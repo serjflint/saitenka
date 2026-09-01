@@ -190,7 +190,8 @@ def prefetch_worker_count(tokenizer, configured: int) -> int:
 
     ``gil_disabled()`` is only trustworthy AFTER fugashi has loaded — it wraps a C extension that
     hasn't declared free-threaded safety and silently re-enables the GIL on first use, not at import
-    (``tokenize.py``). This is called from ``start_prefetch()`` during SessionController construction, before any
+    (``saitenka_tokenize.japanese``). This is called from ``start_prefetch()`` during SessionController
+    construction, before any
     subtitle line has ever been tokenized, so without this warm-up it always sees the pre-fugashi
     state — spawning the free-threaded worker count on a build that loses the GIL moments later anyway,
     paying the allocator's per-thread-arena memory tax (see ``vibe/hot-path-idle-spreading-plan.md``)

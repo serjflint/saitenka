@@ -830,6 +830,14 @@ mining-ownership = { shell = "uv run python tools/mining_ownership_check.py" }
 # cannot return. Planted controls: tool_tests/test_analysis_ownership_check.py.
 analysis-ownership = { shell = "uv run python tools/analysis_ownership_check.py" }
 annotation-ownership = { shell = "uv run python tools/annotation_ownership_check.py" }
+# GATE (in `all`) — no library layer imports saitenka.app, INCLUDING under TYPE_CHECKING, which
+# `.importlinter` excludes globally and so cannot see. Planted controls (both forms):
+# tool_tests/test_library_layer_independence.py.
+layer-independence = { shell = "uv run python tools/library_layer_independence.py" }
+# GATE (in `all`) — a docstring must not name a source file that does not exist. Every instance
+# found came from a module move whose prose did not follow. Planted controls:
+# tool_tests/test_docstring_refs.py.
+docstring-refs = { shell = "uv run python tools/docstring_refs.py" }
 # GATE (in `all`) — the completed tooltip migration keeps policy, store construction, and mutable
 # lifecycle writes behind TooltipController while preserving the existing TipPorts paint helpers.
 # Planted controls: tool_tests/test_tooltip_ownership_check.py.
@@ -932,7 +940,7 @@ hygiene = ["deadcode", "dup", "types-advisory"]
 # name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s
 # of a 4-core runner, and running both passes in the same job made the gate the longest job in the run by
 # a wide margin. Both halves sync the same dev env, so the split changes wall-clock, not coverage.
-gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "app-package-layout", "mining-ownership", "analysis-ownership", "annotation-ownership", "tooltip-ownership", "port-probe", "reducer-purity"]
+gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "app-package-layout", "mining-ownership", "analysis-ownership", "annotation-ownership", "tooltip-ownership", "layer-independence", "docstring-refs", "port-probe", "reducer-purity"]
 all = ["gate-no-ft", "test-ft"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not

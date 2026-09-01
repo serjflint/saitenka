@@ -172,7 +172,7 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing():
 
 def test_swapped_tokenizer_reroutes_nested_popup_link_lookup():
     """A profile swap must reroute a clicked cross-reference link's whole-query lookup through the
-    NEW strategy, not ``tokenize.py``'s ``query_token`` directly."""
+    NEW strategy, not ``japanese.py``'s ``query_token`` directly."""
     from saitenka.app.features.tooltip import nested_popup
     from saitenka.model import LinkBox
 

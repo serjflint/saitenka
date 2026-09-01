@@ -8,7 +8,7 @@ import weakref
 from collections import OrderedDict
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from saitenka_dict.metadata import parse_frequency
 from saitenka_dict.models import (
@@ -20,6 +20,9 @@ from saitenka_dict.models import (
     Tag,
 )
 from saitenka_dict.store import CacheObserver, TermRecord, TermSearch
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _TERM_QUERY_LEGACY = (
     "SELECT d.id, d.title, d.import_order, e.id, e.term, e.reading, e.glossary, "
@@ -91,6 +94,69 @@ _MEDIA_QUERY = (
     "SELECT m.path, m.png FROM media m JOIN dictionaries d ON d.id=m.dict_id "
     "WHERE d.title=? AND m.path IN (SELECT value FROM json_each(?))"
 )
+
+
+def meta_lookup_terms(headwords: tuple[tuple[str, str], ...]) -> tuple[str, ...]:
+    """Every string a ``term_meta`` row for these headwords may be keyed under.
+
+    Both the terms and their readings, because a dictionary may key an entry either way. Selecting
+    terms alone made a kana-keyed row unreachable for a word written in kanji: for 本命 the term is
+    本命 and never ほんめい, so a pitch or frequency dictionary holding only the kana row contributed
+    nothing. In NHK 2016 that is 13,941 rows, covering 12,228 kanji-written headwords that had a
+    pitch pattern the product never showed.
+
+    Widening what is *selected* is only half of it — see :func:`prefer_term_keyed` for the half that
+    keeps the extra rows from attaching one accent to every homophone.
+    """
+    return tuple(
+        dict.fromkeys(part for term, reading in headwords for part in (term, reading) if part)
+    )
+
+
+def prefer_term_keyed(rows: Iterable[Any], headwords: tuple[tuple[str, str], ...]) -> list[Any]:
+    """Drop a reading-keyed row when the same dictionary also answered under the headword's own term.
+
+    A row keyed by a kana reading is inherently ambiguous: ほんめい identifies a reading, not a word,
+    and the data carries nothing further to disambiguate it. Admitting those rows unconditionally
+    would attach one accent to every homophone — of the 12,228 headwords this recovers, only 2,024
+    have a reading that maps to a single kanji headword.
+
+    So precision wins where a dictionary has it: per (dictionary, reading), a term-keyed answer
+    suppresses that dictionary's kana-keyed one. A dictionary that only has ほんめい still
+    contributes, and one that has 本命 is not second-guessed. The choice is per dictionary, so a
+    precise dictionary does not silence a vaguer one that is the only source for some other word.
+
+    Rows are ``(title, term, reading, *rest)`` in query order, which is preserved.
+    """
+    pairs = set(headwords)
+    reading_of_term = {term: reading for term, reading in headwords if term}
+    readings = {reading for _term, reading in headwords if reading}
+    materialised = list(rows)
+
+    def exact(term: str, reading: str | None) -> bool:
+        # A row with no reading is identified by its term alone — that is all it claims.
+        return (term, reading) in pairs or (reading is None and term in reading_of_term)
+
+    precise = {
+        (row[0], row[2] if row[2] is not None else reading_of_term.get(row[1]))
+        for row in materialised
+        if exact(row[1], row[2])
+    }
+
+    def keyed_by_our_reading(title: str, term: str, reading: str | None) -> bool:
+        return (
+            term in readings
+            and (reading is None or reading == term)
+            and (title, term) not in precise
+        )
+
+    return [
+        row
+        for row in materialised
+        if exact(row[1], row[2]) or keyed_by_our_reading(row[0], row[1], row[2])
+    ]
+
+
 _FREQUENCY_QUERY = (
     "SELECT d.title, m.term, m.reading, m.rank, m.disp FROM term_meta m "
     "JOIN dictionaries d ON d.id=m.dict_id "
@@ -367,24 +433,22 @@ class SqliteDictionaryStore:
     def find_frequencies(
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...]
     ) -> tuple[Frequency, ...]:
-        terms = tuple(dict.fromkeys(term for term, _reading in headwords if term))
+        terms = meta_lookup_terms(headwords)
         if not terms:
             return ()
         rows = self._conn().execute(
             _FREQUENCY_QUERY,
             (json.dumps(terms, ensure_ascii=False), *self._dictionary_args(dictionaries)),
         )
-        pairs = set(headwords)
         return tuple(
             Frequency(title, rank if rank is not None else display or "", display, reading)
-            for title, term, reading, rank, display in rows
-            if reading is None or (term, reading) in pairs
+            for title, _term, reading, rank, display in prefer_term_keyed(rows, headwords)
         )
 
     def find_pronunciations(
         self, headwords: tuple[tuple[str, str], ...], dictionaries: tuple[str, ...]
     ) -> tuple[Pronunciation, ...]:
-        terms = tuple(dict.fromkeys(term for term, _reading in headwords if term))
+        terms = meta_lookup_terms(headwords)
         if not terms:
             return ()
         rows = self._conn().execute(
@@ -392,10 +456,7 @@ class SqliteDictionaryStore:
             (json.dumps(terms, ensure_ascii=False), *self._dictionary_args(dictionaries)),
         )
         result: list[Pronunciation] = []
-        pairs = set(headwords)
-        for title, term, reading, mode, raw_positions in rows:
-            if reading is not None and (term, reading) not in pairs:
-                continue
+        for title, term, reading, mode, raw_positions in prefer_term_keyed(rows, headwords):
             payload = json.loads(raw_positions or "[]")
             if mode == "ipa":
                 result.extend(
