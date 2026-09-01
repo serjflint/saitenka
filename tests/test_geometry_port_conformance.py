@@ -9,8 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 import pytest
-
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     GeometryPaletteEntry,
     GeometryRequest,
     GeometrySnapshot,
@@ -22,7 +21,7 @@ from saitenka.subtitles import (
     SubtitleTrackId,
     TokenGeometry,
 )
-from saitenka.subtitles.libass_backend import LibassGeometryBackend
+from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
 TRACK = SubtitleTrackId("track")
 EVENT = SubtitleEventId(TRACK, 1_000, 2_000, 0, 0)

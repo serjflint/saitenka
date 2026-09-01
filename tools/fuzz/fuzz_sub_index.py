@@ -16,7 +16,7 @@ import sys
 import atheris
 
 with atheris.instrument_imports():
-    from saitenka import subtitles
+    import saitenka_subtitles as subtitles
 
 
 def TestOneInput(data: bytes) -> None:

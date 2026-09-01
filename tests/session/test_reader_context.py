@@ -8,12 +8,12 @@ exactly what the future file-change re-slot relies on, so it is asserted here di
 from __future__ import annotations
 
 import util
+from saitenka_subtitles import Cue
 from session_builder import build_session
 
 from saitenka.app.features.subtitle.navigation_state import NavigationState
 from saitenka.app.features.tooltip.popups import PopupView, TooltipState
 from saitenka.runtime.events import SubtitleSecondaryLeased, SubtitleStartupConfigured
-from saitenka.subtitles import Cue
 
 
 class FakeIPC(util.FakeIPC):

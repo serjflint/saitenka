@@ -5,9 +5,9 @@ from __future__ import annotations
 import textwrap
 
 import pytest
+from saitenka_subtitles import Cue, CueIndex, parse_ass, parse_cues, parse_srt
 
 from saitenka.app.sub_index import load_index
-from saitenka.subtitles import Cue, CueIndex, parse_ass, parse_cues, parse_srt
 
 SRT = textwrap.dedent(
     """\

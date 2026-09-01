@@ -24,11 +24,7 @@ from libass_token_matrix import (
     character_support,
     extract_token_geometry,
 )
-from saitenka_tokenize.registry import UnidicTokenizer
-from saitenka_wordstate import Scorer
-from saitenka_wordstate.known import KnownWords
-
-from saitenka.subtitles.ass import (
+from saitenka_subtitles.ass import (
     allocate_token_colors,
     decode_ass_event,
     parse_ass_event_line,
@@ -36,14 +32,16 @@ from saitenka.subtitles.ass import (
     rewrite_ass_event,
     serialize_ass_event_line,
 )
-from saitenka.subtitles.document import AnnotatedSubtitleEvent, SubtitleTrackId, TokenAnnotation
+from saitenka_subtitles.document import AnnotatedSubtitleEvent, SubtitleTrackId, TokenAnnotation
+from saitenka_tokenize.registry import UnidicTokenizer
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from libass_token_matrix import RenderResult
-
-    from saitenka.subtitles.document import DecodedSubtitleEvent
+    from saitenka_subtitles.document import DecodedSubtitleEvent
 
 from saitenka.app.scoring import Coloring, TokenStyle
 

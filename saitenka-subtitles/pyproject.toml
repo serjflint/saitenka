@@ -1,0 +1,23 @@
+[project]
+name = "saitenka-subtitles"
+version = "0.1.0"
+description = "Subtitle parsing, ASS documents, and hidden token geometry, independent of any player"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = [
+    "fonttools>=4.55",
+    "numpy>=2.0",
+    "pysubs2>=1.8.1",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

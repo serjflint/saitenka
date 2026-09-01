@@ -74,9 +74,8 @@ def test_the_classifier_reads_the_message_the_rewrite_actually_raises(
     broke, retry" — with both files still green. This closes the loop by classifying the exception
     the raise site produces rather than a transcription of it.
     """
+    from saitenka_subtitles.ass import UnsupportedAssEvent, rewrite_ass_event
     from test_ass_document import CATALOG, annotated  # the suite puts tests/ on the path
-
-    from saitenka.subtitles.ass import UnsupportedAssEvent, rewrite_ass_event
 
     with pytest.raises(UnsupportedAssEvent) as refusal:
         rewrite_ass_event(annotated(raw, span), {0: 0x010203}, CATALOG)

@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
@@ -18,7 +19,6 @@ from saitenka.app.session.lifecycle import LiveState
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleSecondaryLeased
-from saitenka.subtitles import CueIndex, parse_srt
 
 
 class FakeIPC(RuntimeFakeIPC):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from saitenka.subtitles import CueIndex, parse_cues
+from saitenka_subtitles import CueIndex, parse_cues
 
 log = logging.getLogger(__name__)
 

@@ -17,9 +17,10 @@ from saitenka.app.sub_index import load_index
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_subtitles import Cue
+
     from saitenka.app.features.subtitle.navigation_state import NavigationState
     from saitenka.app.native_subtitles import NativeSubtitleGeometry
-    from saitenka.subtitles import Cue
 
     PropertyGet = Callable[[str], object]
 

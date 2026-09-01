@@ -4,6 +4,16 @@ import threading
 from dataclasses import FrozenInstanceError
 
 import pytest
+from saitenka_subtitles import (
+    GeometryRequest,
+    GeometrySnapshot,
+    GeometryVariant,
+    Rect,
+    SubtitleEventId,
+    SubtitleFrameId,
+    SubtitleTrackId,
+    TokenGeometry,
+)
 from session_builder import build_session
 
 from saitenka.app.config import ReaderOptions
@@ -16,16 +26,6 @@ from saitenka.app.subtitle_pipeline import (
 )
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
-from saitenka.subtitles import (
-    GeometryRequest,
-    GeometrySnapshot,
-    GeometryVariant,
-    Rect,
-    SubtitleEventId,
-    SubtitleFrameId,
-    SubtitleTrackId,
-    TokenGeometry,
-)
 
 
 class FakeCurrentRenderer(NullRenderer):

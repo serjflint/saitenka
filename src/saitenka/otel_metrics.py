@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from contextlib import AbstractContextManager
     from types import ModuleType
 
     from opentelemetry.metrics import Counter, Histogram, Meter, UpDownCounter
@@ -291,6 +292,36 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
             yield SpanSetter(span)
         finally:
             span.set_attribute("cpu_ms", round((time.thread_time() - cpu0) * 1000.0, 3))
+
+
+class _GeometryTelemetry:
+    """This module, as the subtitle core's geometry-telemetry port.
+
+    Structural, not declared: `saitenka_subtitles.telemetry` defines the shape and nothing here
+    imports it, so the subtitle core owes this module nothing back. The indirection is not
+    ceremony — the histograms below are module globals `configure` reassigns, and a library that
+    reads them is bound to this application's telemetry lifecycle.
+    """
+
+    def span(self, name: str) -> AbstractContextManager[SpanSetter]:
+        return traced(name)
+
+    def record(self, metric: str, milliseconds: float) -> None:
+        # Read inside the call, never captured: `configure` rebinds these globals, so a mapping built
+        # at import would pin whatever they were before telemetry was set up — all three `None`.
+        histograms = {
+            "renderer_build_ms": subtitle_geometry_renderer_build_ms,
+            "render_ms": subtitle_geometry_render_ms,
+            "extract_ms": subtitle_geometry_extract_ms,
+        }
+        if metric not in histograms:
+            raise ValueError(f"unknown geometry metric: {metric}")
+        histogram = histograms[metric]
+        if histogram is not None:
+            histogram.record(milliseconds)
+
+
+geometry_telemetry = _GeometryTelemetry()
 
 
 class DeferredSpan:

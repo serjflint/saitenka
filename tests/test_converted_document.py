@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from saitenka_subtitles import converted
+from saitenka_subtitles.converted import SubStyle
+from saitenka_subtitles.geometry import RendererState
 from util import PINNED_FAMILY, pinned_face, pinned_font_setup, requires_libass
-
-from saitenka.subtitles import converted
-from saitenka.subtitles.converted import SubStyle
-from saitenka.subtitles.geometry import RendererState
 
 EVENTS = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello world"
 HD = converted.RenderSpace(1920, 1080)
@@ -234,13 +233,13 @@ ROW = f"Dialogue: 0,0:00:11.25,0:00:13.00,Default,,0,0,0,,{CUE}"
 
 def _render_cue(backend: object, style: converted.SubStyle | None = None) -> list:
     """The tokens real libass paints for a converted cue laid out under `style`."""
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryPaletteEntry,
         GeometryRequest,
         SubtitleTrackId,
         TokenAnnotation,
     )
-    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+    from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
 
     frame = (HD.width, HD.height)
     scale = converted.font_scale(HD)
@@ -298,7 +297,7 @@ def test_every_token_of_a_converted_cue_gets_a_box_from_real_libass() -> None:
     screen.
     """
     requires_libass()
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     backend = LibassGeometryBackend()
     try:
@@ -339,7 +338,7 @@ def test_a_style_the_user_changed_moves_the_boxes_libass_paints() -> None:
     the wrong column reads green against arithmetic and silently pins every box to mpv's defaults.
     """
     requires_libass()
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     backend = LibassGeometryBackend()
     try:
@@ -363,17 +362,17 @@ def test_a_reused_renderer_measures_each_cue_against_its_own_document() -> None:
     one, and the two must agree exactly.
     """
     requires_libass()
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     cues = ["（鳥のさえずり）", "うんうん…。", "キーボードを打つ音"]
 
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryPaletteEntry,
         GeometryRequest,
         SubtitleTrackId,
         TokenAnnotation,
     )
-    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+    from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
 
     frame = (HD.width, HD.height)
 
@@ -442,16 +441,16 @@ def test_justify_reaches_libass_even_though_a_style_row_cannot_state_it() -> Non
     override on the renderer, and its bit is not where counting the names would put it: one below
     JUSTIFY is `ASS_OVERRIDE_FULL_STYLE`, which replaces every field of every style instead.
     """
-    from saitenka.subtitles import (
+    from saitenka_subtitles import (
         GeometryPaletteEntry,
         GeometryRequest,
         SubtitleTrackId,
         TokenAnnotation,
     )
-    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
+    from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
 
     requires_libass()
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     frame = (HD.width, HD.height)
     track = SubtitleTrackId("converted-justify")

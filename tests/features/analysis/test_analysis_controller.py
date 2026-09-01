@@ -3,6 +3,7 @@
 import threading
 
 import pytest
+from saitenka_subtitles import Cue, CueIndex
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.known import KnownWords
 from session_builder import TestSession, build_session
@@ -22,7 +23,6 @@ from saitenka.runtime.events import (
     SubtitleStartupConfigured,
     SubtitleTracksDiscovered,
 )
-from saitenka.subtitles import Cue, CueIndex
 
 
 @pytest.fixture

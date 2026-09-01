@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 import util
+from saitenka_subtitles import FontProvider
 
 from saitenka.app import subtitle_fonts
-from saitenka.subtitles import FontProvider
 
 REPO_FONT = Path(__file__).resolve().parents[1] / "src/saitenka/assets/fonts/NotoSans.ttf"
 

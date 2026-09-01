@@ -9,6 +9,15 @@ import pytest
 import util
 from dirty_equals import IsPartialDict
 from driver import Driver
+from saitenka_subtitles import (
+    MAX_ASS_SOURCE_BYTES,
+    Cue,
+    CueIndex,
+    GeometryRequest,
+    GeometrySnapshot,
+    Rect,
+    TokenGeometry,
+)
 from saitenka_tokenize.japanese import Token
 from saitenka_tokenize.languages import MAIN_LANG
 from saitenka_wordstate import Scorer
@@ -32,15 +41,6 @@ from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
-from saitenka.subtitles import (
-    MAX_ASS_SOURCE_BYTES,
-    Cue,
-    CueIndex,
-    GeometryRequest,
-    GeometrySnapshot,
-    Rect,
-    TokenGeometry,
-)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -2676,9 +2676,10 @@ def test_the_handoff_to_legacy_takes_the_interaction_pixels_down(tmp_path: Path)
 
 def palette_for(*, play_res_y: str, frame_height: int, font_scale: float):
     """The overprint palette for a one-token cue in a document declaring `play_res_y`."""
+    from saitenka_subtitles import SubtitleTrackId, TokenAnnotation
+    from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
+
     from saitenka.app.native_subtitles import _palette_in_frame_units
-    from saitenka.subtitles import SubtitleTrackId, TokenAnnotation
-    from saitenka.subtitles.ass_geometry import prepare_ass_hit_map_frame
 
     row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫"
     source = (
@@ -3803,7 +3804,7 @@ def test_a_delay_that_runs_the_clock_before_the_file_starts_is_rejected():
 
 def _snapshot(pairs, active=None):
     """A geometry snapshot carrying exactly `pairs` of (event_id, token_index)."""
-    from saitenka.subtitles.document import (
+    from saitenka_subtitles.document import (
         SubtitleEventId,
         SubtitleFrameId,
         SubtitleTrackId,
@@ -4105,8 +4106,9 @@ def test_override_no_leaves_the_renderer_at_libass_defaults() -> None:
     """The branch `configure_ass` takes under `no` assigns none of them, so reproducing a zero here
     would be claiming a value mpv never read — and would move every box on a track that was
     previously measured correctly."""
+    from saitenka_subtitles import RendererState
+
     from saitenka.app.native_subtitles import _scaled_renderer_state
-    from saitenka.subtitles import RendererState
 
     assert _scaled_renderer_state(_inputs().scale) == RendererState()
 

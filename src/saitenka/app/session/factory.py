@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from concurrent.futures import Future
 
+    from saitenka_subtitles.geometry import GeometryBackend
+
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
     from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
     from saitenka.app.features.profiles.profile_session import ProfileSession
@@ -24,7 +26,6 @@ if TYPE_CHECKING:
     from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.mpvio.osd import Overlay
-    from saitenka.subtitles.geometry import GeometryBackend
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,9 +201,12 @@ def _geometry_backend(settings: SubtitleGeometryOptions):
     """
     if not settings.native_visible:
         return None
-    from saitenka.subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
+
+    from saitenka import otel_metrics
 
     return LibassGeometryBackend(
         library_path=Path(settings.library_path) if settings.library_path else None,
         renderer_cache_max=settings.cache_max,
+        telemetry=otel_metrics.geometry_telemetry,
     )

@@ -707,7 +707,7 @@ class TestResyncWindow:
     @staticmethod
     def _fake_aligner(resync, delta_s: float):
         """A fake alass that shifts every windowed cue by *delta_s* (what a real align would compute)."""
-        from saitenka.subtitles import Cue, parse_srt
+        from saitenka_subtitles import Cue, parse_srt
 
         def fake_run(cmd, **_kw):
             inp, outp = Path(cmd[-2]), Path(cmd[-1])
@@ -721,7 +721,7 @@ class TestResyncWindow:
     def _fake_split_aligner(resync, split_s: float, near_s: float, far_s: float):
         """A fake alass that SPLIT-aligns: cues before *split_s* shift by *near_s*, the rest by *far_s* —
         what a real align computes for a source that drifts across the OP."""
-        from saitenka.subtitles import Cue, parse_srt
+        from saitenka_subtitles import Cue, parse_srt
 
         def fake_run(cmd, **_kw):
             inp, outp = Path(cmd[-2]), Path(cmd[-1])
@@ -738,8 +738,9 @@ class TestResyncWindow:
 
     def _sub_with_cues(self, tmp_path, starts):
         sub = tmp_path / "ep02.ja.srt"
+        from saitenka_subtitles import Cue
+
         from saitenka.app.resync import _write_srt
-        from saitenka.subtitles import Cue
 
         _write_srt(sub, [Cue(s, s + 1.0, "JP") for s in starts])
         return sub

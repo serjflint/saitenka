@@ -149,8 +149,9 @@ from saitenka.runtime.presentation_slice import TranslationStore
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_subtitles import GeometryBackend
+
     from saitenka.mpvio.ipc import MpvIPC
-    from saitenka.subtitles import GeometryBackend
 
 log = logging.getLogger(__name__)
 console_log = logsetup.user_facing_logger()

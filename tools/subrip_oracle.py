@@ -4,7 +4,7 @@
 # ///
 """Record what mpv actually reports for a converted SubRip track, as the converter's oracle.
 
-`saitenka.subtitles.subrip` predicts the ASS event mpv builds for a `.srt` cue. mpv is the only
+`saitenka_subtitles.subrip` predicts the ASS event mpv builds for a `.srt` cue. mpv is the only
 authority on that — it links libavcodec's `srtdec` and then serialises the row itself — so the
 expected values here are read out of a real mpv rather than written by hand.
 

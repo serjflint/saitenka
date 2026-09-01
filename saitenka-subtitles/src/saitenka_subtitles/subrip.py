@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from saitenka.subtitles.model import Cue
+    from saitenka_subtitles.model import Cue
 
 #: Every `<…>` in the text must match this, or the cue is declined. `srtdec` treats anything between
 #: angle brackets as a tag, including a stray comparison, so "looks like a tag" is not a safe test —

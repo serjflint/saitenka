@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from saitenka_subtitles import Cue, CueIndex
 
 from saitenka.app.subnav_policy import (
     cue_is_on_screen,
     filters_can_drop_a_cue,
     resolve_target,
 )
-from saitenka.subtitles import Cue, CueIndex
 
 CUES = (
     Cue(1.0, 3.0, "いち"),

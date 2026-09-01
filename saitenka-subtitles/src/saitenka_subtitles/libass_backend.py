@@ -9,21 +9,27 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, cast
 
-from saitenka import otel_metrics
-from saitenka.subtitles.geometry import (
+from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometrySnapshot,
     Rect,
     RendererState,
     TokenGeometry,
 )
+from saitenka_subtitles.telemetry import (
+    EXTRACT_MS,
+    RENDER_MS,
+    RENDERER_BUILD_MS,
+    NullTelemetry,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from saitenka.subtitles.document import SubtitleEventId
-    from saitenka.subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.document import SubtitleEventId
+    from saitenka_subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.telemetry import GeometryTelemetry
 
 
 class ImageLayer(Protocol):
@@ -279,12 +285,14 @@ class LibassGeometryBackend:
         library_path: Path | None = None,
         renderer_cache_max: int = 3,
         renderer_factory: RendererFactory | None = None,
+        telemetry: GeometryTelemetry | None = None,
     ) -> None:
         if renderer_cache_max <= 0:
             raise ValueError("renderer cache bound must be positive")
         self._library_path = library_path
         self._cache_max = renderer_cache_max
         self._factory = renderer_factory
+        self._telemetry: GeometryTelemetry = telemetry or NullTelemetry()
         self._renderers: OrderedDict[str, NativeRenderer] = OrderedDict()
         #: The document each cached renderer is currently pointed at, by identity rather than by
         #: value: the bytes are the cue's whole hit-map document, and comparing them per cue would
@@ -354,12 +362,12 @@ class LibassGeometryBackend:
         if not request.palette:
             raise ValueError("hit-map request needs a token palette")
         renderer, built_ms = self._renderer(request)
-        with otel_metrics.traced("subtitle_geometry_libass") as span:
+        with self._telemetry.span("subtitle_geometry_libass") as span:
             span.set("provider", "libasslite")
             span.set("renderer_built_ms", built_ms)
             span.set("renderer_cache_size", len(self._renderers))
-            if otel_metrics.subtitle_geometry_renderer_build_ms is not None and built_ms:
-                otel_metrics.subtitle_geometry_renderer_build_ms.record(built_ms)
+            if built_ms:
+                self._telemetry.record(RENDERER_BUILD_MS, built_ms)
             span.set("libass_version", f"0x{renderer.library_version():x}")
             span.set("timestamp_ms", request.timestamp_ms)
             started = time.perf_counter_ns()
@@ -378,15 +386,13 @@ class LibassGeometryBackend:
             render_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("render_ms", render_ms)
             span.set("layer_count", len(result.layers))
-            if otel_metrics.subtitle_geometry_render_ms is not None:
-                otel_metrics.subtitle_geometry_render_ms.record(render_ms)
+            self._telemetry.record(RENDER_MS, render_ms)
             started = time.perf_counter_ns()
             tokens = extract_token_geometry(result, request, keep_coverage=request.keep_coverage)
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("extract_ms", extract_ms)
             span.set("found_tokens", len(tokens))
-            if otel_metrics.subtitle_geometry_extract_ms is not None:
-                otel_metrics.subtitle_geometry_extract_ms.record(extract_ms)
+            self._telemetry.record(EXTRACT_MS, extract_ms)
         return GeometrySnapshot(
             request.generation,
             request.track_id,

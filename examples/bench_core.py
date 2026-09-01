@@ -14,10 +14,9 @@ from typing import Any
 
 import bench_responsiveness as responsiveness
 from saitenka_dict import DictionaryDatabase, SqliteDictionaryStore, TermQuery, Translator
+from saitenka_subtitles import CueIndex
+from saitenka_subtitles.parsers import parse_cues
 from saitenka_tokenize.japanese import tokenize
-
-from saitenka.subtitles import CueIndex
-from saitenka.subtitles.parsers import parse_cues
 
 
 @dataclass(frozen=True, slots=True)

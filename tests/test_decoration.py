@@ -10,8 +10,7 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-
-from saitenka.subtitles import decoration
+from saitenka_subtitles import decoration
 
 RULE = decoration.TokenRule(100, 200, 60, 48, 0x00FF80)
 

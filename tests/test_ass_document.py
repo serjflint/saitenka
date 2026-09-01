@@ -5,9 +5,7 @@ import re
 from pathlib import Path
 
 import pytest
-from util import PINNED_FAMILY, pinned_ass_renderer, requires_libass
-
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     AnnotatedSubtitleEvent,
     AssStyle,
     AssStyleCatalog,
@@ -24,6 +22,7 @@ from saitenka.subtitles import (
     rewrite_ass_event,
     serialize_ass_event_line,
 )
+from util import PINNED_FAMILY, pinned_ass_renderer, requires_libass
 
 TRACK = SubtitleTrackId("external:/tmp/example.ass:1")
 CATALOG = AssStyleCatalog((AssStyle("Default", "00FFFFFF"), AssStyle("Alt", "00112233")))
@@ -255,7 +254,7 @@ def test_margin_zero_padding_does_not_change_an_event_signature(authored: str) -
     normalization is the only reason an authored source ever matches what mpv says is on screen.
     Verified against a real mpv 0.40 on an embedded ASS track extracted with ``-c:s copy``.
     """
-    from saitenka.subtitles.ass_geometry import _event_signature
+    from saitenka_subtitles.ass_geometry import _event_signature
 
     reported = "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0000,0000,0000,,{\\i1}こんにちは{\\i0}"
 
@@ -266,7 +265,7 @@ def test_margin_zero_padding_does_not_change_an_event_signature(authored: str) -
 
 def test_a_differing_margin_still_changes_the_signature() -> None:
     """The negative control: normalization must not flatten margins into no signal at all."""
-    from saitenka.subtitles.ass_geometry import _event_signature
+    from saitenka_subtitles.ass_geometry import _event_signature
 
     base = "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0,0,0,,猫"
     moved = "Dialogue: 0,0:00:00.50,0:00:09.00,Default,,0,0,90,,猫"
@@ -294,7 +293,7 @@ Dialogue: 0,0:00:30.00,0:00:32.50,Sign,,0,0,0,,遅い
 
 
 def test_shifting_dialogue_moves_only_events_from_the_boundary_on() -> None:
-    from saitenka.subtitles.ass import shift_ass_dialogue
+    from saitenka_subtitles.ass import shift_ass_dialogue
 
     out = shift_ass_dialogue(_SHIFT_DOC, delta_ms=4732, from_ms=20_000)
 
@@ -305,7 +304,7 @@ def test_shifting_dialogue_moves_only_events_from_the_boundary_on() -> None:
 def test_shifting_dialogue_leaves_the_typesetting_byte_identical() -> None:
     """The whole reason a re-time stopped serializing cues to SRT: an ASS is chosen FOR its styles,
     and the old path returned a SubRip body under a name that still said `.ass`."""
-    from saitenka.subtitles.ass import shift_ass_dialogue
+    from saitenka_subtitles.ass import shift_ass_dialogue
 
     out = shift_ass_dialogue(_SHIFT_DOC, delta_ms=1_000, from_ms=0)
 
@@ -318,7 +317,7 @@ def test_shifting_dialogue_clamps_the_pair_and_keeps_the_duration() -> None:
     """A shift past zero clamps the event as a PAIR: clamping each end independently would collapse
     it to an empty range, which `SubtitleEventId` rejects outright — a re-time must not be able to
     produce a document that is not a legal one."""
-    from saitenka.subtitles.ass import shift_ass_dialogue
+    from saitenka_subtitles.ass import shift_ass_dialogue
 
     out = shift_ass_dialogue(_SHIFT_DOC, delta_ms=-9_999_999, from_ms=0)
 
@@ -329,7 +328,7 @@ def test_shifting_dialogue_clamps_the_pair_and_keeps_the_duration() -> None:
 def test_shifting_dialogue_refuses_a_document_it_cannot_round_trip() -> None:
     """A non-canonical event Format would be silently REORDERED by serialization, so the caller has
     to keep the original instead — raising is what lets it."""
-    from saitenka.subtitles.ass import shift_ass_dialogue
+    from saitenka_subtitles.ass import shift_ass_dialogue
 
     doc = _SHIFT_DOC.replace(
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

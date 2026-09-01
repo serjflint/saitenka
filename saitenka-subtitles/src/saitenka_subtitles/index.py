@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-    from saitenka.subtitles.model import Cue
+    from saitenka_subtitles.model import Cue
 
 
 def _normalize(text: str) -> str:

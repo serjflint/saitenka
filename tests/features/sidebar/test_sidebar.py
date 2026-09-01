@@ -6,6 +6,7 @@ import pytest
 import util
 from driver import Driver
 from PIL import Image
+from saitenka_subtitles import Cue, CueIndex
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.known import KnownWords
 from session_builder import TestSession, build_session, install_profile_dependencies
@@ -29,7 +30,6 @@ from saitenka.app.subtitles import (
 )
 from saitenka.runtime import events
 from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
-from saitenka.subtitles import Cue, CueIndex
 
 
 class FakeIPC(util.FakeIPC):

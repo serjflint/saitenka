@@ -8,6 +8,7 @@ requires-python = ">=3.13"
 dependencies = [
     "ankiconnect-client>=0.1.0",
     "saitenka-dict>=0.1.1",
+    "saitenka-subtitles>=0.1.0",
     "saitenka-tokenize>=0.1.0",
     "saitenka-wordstate>=0.1.0",
     "pillow>=11.0",
@@ -16,7 +17,6 @@ dependencies = [
     "cyclopts>=4.22.1",
     "ijson>=3.5.1",
     "platformdirs>=4.11.0",
-    "pysubs2>=1.8.1",
     "keyring>=25.7.0; sys_platform != 'linux' or python_version < '3.15'",
     "psutil>=7.2.2",
     "filelock>=3.32.0",
@@ -122,6 +122,7 @@ saitenka = "saitenka.app.cli:main"
 saitenka-deinflect = { path = "deinflect", editable = true }
 ankiconnect-client = { path = "ankiconnect-client", editable = true }
 saitenka-dict = { path = "saitenka-dict", editable = true }
+saitenka-subtitles = { path = "saitenka-subtitles", editable = true }
 saitenka-tokenize = { path = "saitenka-tokenize", editable = true }
 saitenka-wordstate = { path = "saitenka-wordstate", editable = true }
 libasslite = { path = "libasslite", editable = true }
@@ -477,13 +478,13 @@ python_version = "3.13"
 # `Fake*`-as-real-type doubles are a separate, larger adaptation — see follow-up note). taffylite/python
 # is a thin binding over a Rust ext with a hand-written .pyi (no importable runtime stubs), so it stays
 # out of the type tier.
-files = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
+files = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "saitenka-subtitles/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
 # Source roots on the path so first-party + optional-ext imports resolve when mypy runs from the repo
 # root — incl. taffylite/python so `import taffylite` finds the committed .pyi stub (column) rather than
 # the root taffylite/ dir as an empty namespace package (which only reproduces when the Rust ext is
 # absent, e.g. the CI gate env — the layout-engine extra is deliberately not installed there). `stubs/`
 # holds our local third-party stubs (fugashi — Cython, no py.typed).
-mypy_path = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+mypy_path = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "saitenka-subtitles/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # Stage 8b tooling: good additional checks, NOT --strict (plan decision).
 check_untyped_defs = true
 no_implicit_optional = true
@@ -496,7 +497,7 @@ ignore_missing_imports = true   # fugashi/jamdict/unidic ship no stubs
 # Run from the repo root → the first-party source roots must be on the search path (same reason as
 # basedpyright's extraPaths) so `saitenka_deinflect.engine` / `overlay.*` resolve from source.
 # `stubs/` holds local third-party stubs (fugashi).
-search-path = ["src", "deinflect/src", "saitenka-dict/src", "ankiconnect-client/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+search-path = ["src", "deinflect/src", "saitenka-dict/src", "ankiconnect-client/src", "saitenka-subtitles/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # Library-only, deliberately NOT widened alongside mypy/basedpyright above: pyrefly's inference is far
 # stricter on the ad-hoc untyped dict-literal "records" idiom pervasive in tools/ (e.g. plan.append({...})
 # read back via p["key"]) — real findings there are inference-strictness noise, not import/attr rot (the
@@ -511,10 +512,10 @@ missing-import = false
 
 [tool.basedpyright]
 # Same widened scope as mypy above — see [tool.mypy].files for the rationale.
-include = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
+include = ["src/saitenka", "deinflect/src", "saitenka-dict/src", "saitenka-dict/oracle", "ankiconnect-client/src", "saitenka-subtitles/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "examples", "tools/anime_chooser.py", "tools/anki_annotate_source.py", "tools/anki_build_decks.py", "tools/anki_normalize_fields.py", "tools/anki_rank_dicts.py", "tools/anki_refile_by_state.py", "tools/anki_retag.py", "tools/backfill_deeplink_id.py", "tools/benchmark_results.py", "tools/repowise_ops.py", "install", ".agents"]
 # Run from the repo root, so the first-party source roots must be on the search path explicitly (else
 # `from overlay import …` / `saitenka_deinflect` resolve against the root poe-only .venv and fail).
-extraPaths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", ".agents/hooks"]
+extraPaths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "saitenka-subtitles/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", ".agents/hooks"]
 stubPath = "stubs"   # local third-party stubs (fugashi — Cython, no py.typed)
 typeCheckingMode = "basic"
 reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers import sanity
@@ -526,7 +527,7 @@ reportMissingImports = "none"   # fugashi/jamdict ship no stubs; mypy covers imp
 # `concurrent.interpreters`), and `extra-paths` so the local fugashi stub + the taffylite/resvglite
 # `.pyi` resolve (`fugashi.Tagger`, `taffylite.column`/`Tree`).
 python-version = "3.14"
-extra-paths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
+extra-paths = ["src", "deinflect/src", "saitenka-dict/src", "saitenka-dict", "ankiconnect-client/src", "saitenka-subtitles/src", "saitenka-tokenize/src", "saitenka-wordstate/src", "taffylite/python", "resvglite/python", "stubs", ".agents/hooks"]
 # `unresolved-import` (the optional PEP-723 script deps + example-local `live_harness`) is silenced by
 # `--ignore unresolved-import` on the `types` task's ty call — a `[tool.ty.rules]` table here is NOT
 # honored (ty reads `[tool.ty.environment]` from this file but not the rules table), the flag is.
@@ -538,7 +539,7 @@ lint = { shell = "uv run ruff check --fix . && uv run ruff format ." }
 # mypy/basedpyright gate the widened scope (library + examples + tools + install + .agents —
 # see [tool.mypy].files); pyrefly stays a HARD gate on library-only, because its dict-literal inference
 # is too strict for the dev-script idiom to gate on.
-types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src saitenka-tokenize/src saitenka-wordstate/src" }
+types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright && uv run --extra full pyrefly check src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src saitenka-subtitles/src saitenka-tokenize/src saitenka-wordstate/src" }
 # ADVISORY tier for the two checkers that can't gate: pyrefly over the widened scope, and ty anywhere.
 # Human-triage only (in `hygiene`, never in `all`) — a suppressed exit code plus a per-run diagnostic dump
 # is the shape a finding dies in: 59 known lines every green run, where a new one would read as more of the
@@ -547,7 +548,7 @@ types = { shell = "uv run --extra full mypy && uv run --extra full basedpyright 
 # findings. file:line is what a follow-up needs to re-run one in full.
 # Sequenced on `;`, not `&&`: either checker being red is the normal state, and short-circuiting would
 # hide the second one exactly then. Both always run; the rc is clean only if both are.
-types-advisory = { shell = "uv run --extra full pyrefly check --output-format=min-text examples tools install .agents; p=$?; uv run --extra full ty check --output-format concise --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src saitenka-tokenize/src saitenka-wordstate/src examples tools install .agents; t=$?; [ $p -eq 0 ] && [ $t -eq 0 ]" }
+types-advisory = { shell = "uv run --extra full pyrefly check --output-format=min-text examples tools install .agents; p=$?; uv run --extra full ty check --output-format concise --ignore unresolved-import src/saitenka deinflect/src saitenka-dict/src saitenka-dict/oracle ankiconnect-client/src saitenka-subtitles/src saitenka-tokenize/src saitenka-wordstate/src examples tools install .agents; t=$?; [ $p -eq 0 ] && [ $t -eq 0 ]" }
 # Dependency-contract engine: no import cycles among overlay's top-level packages, sc/model.py stay
 # PIL-agnostic, and the saitenka_deinflect GPL add-on is only imported through its app/dictionary.py
 # + app/doctor.py chokepoint. Config: .importlinter.
@@ -601,7 +602,7 @@ subtitle-test = { shell = "uv run --extra full pytest -q -n auto tests/test_sub_
 # package testpaths intentionally stays on the shipped overlay suite.
 loop-tools-test = { shell = "uv run --extra full pytest -q -n auto -m 'not integration' tool_tests" }
 # Independent package surfaces stay runnable without the overlay dependency graph.
-package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-dict/pyproject.toml -m 'not integration' saitenka-dict/tests && uv run --project ankiconnect-client pytest -q -c ankiconnect-client/pyproject.toml ankiconnect-client/tests && uv run --project saitenka-tokenize pytest -q -c saitenka-tokenize/pyproject.toml saitenka-tokenize/tests && uv run --project saitenka-wordstate pytest -q -c saitenka-wordstate/pyproject.toml saitenka-wordstate/tests" }
+package-test = { shell = "uv run --project saitenka-dict pytest -q -c saitenka-dict/pyproject.toml -m 'not integration' saitenka-dict/tests && uv run --project ankiconnect-client pytest -q -c ankiconnect-client/pyproject.toml ankiconnect-client/tests && uv run --project saitenka-subtitles pytest -q -c saitenka-subtitles/pyproject.toml saitenka-subtitles/tests && uv run --project saitenka-tokenize pytest -q -c saitenka-tokenize/pyproject.toml saitenka-tokenize/tests && uv run --project saitenka-wordstate pytest -q -c saitenka-wordstate/pyproject.toml saitenka-wordstate/tests" }
 # Differential oracle: one Yomitan import and one batched query for all term modes plus kanji.
 yomitan-parity = { shell = "cd saitenka-dict && uv run python -m oracle.parity" }
 yomitan-parity-json = { shell = "cd saitenka-dict && uv run python -m oracle.parity --json" }

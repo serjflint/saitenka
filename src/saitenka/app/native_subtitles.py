@@ -11,16 +11,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
-from saitenka import otel_metrics
-from saitenka.app import subtitle_fonts
-from saitenka.app.subtitle_geometry_diagnostics import (
-    GeometryCacheReason,
-    GeometryOutcome,
-    geometry_error_code,
-    geometry_failure_reason,
-)
-from saitenka.app.subtitles import WordBox
-from saitenka.subtitles import (
+from saitenka_subtitles import (
     MAX_ASS_SOURCE_BYTES,
     GeometryPaletteEntry,
     GeometryRequest,
@@ -37,19 +28,29 @@ from saitenka.subtitles import (
     subrip,
 )
 
+from saitenka import otel_metrics
+from saitenka.app import subtitle_fonts
+from saitenka.app.subtitle_geometry_diagnostics import (
+    GeometryCacheReason,
+    GeometryOutcome,
+    geometry_error_code,
+    geometry_failure_reason,
+)
+from saitenka.app.subtitles import WordBox
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import SupportsFloat
 
+    from saitenka_subtitles import Cue, CueIndex
+    from saitenka_subtitles.ass_geometry import PreparedAssFrame
+    from saitenka_subtitles.geometry import GeometrySnapshot
     from saitenka_tokenize.japanese import Token
 
     from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.token_cache import TokenizedCue
-    from saitenka.subtitles import Cue, CueIndex
-    from saitenka.subtitles.ass_geometry import PreparedAssFrame
-    from saitenka.subtitles.geometry import GeometrySnapshot
 
 log = logging.getLogger(__name__)
 

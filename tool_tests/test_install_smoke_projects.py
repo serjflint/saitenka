@@ -34,6 +34,7 @@ def test_extras_expand_to_the_first_party_packages_the_install_resolves():
     assert {
         "ankiconnect-client",
         "saitenka-dict",
+        "saitenka-subtitles",
         "saitenka-tokenize",
         "saitenka-wordstate",
         "saitenka-deinflect",  # reached only through `full` -> `deinflect`

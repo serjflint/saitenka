@@ -20,12 +20,13 @@ from saitenka.runtime.sidebar import MANUAL_SCROLL_HOLD, SidebarState
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka_subtitles import Cue, CueIndex
+
     from saitenka.app.backlog import BacklogEntry, BacklogStore, MediaRecord
     from saitenka.app.features.mining import mined_store
     from saitenka.app.features.mining.mined_store import MinedCard
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.runtime.interaction_slice import SidebarStore
-    from saitenka.subtitles import Cue, CueIndex
 
 SIDEBAR_ID = OverlayId.SIDEBAR
 PLAIN = (236, 241, 247, 255)
