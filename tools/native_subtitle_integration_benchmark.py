@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from saitenka.app.session.graph import SessionGraph
-    from saitenka.mpvio.gateway import MpvGateway
+    from saitenka.app.session.mpv_gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
 
 STYLE = """[Script Info]

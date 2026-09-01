@@ -115,10 +115,10 @@ if TYPE_CHECKING:
     from saitenka.app.features.tooltip.hover_adapter import HoverCommandCoordinator
     from saitenka.app.session.adapter import SessionCommandCoordinator
     from saitenka.app.session.interaction_adapter import InteractionCommandCoordinator
+    from saitenka.app.session.mpv_gateway import MpvGateway
     from saitenka.app.session.panel_adapter import PanelCommandCoordinator
     from saitenka.app.session.stateless import InstalledStatelessBinding
     from saitenka.app.subtitle_adapter import SubtitleCommandCoordinator
-    from saitenka.mpvio.gateway import MpvGateway
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.effects import CoreControl, Effect
     from saitenka.runtime.events import RuntimeEvent
@@ -343,7 +343,7 @@ def install_session_runtime(ipc: MpvIPC, *, startup_hint: bool = True) -> MpvGat
     duties never run, which is what `attach` silently was. Entrypoints ask for a session runtime,
     not for the two halves in the right order.
     """
-    from saitenka.mpvio.gateway import install_gateway
+    from saitenka.app.session.mpv_gateway import install_gateway
 
     gateway = install_gateway(ipc)
     install_session_reactor(gateway, startup_hint=startup_hint)

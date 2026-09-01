@@ -20,7 +20,7 @@ from saitenka.app.subtitle_render import SubtitleEgress
 from saitenka.mpvio.ipc import MpvIPC
 from saitenka.runtime.jobs import NoSessionRuntime, RuntimeJobPort
 
-# Installed by the object that *is* the runtime (`mpvio/gateway.py` hands the transport its mailbox
+# Installed by the object that *is* the runtime (`app/session/mpv_gateway.py` hands the transport its mailbox
 # and loop). A stand-in is never passed to `RuntimeGateway`, so refusing these would mean nothing.
 _RUNTIME_OWNER_ONLY = frozenset({"install_runtime_ingress", "register_runtime_observers"})
 

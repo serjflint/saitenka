@@ -6,7 +6,7 @@ from concurrent.futures import Future
 
 import pytest
 
-from saitenka.mpvio.gateway import MpvGateway
+from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime import (
     CommandHandled,

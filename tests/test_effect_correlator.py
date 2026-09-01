@@ -5,7 +5,7 @@ import time
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, cast
 
-from saitenka.mpvio.gateway import MpvGateway
+from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime.effects import EffectError, EffectOutcome, Owner
 from saitenka.runtime.events import PropertyObserved
