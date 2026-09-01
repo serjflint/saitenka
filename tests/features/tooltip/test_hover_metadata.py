@@ -180,6 +180,53 @@ def test_metadata_completion_refuses_facts_that_changed_after_submission():
     assert reader.graph.tooltip.surface_state().view.state is None
 
 
+def test_a_hover_survives_the_prefetch_generation_its_own_arrival_bumps():
+    """The prefetch generation is a queue epoch, not the hovered word's identity.
+
+    Engaging — pausing, or the cursor entering the video — is what `update_prefetch` re-keys on, so
+    the first hover after the pointer arrives bumps the very generation its in-flight request was
+    stamped with. Treating that as a different target drops the answer *and* declines to ask again,
+    which is a tooltip that never appears rather than one that appears late. Isolated deliberately:
+    the neighbouring refusal test moves the mined set, the cue and this generation at once, so it
+    passes whichever of the three is doing the work.
+    """
+    submitted = []
+    reader = build_session(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            tooltip_jobs=lambda jobs: replace(
+                jobs, metadata=lambda **kwargs: submitted.append(kwargs) or True
+            ),
+        ),
+    )
+    reader.graph.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token("猫", "猫", "ネコ", "名詞", 0, 1)]
+    )
+    reader.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
+    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    Driver(reader).move_to_word(0)
+    original = submitted[0]["request"]
+
+    reader.graph.tooltip_preparation.cancel()  # the engagement flip, as `settle` performs it
+    submitted[0]["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            Owner.INTERACTION,
+            submitted[0]["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=HoverMetadata(
+                original.key,
+                phrase_terms=("猫",),
+                phrase_span=(0, 1),
+                mined=False,
+                group_mined=(),
+            ),
+        )
+    )
+
+    assert [kwargs["request"].key.index for kwargs in submitted] == [0, 0]
+
+
 def test_uncorrelated_metadata_completion_does_not_assemble_apply_ports(monkeypatch):
     reader = build_session(FakeIPC())
 
