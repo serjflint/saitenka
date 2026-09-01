@@ -151,8 +151,10 @@ def test_free_threaded_split_uses_the_published_bundle_runtime() -> None:
         ],
     ]
 
+    # Found by position of `uv`, not by prefix: the step may be wrapped (the resource probe is), and
+    # the claim is that pytest runs against the env just synced above — never that nothing precedes it.
     tests = shlex.split(_step_command("tests-ft", "Tests (free-threaded)"))
-    assert tests[:3] == ["uv", "run", "--no-sync"]
+    assert tests[tests.index("uv") : tests.index("uv") + 3] == ["uv", "run", "--no-sync"]
 
 
 def _jobs_selecting_tests_broadly() -> dict[str, dict]:

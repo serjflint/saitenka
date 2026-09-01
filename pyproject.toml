@@ -925,7 +925,7 @@ licenses = { shell = "uv run --extra full --with pip-licenses pip-licenses --par
 # GATE (in `all`) — shell installer static analysis (shellcheck, standalone binary: brew install
 # shellcheck). The install/*.sh scripts run on users' machines, so correctness matters. Clean at
 # default severity after the 2026-07-25 nit sweep (SC2043/SC2012 fixed, SC2016/SC2329 reasoned-disabled).
-shell = { shell = "shellcheck install/*.sh" }
+shell = { shell = "shellcheck install/*.sh .github/scripts/*.sh" }
 # ADVISORY — PowerShell installer static analysis (PSScriptAnalyzer). Prereqs: `brew install --cask
 # powershell` + `pwsh -c 'Install-Module PSScriptAnalyzer -Scope CurrentUser'`. Kept OUT of `hygiene`
 # because pwsh is a heavy, mac-uncommon prereq and the .ps1 files only matter for Windows packaging.

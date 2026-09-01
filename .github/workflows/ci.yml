@@ -69,8 +69,12 @@ jobs:
           uv python install
           uv sync --locked --extra full
 
+      # Probed: this job carries 15 of the 29 runner-shutdown events in the last 60 runs, and a
+      # shutdown leaves no summary to read. `timeout-minutes` separates a hang from that — it fails
+      # with a reason instead of running out the 6h default.
       - name: Dev gate
-        run: uv run poe ${{ matrix.task }}
+        timeout-minutes: 30
+        run: bash .github/scripts/with-resource-probe.sh uv run poe ${{ matrix.task }}
 
   layout-engine:
     name: taffylite wheel (Linux, 3.14t)
@@ -416,13 +420,21 @@ jobs:
       # its `limit_memory` marker comes from pytest-memray, which the lean test group omits → strict
       # markers would error at collection. The gate (full dev) collects and runs it normally.
       #
-      # PYTHON_GIL=1 makes this a genuine GIL-ON control on the free-threaded (`…t`) legs — a real
-      # baseline instead of a redundant no-GIL subset of the `tests-ft` job below. It's a no-op on the
-      # non-`t` legs (GIL is always on there), so setting it unconditionally is harmless.
+      # PYTHON_GIL=1 gives the free-threaded (`…t`) legs a GIL-ON baseline instead of a redundant
+      # no-GIL subset of the `tests-ft` job below. It's a no-op on the non-`t` legs (GIL is always on
+      # there), so setting it unconditionally is harmless.
+      #
+      # NOT a controlled comparison against `tests-ft`, despite reading like one: the marker sets
+      # differ too (that job includes integration/requires_display/e2e), so a difference between the
+      # arms has two candidate causes. Deliberate — each arm is sized for what it is there to cover —
+      # but do not read a delta between them as a GIL effect.
+      # Probed like the free-threaded job so the two arms carry the same instrument — this is the
+      # control, and a control without the measurement answers nothing.
       - name: Tests
+        timeout-minutes: 30
         env:
           PYTHON_GIL: "1"
-        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or integration or requires_display or e2e or live)"
+        run: bash .github/scripts/with-resource-probe.sh uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or integration or requires_display or e2e or live)"
 
   tests-ft:
     name: tests free-threaded (${{ matrix.python }})
@@ -467,6 +479,7 @@ jobs:
       # The free-threaded (no-GIL) signal, run in parallel with the `tests` job's GIL-ON control instead
       # of sequentially after it — same command as before the split, just its own job.
       - name: Tests (free-threaded)
+        timeout-minutes: 30
         env:
           PYTHON_GIL: "0"
-        run: uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or live)"
+        run: bash .github/scripts/with-resource-probe.sh uv run --no-sync pytest -q -n auto --ignore=tests/test_stress_memory.py -m "not (slow or live)"
