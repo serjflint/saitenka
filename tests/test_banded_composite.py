@@ -8,6 +8,7 @@ exact; any off-by-one vertical placement fringes a glyph and the pixel diff catc
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from PIL import Image, ImageDraw
@@ -129,22 +130,43 @@ def test_premultiplied_disjoint_numpy_copy_matches_reference(col):
     assert np.array_equal(out, ref)
 
 
-def test_a_band_inflates_with_the_codec_that_wrote_it(monkeypatch):
-    """A band carries its codec, so the reader never assumes its own.
+def test_pack_prefers_zstd_only_where_the_interpreter_has_it():
+    """`compression.zstd` is 3.14+ (PEP 784) and this repo still supports 3.13.
 
-    zstd is 3.14+ only and the band renderer can run in a process pool, so "written by zlib, read
-    where zstd exists" is a real pairing. Only the zstd arm runs on 3.14+ and only the zlib arm on
-    3.13, so without driving both here the fallback ships untested on every leg that could reach it.
+    Asserting a codec name outright is what broke on the 3.13 leg: the expectation is a fact about
+    the interpreter, not about the packer.
     """
+    packed = banded.PackedPixels.pack(b"\x00" * 64, (4, 4))
+
+    assert packed.codec == ("zstd" if banded._zstd is not None else "zlib")
+
+
+def test_a_zlib_band_inflates_whether_or_not_the_reader_has_zstd(monkeypatch):
+    """The pairing that actually spans versions: written by 3.13, read on 3.14+."""
     size = (64, 48)
     raw = Image.new("RGBA", size, (12, 34, 56, 255)).tobytes()
-
-    by_zstd = banded.PackedPixels.pack(raw, size)
     monkeypatch.setattr(banded, "_zstd", None)
+
     by_zlib = banded.PackedPixels.pack(raw, size)
 
-    assert (by_zstd.codec, by_zlib.codec) == ("zstd", "zlib")
+    assert by_zlib.codec == "zlib"
     assert by_zlib.inflate() == raw  # zlib writer, zlib-only reader
     monkeypatch.undo()
-    assert by_zlib.inflate() == raw  # zlib writer, zstd-capable reader
-    assert by_zstd.inflate() == raw
+    assert by_zlib.inflate() == raw  # zlib writer, reader that would have preferred zstd
+
+
+def test_a_zstd_band_read_without_zstd_names_the_reason(monkeypatch):
+    """The one pairing that cannot work says why, instead of raising a codec-internal error.
+
+    Runs on every leg, because it constructs the zstd-tagged band rather than needing to compress
+    one — which is the only way the 3.13 leg can cover this at all.
+    """
+    monkeypatch.setattr(banded, "_zstd", None)
+
+    with pytest.raises(RuntimeError, match="cannot inflate"):
+        banded.PackedPixels(b"whatever", (4, 4), "zstd").inflate()
+
+
+def test_an_unknown_band_codec_is_refused():
+    with pytest.raises(ValueError, match="unknown band codec"):
+        banded.PackedPixels(b"whatever", (4, 4), "brotli").inflate()
