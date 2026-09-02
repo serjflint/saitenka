@@ -24,7 +24,16 @@ def lang_matches(lang: str | None, wants: list[str]) -> bool:
 
 
 def wanted_languages(slang: str) -> list[str]:
-    return [part.strip().lower() for part in slang.split(",") if part.strip()]
+    wanted: list[str] = []
+    for part in slang.split(","):
+        code = part.strip().lower()
+        if not code:
+            continue
+        wanted.append(code)
+        base = code.partition("-")[0]
+        if base != code:
+            wanted.append(base)
+    return list(dict.fromkeys(wanted))
 
 
 @dataclass(frozen=True)

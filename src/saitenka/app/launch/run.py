@@ -60,11 +60,11 @@ class RunSubtitleOptions:
     (title, episode number) stays a separate arg — the re-slot recomputes it."""
 
     slang: str
-    second_slang: str = "en"
     sub_file: str | None = None
     jimaku: bool = False
     jimaku_key: str | None = None
     resync: bool = False
+    second_slang: str = "en"
 
 
 @dataclass(frozen=True)

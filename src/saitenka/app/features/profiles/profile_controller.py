@@ -24,6 +24,10 @@ if TYPE_CHECKING:
     from saitenka.app.dictionary import DictionarySet
 
 
+def _default_second_slang() -> str:
+    return "en"
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileInvalidation:
     """Cache and warm-state invalidation applied after profile preflight."""
@@ -41,6 +45,7 @@ class ProfileSubtitles:
     has_subtitle_track: Callable[[str], bool]
     select_subtitle_track: Callable[[str, str], None]
     retokenize_current_cue: Callable[[], None]
+    current_second_slang: Callable[[], str] = _default_second_slang
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,14 +208,18 @@ class ProfileController:
         return ProfileSwitchOutcome(status, target, index)
 
     def _switch_subtitle_track(self, slang: str) -> _TrackSwitch:
-        if slang == self._subtitles.current_subtitle_slang():
+        second_slang = self._profile.langs.second
+        if (
+            slang == self._subtitles.current_subtitle_slang()
+            and second_slang == self._subtitles.current_second_slang()
+        ):
             return _TrackSwitch.UNCHANGED
         if not self._subtitles.has_subtitle_track(slang):
             self._aftermath.notify(
                 f"profile {self._profile.name!r}: no {slang!r} subtitle track", "warn"
             )
             return _TrackSwitch.MISSING
-        self._subtitles.select_subtitle_track(slang, self._profile.langs.second)
+        self._subtitles.select_subtitle_track(slang, second_slang)
         return _TrackSwitch.SWITCHED
 
     @staticmethod

@@ -785,6 +785,7 @@ def test_foreign_only_tracks_use_the_selected_one_as_primary():
             {"id": 3, "type": "sub", "lang": "ger", "selected": True, "main-selection": 0},
         ]
     )
+
     assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(jp_sid=3, en_sid=4)
 
 
@@ -812,6 +813,19 @@ def test_discovery_uses_the_configured_second_language():
     )
 
     assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_falls_back_from_a_region_tag_to_the_base_track_language():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 8, "type": "sub", "lang": "deu"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de-CH") == subtitle_modes.SubtitleTracks(
         jp_sid=6, en_sid=8
     )
 

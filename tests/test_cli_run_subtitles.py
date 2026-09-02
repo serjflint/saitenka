@@ -8,6 +8,12 @@ from saitenka.app.episode_reslot import ReslotPorts
 from saitenka.app.launch import run as cli_run
 
 
+def test_run_subtitle_options_preserves_the_positional_sub_file_argument():
+    options = cli_run.RunSubtitleOptions("ja,jpn,jp", "episode.srt")
+
+    assert options.sub_file == "episode.srt" and options.second_slang == "en"
+
+
 def _resolve(tmp_path, *, jimaku: bool):
     return cli_run._resolve_subtitles(
         {"jimaku": {"fetch": True}},

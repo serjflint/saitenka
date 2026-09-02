@@ -397,6 +397,28 @@ def test_cycle_selects_the_profiles_configured_translation_language(request):
     ) == ("de", 6, 8, 8)
 
 
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_reconfigures_translation_when_only_the_second_language_changes(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 6, "lang": "fr"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+        {"type": "sub", "id": 8, "lang": "de"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("fr", "en")
+
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
+
+    tracks = reader.graph.track_commands.current()
+    assert (
+        reader.graph.profile.profile.langs.second,
+        tracks.slang,
+        tracks.second_slang,
+        tracks.translation_sid,
+    ) == ("de", "fr", "de", 8)
+
+
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------
 
 

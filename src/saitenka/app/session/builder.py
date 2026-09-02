@@ -395,6 +395,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 profile_integration_ref.get().select_subtitle_track(slang, second_slang)
             ),
             retokenize_current_cue=lambda: profile_integration_ref.get().retokenize_current_cue(),
+            current_second_slang=lambda: subtitle_tracks.current.second_slang,
         ),
         ProfileAftermath(
             warm_episode=lambda: profile_integration_ref.get().warm_episode(),
