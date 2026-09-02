@@ -44,7 +44,7 @@ def matching_track(tracks: list[dict], wants: list[str]) -> dict | None:
 
 
 def _fill_untagged_tracks(
-    tracks: list[dict], jp: dict | None, en: dict | None
+    tracks: list[dict], jp: dict | None, en: dict | None, *, primary_matched: bool
 ) -> tuple[dict | None, dict | None]:
     selected = sorted(
         (track for track in tracks if track.get("selected")),
@@ -55,24 +55,32 @@ def _fill_untagged_tracks(
     if jp is None and en is None and tracks:
         jp = tracks[0]
     if en is None:
-        en = next((track for track in tracks if track.get("id") != (jp or {}).get("id")), None)
+        candidates = (track for track in tracks if track.get("id") != (jp or {}).get("id"))
+        en = next(
+            (
+                track
+                for track in candidates
+                if not primary_matched or not str(track.get("lang") or "").strip()
+            ),
+            None,
+        )
     return jp, en
 
 
-def discover(tracks: list[dict], slang: str) -> SubtitleTracks:
+def discover(tracks: list[dict], slang: str, second_slang: str = "en") -> SubtitleTracks:
     """Classify the track list into the target-language and secondary sids."""
     jp = matching_track(tracks, wanted_languages(slang))
-    en = matching_track(tracks, list(EN_LANGS))
-    jp, en = _fill_untagged_tracks(tracks, jp, en)
+    en = matching_track(tracks, wanted_languages(second_slang))
+    jp, en = _fill_untagged_tracks(tracks, jp, en, primary_matched=jp is not None)
     return SubtitleTracks(
         jp_sid=jp.get("id") if jp is not None else None,
         en_sid=en.get("id") if en is not None else None,
     )
 
 
-def initial(tracks: list[dict], slang: str) -> SubtitleStartup:
-    """Prefer the target language, fall back to tagged English, leave a missing-both file alone."""
-    discovered = discover(tracks, slang)
+def initial(tracks: list[dict], slang: str, second_slang: str = "en") -> SubtitleStartup:
+    """Prefer the target language, then its configured translation language."""
+    discovered = discover(tracks, slang, second_slang)
     if discovered.jp_sid is not None:
         return SubtitleStartup(discovered, MAIN_LANG)
     if discovered.en_sid is not None:

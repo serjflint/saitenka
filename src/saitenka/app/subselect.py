@@ -20,6 +20,7 @@ from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
     has_track_for_slang,
+    language_name,
     select_initial,
 )
 from saitenka.app.subtitle_modes import (
@@ -482,6 +483,7 @@ class ProviderConfig:
     #: Active profile's main language. Carried here so the re-slot gates provider eligibility the
     #: same way startup does; defaulting it per call site is how the two came to disagree.
     language: str = MAIN_LANG
+    second_language: str = "en"
 
 
 def provider_fetch_factory(
@@ -636,6 +638,7 @@ class AttachSubtitleOptions:
     episode: int | None = None
     resync: bool = True
     language: str = MAIN_LANG  # active profile's main language — gates provider eligibility
+    second_language: str = "en"
 
 
 def _adopt_cached_subtitle(ipc, opts: AttachSubtitleOptions) -> str:
@@ -673,14 +676,16 @@ def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
     elif not has_track_for_slang(ipc, opts.slang):
         status = _adopt_cached_subtitle(ipc, opts)
 
-    startup = select_initial(ipc, opts.slang)
+    startup = select_initial(ipc, opts.slang, opts.second_language)
+    target_name = language_name(opts.language)
+    second_name = language_name(opts.second_language)
     if not status:
         if startup.active == MAIN_LANG:
-            status = f"selected JP subtitle track sid={startup.tracks.jp_sid}"
+            status = f"selected {target_name} subtitle track sid={startup.tracks.jp_sid}"
         elif startup.active == SECOND_LANG:
-            status = f"selected English fallback sid={startup.tracks.en_sid}"
+            status = f"selected {second_name} fallback sid={startup.tracks.en_sid}"
         else:
-            status = "no Japanese or English subtitle track found"
+            status = f"no {target_name} or {second_name} subtitle track found"
     # Same registry/language gate as the retry+picker enablement (cli.py) — one source of truth for
     # "which providers are on", so a non-jp profile can't leave this initial fetch chasing jimaku while
     # the picker excludes it. ``jimaku_force`` already fetched ahead in ensure_jp_subs, so it's excluded

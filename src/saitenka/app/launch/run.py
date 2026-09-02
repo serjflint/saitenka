@@ -56,10 +56,11 @@ def _dict_scoper_for(cfg: dict, profile_cycle):
 @dataclass(frozen=True)
 class RunSubtitleOptions:
     """A ``run``'s subtitle-sourcing choices, resolved once from CLI + config and threaded through the
-    resolve → re-slot → watch-hook chain (was a recurring sub_file/jimaku/jimaku_key/slang/resync clump).
-    Per-episode identity (title, episode number) stays a separate arg — the re-slot recomputes it."""
+    resolve → re-slot → watch-hook chain (was a recurring sourcing-options clump). Per-episode identity
+    (title, episode number) stays a separate arg — the re-slot recomputes it."""
 
     slang: str
+    second_slang: str = "en"
     sub_file: str | None = None
     jimaku: bool = False
     jimaku_key: str | None = None
@@ -732,6 +733,7 @@ def reslot_to_current(
     from saitenka.app.subtitle_modes import select_initial
 
     ipc = ports.ipc
+    primary_slang, second_slang = subs.slang, subs.second_slang
     title, parsed_episode = parse_filename(video_path)
     # One span over the whole re-slot: it's a discrete, non-trivial cost on the reader thread (a cold
     # re-slot resolves+ffsubsync-resyncs subs, ~1.3s live), and its attributes make a wrong-track
@@ -756,7 +758,7 @@ def reslot_to_current(
         # Tag the JP srt with the caller's own slang token so select_initial's _matching_track picks OUR
         # srt, not an untagged leftover the auto-selection latched onto (the ep2-on-ep03 bug). "auto"
         # flag → selection stays select_initial's. First slang token matches whatever slang is set.
-        jp_lang = next((part.strip() for part in subs.slang.split(",") if part.strip()), "jpn")
+        jp_lang = next((part.strip() for part in primary_slang.split(",") if part.strip()), "jpn")
         for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
             if path is not None:
                 send_correlated(
@@ -769,7 +771,7 @@ def reslot_to_current(
                     lang,
                     owner=Owner.SUBTITLE,
                 )
-        startup = select_initial(ipc, subs.slang)
+        startup = select_initial(ipc, primary_slang, second_slang)
         span.set(
             "active", startup.active or "none"
         )  # the selection outcome, queryable in the trace
@@ -782,7 +784,7 @@ def reslot_to_current(
             startup.tracks.en_sid,
         )
         ports.rebuild_index()
-        ports.configure_mode(startup, slang=subs.slang)
+        ports.configure_mode(startup, slang=primary_slang, second_slang=second_slang)
         ports.start_stats()  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
             # background fetch below; tell the user to wait
@@ -1108,7 +1110,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
     subs = RunSubtitleOptions(
-        slang=slang, sub_file=sub_file, jimaku=jimaku, jimaku_key=jimaku_key, resync=resync
+        slang=slang,
+        second_slang=active_profile.langs.second,
+        sub_file=sub_file,
+        jimaku=jimaku,
+        jimaku_key=jimaku_key,
+        resync=resync,
     )
     sub_path, en_sub_path, fetch_jimaku_in_background, enabled_providers = _resolve_subtitles(
         cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
@@ -1136,7 +1143,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     from saitenka.app.subtitle_modes import select_initial
 
     with otel_metrics.traced("startup.subtitle_selection"):
-        subtitle_startup = select_initial(ipc, slang)
+        subtitle_startup = select_initial(ipc, slang, active_profile.langs.second)
 
     opts = _build_run_options(
         cfg,
@@ -1220,7 +1227,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         )  # the build has been running since pre-launch
 
     with otel_metrics.traced("startup.subtitle_mode_configure"):
-        prepared.configure_subtitle_mode(subtitle_startup, slang=slang)
+        prepared.configure_subtitle_mode(
+            subtitle_startup, slang=slang, second_slang=active_profile.langs.second
+        )
     _start_run_provider_fetch(
         prepared.reslot,
         cfg,

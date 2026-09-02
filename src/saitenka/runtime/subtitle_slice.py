@@ -38,13 +38,19 @@ class SubtitleReducer:
 
     def reduce(self, state: SubtitleTrackState, event: SubtitleSliceEvent) -> SubtitleTrackState:
         match event:
-            case SubtitleStartupConfigured(jp_sid=jp, en_sid=en, language=language, slang=slang):
+            case SubtitleStartupConfigured(
+                jp_sid=jp,
+                en_sid=en,
+                language=language,
+                slang=slang,
+                second_slang=second_slang,
+            ):
                 # A whole-state reset, and that is what keeps this session-lived slot episode-safe:
                 # a re-slot always runs `configure`, so nothing survives into the next file. It
                 # supersedes the lease for a second reason too — `configure` also runs mid-session
                 # on a live profile cycle, where a carried-over secondary leaves the reveal stuck
                 # off, because `setup_secondary`'s `mirror == sid` guard skips re-issuing it.
-                return SubtitleTrackState(jp, en, language, slang)
+                return SubtitleTrackState(jp, en, language, slang, second_slang=second_slang)
             case SubtitleTracksDiscovered(jp_sid=jp, en_sid=en):
                 return replace(state, jp_sid=jp, en_sid=en)
             case SubtitlePrimaryAdopted(sid=sid, language=language):

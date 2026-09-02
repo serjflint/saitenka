@@ -802,6 +802,33 @@ def test_single_foreign_track_has_no_secondary():
     )
 
 
+def test_discovery_uses_the_configured_second_language():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 7, "type": "sub", "lang": "eng"},
+            {"id": 8, "type": "sub", "lang": "deu"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_does_not_substitute_a_tagged_unconfigured_translation_language():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 7, "type": "sub", "lang": "eng"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=None
+    )
+
+
 def _select(ipc, sid):
     ipc.props["sid"] = sid
     for track in ipc.tracks:

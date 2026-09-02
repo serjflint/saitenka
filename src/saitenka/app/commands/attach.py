@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -101,7 +102,7 @@ def _finish_attach_subtitle_startup(
 ) -> None:
     if startup is not None:
         with otel_metrics.traced("startup.subtitle_mode_configure"):
-            ports.configure_mode(startup, slang=cfg.slang)
+            ports.configure_mode(startup, slang=cfg.slang, second_slang=cfg.second_language)
     with otel_metrics.traced("startup.subtitle_index"):
         ports.rebuild_index()
     from saitenka.app.subselect import configure_providers, provider_fetch_factory
@@ -125,8 +126,6 @@ def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> 
     subtitle navigation state, drops the carried-over external sub, re-runs the attach selection (which prefers JP
     and defers a jimaku fetch when the new file has none — so watching continues in Japanese even when
     the next episode ships no JP track), re-wires the retry/picker, and restarts recorder + prefetch."""
-    from dataclasses import replace
-
     from saitenka import otel_metrics
     from saitenka.app.jimaku import parse_filename
     from saitenka.app.subselect import (
@@ -160,6 +159,7 @@ def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> 
                     episode=episode,
                     resync=ep_cfg.resync,
                     language=ep_cfg.language,
+                    second_language=ep_cfg.second_language,
                 ),
             )
         except Exception:  # never let sub selection break following the advance
@@ -326,6 +326,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
                     episode=episode,
                     resync=resync,
                     language=active_profile.langs.main,
+                    second_language=active_profile.langs.second,
                 ),
             )
         log.info("attach subs: %s", status)  # plugin mode is detached — the log is the only sink
@@ -389,6 +390,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         jimaku_force=jimaku_force,
         tsukihime=bool(th.get("enabled", False)),
         language=active_profile.langs.main,
+        second_language=active_profile.langs.second,
     )
     _finish_attach_subtitle_startup(
         prepared.reslot,

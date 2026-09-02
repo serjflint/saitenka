@@ -39,7 +39,7 @@ class ProfileSubtitles:
 
     current_subtitle_slang: Callable[[], str]
     has_subtitle_track: Callable[[str], bool]
-    select_subtitle_track: Callable[[str], None]
+    select_subtitle_track: Callable[[str, str], None]
     retokenize_current_cue: Callable[[], None]
 
 
@@ -210,7 +210,7 @@ class ProfileController:
                 f"profile {self._profile.name!r}: no {slang!r} subtitle track", "warn"
             )
             return _TrackSwitch.MISSING
-        self._subtitles.select_subtitle_track(slang)
+        self._subtitles.select_subtitle_track(slang, self._profile.langs.second)
         return _TrackSwitch.SWITCHED
 
     @staticmethod

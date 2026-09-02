@@ -283,12 +283,17 @@ class CueCoordinator:
         )
 
     def configure_subtitle_mode(
-        self, startup: subtitle_modes.SubtitleStartup, *, slang: str = "ja,jpn,jp"
+        self,
+        startup: subtitle_modes.SubtitleStartup,
+        *,
+        slang: str = "ja,jpn,jp",
+        second_slang: str = "en",
     ) -> None:
         o = self._o
         subtitle_modes.configure(
             startup,
             slang=slang,
+            second_slang=second_slang,
             declare=o.track_commands.declare,
             activate=self._activate_mode,
             secondary_sid=o.playback.query("secondary-sid"),

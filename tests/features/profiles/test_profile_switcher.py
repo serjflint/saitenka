@@ -37,6 +37,9 @@ _FR = Profile(name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenize
 _FR_SUBS = Profile(
     name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin", slang="fr"
 )
+_FR_DE_SUBS = Profile(
+    name="fr-de", langs=ReaderLanguages(main="fr", second="de"), tokenizer="latin", slang="fr"
+)
 _BROKEN = Profile(name="de", langs=ReaderLanguages(main="de", second="en"), tokenizer="nonexistent")
 _JA_FR_TRACKS = [{"type": "sub", "id": 1, "lang": "jpn"}, {"type": "sub", "id": 6, "lang": "fr"}]
 
@@ -367,6 +370,31 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(requ
         reader.graph.track_commands.current().secondary_sid is None
     )  # mirror cleared → reveal can re-establish
     assert ("set_property", "secondary-sid", "no") in reader.graph.ipc.commands
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_cycle_selects_the_profiles_configured_translation_language(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 1, "lang": "jpn"},
+        {"type": "sub", "id": 6, "lang": "fr"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+        {"type": "sub", "id": 8, "lang": "de"},
+    ]
+    reader.command(app_bindings.TRANS_MSG)
+
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
+    reader.graph.playback.observe_event({"name": "sid", "data": 6})
+
+    profile = reader.graph.profile.profile
+    tracks = reader.graph.track_commands.current()
+    assert (
+        profile.langs.second,
+        tracks.primary_sid,
+        tracks.translation_sid,
+        tracks.secondary_sid,
+    ) == ("de", 6, 8, 8)
 
 
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------

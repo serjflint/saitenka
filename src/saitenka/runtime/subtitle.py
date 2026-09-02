@@ -32,6 +32,8 @@ class SubtitleTrackState:
     slang: str = "ja,jpn,jp"
     secondary_sid: int | None = None
     announced_sid: int | None = None
+    # Selection criterion for the role still named `en_sid` for compatibility.
+    second_slang: str = "en"
 
     @property
     def primary_sid(self) -> int | None:

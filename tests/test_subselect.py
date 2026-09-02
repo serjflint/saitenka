@@ -105,6 +105,22 @@ def test_attach_does_not_fetch_when_japanese_is_already_present():
     assert ipc.sets("sid") == [2]
 
 
+def test_attach_classifies_the_configured_second_language_track():
+    tracks = [
+        {"id": 6, "type": "sub", "lang": "fra"},
+        {"id": 7, "type": "sub", "lang": "eng"},
+        {"id": 8, "type": "sub", "lang": "deu"},
+    ]
+    ipc = FakeIPC(tracks=tracks, path="/v/Multilingual - 01.mkv")
+
+    startup, _status, _providers = subselect.prepare_attach_startup(
+        ipc,
+        subselect.AttachSubtitleOptions(slang="fr", language="fr", second_language="de"),
+    )
+
+    assert (startup.tracks.jp_sid, startup.tracks.en_sid, ipc.sets("sid")) == (6, 8, [6])
+
+
 def test_attach_orders_enabled_jimaku_before_tsukihime():
     ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
 

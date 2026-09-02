@@ -391,8 +391,8 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             has_subtitle_track=lambda slang: profile_integration_ref.get().has_subtitle_track(
                 slang
             ),
-            select_subtitle_track=lambda slang: profile_integration_ref.get().select_subtitle_track(
-                slang
+            select_subtitle_track=lambda slang, second_slang: (
+                profile_integration_ref.get().select_subtitle_track(slang, second_slang)
             ),
             retokenize_current_cue=lambda: profile_integration_ref.get().retokenize_current_cue(),
         ),
@@ -623,8 +623,10 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             ),
             teardown_tooltip=tooltip_controller.teardown,
             retire_cue=lambda reason: cue_ref.get().retire(reason),
-            configure_subtitle_mode=lambda startup, slang: cue_ref.get().configure_subtitle_mode(
-                startup, slang=slang
+            configure_subtitle_mode=lambda startup, slang, second_slang: (
+                cue_ref.get().configure_subtitle_mode(
+                    startup, slang=slang, second_slang=second_slang
+                )
             ),
             rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
         )

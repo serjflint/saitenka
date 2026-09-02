@@ -159,8 +159,8 @@ def has_track_for_slang(ipc, slang: str) -> bool:
     return _matching_track(sub_tracks(ipc), wanted_languages(slang)) is not None
 
 
-def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
-    return _discover(sub_tracks(ipc), slang)
+def discover_tracks(ipc, slang: str = "ja,jpn,jp", second_slang: str = "en") -> SubtitleTracks:
+    return _discover(sub_tracks(ipc), slang, second_slang)
 
 
 def selected_sid(startup: SubtitleStartup) -> int | str | None:
@@ -172,9 +172,9 @@ def selected_sid(startup: SubtitleStartup) -> int | str | None:
     return startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
 
 
-def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
+def select_initial(ipc, slang: str = "ja,jpn,jp", second_slang: str = "en") -> SubtitleStartup:
     """Prefer Japanese, fall back to tagged English, and leave a missing-both file untouched."""
-    startup = _initial(sub_tracks(ipc), slang)
+    startup = _initial(sub_tracks(ipc), slang, second_slang)
     sid = selected_sid(startup)
     if sid is not None:
         _send(ipc, "select-primary", "set_property", "sid", sid)
@@ -185,6 +185,7 @@ def configure(
     startup: SubtitleStartup,
     *,
     slang: str = "ja,jpn,jp",
+    second_slang: str = "en",
     declare: Callable[[SubtitleEvent], object],
     activate: Callable[[SelectedSid], None],
     secondary_sid: object,
@@ -200,7 +201,11 @@ def configure(
     """
     declare(
         SubtitleStartupConfigured(
-            startup.tracks.jp_sid, startup.tracks.en_sid, startup.active or MAIN_LANG, slang
+            startup.tracks.jp_sid,
+            startup.tracks.en_sid,
+            startup.active or MAIN_LANG,
+            slang,
+            second_slang,
         )
     )
     # Declare the track rather than let the renderer read it back. `select_initial` wrote `sid`
@@ -242,7 +247,7 @@ class TrackPorts:
 def setup_secondary(ports: TrackPorts) -> int | None:
     state = ports.tracks()
     if state.jp_sid is None and state.en_sid is None:
-        found = discover_tracks(ports.ipc, state.slang)
+        found = discover_tracks(ports.ipc, state.slang, state.second_slang)
         state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     sid = state.translation_sid
     if sid is None or sid == ports.get("sid"):
@@ -335,7 +340,8 @@ def announce_track(ports: TrackPorts, sid) -> None:
 
 def select_track(ports: TrackPorts, sid: int, target: Language) -> None:
     """Carry out a decided language switch: make ``sid`` primary and adopt ``target`` as the role."""
-    tracks = discover_tracks(ports.ipc, ports.tracks().slang)
+    state = ports.tracks()
+    tracks = discover_tracks(ports.ipc, state.slang, state.second_slang)
     ports.declare(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
@@ -555,7 +561,7 @@ def _replace_japanese_track(
     ports.declare(
         SubtitleTracksDiscovered(
             selected if isinstance(selected, int) else None,
-            discover_tracks(ports.ipc, ports.tracks().slang).en_sid,
+            discover_tracks(ports.ipc, ports.tracks().slang, ports.tracks().second_slang).en_sid,
         )
     )
     ports.declare(SubtitleLanguageChanged(MAIN_LANG))
@@ -575,7 +581,7 @@ def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> 
     state = ports.tracks()
     had_japanese = state.jp_sid is not None
     _send(ports.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
-    found = discover_tracks(ports.ipc, state.slang)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
     state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     select_japanese = selects_background_japanese(
         select_if_unchanged=result.select_if_unchanged,

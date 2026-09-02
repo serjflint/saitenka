@@ -231,12 +231,13 @@ class EpisodeRetired:
 
 @dataclass(frozen=True, slots=True)
 class SubtitleStartupConfigured:
-    """The startup selection: both role tracks, the active role, and the search language list."""
+    """The startup selection: both role tracks, the active role, and their language searches."""
 
     jp_sid: int | None
     en_sid: int | None
     language: str
     slang: str
+    second_slang: str = "en"
 
 
 @dataclass(frozen=True, slots=True)

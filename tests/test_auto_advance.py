@@ -116,6 +116,35 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(
     assert started == [str(cur)]  # a new stats row started against the current file
 
 
+def test_reslot_preserves_the_configured_translation_language(tmp_path, make_session):
+    ipc = FakeIPC()
+    reader = make_session(ipc)
+    cur = tmp_path / "Show 04.mkv"
+    ipc.props["path"] = str(cur)
+    ipc.props["track-list"] = [
+        {"id": 6, "type": "sub", "lang": "fra"},
+        {"id": 7, "type": "sub", "lang": "eng"},
+        {"id": 8, "type": "sub", "lang": "deu"},
+    ]
+
+    cli_run.reslot_to_current(
+        reader.graph.reslot,
+        {},
+        cur,
+        tmp_path,
+        0,
+        cli_run.RunSubtitleOptions(slang="fr", second_slang="de"),
+    )
+
+    tracks = reader.graph.track_commands.current()
+    assert (tracks.slang, tracks.second_slang, tracks.primary_sid, tracks.translation_sid) == (
+        "fr",
+        "de",
+        6,
+        8,
+    )
+
+
 def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
     tmp_path, monkeypatch, make_session
 ):
