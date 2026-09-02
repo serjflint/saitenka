@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka_tokenize.languages import MAIN_LANG, Language
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, Language
 
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
@@ -274,17 +274,27 @@ def clear_secondary(ipc) -> None:
     _send(ipc, "clear-secondary", "set_property", "secondary-sid", "no")
 
 
-def select_translation(ports: TrackPorts, second_slang: str) -> None:
-    """Re-resolve only the translation role when a new primary is unavailable."""
+def select_translation(ports: TrackPorts, slang: str, second_slang: str) -> None:
+    """Publish a degraded profile's criteria and keep the active role coherent."""
     state = ports.tracks()
-    found = discover_tracks(ports.ipc, state.slang, second_slang)
-    retained_primary = state.primary_sid
-    translation_sid = found.en_sid if found.en_sid != retained_primary else None
-    ports.declare(
-        SubtitleTranslationConfigured(
-            retained_primary, translation_sid, second_slang, state.language
-        )
-    )
+    found = discover_tracks(ports.ipc, slang, second_slang)
+    translation_sid = found.en_sid
+    if state.language == MAIN_LANG:
+        jp_sid = state.primary_sid
+        if translation_sid == jp_sid:
+            translation_sid = None
+    else:
+        jp_sid = None
+        if translation_sid is None:
+            translation_sid = state.primary_sid
+    ports.declare(SubtitleTranslationConfigured(jp_sid, translation_sid, slang, second_slang))
+    if (
+        state.language == SECOND_LANG
+        and found.en_sid is not None
+        and found.en_sid != state.primary_sid
+    ):
+        select_track(ports, found.en_sid, SECOND_LANG)
+        return
     if ports.translation_visible():
         setup_secondary(ports)
     else:

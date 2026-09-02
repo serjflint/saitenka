@@ -298,9 +298,7 @@ def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_t
     outcome = reader.graph.profile.profile.switch_to(1)  # fr, but the file has no fr track
 
     assert reader.graph.profile.profile.langs.main == "fr"  # the engine switched
-    assert (
-        reader.graph.track_commands.current().slang == "ja,jpn,jp"
-    )  # ...the track was left untouched
+    assert reader.graph.track_commands.current().slang == "fr"  # the committed criterion follows it
     assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
     assert retokenized == [True]
     assert outcome.status is ProfileSwitchStatus.DEGRADED
@@ -327,12 +325,12 @@ def test_degraded_cycle_reconfigures_only_the_translation_language(request):
         tracks.slang,
         tracks.second_slang,
         tracks.en_sid,
-    ) == (ProfileSwitchStatus.DEGRADED, "ja,jpn,jp", "de", 8)
+    ) == (ProfileSwitchStatus.DEGRADED, "fr", "de", 8)
     assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_degraded_cycle_preserves_the_actual_secondary_primary(request):
+def test_degraded_cycle_preserves_the_actual_secondary_primary(request, monkeypatch):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
     reader.graph.ipc.props["track-list"] = [
@@ -344,21 +342,70 @@ def test_degraded_cycle_preserves_the_actual_secondary_primary(request):
     reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
     reader.graph.ipc.props["sid"] = 7
     reader.graph.ipc.commands.clear()
+    notices = []
+    monkeypatch.setattr(
+        reader.graph.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: notices.append((text, kind)),
+    )
 
     outcome = reader.graph.profile.profile.switch_to(1)
 
     tracks = reader.graph.track_commands.current()
-    assert (outcome.status, tracks.language, tracks.primary_sid, tracks.translation_sid) == (
+    assert (outcome.status, tracks.slang, tracks.language, tracks.primary_sid) == (
         ProfileSwitchStatus.DEGRADED,
+        "fr",
         "en",
-        7,
         8,
+    )
+    assert ("set_property", "sid", 8) in reader.graph.ipc.commands
+
+    reader.graph.ipc.props["sid"] = 8
+    reader.graph.playback.observe_event({"name": "sid", "data": 8})
+    reader.graph.ipc.commands.clear()
+    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
+
+    assert [cmd for cmd in reader.graph.ipc.commands if cmd[:2] == ("set_property", "sid")] == []
+    assert ("FR subtitles unavailable", "warn") in notices
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_degraded_cycle_retires_the_unavailable_main_when_secondary_is_unchanged(
+    request, monkeypatch
+):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=_JP_DE_SUBS, profiles=[_JP_DE_SUBS, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 1, "lang": "jpn"},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "de")
+    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
+    reader.graph.ipc.props["sid"] = 8
+    reader.graph.ipc.commands.clear()
+    notices = []
+    monkeypatch.setattr(
+        reader.graph.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: notices.append((text, kind)),
+    )
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (outcome.status, tracks.slang, tracks.jp_sid, tracks.en_sid, tracks.language) == (
+        ProfileSwitchStatus.DEGRADED,
+        "fr",
+        None,
+        8,
+        "en",
     )
     assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
 
     reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
 
-    assert ("set_property", "sid", 8) in reader.graph.ipc.commands
+    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
+    assert ("FR subtitles unavailable", "warn") in notices
 
 
 def test_untagged_track_does_not_claim_a_new_profile_language(request):

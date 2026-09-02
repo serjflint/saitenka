@@ -52,6 +52,7 @@ class ProfileSubtitles:
     current_second_slang: Callable[[], str] = _default_second_slang
     select_subtitle_languages: Callable[[str, str], None] | None = None
     select_translation_track: Callable[[str], None] = _ignore_second_slang
+    select_degraded_subtitle_languages: Callable[[str, str], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +220,10 @@ class ProfileController:
         if primary_unchanged and second_slang == self._subtitles.current_second_slang():
             return _TrackSwitch.UNCHANGED
         if not primary_unchanged and not self._subtitles.has_subtitle_track(slang):
-            self._subtitles.select_translation_track(second_slang)
+            if self._subtitles.select_degraded_subtitle_languages is not None:
+                self._subtitles.select_degraded_subtitle_languages(slang, second_slang)
+            else:
+                self._subtitles.select_translation_track(second_slang)
             self._aftermath.notify(
                 f"profile {self._profile.name!r}: no {slang!r} subtitle track", "warn"
             )

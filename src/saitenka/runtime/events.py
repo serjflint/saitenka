@@ -250,12 +250,12 @@ class SubtitleTracksDiscovered:
 
 @dataclass(frozen=True, slots=True)
 class SubtitleTranslationConfigured:
-    """A degraded switch retained the actual primary and re-resolved its translation."""
+    """A degraded switch published its retained or replacement subtitle roles."""
 
-    primary_sid: int | None
+    jp_sid: int | None
     en_sid: int | None
+    slang: str
     second_slang: str
-    language: str
 
 
 @dataclass(frozen=True, slots=True)

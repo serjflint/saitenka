@@ -97,8 +97,8 @@ class ProfileIntegration:
         self.navigation.current.sub_index = None
         self.rebuild_index()
 
-    def select_translation_track(self, second_slang: str) -> None:
-        subtitle_modes.select_translation(self.track_ports(), second_slang)
+    def select_translation_track(self, slang: str, second_slang: str) -> None:
+        subtitle_modes.select_translation(self.track_ports(), slang, second_slang)
 
     def retokenize_current_cue(self) -> None:
         text = self.cue_text()
