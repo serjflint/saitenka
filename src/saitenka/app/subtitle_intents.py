@@ -61,6 +61,7 @@ class SubtitleInputs:
     #: The projection's cue revision when these facts were read. Navigation is relative to a cue,
     #: so an effect decided here has to say which one — see `SeekCue`.
     cue_revision: int = 0
+    second_language: str = "en"
 
 
 # --- effects ------------------------------------------------------------------------------------
@@ -144,7 +145,10 @@ type SubtitleEffect = (
 def _toggle_language(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
     decision = toggle_target(inputs.tracks, active_sid=inputs.active_sid, language=inputs.language)
     if decision.sid is None:
-        return (Announce(f"{decision.target.upper()} subtitles unavailable", "warn"),)
+        unavailable = (
+            inputs.second_language if decision.target != "jp" else decision.target
+        ).upper()
+        return (Announce(f"{unavailable} subtitles unavailable", "warn"),)
     return (SelectTrack(decision.sid, decision.target),)
 
 

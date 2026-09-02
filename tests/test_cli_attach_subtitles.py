@@ -102,6 +102,31 @@ def test_attach_configures_retry_even_when_startup_fetch_is_unneeded():
     assert ipc.commands == []
 
 
+def test_attach_reslot_hook_samples_current_profile_config(monkeypatch, make_session):
+    ipc = IPC()
+    reader = make_session(ipc)
+    current = [subselect.ProviderConfig(slang="fr", second_language="en")]
+    seen = []
+    monkeypatch.setattr(
+        attach_commands,
+        "_attach_reslot",
+        lambda _ports, _ipc, path, cfg: seen.append((path.name, cfg.slang, cfg.second_language)),
+    )
+    attach_commands._install_attach_reslot_hook(
+        reader.graph.reslot,
+        reader.graph.watch,
+        ipc,
+        current[0],
+        current_config=lambda: current[-1],
+    )
+    current.append(subselect.ProviderConfig(slang="fr", second_language="de"))
+    ipc.props["path"] = "/videos/Show - 02.mkv"
+
+    reader.graph.episode_watch.file_loaded()
+
+    assert seen == [("Show - 02.mkv", "fr", "de")]
+
+
 class _TrackIPC(util.FakeIPC):
     """Models mpv's current path + a track-list carrying the previous episode's external sub."""
 

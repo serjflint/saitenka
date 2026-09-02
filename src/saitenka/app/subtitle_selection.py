@@ -14,6 +14,30 @@ from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, Language, looks_
 
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
 JP_LANGS = {"ja", "jpn", "jp", "japanese"}
+_ISO_639_ALIASES = {
+    "be": ("bel",),
+    "bg": ("bul",),
+    "ca": ("cat",),
+    "da": ("dan",),
+    "de": ("deu", "ger"),
+    "el": ("ell", "gre"),
+    "es": ("spa",),
+    "fi": ("fin",),
+    "fr": ("fra", "fre"),
+    "it": ("ita",),
+    "mk": ("mkd", "mac"),
+    "nb": ("nob",),
+    "nl": ("nld", "dut"),
+    "nn": ("nno",),
+    "no": ("nor",),
+    "pl": ("pol",),
+    "pt": ("por",),
+    "ro": ("ron", "rum"),
+    "ru": ("rus",),
+    "sr": ("srp",),
+    "sv": ("swe",),
+    "uk": ("ukr",),
+}
 
 
 def lang_matches(lang: str | None, wants: list[str]) -> bool:
@@ -33,6 +57,7 @@ def wanted_languages(slang: str) -> list[str]:
         base = code.partition("-")[0]
         if base != code:
             wanted.append(base)
+        wanted.extend(_ISO_639_ALIASES.get(base, ()))
     return list(dict.fromkeys(wanted))
 
 
@@ -49,6 +74,17 @@ class SubtitleStartup:
 
 
 def matching_track(tracks: list[dict], wants: list[str]) -> dict | None:
+    tagged = next(
+        (
+            track
+            for want in wants
+            for track in tracks
+            if track.get("lang") and lang_matches(track.get("lang"), [want])
+        ),
+        None,
+    )
+    if tagged is not None:
+        return tagged
     return next((track for track in tracks if lang_matches(track.get("lang"), wants)), None)
 
 

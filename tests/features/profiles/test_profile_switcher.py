@@ -40,6 +40,9 @@ _FR_SUBS = Profile(
 _FR_DE_SUBS = Profile(
     name="fr-de", langs=ReaderLanguages(main="fr", second="de"), tokenizer="latin", slang="fr"
 )
+_JP_DE_SUBS = Profile(
+    name="jp-de", langs=ReaderLanguages(main="jp", second="de"), tokenizer="unidic"
+)
 _BROKEN = Profile(name="de", langs=ReaderLanguages(main="de", second="en"), tokenizer="nonexistent")
 _JA_FR_TRACKS = [{"type": "sub", "id": 1, "lang": "jpn"}, {"type": "sub", "id": 6, "lang": "fr"}]
 
@@ -417,6 +420,25 @@ def test_cycle_reconfigures_translation_when_only_the_second_language_changes(re
         tracks.second_slang,
         tracks.translation_sid,
     ) == ("de", "fr", "de", 8)
+
+
+def test_second_only_cycle_keeps_an_untagged_primary(request):
+    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _JP_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 1, "selected": True},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "en")
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (
+        outcome.status,
+        tracks.jp_sid,
+        tracks.en_sid,
+        tracks.second_slang,
+    ) == (ProfileSwitchStatus.COMMITTED, 1, 8, "de")
 
 
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------

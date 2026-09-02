@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -22,6 +22,7 @@ from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
 from saitenka.app.profiles import (
+    effective_slang,
     resolve_launch_identity,
     resolve_profile,
     scope_config,
@@ -582,6 +583,8 @@ def _start_run_provider_fetch(
         episode=episode,
         resync=subs.resync,
         tsukihime_config=tsukihime_cfg,
+        language=resolve_profile(cfg).langs.main,
+        second_language=subs.second_slang,
     )
     configure_providers(
         ports.configure_retry, ports.configure_picker, pcfg
@@ -688,6 +691,7 @@ def _install_watch_hooks(  # noqa: PLR0913 -- the session's ports plus the run's
     *,
     interactive: bool,
     auto_advance: bool,
+    current_context: Callable[[], tuple[dict, RunSubtitleOptions]] | None = None,
 ) -> None:
     """Wire the #100 watch hooks (run mode only — attach/SyncPlay never reaches here, which IS the
     SyncPlay gate, #62 precedent). ``reslot_hook`` fires on EVERY mpv ``file-loaded`` so the overlay
@@ -699,7 +703,10 @@ def _install_watch_hooks(  # noqa: PLR0913 -- the session's ports plus the run's
         return
 
     def _reslot(path: Path) -> None:
-        reslot_to_current(ports, cfg, path, tmp, dur, subs)
+        current_cfg, current_subs = (
+            current_context() if current_context is not None else (cfg, subs)
+        )
+        reslot_to_current(ports, current_cfg, path, tmp, dur, current_subs)
 
     watch.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
@@ -1241,6 +1248,14 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         episode=episode,
     )
 
+    def _current_reslot_context() -> tuple[dict, RunSubtitleOptions]:
+        selected = prepared.profile.profile.profile
+        return _scoped_for(selected), replace(
+            subs,
+            slang=effective_slang(selected, ident.base_slang),
+            second_slang=selected.langs.second,
+        )
+
     _install_watch_hooks(
         prepared.reslot,
         prepared.watch,
@@ -1251,6 +1266,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         subs,
         interactive=not (demo_word or screenshot),
         auto_advance=auto_advance,
+        current_context=_current_reslot_context,
     )
 
     try:

@@ -4,6 +4,8 @@ AND our own eof loadfile through one setup path; auto-advance only decides wheth
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import util
 
 from saitenka.app import session_stats, subselect
@@ -373,6 +375,41 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path, make_
     )
     assert reader.graph.episode_watch.reslot_hook is not None  # follows file-loaded / playlists
     assert reader.graph.episode_watch.advance_hook is None  # but never drives its own advance
+
+
+def test_watch_hook_samples_the_current_profile_context_on_file_load(
+    tmp_path, monkeypatch, make_session
+):
+    ipc = FakeIPC()
+    reader = make_session(ipc)
+    initial = cli_run.RunSubtitleOptions(slang="fr", second_slang="en")
+    current = [({}, initial)]
+    seen = []
+    monkeypatch.setattr(
+        cli_run,
+        "reslot_to_current",
+        lambda _ports, cfg, path, _tmp, _dur, subs: seen.append(
+            (cfg, path.name, subs.slang, subs.second_slang)
+        ),
+    )
+    cli_run._install_watch_hooks(
+        reader.graph.reslot,
+        reader.graph.watch,
+        {},
+        tmp_path / "Show 01.mkv",
+        tmp_path,
+        0,
+        initial,
+        interactive=True,
+        auto_advance=False,
+        current_context=lambda: current[-1],
+    )
+    current.append(({"profile": "fr-de"}, replace(initial, second_slang="de")))
+    ipc.props["path"] = str(tmp_path / "Show 02.mkv")
+
+    reader.graph.episode_watch.file_loaded()
+
+    assert seen == [({"profile": "fr-de"}, "Show 02.mkv", "fr", "de")]
 
 
 def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path, make_session):

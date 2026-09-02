@@ -17,6 +17,8 @@ from saitenka.app.subselect import ProviderConfig
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.config import ReaderOptions
     from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
 
@@ -174,7 +176,12 @@ def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> 
 
 
 def _install_attach_reslot_hook(
-    ports: ReslotPorts, watch: WatchPorts, ipc, cfg: ProviderConfig
+    ports: ReslotPorts,
+    watch: WatchPorts,
+    ipc,
+    cfg: ProviderConfig,
+    *,
+    current_config: Callable[[], ProviderConfig] | None = None,
 ) -> None:
     """#100 in attach: follow the user's mpv to the next episode (native autoload/playlist advance) and
     re-establish JP subs via :func:`_attach_reslot`, so watching continues in Japanese without a manual
@@ -185,7 +192,12 @@ def _install_attach_reslot_hook(
         return
 
     def _hook(loaded_path: Path) -> None:
-        _attach_reslot(ports, ipc, loaded_path, cfg)
+        _attach_reslot(
+            ports,
+            ipc,
+            loaded_path,
+            current_config() if current_config is not None else cfg,
+        )
 
     watch.install_reslot_hook(_hook, initial=Path(str(current_path)))
 
@@ -238,7 +250,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     """
     from saitenka.app.features.profiles.dependencies import begin_tokenizer_warm
     from saitenka.app.launch.run import setup_session_telemetry
-    from saitenka.app.profiles import resolve_launch_identity
+    from saitenka.app.profiles import effective_slang, resolve_launch_identity, scope_config
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
@@ -251,6 +263,10 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         ident.slang,
         ident.profile_cycle,
     )
+
+    def scoped_for(selected):
+        override = None if selected.name == "default" else selected.name
+        return scope_config(raw_cfg, override=override)
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of
@@ -295,19 +311,43 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
 
     # [jimaku] config table feeds attach defaults so plugin mode (which spawns a bare `attach`) can
     # fetch subs without CLI flags. An explicit --jimaku / --jimaku-key still wins.
-    _jm = cfg.get("jimaku")
-    jm = _jm if isinstance(_jm, dict) else {}
-    _th = cfg.get("tsukihime")
-    th = _th if isinstance(_th, dict) else {}
-    jimaku_force = jimaku_force or bool(jm.get("force", False))
-    jimaku = (
-        jimaku or jimaku_force or bool(jm.get("enabled", False) or jm.get("fetch", False))
-    )  # force implies fetch
-    jimaku_key = jimaku_key or jm.get("key")
-    resync = resync and bool(jm.get("resync", True))
-    enabled_providers = enabled_providers_for(
-        active_profile.langs.main, (("jimaku", jimaku), ("tsukihime", bool(th.get("enabled"))))
-    )
+    explicit_jimaku = jimaku
+    explicit_jimaku_force = jimaku_force
+    explicit_jimaku_key = jimaku_key
+    explicit_resync = resync
+
+    def provider_config_for(selected) -> ProviderConfig:
+        selected_cfg = scoped_for(selected)
+        raw_jimaku = selected_cfg.get("jimaku")
+        selected_jimaku = raw_jimaku if isinstance(raw_jimaku, dict) else {}
+        raw_tsukihime = selected_cfg.get("tsukihime")
+        selected_tsukihime = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
+        force = explicit_jimaku_force or bool(selected_jimaku.get("force", False))
+        use_jimaku = (
+            explicit_jimaku
+            or force
+            or bool(selected_jimaku.get("enabled", False) or selected_jimaku.get("fetch", False))
+        )
+        use_tsukihime = bool(selected_tsukihime.get("enabled", False))
+        return ProviderConfig(
+            enabled_providers=enabled_providers_for(
+                selected.langs.main,
+                (("jimaku", use_jimaku), ("tsukihime", use_tsukihime)),
+            ),
+            jimaku_key=explicit_jimaku_key or selected_jimaku.get("key"),
+            jimaku_title=jimaku_title,
+            episode=episode,
+            resync=explicit_resync and bool(selected_jimaku.get("resync", True)),
+            tsukihime_config=selected_tsukihime,
+            slang=effective_slang(selected, ident.base_slang),
+            jimaku=use_jimaku,
+            jimaku_force=force,
+            tsukihime=use_tsukihime,
+            language=selected.langs.main,
+            second_language=selected.langs.second,
+        )
+
+    provider_cfg = provider_config_for(active_profile)
 
     subtitle_startup = None
     fetch_jimaku_in_background: tuple[str, ...] = ()
@@ -316,17 +356,17 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
             subtitle_startup, status, fetch_jimaku_in_background = prepare_attach_startup(
                 ipc,
                 AttachSubtitleOptions(
-                    slang=slang,
+                    slang=provider_cfg.slang,
                     sub_file=sub_file,
-                    jimaku=jimaku,
-                    jimaku_force=jimaku_force,
-                    jimaku_key=jimaku_key,
-                    jimaku_title=jimaku_title,
-                    tsukihime=bool(th.get("enabled", False)),
-                    episode=episode,
-                    resync=resync,
-                    language=active_profile.langs.main,
-                    second_language=active_profile.langs.second,
+                    jimaku=provider_cfg.jimaku,
+                    jimaku_force=provider_cfg.jimaku_force,
+                    jimaku_key=provider_cfg.jimaku_key,
+                    jimaku_title=provider_cfg.jimaku_title,
+                    tsukihime=provider_cfg.tsukihime,
+                    episode=provider_cfg.episode,
+                    resync=provider_cfg.resync,
+                    language=provider_cfg.language,
+                    second_language=provider_cfg.second_language,
                 ),
             )
         log.info("attach subs: %s", status)  # plugin mode is detached — the log is the only sink
@@ -357,11 +397,6 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         )
         reader = prepared.live
     import saitenka.app.features.profiles.dependencies as reader_deps
-    from saitenka.app.profiles import scope_config
-
-    def scoped_for(selected):
-        override = None if selected.name == "default" else selected.name
-        return scope_config(raw_cfg, override=override)
 
     def dependency_builder_for(selected, _identity):
         selected_cfg = scoped_for(selected)
@@ -378,20 +413,6 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         dict_scoper=reader_deps.make_dict_scoper(raw_cfg) if len(profile_cycle) > 1 else None,
         base_slang=ident.base_slang,
     )
-    provider_cfg = ProviderConfig(
-        enabled_providers=enabled_providers,
-        jimaku_key=jimaku_key,
-        jimaku_title=jimaku_title,
-        episode=episode,
-        resync=resync,
-        tsukihime_config=th,
-        slang=slang,
-        jimaku=jimaku,
-        jimaku_force=jimaku_force,
-        tsukihime=bool(th.get("enabled", False)),
-        language=active_profile.langs.main,
-        second_language=active_profile.langs.second,
-    )
     _finish_attach_subtitle_startup(
         prepared.reslot,
         ipc,
@@ -399,7 +420,13 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         provider_cfg,
         fetch_in_background=fetch_jimaku_in_background,
     )
-    _install_attach_reslot_hook(prepared.reslot, prepared.watch, ipc, provider_cfg)
+    _install_attach_reslot_hook(
+        prepared.reslot,
+        prepared.watch,
+        ipc,
+        provider_cfg,
+        current_config=lambda: provider_config_for(prepared.profile.profile.profile),
+    )
     prepared.profile.load(cfg)
     print(
         f"attached to mpv on {sock} — subs now; coloring/tooltips/mining load in the background. "

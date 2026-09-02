@@ -67,6 +67,19 @@ def test_toggling_without_a_usable_track_announces_instead_of_switching() -> Non
     assert effects == (Announce("EN subtitles unavailable", "warn"),)
 
 
+def test_unavailable_translation_names_the_configured_language() -> None:
+    effects = reduce(
+        SubtitleCommand.TOGGLE_LANGUAGE,
+        inputs(
+            tracks=SubtitleTracks(2, None),
+            active_sid=2,
+            second_language="de",
+        ),
+    )
+
+    assert effects == (Announce("DE subtitles unavailable", "warn"),)
+
+
 # --- mark current as target --------------------------------------------------------------------
 
 

@@ -455,6 +455,24 @@ def test_unavailable_language_keeps_current_mode(monkeypatch, make_session):
     assert messages == [("EN subtitles unavailable", "warn")]
 
 
+def test_unavailable_configured_translation_language_names_it(monkeypatch, make_session):
+    ipc = FakeIPC([JP.copy(), EN.copy()])
+    reader = make_session(ipc)
+    reader.graph.cue.configure_subtitle_mode(
+        subtitle_modes.select_initial(ipc, second_slang="de"),
+        second_slang="de",
+    )
+    messages = []
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, kind="ok": messages.append((text, kind))
+    )
+
+    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
+
+    assert reader.graph.track_commands.current().language == "jp"
+    assert messages == [("DE subtitles unavailable", "warn")]
+
+
 def test_english_primary_is_plain_and_noninteractive(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy()])
     reader = make_session(ipc)
@@ -826,6 +844,47 @@ def test_discovery_falls_back_from_a_region_tag_to_the_base_track_language():
     )
 
     assert subtitle_modes.discover_tracks(ipc, "fr", "de-CH") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_prefers_an_exact_region_before_its_base_language():
+    ipc = FakeIPC(
+        [
+            {"id": 1, "type": "sub", "lang": "pt-PT"},
+            {"id": 2, "type": "sub", "lang": "pt-BR"},
+            {"id": 6, "type": "sub", "lang": "fra"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "pt-BR") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=2
+    )
+
+
+def test_discovery_matches_iso_639_two_and_three_letter_aliases():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 8, "type": "sub", "lang": "spa"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "es-MX") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_checks_configured_tracks_before_untagged_fallback():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 9, "type": "sub"},
+            {"id": 8, "type": "sub", "lang": "deu"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
         jp_sid=6, en_sid=8
     )
 

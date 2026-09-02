@@ -247,7 +247,7 @@ class SubtitleCommandCoordinator:
         cue = read.cue.current
         playhead = read.observed_property("time-pos")
         return subtitle_intents.SubtitleInputs(
-            tracks=subtitle_modes.discover_tracks(read.ipc, track.slang),
+            tracks=subtitle_modes.discover_tracks(read.ipc, track.slang, track.second_slang),
             active_sid=read.property_value("sid"),
             language=track.language,
             annotation_mode=read.annotation.view.mode,
@@ -260,6 +260,7 @@ class SubtitleCommandCoordinator:
             playhead=None if playhead is None else float(playhead),  # type: ignore[arg-type]
             sub_delay=float(read.observed_property("sub-delay") or 0.0),  # type: ignore[arg-type]
             cue_revision=cue_facts.cue.value,
+            second_language=track.second_slang,
         )
 
     def apply(self, effect: subtitle_intents.SubtitleEffect, /) -> None:

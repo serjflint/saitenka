@@ -209,12 +209,10 @@ class ProfileController:
 
     def _switch_subtitle_track(self, slang: str) -> _TrackSwitch:
         second_slang = self._profile.langs.second
-        if (
-            slang == self._subtitles.current_subtitle_slang()
-            and second_slang == self._subtitles.current_second_slang()
-        ):
+        primary_unchanged = slang == self._subtitles.current_subtitle_slang()
+        if primary_unchanged and second_slang == self._subtitles.current_second_slang():
             return _TrackSwitch.UNCHANGED
-        if not self._subtitles.has_subtitle_track(slang):
+        if not primary_unchanged and not self._subtitles.has_subtitle_track(slang):
             self._aftermath.notify(
                 f"profile {self._profile.name!r}: no {slang!r} subtitle track", "warn"
             )
