@@ -21,7 +21,7 @@ from saitenka.app.subtitle_selection import (
 )
 from saitenka.app.subtitle_selection import discover as _discover
 from saitenka.app.subtitle_selection import initial as _initial
-from saitenka.app.subtitle_selection import matching_track as _matching_track
+from saitenka.app.subtitle_selection import matching_tagged_track as _matching_tagged_track
 from saitenka.app.subtitle_selection import primary_role as _primary_role_for
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.events import (
@@ -157,7 +157,7 @@ def has_track_for_slang(ipc, slang: str) -> bool:
     (unlike :func:`discover_tracks`, which grabs the first track when nothing matches). The live profile
     switcher gates on this: cycling to a language the file has no track for keeps the current track and
     warns, instead of silently grabbing an unrelated one."""
-    return _matching_track(sub_tracks(ipc), wanted_languages(slang)) is not None
+    return _matching_tagged_track(sub_tracks(ipc), wanted_languages(slang)) is not None
 
 
 def discover_tracks(ipc, slang: str = "ja,jpn,jp", second_slang: str = "en") -> SubtitleTracks:
@@ -278,7 +278,9 @@ def select_translation(ports: TrackPorts, second_slang: str) -> None:
     """Re-resolve only the translation role when a new primary is unavailable."""
     state = ports.tracks()
     found = discover_tracks(ports.ipc, state.slang, second_slang)
-    ports.declare(SubtitleTranslationConfigured(found.en_sid, second_slang))
+    retained_primary = state.primary_sid
+    translation_sid = found.en_sid if found.en_sid != retained_primary else None
+    ports.declare(SubtitleTranslationConfigured(retained_primary, translation_sid, second_slang))
     if ports.translation_visible():
         setup_secondary(ports)
     else:

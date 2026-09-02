@@ -415,6 +415,13 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
         ),
         dict_scoper=reader_deps.make_dict_scoper(raw_cfg) if len(profile_cycle) > 1 else None,
         base_slang=ident.base_slang,
+        environment_select=lambda selected: _finish_attach_subtitle_startup(
+            prepared.reslot,
+            ipc,
+            None,
+            provider_config_for(selected),
+            fetch_in_background=(),
+        ),
     )
     _finish_attach_subtitle_startup(
         prepared.reslot,

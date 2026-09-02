@@ -250,8 +250,9 @@ class SubtitleTracksDiscovered:
 
 @dataclass(frozen=True, slots=True)
 class SubtitleTranslationConfigured:
-    """The translation role was re-resolved while the primary track stayed in place."""
+    """A degraded switch retained the actual primary and re-resolved its translation."""
 
+    primary_sid: int | None
     en_sid: int | None
     second_slang: str
 

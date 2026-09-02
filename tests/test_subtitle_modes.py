@@ -876,6 +876,20 @@ def test_discovery_prefers_a_regional_iso_alias_before_the_alias_base():
     )
 
 
+def test_discovery_prefers_the_exact_english_region_through_its_iso_alias():
+    ipc = FakeIPC(
+        [
+            {"id": 1, "type": "sub", "lang": "eng-US"},
+            {"id": 2, "type": "sub", "lang": "eng-GB"},
+            {"id": 6, "type": "sub", "lang": "fra"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "en-GB") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=2
+    )
+
+
 def test_discovery_matches_iso_639_two_and_three_letter_aliases():
     ipc = FakeIPC(
         [

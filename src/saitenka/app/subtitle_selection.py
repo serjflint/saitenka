@@ -21,6 +21,7 @@ _ISO_639_ALIASES = {
     "da": ("dan",),
     "de": ("deu", "ger"),
     "el": ("ell", "gre"),
+    "en": ("eng",),
     "es": ("spa",),
     "fi": ("fin",),
     "fr": ("fra", "fre"),
@@ -84,7 +85,14 @@ class SubtitleStartup:
 
 
 def matching_track(tracks: list[dict], wants: list[str]) -> dict | None:
-    tagged = next(
+    tagged = matching_tagged_track(tracks, wants)
+    if tagged is not None:
+        return tagged
+    return next((track for track in tracks if lang_matches(track.get("lang"), wants)), None)
+
+
+def matching_tagged_track(tracks: list[dict], wants: list[str]) -> dict | None:
+    return next(
         (
             track
             for want in wants
@@ -93,9 +101,6 @@ def matching_track(tracks: list[dict], wants: list[str]) -> dict | None:
         ),
         None,
     )
-    if tagged is not None:
-        return tagged
-    return next((track for track in tracks if lang_matches(track.get("lang"), wants)), None)
 
 
 def _fill_untagged_tracks(
@@ -126,6 +131,8 @@ def discover(tracks: list[dict], slang: str, second_slang: str = "en") -> Subtit
     """Classify the track list into the target-language and secondary sids."""
     jp = matching_track(tracks, wanted_languages(slang))
     en = matching_track(tracks, wanted_languages(second_slang))
+    if jp is not None and en is not None and jp.get("id") == en.get("id"):
+        en = None
     jp, en = _fill_untagged_tracks(tracks, jp, en, primary_matched=jp is not None)
     return SubtitleTracks(
         jp_sid=jp.get("id") if jp is not None else None,

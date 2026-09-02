@@ -54,8 +54,16 @@ class SubtitleReducer:
                 return SubtitleTrackState(jp, en, language, slang, second_slang=second_slang)
             case SubtitleTracksDiscovered(jp_sid=jp, en_sid=en):
                 return replace(state, jp_sid=jp, en_sid=en)
-            case SubtitleTranslationConfigured(en_sid=en, second_slang=second_slang):
-                return replace(state, en_sid=en, second_slang=second_slang)
+            case SubtitleTranslationConfigured(
+                primary_sid=primary, en_sid=en, second_slang=second_slang
+            ):
+                return replace(
+                    state,
+                    jp_sid=primary,
+                    en_sid=en,
+                    language="jp",
+                    second_slang=second_slang,
+                )
             case SubtitlePrimaryAdopted(sid=sid, language=language):
                 return replace(adopt(state, sid, language), language=language)
             case SubtitleLanguageChanged(language=language):

@@ -1212,6 +1212,37 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             request = _request_for(selected)
             return _scoped_for(selected), lambda: _build_run_deps(request)
 
+        def reslot_context_for(selected) -> tuple[dict, RunSubtitleOptions]:
+            return _scoped_for(selected), replace(
+                subs,
+                slang=effective_slang(selected, ident.base_slang),
+                second_slang=selected.langs.second,
+            )
+
+        def refresh_profile_sources(selected) -> None:
+            selected_cfg, selected_subs = reslot_context_for(selected)
+            raw_jimaku = selected_cfg.get("jimaku")
+            selected_jimaku = raw_jimaku if isinstance(raw_jimaku, dict) else {}
+            raw_tsukihime = selected_cfg.get("tsukihime")
+            selected_tsukihime = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
+            enabled = _enabled_provider_names(
+                video,
+                jimaku=selected_subs.jimaku,
+                jimaku_cfg=selected_jimaku,
+                tsukihime_cfg=selected_tsukihime,
+                language=selected.langs.main,
+            )
+            _start_run_provider_fetch(
+                prepared.reslot,
+                selected_cfg,
+                video_path,
+                selected_subs,
+                providers=(),
+                enabled_providers=enabled,
+                jimaku_title=jimaku_title,
+                episode=episode,
+            )
+
         prepared.profile.configure(
             profile_cycle,
             dependency_builder_for=dependency_builder_for,
@@ -1220,6 +1251,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             ),
             dict_scoper=_dict_scoper_for(raw_cfg, profile_cycle),
             base_slang=ident.base_slang,
+            environment_select=refresh_profile_sources,
         )
     if not (demo_word or screenshot):
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
@@ -1246,12 +1278,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     )
 
     def _current_reslot_context() -> tuple[dict, RunSubtitleOptions]:
-        selected = prepared.profile.profile.profile
-        return _scoped_for(selected), replace(
-            subs,
-            slang=effective_slang(selected, ident.base_slang),
-            second_slang=selected.langs.second,
-        )
+        return reslot_context_for(prepared.profile.profile.profile)
 
     _install_watch_hooks(
         prepared.reslot,

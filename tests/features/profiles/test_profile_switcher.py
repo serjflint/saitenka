@@ -28,7 +28,7 @@ from saitenka.app.session.factory import (
 )
 from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.runtime.events import SubtitleSecondaryLeased
+from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleSecondaryLeased
 
 _FR = Profile(name="fr", langs=ReaderLanguages(main="fr", second="en"), tokenizer="latin")
 # A real French profile carries its own slang (resolve_profile derives "fr" from the language) — that is
@@ -332,6 +332,43 @@ def test_degraded_cycle_reconfigures_only_the_translation_language(request):
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_degraded_cycle_preserves_the_actual_secondary_primary(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 1, "lang": "jpn"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "en")
+    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
+    reader.graph.ipc.props["sid"] = 7
+    reader.graph.ipc.commands.clear()
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (outcome.status, tracks.primary_sid, tracks.translation_sid) == (
+        ProfileSwitchStatus.DEGRADED,
+        7,
+        8,
+    )
+    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
+
+
+def test_untagged_track_does_not_claim_a_new_profile_language(request):
+    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 1},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    assert outcome.status is ProfileSwitchStatus.DEGRADED
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
@@ -613,6 +650,32 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
     reader.command(MINE_MSG)
 
     assert anki.added[0]["deckName"] == f"Deck::{_FR.name}"
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_profile_session_publishes_each_committed_profile_to_the_environment(request, monkeypatch):
+    from saitenka.app.features.mining.mining_controller import MiningSpec
+
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE)
+    monkeypatch.setattr(
+        "saitenka.app.features.profiles.dependencies.load_deps_async",
+        lambda *_args, **_kwargs: None,
+    )
+    selected = []
+    reader.graph.profile.configure(
+        [DEFAULT_PROFILE, _FR],
+        dependency_builder_for=lambda profile, _identity: (
+            {"profile": profile.name},
+            lambda: (),
+        ),
+        mining_spec_for=lambda _profile, identity: MiningSpec.disabled(identity),
+        environment_select=selected.append,
+    )
+
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
+
+    assert selected == [_FR]
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")

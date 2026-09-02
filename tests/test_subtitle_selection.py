@@ -38,10 +38,8 @@ def test_an_untagged_selected_track_becomes_the_target() -> None:
     assert discover(tracks, "ja,jpn,jp") == SubtitleTracks(jp_sid=2, en_sid=1)
 
 
-def test_a_lone_untagged_track_fills_both_roles() -> None:
-    """A missing tag wildcard-matches every want list, so one untagged track answers both
-    queries. `primary_role` is what actually decides such a track's role, by content."""
-    assert discover([track(7)], "ja,jpn,jp") == SubtitleTracks(jp_sid=7, en_sid=7)
+def test_a_lone_untagged_track_fills_only_the_target_role() -> None:
+    assert discover([track(7)], "ja,jpn,jp") == SubtitleTracks(jp_sid=7, en_sid=None)
 
 
 def test_no_tracks_selects_nothing() -> None:
