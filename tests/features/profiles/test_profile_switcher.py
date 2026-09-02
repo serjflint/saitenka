@@ -348,12 +348,17 @@ def test_degraded_cycle_preserves_the_actual_secondary_primary(request):
     outcome = reader.graph.profile.profile.switch_to(1)
 
     tracks = reader.graph.track_commands.current()
-    assert (outcome.status, tracks.primary_sid, tracks.translation_sid) == (
+    assert (outcome.status, tracks.language, tracks.primary_sid, tracks.translation_sid) == (
         ProfileSwitchStatus.DEGRADED,
+        "en",
         7,
         8,
     )
     assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
+
+    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
+
+    assert ("set_property", "sid", 8) in reader.graph.ipc.commands
 
 
 def test_untagged_track_does_not_claim_a_new_profile_language(request):

@@ -55,13 +55,17 @@ class SubtitleReducer:
             case SubtitleTracksDiscovered(jp_sid=jp, en_sid=en):
                 return replace(state, jp_sid=jp, en_sid=en)
             case SubtitleTranslationConfigured(
-                primary_sid=primary, en_sid=en, second_slang=second_slang
+                primary_sid=primary,
+                en_sid=translation,
+                second_slang=second_slang,
+                language=language,
             ):
+                jp, en = (primary, translation) if language == "jp" else (translation, primary)
                 return replace(
                     state,
-                    jp_sid=primary,
+                    jp_sid=jp,
                     en_sid=en,
-                    language="jp",
+                    language=language,
                     second_slang=second_slang,
                 )
             case SubtitlePrimaryAdopted(sid=sid, language=language):

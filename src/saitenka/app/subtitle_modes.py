@@ -280,7 +280,11 @@ def select_translation(ports: TrackPorts, second_slang: str) -> None:
     found = discover_tracks(ports.ipc, state.slang, second_slang)
     retained_primary = state.primary_sid
     translation_sid = found.en_sid if found.en_sid != retained_primary else None
-    ports.declare(SubtitleTranslationConfigured(retained_primary, translation_sid, second_slang))
+    ports.declare(
+        SubtitleTranslationConfigured(
+            retained_primary, translation_sid, second_slang, state.language
+        )
+    )
     if ports.translation_visible():
         setup_secondary(ports)
     else:

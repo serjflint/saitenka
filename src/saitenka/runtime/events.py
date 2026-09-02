@@ -255,6 +255,7 @@ class SubtitleTranslationConfigured:
     primary_sid: int | None
     en_sid: int | None
     second_slang: str
+    language: str
 
 
 @dataclass(frozen=True, slots=True)
