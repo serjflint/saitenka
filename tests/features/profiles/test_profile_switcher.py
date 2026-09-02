@@ -308,6 +308,30 @@ def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_t
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_degraded_cycle_reconfigures_only_the_translation_language(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 1, "lang": "jpn"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "en")
+    reader.graph.ipc.commands.clear()
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (
+        outcome.status,
+        tracks.slang,
+        tracks.second_slang,
+        tracks.en_sid,
+    ) == (ProfileSwitchStatus.DEGRADED, "ja,jpn,jp", "de", 8)
+    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])

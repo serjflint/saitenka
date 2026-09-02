@@ -42,9 +42,16 @@ _ISO_639_ALIASES = {
 
 def lang_matches(lang: str | None, wants: list[str]) -> bool:
     low = (lang or "").lower()
+    if not low:
+        return any(wants)
     return any(
         want and (low == want or low.startswith(want) or want.startswith(low)) for want in wants
     )
+
+
+def _tag_matches_preference(lang: str, want: str) -> bool:
+    low = lang.lower()
+    return low == want or low.startswith(f"{want}-")
 
 
 def wanted_languages(slang: str) -> list[str]:
@@ -55,6 +62,9 @@ def wanted_languages(slang: str) -> list[str]:
             continue
         wanted.append(code)
         base = code.partition("-")[0]
+        region = code.removeprefix(f"{base}-") if base != code else ""
+        if region:
+            wanted.extend(f"{alias}-{region}" for alias in _ISO_639_ALIASES.get(base, ()))
         if base != code:
             wanted.append(base)
         wanted.extend(_ISO_639_ALIASES.get(base, ()))
@@ -79,7 +89,7 @@ def matching_track(tracks: list[dict], wants: list[str]) -> dict | None:
             track
             for want in wants
             for track in tracks
-            if track.get("lang") and lang_matches(track.get("lang"), [want])
+            if track.get("lang") and _tag_matches_preference(str(track["lang"]), want)
         ),
         None,
     )
@@ -160,7 +170,13 @@ def toggle_target(
 
 
 def primary_role(
-    sid: object, tracks: SubtitleTracks, *, track_lang: str | None, sample: str
+    sid: object,
+    tracks: SubtitleTracks,
+    *,
+    track_lang: str | None,
+    sample: str,
+    primary_slang: str = "ja,jpn,jp",
+    second_slang: str = "en",
 ) -> Language:
     """Role of the track mpv just made primary. A real Japanese tag wins, then a real English tag.
     An UNTAGGED track is classified by CONTENT — Japanese script in its cues, else the on-screen
@@ -169,9 +185,9 @@ def primary_role(
         return MAIN_LANG
     if sid == tracks.en_sid:
         return SECOND_LANG
-    if track_lang and lang_matches(track_lang, list(JP_LANGS)):
+    if track_lang and lang_matches(track_lang, wanted_languages(primary_slang)):
         return MAIN_LANG
-    if track_lang and lang_matches(track_lang, list(EN_LANGS)):
+    if track_lang and lang_matches(track_lang, wanted_languages(second_slang)):
         return SECOND_LANG
     return MAIN_LANG if (not sample or looks_japanese(sample)) else SECOND_LANG
 

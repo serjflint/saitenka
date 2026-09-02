@@ -31,6 +31,7 @@ from saitenka.runtime.events import (
     SubtitleStartupConfigured,
     SubtitleTrackAnnounced,
     SubtitleTracksDiscovered,
+    SubtitleTranslationConfigured,
 )
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
@@ -273,6 +274,17 @@ def clear_secondary(ipc) -> None:
     _send(ipc, "clear-secondary", "set_property", "secondary-sid", "no")
 
 
+def select_translation(ports: TrackPorts, second_slang: str) -> None:
+    """Re-resolve only the translation role when a new primary is unavailable."""
+    state = ports.tracks()
+    found = discover_tracks(ports.ipc, state.slang, second_slang)
+    ports.declare(SubtitleTranslationConfigured(found.en_sid, second_slang))
+    if ports.translation_visible():
+        setup_secondary(ports)
+    else:
+        release_secondary(ports)
+
+
 def on_primary_changed(ports: TrackPorts, sid) -> None:
     state = ports.tracks()
     if sid == state.secondary_sid:
@@ -287,7 +299,12 @@ def on_primary_changed(ports: TrackPorts, sid) -> None:
         ports.drop_index()
         ports.rebuild_index()
     language = _primary_role(
-        ports.ipc, sid, SubtitleTracks(state.jp_sid, state.en_sid), ports.sample_cue()
+        ports.ipc,
+        sid,
+        SubtitleTracks(state.jp_sid, state.en_sid),
+        ports.sample_cue(),
+        state.slang,
+        state.second_slang,
     )
     changed = language != state.language
     if not known:
@@ -305,14 +322,23 @@ def on_primary_changed(ports: TrackPorts, sid) -> None:
         release_secondary(ports)
 
 
-def _primary_role(ipc, sid, tracks: SubtitleTracks, sample: str) -> Language:
+def _primary_role(
+    ipc, sid, tracks: SubtitleTracks, sample: str, primary_slang: str, second_slang: str
+) -> Language:
     """Which role a newly-primary track plays, from its tag or its content.
 
     Takes the facts, like `_sample_cue_text` beside it. `ipc` stays because the track list is a
     query, not a fact the caller holds — it is the mpv-read contract, not the host.
     """
     lang = next((t.get("lang") for t in sub_tracks(ipc) if t.get("id") == sid), None)
-    return _primary_role_for(sid, tracks, track_lang=lang, sample=sample)
+    return _primary_role_for(
+        sid,
+        tracks,
+        track_lang=lang,
+        sample=sample,
+        primary_slang=primary_slang,
+        second_slang=second_slang,
+    )
 
 
 def _sample_cue_text(sub_index, sub_text: str, limit: int = 20) -> str:

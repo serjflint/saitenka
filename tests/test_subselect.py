@@ -543,13 +543,20 @@ def test_configure_providers_wires_retry_and_picker():
     assert callable(reader.picker_lister)  # the Ctrl+J source picker
 
 
-def test_configure_providers_clears_retry_when_no_provider():
+def test_configure_providers_clears_runtime_callbacks_when_no_provider():
     reader = _FakeReader()
+    subselect.configure_providers(
+        reader.configure_subtitle_retry,
+        reader.configure_sub_picker,
+        subselect.ProviderConfig(enabled_providers=("jimaku",)),
+    )
+
     subselect.configure_providers(
         reader.configure_subtitle_retry, reader.configure_sub_picker, subselect.ProviderConfig()
     )
-    assert reader.retry_factory is None  # cleared, not left stale after a provider-off re-slot
-    assert reader.picker_lister == "unset"  # picker never configured without a provider
+
+    assert reader.retry_factory is None
+    assert reader.picker_lister is None
 
 
 def test_configure_providers_retry_forces_a_refetch(monkeypatch):

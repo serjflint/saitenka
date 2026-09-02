@@ -250,7 +250,11 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     """
     from saitenka.app.features.profiles.dependencies import begin_tokenizer_warm
     from saitenka.app.launch.run import setup_session_telemetry
-    from saitenka.app.profiles import effective_slang, resolve_launch_identity, scope_config
+    from saitenka.app.profiles import (
+        effective_slang,
+        resolve_launch_identity,
+        scope_profile_config,
+    )
 
     # The shared run/attach identity spine (#254): --profile override, active profile, scoped cfg,
     # effective slang, switcher cycle — resolved in ONE place so run and attach can't drift. attach has
@@ -265,8 +269,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     )
 
     def scoped_for(selected):
-        override = None if selected.name == "default" else selected.name
-        return scope_config(raw_cfg, override=override)
+        return scope_profile_config(raw_cfg, selected)
 
     # Fire this as early as possible — before the IPC connect handshake — so fugashi's slow
     # first-ever tokenize() call (see warm_tokenizer's docstring) overlaps that dead time instead of

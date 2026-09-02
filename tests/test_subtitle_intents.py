@@ -80,6 +80,21 @@ def test_unavailable_translation_names_the_configured_language() -> None:
     assert effects == (Announce("DE subtitles unavailable", "warn"),)
 
 
+def test_unavailable_primary_names_the_configured_language() -> None:
+    effects = reduce(
+        SubtitleCommand.TOGGLE_LANGUAGE,
+        inputs(
+            tracks=SubtitleTracks(None, 8),
+            active_sid=8,
+            language=SECOND_LANG,
+            main_language="fr",
+            second_language="de",
+        ),
+    )
+
+    assert effects == (Announce("FR subtitles unavailable", "warn"),)
+
+
 # --- mark current as target --------------------------------------------------------------------
 
 

@@ -102,6 +102,21 @@ def test_an_unknown_tagged_track_is_classified_by_its_tag() -> None:
     assert primary_role(9, tracks, track_lang="eng", sample="猫を見る") == SECOND_LANG
 
 
+def test_an_unknown_track_uses_the_configured_profile_languages() -> None:
+    tracks = SubtitleTracks(jp_sid=6, en_sid=8)
+
+    role = primary_role(
+        9,
+        tracks,
+        track_lang="fra",
+        sample="Bonjour",
+        primary_slang="fr",
+        second_slang="de",
+    )
+
+    assert role == MAIN_LANG
+
+
 def test_an_untagged_track_is_classified_by_its_content() -> None:
     """A missing tag wildcard-matches English, so only the cue text can decide."""
     tracks = SubtitleTracks(jp_sid=None, en_sid=None)

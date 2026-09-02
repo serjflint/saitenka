@@ -391,8 +391,14 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             has_subtitle_track=lambda slang: profile_integration_ref.get().has_subtitle_track(
                 slang
             ),
-            select_subtitle_track=lambda slang, second_slang: (
+            select_subtitle_track=lambda slang: profile_integration_ref.get().select_subtitle_track(
+                slang, "en"
+            ),
+            select_subtitle_languages=lambda slang, second_slang: (
                 profile_integration_ref.get().select_subtitle_track(slang, second_slang)
+            ),
+            select_translation_track=lambda second_slang: (
+                profile_integration_ref.get().select_translation_track(second_slang)
             ),
             retokenize_current_cue=lambda: profile_integration_ref.get().retokenize_current_cue(),
             current_second_slang=lambda: subtitle_tracks.current.second_slang,
@@ -630,6 +636,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 )
             ),
             rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
+            track_ports=track_commands.ports,
         )
     )
 

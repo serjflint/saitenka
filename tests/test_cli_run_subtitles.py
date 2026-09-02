@@ -222,3 +222,34 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
     assert path == Path(tmp_path / "episode.ja.srt")
     assert status == "tsukihime: added episode.ja.srt"
     assert calls == [("/videos/current.mkv", ("jimaku", "tsukihime"))]
+
+
+def test_run_with_no_current_provider_clears_runtime_callbacks(tmp_path):
+    retry = [object()]
+    picker = [object()]
+    ports = ReslotPorts(
+        ipc=None,
+        finish_stats=lambda: None,
+        start_stats=lambda: None,
+        rebind_episode=lambda: None,
+        rebuild_index=lambda: None,
+        configure_mode=lambda *_a, **_kw: None,
+        configure_retry=retry.append,
+        configure_picker=picker.append,
+        fetch_japanese=lambda _fetch: None,
+        start_prefetch=lambda: None,
+        toast=lambda *_a, **_kw: None,
+    )
+
+    cli_run._start_run_provider_fetch(
+        ports,
+        {},
+        tmp_path / "episode.mkv",
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),
+        providers=(),
+        enabled_providers=(),
+        jimaku_title=None,
+        episode=None,
+    )
+
+    assert retry[-1] is None and picker[-1] is None

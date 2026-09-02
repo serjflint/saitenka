@@ -48,6 +48,7 @@ class ProfileIntegration:
     retire_cue: Callable[[str], None]
     configure_subtitle_mode: Callable[[SubtitleStartup, str, str], None]
     rebuild_index: Callable[[], None]
+    track_ports: Callable[[], subtitle_modes.TrackPorts]
 
     def enable_async_annotation(self) -> None:
         self.annotation.enable_async()
@@ -95,6 +96,9 @@ class ProfileIntegration:
         self.configure_subtitle_mode(startup, new_slang, second_slang)
         self.navigation.current.sub_index = None
         self.rebuild_index()
+
+    def select_translation_track(self, second_slang: str) -> None:
+        subtitle_modes.select_translation(self.track_ports(), second_slang)
 
     def retokenize_current_cue(self) -> None:
         text = self.cue_text()

@@ -249,6 +249,14 @@ class SubtitleTracksDiscovered:
 
 
 @dataclass(frozen=True, slots=True)
+class SubtitleTranslationConfigured:
+    """The translation role was re-resolved while the primary track stayed in place."""
+
+    en_sid: int | None
+    second_slang: str
+
+
+@dataclass(frozen=True, slots=True)
 class SubtitlePrimaryAdopted:
     """One track took a role — a manual cycle, a drag-'n'-drop, or the user's override key."""
 
@@ -280,6 +288,7 @@ class SubtitleTrackAnnounced:
 type SubtitleEvent = (
     SubtitleStartupConfigured
     | SubtitleTracksDiscovered
+    | SubtitleTranslationConfigured
     | SubtitlePrimaryAdopted
     | SubtitleLanguageChanged
     | SubtitleSecondaryLeased
@@ -289,6 +298,7 @@ type SubtitleEvent = (
 SUBTITLE_EVENTS = (
     SubtitleStartupConfigured,
     SubtitleTracksDiscovered,
+    SubtitleTranslationConfigured,
     SubtitlePrimaryAdopted,
     SubtitleLanguageChanged,
     SubtitleSecondaryLeased,

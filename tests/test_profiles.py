@@ -15,6 +15,7 @@ from saitenka.app.profiles import (
     resolve_launch_identity,
     resolve_profile,
     scope_config,
+    scope_profile_config,
     validate_language_code,
 )
 from saitenka.app.session.factory import SessionIdentity
@@ -353,6 +354,19 @@ def test_profile_override_selects_scoping_like_resolve_profile():
         },
     }
     assert scope_config(cfg, override="fr")["dicts"] == ["Le Grand Robert"]
+
+
+def test_profile_scoped_config_keeps_resolution_on_the_same_profile():
+    raw = {
+        "profiles": {
+            "fr": {"language": "fr", "second": "de", "tokenizer": "latin"},
+        }
+    }
+    selected = resolve_profile(raw, override="fr")
+
+    resolved = resolve_profile(scope_profile_config(raw, selected))
+
+    assert resolved.langs == ReaderLanguages(main="fr", second="de")
 
 
 def test_scoped_dicts_are_what_the_run_path_resolves():

@@ -28,6 +28,10 @@ def _default_second_slang() -> str:
     return "en"
 
 
+def _ignore_second_slang(_second_slang: str) -> None:
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileInvalidation:
     """Cache and warm-state invalidation applied after profile preflight."""
@@ -43,9 +47,11 @@ class ProfileSubtitles:
 
     current_subtitle_slang: Callable[[], str]
     has_subtitle_track: Callable[[str], bool]
-    select_subtitle_track: Callable[[str, str], None]
+    select_subtitle_track: Callable[[str], None]
     retokenize_current_cue: Callable[[], None]
     current_second_slang: Callable[[], str] = _default_second_slang
+    select_subtitle_languages: Callable[[str, str], None] | None = None
+    select_translation_track: Callable[[str], None] = _ignore_second_slang
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,11 +219,15 @@ class ProfileController:
         if primary_unchanged and second_slang == self._subtitles.current_second_slang():
             return _TrackSwitch.UNCHANGED
         if not primary_unchanged and not self._subtitles.has_subtitle_track(slang):
+            self._subtitles.select_translation_track(second_slang)
             self._aftermath.notify(
                 f"profile {self._profile.name!r}: no {slang!r} subtitle track", "warn"
             )
             return _TrackSwitch.MISSING
-        self._subtitles.select_subtitle_track(slang, second_slang)
+        if self._subtitles.select_subtitle_languages is not None:
+            self._subtitles.select_subtitle_languages(slang, second_slang)
+        else:
+            self._subtitles.select_subtitle_track(slang)
         return _TrackSwitch.SWITCHED
 
     @staticmethod

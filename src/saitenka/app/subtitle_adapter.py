@@ -261,6 +261,7 @@ class SubtitleCommandCoordinator:
             sub_delay=float(read.observed_property("sub-delay") or 0.0),  # type: ignore[arg-type]
             cue_revision=cue_facts.cue.value,
             second_language=track.second_slang,
+            main_language=track.slang,
         )
 
     def apply(self, effect: subtitle_intents.SubtitleEffect, /) -> None:

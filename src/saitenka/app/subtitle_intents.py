@@ -62,6 +62,7 @@ class SubtitleInputs:
     #: so an effect decided here has to say which one — see `SeekCue`.
     cue_revision: int = 0
     second_language: str = "en"
+    main_language: str = "jp"
 
 
 # --- effects ------------------------------------------------------------------------------------
@@ -145,9 +146,10 @@ type SubtitleEffect = (
 def _toggle_language(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
     decision = toggle_target(inputs.tracks, active_sid=inputs.active_sid, language=inputs.language)
     if decision.sid is None:
-        unavailable = (
-            inputs.second_language if decision.target != "jp" else decision.target
-        ).upper()
+        configured = inputs.second_language if decision.target != "jp" else inputs.main_language
+        unavailable = configured.split(",", 1)[0].upper()
+        if unavailable in {"JA", "JPN", "JAPANESE"}:
+            unavailable = "JP"
         return (Announce(f"{unavailable} subtitles unavailable", "warn"),)
     return (SelectTrack(decision.sid, decision.target),)
 

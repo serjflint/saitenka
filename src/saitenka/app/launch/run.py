@@ -25,7 +25,7 @@ from saitenka.app.profiles import (
     effective_slang,
     resolve_launch_identity,
     resolve_profile,
-    scope_config,
+    scope_profile_config,
 )
 from saitenka.app.session.factory import (
     SessionIdentity,
@@ -570,8 +570,6 @@ def _start_run_provider_fetch(
     jimaku_title: str | None,
     episode: int | None,
 ) -> None:
-    if not providers and not enabled_providers:
-        return
     from saitenka.app.subselect import ProviderConfig, configure_providers, provider_fetch_factory
 
     raw_tsukihime = cfg.get("tsukihime")
@@ -1057,8 +1055,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         return 2
 
     def _scoped_for(selected):
-        override = None if selected.name == "default" else selected.name
-        return scope_config(raw_cfg, override=override)
+        return scope_profile_config(raw_cfg, selected)
 
     def _request_for(selected):
         selected_cfg = _scoped_for(selected)

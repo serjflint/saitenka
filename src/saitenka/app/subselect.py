@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -518,16 +519,18 @@ def configure_providers(configure_retry, configure_picker, cfg: ProviderConfig) 
         if cfg.enabled_providers
         else None
     )
-    if cfg.enabled_providers:
-        configure_picker(
-            lambda video: list_candidates(
-                video,
-                cfg.enabled_providers,
-                jimaku_key=cfg.jimaku_key,
-                title_override=cfg.jimaku_title,
-                tsukihime_config=cfg.tsukihime_config,
-            )
+    picker = (
+        partial(
+            list_candidates,
+            providers=cfg.enabled_providers,
+            jimaku_key=cfg.jimaku_key,
+            title_override=cfg.jimaku_title,
+            tsukihime_config=cfg.tsukihime_config,
         )
+        if cfg.enabled_providers
+        else None
+    )
+    configure_picker(picker)
 
 
 def fetch_jimaku(

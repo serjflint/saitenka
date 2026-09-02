@@ -165,6 +165,16 @@ def scope_config(cfg: dict, override: str | None = None) -> dict:
     return out
 
 
+def scope_profile_config(cfg: dict, profile: Profile) -> dict:
+    """Return config whose scoped values and active identity both name ``profile``."""
+    selected = dict(cfg)
+    if profile.name == "default":
+        selected.pop("active_profile", None)
+    else:
+        selected["active_profile"] = profile.name
+    return scope_config(selected)
+
+
 def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
     """The active :class:`Profile` for ``cfg``. ``override`` (the ``--profile`` CLI flag) wins over the
     config's ``active_profile`` selector. No profile configured → the built-in JP default."""
