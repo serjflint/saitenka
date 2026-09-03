@@ -13,7 +13,7 @@ the Grow-specific deltas are spelled out here.
 | `exec(command, cwd)` | Run a deterministic command and return exit code plus complete output. |
 | `invoke(role, prompt, schema, isolation)` | Start a fresh agent context, validate its result against `contracts.json`, return result + host invocation id. |
 | `phase(name, detail)` | Report progress without changing repository state. |
-| `record(record)` | Append one JSONL object through `grow_ledger.py append`; the CLI owns semantic `gap_id`, `target_sha`, and manifest version. |
+| `record(record)` | Append one JSONL object through `grow_ledger.py append`; the CLI owns semantic gap identity or no-gap module-audit identity, plus the manifest version. |
 | `open_pr(body)` | Optional; available only after explicit `openPr=true` and every ship guard passes. Never merge. |
 
 The adapter, not an agent response, assigns invocation identity. If the host exposes no id, a unique
@@ -96,8 +96,9 @@ an index lock, failed restore, or byte mismatch is a hard bounce.
 - Root-executor run proves the grown test RED on pristine code: this is **outcome-class 2 (latent bug)**,
   not a gate failure — file the product issue when authorized or record a dry-run filing blocker; do NOT
   trust author classification or massage it green.
-- No orphan scenario / nothing to grow: record the gap `left-unclosable` (or skip); never ask the author to
-  fabricate a vacuous test.
+- No orphan after a live module's completed scenario map: append a no-gap module audit over the inspected
+  module and test tree. A `no-live` selection records nothing. Never invent an `unclosable` semantic gap
+  or ask the author to fabricate a vacuous test. New positive adequacy evidence overrides a prior audit.
 - Objective gate bounced (vacuous / redundant / no new line / raceless): revert the edit; retry ≤ the cap
   with only the bounce carried forward; then record `left-unclosable` with the last bounce.
 - Refuted candidate with `better_fix`: revert it, record the recommendation + scope, stop.

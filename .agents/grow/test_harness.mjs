@@ -8,6 +8,7 @@ const runHarness = new AsyncFunction('args', 'phase', 'agent', 'log', source)
 
 const gap = {
   found: true,
+  selection_outcome: 'gap',
   module: 'app/example.py',
   target_symbol: 'app/example.py::example',
   dimension: 'relative path',
@@ -64,7 +65,7 @@ const receipt = {
   recorded_gap_id: '0123456789abcdef',
   recorded_target_sha: 'fedcba9876543210',
   recorded_toolset_version: 1,
-  recorded_contract_version: 7,
+  recorded_contract_version: 8,
 }
 const pristinePass = { status: 'pass', report: 'requested nodes passed' }
 const additivePass = { pass: true, report: 'additive only' }
@@ -82,6 +83,39 @@ async function scenario(responses, args = { openPr: true }) {
   }
   const result = await runHarness(args, (name) => phases.push(name), agent, () => {})
   return { calls, phases, result }
+}
+
+{
+  const noGap = {
+    ...gap,
+    found: false,
+    selection_outcome: 'no-orphan',
+    target_symbol: '',
+    dimension: '',
+    reason: 'scenario map is already covered',
+  }
+  const audit = {
+    state: 'no-gap',
+    ledger_appended: true,
+    recorded_audit_module: noGap.module,
+    recorded_audit_sha: 'a'.repeat(64),
+    recorded_toolset_version: 3,
+    recorded_contract_version: 8,
+  }
+  const result = await scenario({ triage: noGap, 'record-no-gap': audit, reflect: reflection }, { openPr: false })
+  assert.equal(result.result.audit.recorded_audit_module, noGap.module)
+  assert.match(result.calls.find(({ label }) => label === 'record-no-gap').prompt, /state:"no-gap"/)
+}
+
+{
+  const noLive = {
+    ...gap,
+    found: false,
+    selection_outcome: 'no-live',
+    reason: 'every candidate is excluded',
+  }
+  const result = await scenario({ triage: noLive, reflect: reflection }, { openPr: false })
+  assert.ok(!result.calls.some(({ label }) => label === 'record-no-gap'))
 }
 
 {

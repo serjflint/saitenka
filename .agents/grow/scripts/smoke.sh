@@ -18,7 +18,7 @@ done
 uv run python - "$here/contracts.json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-need = {"version", "gap", "test_design", "proposal", "gate", "ship_gate", "review", "review_provenance", "record"}
+need = {"version", "gap", "test_design", "proposal", "gate", "ship_gate", "review", "review_provenance", "record", "audit_record"}
 missing = need - set(data)
 assert not missing, f"contracts.json missing keys: {missing}"
 PY

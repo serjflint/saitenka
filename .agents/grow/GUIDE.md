@@ -122,6 +122,10 @@ content-hash of the **target symbol's AST source** — not the whole module. Unr
 a real change to the target reopens it. This is implemented in `tools/grow_ledger.py` and locked by
 `tool_tests/test_grow_ledger.py`.
 
+A completed scenario map with no orphan is also terminal evidence. It records a module audit hashed over
+the module and test tree, so triage skips the unchanged inspection without inventing a semantic gap;
+changing either side or the toolset reopens it, and newly positive adequacy evidence overrides it.
+
 ## Anti-bloat — Grow's characteristic hazard
 
 Where Sharpen risks *lobotomising* a test, Grow risks *flooding* the suite. Four controls: extend-before-add

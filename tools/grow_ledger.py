@@ -1,5 +1,5 @@
 """Read/write library for the grow ledger (`.ledger.grow.jsonl`, repo top level) — the loop's durable
-memory of which behaviour-gaps have been examined.
+memory of examined behaviour gaps and completed no-gap module audits.
 
 Sharpen keys on a whole-module content-hash; a Grow gap is fuzzier and must be keyed SEMANTICALLY, or
 line-number drift from unrelated edits spuriously reopens a closed gap and the loop never terminates
@@ -34,6 +34,9 @@ CLOSED_CURRENT = "closed-current"  # a grown test landed, target unchanged → S
 STALE_TARGET = "stale-target"  # the target symbol changed since → reopen
 STALE_TOOLSET = "stale-toolset"  # toolset_version bumped → whole ledger re-examines
 UNCLOSABLE = "unclosable"  # recorded infeasible (equivalent mutant / infeasible config) → SKIP
+AUDIT_UNSEEN = "audit-unseen"
+AUDITED_CURRENT = "audited-current"  # no orphan found, module/tests unchanged → SKIP
+STALE_AUDIT = "stale-audit"  # module or mapped tests changed → re-audit
 
 
 def gap_id(source: str, target_symbol: str, dimension: str) -> str:
@@ -74,6 +77,25 @@ def target_sha(module_src: str, symbol: str) -> str:
     return hashlib.sha256(symbol_source(module_src, symbol).encode()).hexdigest()[:16]
 
 
+def audit_sha(root: Path, module_key: str) -> str:
+    """Hash a no-gap audit's module and test tree; unrelated test drift safely reopens it."""
+    h = hashlib.sha256()
+    test_files = sorted(
+        path
+        for path in (root / "tests").rglob("*")
+        if path.is_file()
+        and "__pycache__" not in path.parts
+        and path.suffix not in {".pyc", ".pyo"}
+    )
+    paths = [root / SRC / module_key, *test_files]
+    for path in paths:
+        rel = str(path.relative_to(root))
+        h.update(rel.encode())
+        h.update(b"\0")
+        h.update(path.read_bytes())
+    return h.hexdigest()
+
+
 @dataclass
 class Ledger:
     path: Path
@@ -97,12 +119,36 @@ class Ledger:
     def _gap_records(self) -> list[dict]:
         return [r for r in self.lines if "gap_id" in r]
 
+    def _audit_records(self) -> list[dict]:
+        return [r for r in self.lines if "audit_module" in r and "audit_sha" in r]
+
     def latest(self, gap: str) -> dict | None:
         """The most recent record for a gap (records are chronological)."""
         for r in reversed(self._gap_records()):
             if r["gap_id"] == gap:
                 return r
         return None
+
+    def latest_audit(self, module_key: str) -> dict | None:
+        """The most recent no-gap scenario-map audit for a module."""
+        for record in reversed(self._audit_records()):
+            if record["audit_module"] == module_key:
+                return record
+        return None
+
+    def audit_status(self, module_key: str, root: Path) -> str:
+        record = self.latest_audit(module_key)
+        if record is None:
+            return AUDIT_UNSEEN
+        if int(record.get("toolset_version", 1)) != self.toolset_version:
+            return STALE_TOOLSET
+        try:
+            current = audit_sha(root, module_key)
+        except FileNotFoundError:
+            return STALE_AUDIT
+        if record["audit_sha"] != current:
+            return STALE_AUDIT
+        return AUDITED_CURRENT if record.get("state") == "no-gap" else AUDIT_UNSEEN
 
     def status(self, gap: str, root: Path) -> str:
         """Resolve a gap's status. The module + symbol come from the stored ``target_symbol``, so the
@@ -167,6 +213,46 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
     return prepared
 
 
+def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
+    """Fill the identity fields for a completed scenario-map audit with no orphan gap."""
+    module_key = record.get("audit_module")
+    test_files = record.get("tests")
+    if not isinstance(module_key, str) or not module_key:
+        raise ValueError("audit record requires a non-empty audit_module")
+    if (
+        not isinstance(test_files, list)
+        or not test_files
+        or not all(isinstance(path, str) for path in test_files)
+    ):
+        raise ValueError("audit record requires a non-empty tests list")
+    if record.get("state") != "no-gap":
+        raise ValueError("audit record state must be no-gap")
+    source_root = (root / SRC).resolve()
+    module_path = (source_root / module_key).resolve()
+    try:
+        module_path.relative_to(source_root)
+    except ValueError as exc:
+        raise ValueError("audit module must stay under src/saitenka") from exc
+    tests_root = (root / "tests").resolve()
+    for test_file in test_files:
+        test_path = (root / test_file).resolve()
+        try:
+            test_path.relative_to(tests_root)
+        except ValueError as exc:
+            raise ValueError("audit tests must stay under tests") from exc
+        if (
+            not test_path.is_file()
+            or not test_path.name.startswith("test_")
+            or test_path.suffix != ".py"
+        ):
+            raise ValueError("audit tests must be existing test_*.py files")
+    prepared = dict(record)
+    prepared["tests"] = sorted(test_files)
+    prepared["audit_sha"] = audit_sha(root, module_key)
+    prepared["toolset_version"] = ledger.toolset_version
+    return prepared
+
+
 def _main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path.cwd())
@@ -207,7 +293,11 @@ def _main() -> int:
     record = json.loads(raw)
     if not isinstance(record, dict):
         raise TypeError("record must be a JSON object")
-    prepared = prepare_record(record, root, ledger)
+    prepared = (
+        prepare_audit_record(record, root, ledger)
+        if "audit_module" in record
+        else prepare_record(record, root, ledger)
+    )
     ledger.append(prepared)
     print(json.dumps(prepared, ensure_ascii=False))
     return 0

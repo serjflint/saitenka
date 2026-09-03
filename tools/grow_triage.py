@@ -14,9 +14,10 @@ the score, by design (the plan's core-principle: either alone wastes effort).
                     a missing source prints "—", never a silent zero masquerading as "healthy".
 
 The composite is transparent (every component is a column, never just a scalar). Module-level exclusions
-are hard drops: a module any OPEN PR is editing (grow at rest, don't fight in-flight work). Per-GAP
-exclusion (a `.ledger.grow.jsonl` gap already closed-current / unclosable) happens later, when the picked
-module's scenario map is enumerated — not here. Run from the repository root:
+are hard drops: a module any OPEN PR is editing (grow at rest, don't fight in-flight work), or an unchanged
+module whose completed scenario-map audit found no orphan. Per-GAP exclusion (a `.ledger.grow.jsonl` gap
+already closed-current / unclosable) happens later, when the picked module's scenario map is enumerated.
+Run from the repository root:
     uv run python tools/grow_triage.py                       # ranked table
     uv run python tools/grow_triage.py --top 1               # just the pick
     uv run python tools/grow_triage.py --survivors-json s.json --contexts-json c.json   # full signal set
@@ -33,6 +34,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import grow_contexts as gc
+import grow_ledger as gl
 import sharpen_ledger as sl
 import sharpen_triage as st
 from tool_json import InstrumentError, run_json
@@ -53,6 +55,12 @@ class Candidate:
     underspec: float = 0.0
     score: float = 0.0
     notes: list[str] = field(default_factory=list)
+
+
+def apply_audit_status(candidate: Candidate, status: str) -> None:
+    positive_evidence = bool(candidate.survivors) or bool(candidate.dead_ctx)
+    if status == gl.AUDITED_CURRENT and not positive_evidence:
+        candidate.excluded = "no-gap-audit-current"
 
 
 def fan_in_by_module(root: Path) -> dict[str, int]:
@@ -131,6 +139,7 @@ def rank(
     context_tests: dict[str, list[str]] | None = None,
     check_network: bool = True,
 ) -> list[Candidate]:
+    ledger = gl.Ledger.load(root / ".ledger.grow.jsonl")
     test_map = sl.map_tests_to_modules(root)
     conf = st.conformance_by_module(root, test_map)
     fan = fan_in_by_module(root)
@@ -150,6 +159,8 @@ def rank(
         touched = {f"{sl.SRC}/{module}", *tests} & pr_paths
         if touched:
             c.excluded = f"open-PR: {min(touched)}"
+        else:
+            apply_audit_status(c, ledger.audit_status(module, root))
         cands.append(c)
 
     score_candidates(cands)
