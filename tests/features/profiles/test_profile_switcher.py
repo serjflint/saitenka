@@ -437,6 +437,31 @@ def test_same_track_switch_retokenizes_the_current_cue(request, monkeypatch):
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_same_primary_profile_switch_reestablishes_an_open_translation(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 6, "lang": "fra"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("fr", "en")
+    reader.graph.ipc.props["sid"] = 6
+    reader.command(app_bindings.TRANS_MSG)
+    reader.graph.ipc.commands.clear()
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (outcome.status, tracks.second_slang, tracks.secondary_sid) == (
+        ProfileSwitchStatus.COMMITTED,
+        "de",
+        8,
+    )
+    assert ("set_property", "secondary-sid", 8) in reader.graph.ipc.commands
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request, make_session):
     """Wrapping back to the slang-less JP default re-selects its track using the launcher's base slang,
     proving that the fallback is not hard-coded to the default string."""

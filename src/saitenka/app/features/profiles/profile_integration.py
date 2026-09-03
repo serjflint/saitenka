@@ -94,6 +94,9 @@ class ProfileIntegration:
     def select_subtitle_track(self, new_slang: str, second_slang: str) -> None:
         startup = subtitle_modes.select_initial(self.ipc, new_slang, second_slang)
         self.configure_subtitle_mode(startup, new_slang, second_slang)
+        ports = self.track_ports()
+        if ports.translation_visible():
+            subtitle_modes.setup_secondary(ports)
         self.navigation.current.sub_index = None
         self.rebuild_index()
 

@@ -903,6 +903,19 @@ def test_discovery_matches_iso_639_two_and_three_letter_aliases():
     )
 
 
+def test_discovery_matches_a_regional_three_letter_preference_to_a_two_letter_tag():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 8, "type": "sub", "lang": "de-CH"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "deu-CH") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
 def test_discovery_checks_configured_tracks_before_untagged_fallback():
     ipc = FakeIPC(
         [
