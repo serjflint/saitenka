@@ -588,7 +588,7 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
 
     sid = select_sub_track(ipc, opts.slang)
     if sid is not None:
-        return f"selected JP subtitle track sid={sid}"
+        return f"selected {language_name(opts.language)} subtitle track sid={sid}"
 
     if not opts.jimaku:
         return "no Japanese subtitle track found (pass --jimaku to fetch, or --sub-file)"

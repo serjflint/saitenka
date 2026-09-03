@@ -400,6 +400,28 @@ def test_jimaku_force_cannot_bypass_profile_language_eligibility(monkeypatch):
     assert providers == ()
 
 
+def test_ineligible_jimaku_force_names_the_selected_profile_language(monkeypatch):
+    monkeypatch.setattr(
+        subselect,
+        "fetch_jimaku",
+        lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("ineligible provider called")),
+    )
+    fr = {"id": 2, "type": "sub", "lang": "fr"}
+    ipc = FakeIPC(tracks=[EN, fr], path="/v/French - 01.mkv")
+
+    status = subselect.ensure_jp_subs(
+        ipc,
+        subselect.AttachSubtitleOptions(
+            slang="fr",
+            jimaku=True,
+            jimaku_force=True,
+            language="fr",
+        ),
+    )
+
+    assert status == "selected fr subtitle track sid=2"
+
+
 def test_provider_path_runs_configured_order_and_returns_first_success(tmp_path, monkeypatch):
     calls = []
     hit = tmp_path / "th.srt"
