@@ -124,7 +124,8 @@ a real change to the target reopens it. This is implemented in `tools/grow_ledge
 
 A completed scenario map with no orphan is also terminal evidence. It records a module audit hashed over
 the module and test tree, so triage skips the unchanged inspection without inventing a semantic gap;
-changing either side or the toolset reopens it, and newly positive adequacy evidence overrides it.
+changing either side, the lifecycle contract, or the toolset reopens it, and newly positive adequacy
+evidence overrides it.
 
 ## Anti-bloat — Grow's characteristic hazard
 

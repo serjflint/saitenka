@@ -116,8 +116,8 @@ failure reverts the test, records a dry-run, and opens no PR.
 When Select completes a scenario map but returns no orphan, append `{audit_module, tests, state: "no-gap",
 examined, contract_version, scenario_map_summary}` through the same CLI. The CLI computes `audit_sha` and
 `toolset_version`; do not manufacture a semantic gap identity. A current audit prevents immediate repeat
-selection and reopens when the module, test tree, or toolset changes. New positive survivor/context
-evidence overrides the receipt immediately.
+selection and reopens when the module, test tree, lifecycle contract, or toolset changes. New positive
+survivor/context evidence overrides the receipt immediately.
 
 ## Reflect (self-reflection on the LOOP — every run)
 

@@ -18,19 +18,24 @@ done
 uv run python - "$here/contracts.json" <<'PY'
 import json, sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
-need = {"version", "gap", "test_design", "proposal", "gate", "ship_gate", "review", "review_provenance", "record", "audit_record"}
+need = {"version", "lifecycle", "gap", "test_design", "proposal", "gate", "ship_gate", "review", "review_provenance", "record", "audit_record", "reflection"}
 missing = need - set(data)
 assert not missing, f"contracts.json missing keys: {missing}"
+assert data["lifecycle"]["terminal_phase"] == "Reflect"
 PY
 
 # 3. harness.js is syntactically valid (if node is available) and its CONTRACT_VERSION matches contracts.json.
-uv run python - "$here/harness.js" "$here/contracts.json" <<'PY'
+uv run python - "$here/harness.js" "$here/contracts.json" "$root/tools/grow_ledger.py" <<'PY'
 import json, re, sys
 src = open(sys.argv[1], encoding="utf-8").read()
 ver = json.load(open(sys.argv[2], encoding="utf-8"))["version"]
 m = re.search(r"CONTRACT_VERSION\s*=\s*(\d+)", src)
 assert m, "harness.js has no CONTRACT_VERSION"
 assert int(m.group(1)) == ver, f"harness CONTRACT_VERSION {m.group(1)} != contracts.json version {ver}"
+ledger = open(sys.argv[3], encoding="utf-8").read()
+m = re.search(r"^CONTRACT_VERSION\s*=\s*(\d+)", ledger, re.MULTILINE)
+assert m, "grow_ledger.py has no CONTRACT_VERSION"
+assert int(m.group(1)) == ver, f"ledger CONTRACT_VERSION {m.group(1)} != contracts.json version {ver}"
 for tok in ("grow_triage", "grow_gate", "grow_ledger", "grow_reflect"):
     assert tok in src, f"harness.js never invokes {tok}"
 for phase in ("Select", "Test design", "Author", "Objective gate", "Skeptic", "Judge", "Ship gate", "Record", "Reflect"):
@@ -56,6 +61,16 @@ spec = open(sys.argv[1], encoding="utf-8").read()
 guide = open(sys.argv[2], encoding="utf-8").read()
 assert "GUIDE.md" in spec, "SPEC.md must point to GUIDE.md"
 assert "SPEC.md" in guide, "GUIDE.md must point to SPEC.md"
+PY
+
+# 6. The Codex adapter carries the machine-declared mandatory terminal phase.
+uv run python - "$here/contracts.json" "$root/.agents/skills/grow-loop/SKILL.md" <<'PY'
+import json, sys
+contract = json.load(open(sys.argv[1], encoding="utf-8"))
+skill = open(sys.argv[2], encoding="utf-8").read()
+phase = contract["lifecycle"]["terminal_phase"]
+marker = f"Mandatory terminal phase — {phase}."
+assert marker in skill, f"Codex grow-loop skill missing terminal phase marker: {marker}"
 PY
 
 echo "SMOKE OK: .agents/grow/ artifacts consistent"

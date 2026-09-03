@@ -1,5 +1,9 @@
 {
-  "version": 8,
+  "version": 9,
+  "lifecycle": {
+    "terminal_phase": "Reflect",
+    "description": "Every terminal outcome completes through an isolated loop reflection."
+  },
   "gap": {
     "type": "object",
     "additionalProperties": false,

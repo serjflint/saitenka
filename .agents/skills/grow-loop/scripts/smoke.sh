@@ -15,4 +15,13 @@ test -f "$repo_dir/.agents/skills/test-adequacy/SKILL.md"
 test -f "$repo_dir/.agents/skills/contribute/SKILL.md"
 test -f "$repo_dir/.agents/skills/assurance-pipeline/SKILL.md"
 
+uv run python - "$repo_dir/.agents/grow/contracts.json" "$skill_dir/SKILL.md" <<'PY'
+import json, sys
+contract = json.load(open(sys.argv[1], encoding="utf-8"))
+skill = open(sys.argv[2], encoding="utf-8").read()
+phase = contract["lifecycle"]["terminal_phase"]
+marker = f"Mandatory terminal phase — {phase}."
+assert marker in skill, f"grow-loop skill missing terminal phase marker: {marker}"
+PY
+
 echo "grow-loop skill smoke: ok"

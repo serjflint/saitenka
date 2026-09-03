@@ -225,6 +225,21 @@ def test_no_gap_audit_reopens_when_the_toolset_changes(tmp_path):
     assert ledger.audit_status("app/x.py", root) == gl.STALE_TOOLSET
 
 
+def test_no_gap_audit_reopens_when_the_lifecycle_contract_changes(tmp_path):
+    root = _repo(tmp_path)
+    prepared = {
+        "audit_module": "app/x.py",
+        "tests": ["tests/test_x.py"],
+        "audit_sha": gl.audit_sha(root, "app/x.py"),
+        "toolset_version": 1,
+        "contract_version": gl.CONTRACT_VERSION - 1,
+        "state": "no-gap",
+    }
+    ledger = _ledger(root, [MANIFEST, prepared])
+
+    assert ledger.audit_status("app/x.py", root) == gl.STALE_CONTRACT
+
+
 def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
@@ -241,6 +256,7 @@ def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
 
     assert prepared["audit_sha"] == gl.audit_sha(root, "app/x.py")
     assert prepared["toolset_version"] == 7
+    assert prepared["contract_version"] == gl.CONTRACT_VERSION
 
 
 def test_prepare_audit_record_requires_evidence_and_no_gap_state(tmp_path):

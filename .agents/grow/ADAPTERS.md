@@ -98,7 +98,8 @@ an index lock, failed restore, or byte mismatch is a hard bounce.
   trust author classification or massage it green.
 - No orphan after a live module's completed scenario map: append a no-gap module audit over the inspected
   module and test tree. A `no-live` selection records nothing. Never invent an `unclosable` semantic gap
-  or ask the author to fabricate a vacuous test. New positive adequacy evidence overrides a prior audit.
+  or ask the author to fabricate a vacuous test. A lifecycle-contract change or new positive adequacy
+  evidence overrides a prior audit.
 - Objective gate bounced (vacuous / redundant / no new line / raceless): revert the edit; retry ≤ the cap
   with only the bounce carried forward; then record `left-unclosable` with the last bounce.
 - Refuted candidate with `better_fix`: revert it, record the recommendation + scope, stop.

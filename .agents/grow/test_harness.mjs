@@ -65,7 +65,7 @@ const receipt = {
   recorded_gap_id: '0123456789abcdef',
   recorded_target_sha: 'fedcba9876543210',
   recorded_toolset_version: 1,
-  recorded_contract_version: 8,
+  recorded_contract_version: 9,
 }
 const pristinePass = { status: 'pass', report: 'requested nodes passed' }
 const additivePass = { pass: true, report: 'additive only' }
@@ -82,6 +82,8 @@ async function scenario(responses, args = { openPr: true }) {
     return responses[label]
   }
   const result = await runHarness(args, (name) => phases.push(name), agent, () => {})
+  assert.equal(phases.at(-1), 'Reflect', 'every terminal path must end in Reflect')
+  assert.equal(calls.at(-1)?.label, 'reflect', 'Reflect must be the final agent invocation')
   return { calls, phases, result }
 }
 
@@ -100,7 +102,7 @@ async function scenario(responses, args = { openPr: true }) {
     recorded_audit_module: noGap.module,
     recorded_audit_sha: 'a'.repeat(64),
     recorded_toolset_version: 3,
-    recorded_contract_version: 8,
+    recorded_contract_version: 9,
   }
   const result = await scenario({ triage: noGap, 'record-no-gap': audit, reflect: reflection }, { openPr: false })
   assert.equal(result.result.audit.recorded_audit_module, noGap.module)

@@ -26,7 +26,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 8 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 9 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = '.' // poe tasks + tools run from the launch worktree root

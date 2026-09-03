@@ -198,7 +198,7 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
   "dimension": "warm==cold@entry_cache",           // the under-specified axis
   "target_sha": "<hash of the TARGET SYMBOL's AST source, not the whole module>",
   "toolset_version": 3,
-  "contract_version": 8,
+  "contract_version": 9,
   "state": "open | closed | unclosable | filed | dry-run",
   "test": "tests/test_cache_race.py::test_...",
   "outcome": "coverage-only | bug | robustness | design",
@@ -220,16 +220,17 @@ A completed scenario map that finds no orphan appends a separate module-audit re
 ```jsonc
 { "audit_module": "app/subnav.py", "examined": "<iso>",
   "tests": ["tests/test_subnav_policy.py"], "audit_sha": "<module plus test tree>",
-  "toolset_version": 3, "contract_version": 8, "state": "no-gap",
+  "toolset_version": 3, "contract_version": 9, "state": "no-gap",
   "scenario_map_summary": "source replacement, policy, settle windows, failure, navigation" }
 ```
 
-`audit_status` is **audit-unseen** / **audited-current** / **stale-audit** / **stale-toolset**. Current
+`audit_status` is **audit-unseen** / **audited-current** / **stale-audit** / **stale-contract** /
+**stale-toolset**. Current
 no-gap audits are module-level triage exclusions only when current survivor/context evidence remains zero.
-Any byte change to the module or test tree, a toolset bump, or newly positive adequacy evidence reopens the
-audit. The conservative whole-test-tree hash prevents an omitted indirect test from creating a false
-permanent exclusion. This is not an `unclosable` gap: no semantic gap was claimed, so no target symbol or
-dimension is invented.
+Any byte change to the module or test tree, a lifecycle-contract or toolset bump, or newly positive
+adequacy evidence reopens the audit. The conservative whole-test-tree hash prevents an omitted indirect
+test from creating a false permanent exclusion. This is not an `unclosable` gap: no semantic gap was
+claimed, so no target symbol or dimension is invented.
 
 ## Self-reflection — every run introspects the LOOP (`tools/grow_reflect.py`)
 

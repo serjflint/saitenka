@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SRC = "src/saitenka"  # module keys are relative to here (matching the sharpen ledger)
+CONTRACT_VERSION = 9
 
 # Gap status against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never examined → a candidate
@@ -35,8 +36,9 @@ STALE_TARGET = "stale-target"  # the target symbol changed since → reopen
 STALE_TOOLSET = "stale-toolset"  # toolset_version bumped → whole ledger re-examines
 UNCLOSABLE = "unclosable"  # recorded infeasible (equivalent mutant / infeasible config) → SKIP
 AUDIT_UNSEEN = "audit-unseen"
-AUDITED_CURRENT = "audited-current"  # no orphan found, module/tests unchanged → SKIP
-STALE_AUDIT = "stale-audit"  # module or mapped tests changed → re-audit
+AUDITED_CURRENT = "audited-current"  # no orphan found, module/test tree unchanged → SKIP
+STALE_AUDIT = "stale-audit"  # module or test tree changed → re-audit
+STALE_CONTRACT = "stale-contract"  # audit predates the current lifecycle contract → re-audit
 
 
 def gap_id(source: str, target_symbol: str, dimension: str) -> str:
@@ -142,6 +144,8 @@ class Ledger:
             return AUDIT_UNSEEN
         if int(record.get("toolset_version", 1)) != self.toolset_version:
             return STALE_TOOLSET
+        if record.get("contract_version") != CONTRACT_VERSION:
+            return STALE_CONTRACT
         try:
             current = audit_sha(root, module_key)
         except FileNotFoundError:
@@ -250,6 +254,7 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
     prepared["tests"] = sorted(test_files)
     prepared["audit_sha"] = audit_sha(root, module_key)
     prepared["toolset_version"] = ledger.toolset_version
+    prepared["contract_version"] = CONTRACT_VERSION
     return prepared
 
 
