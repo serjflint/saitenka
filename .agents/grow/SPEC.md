@@ -200,7 +200,7 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
   "dimension": "warm==cold@entry_cache",           // the under-specified axis
   "target_sha": "<hash of the TARGET SYMBOL's AST source, not the whole module>",
   "toolset_version": 3,
-  "contract_version": 9,
+  "contract_version": 10,
   "state": "open | closed | unclosable | filed | dry-run",
   "test": "tests/test_cache_race.py::test_...",
   "outcome": "coverage-only | bug | robustness | design",
@@ -222,7 +222,7 @@ A completed scenario map that finds no orphan appends a separate module-audit re
 ```jsonc
 { "audit_module": "app/subnav.py", "examined": "<iso>",
   "tests": ["tests/test_subnav_policy.py"], "audit_sha": "<module plus test tree>",
-  "toolset_version": 3, "contract_version": 9, "state": "no-gap",
+  "toolset_version": 3, "contract_version": 10, "state": "no-gap",
   "scenario_map_summary": "source replacement, policy, settle windows, failure, navigation" }
 ```
 

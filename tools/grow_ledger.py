@@ -29,7 +29,7 @@ from pathlib import Path
 import grow_reflect as gr
 
 SRC = "src/saitenka"  # module keys are relative to here (matching the sharpen ledger)
-CONTRACT_VERSION = 9
+CONTRACT_VERSION = 10
 
 # Gap status against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never examined → a candidate
@@ -81,8 +81,16 @@ def _validate_reflection(record: dict, root: Path) -> None:
         raise ValueError("reflection payload differs from its durable receipt")
     trace_gap = persisted.get("trace", {}).get("gap", {})
     expected_target = record.get("target_symbol")
-    if expected_target and trace_gap.get("target_symbol") != expected_target:
-        raise ValueError("reflection receipt belongs to a different Grow gap")
+    if expected_target:
+        expected_gap = {
+            "source": record.get("source"),
+            "target_symbol": expected_target,
+            "dimension": record.get("dimension"),
+        }
+        if any(trace_gap.get(key) != value for key, value in expected_gap.items()):
+            raise ValueError("reflection receipt belongs to a different Grow gap")
+        if persisted.get("trace", {}).get("outcome") != record.get("state"):
+            raise ValueError("reflection receipt belongs to a different Grow outcome")
     expected_module = record.get("audit_module")
     if expected_module and trace_gap.get("module") != expected_module:
         raise ValueError("reflection receipt belongs to a different module audit")
@@ -91,7 +99,7 @@ def _validate_reflection(record: dict, root: Path) -> None:
 def _has_valid_reflection(record: dict, root: Path) -> bool:
     try:
         _validate_reflection(record, root)
-    except (OSError, TypeError, ValueError):
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
         return False
     return True
 

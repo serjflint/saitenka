@@ -106,7 +106,15 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
                 "type": "run-reflection",
                 "reflection_id": REFLECTION["reflection_id"],
                 "trace_sha": REFLECTION["trace_sha"],
-                "trace": {"gap": {"target_symbol": "app/x.py::crisp", "module": "app/x.py"}},
+                "trace": {
+                    "gap": {
+                        "source": "invariant",
+                        "target_symbol": "app/x.py::crisp",
+                        "dimension": "scale=2.0",
+                        "module": "app/x.py",
+                    },
+                    "outcome": "closed",
+                },
                 "introspection": REFLECTION["introspection"],
                 "finding_ids": [],
                 "escalations": [],
@@ -120,6 +128,22 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
 
 
 def _ledger(root: Path, records: list[dict]) -> gl.Ledger:
+    gap_record = next((record for record in records if "gap_id" in record), None)
+    if gap_record is not None:
+        reflection_path = root / ".reflection.grow.jsonl"
+        reflection_lines = [json.loads(line) for line in reflection_path.read_text().splitlines()]
+        reflection_lines[-1]["trace"] = {
+            "gap": {
+                "source": gap_record.get("source"),
+                "target_symbol": gap_record.get("target_symbol"),
+                "dimension": gap_record.get("dimension"),
+                "module": gap_record.get("target_symbol", "").partition("::")[0],
+            },
+            "outcome": gap_record.get("state"),
+        }
+        reflection_path.write_text(
+            "".join(json.dumps(record) + "\n" for record in reflection_lines), encoding="utf-8"
+        )
     p = root / ".ledger.grow.jsonl"
     p.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
     return gl.Ledger.load(p)
@@ -129,6 +153,7 @@ def _rec(*, state: str, module_src: str = MODULE_V1, **extra) -> dict:
     gid = gl.gap_id("invariant", "app/x.py::crisp", "scale=2.0")
     return {
         "gap_id": gid,
+        "source": "invariant",
         "target_symbol": "app/x.py::crisp",
         "dimension": "scale=2.0",
         "target_sha": gl.target_sha(module_src, "crisp"),
@@ -350,6 +375,31 @@ def test_prepare_record_rejects_a_receipt_from_another_gap(tmp_path):
         gl.prepare_record(record, root, ledger, require_reflection=True)
 
 
+def test_prepare_record_rejects_reflection_from_another_dimension(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "source": "invariant",
+        "target_symbol": "app/x.py::crisp",
+        "dimension": "another-dimension",
+        "state": "closed",
+        "reflection": REFLECTION,
+    }
+    with pytest.raises(ValueError, match="different Grow gap"):
+        gl.prepare_record(record, root, ledger, require_reflection=True)
+
+
+def test_malformed_reflection_reopens_instead_of_crashing(tmp_path):
+    root = _repo(tmp_path)
+    record = _rec(state="closed")
+    record["reflection"] = {**REFLECTION, "findings": ["bad"]}
+    ledger = _ledger(root, [MANIFEST, record])
+
+    assert ledger.status(record["gap_id"], root) == gl.STALE_CONTRACT
+
+
 def test_prepare_audit_record_requires_evidence_and_no_gap_state(tmp_path):
     import pytest
 
@@ -413,7 +463,7 @@ def test_append_cli_fills_identity_fields(monkeypatch, tmp_path, capsys):
         "source": "invariant",
         "target_symbol": "app/x.py::crisp",
         "dimension": "scale=2.0",
-        "state": "dry-run",
+        "state": "closed",
         "reflection": REFLECTION,
     }
     monkeypatch.setattr(
@@ -434,7 +484,7 @@ def test_append_cli_fills_identity_fields(monkeypatch, tmp_path, capsys):
     assert gl._main() == 0
 
     written = json.loads(capsys.readouterr().out)
-    assert gl.Ledger.load(ledger.path).latest(written["gap_id"])["state"] == "dry-run"
+    assert gl.Ledger.load(ledger.path).latest(written["gap_id"])["state"] == "closed"
 
 
 def test_append_cli_fills_no_gap_audit_identity(monkeypatch, tmp_path, capsys):

@@ -65,7 +65,7 @@ const receipt = {
   recorded_gap_id: '0123456789abcdef',
   recorded_target_sha: 'fedcba9876543210',
   recorded_toolset_version: 1,
-  recorded_contract_version: 9,
+  recorded_contract_version: 10,
   recorded_reflection: true,
 }
 const pristinePass = { status: 'pass', report: 'requested nodes passed' }
@@ -104,7 +104,7 @@ async function scenario(responses, args = { openPr: true }) {
     recorded_audit_module: noGap.module,
     recorded_audit_sha: 'a'.repeat(64),
     recorded_toolset_version: 3,
-    recorded_contract_version: 9,
+    recorded_contract_version: 10,
     recorded_reflection: true,
   }
   const result = await scenario({ triage: noGap, 'record-no-gap': audit, reflect: reflection }, { openPr: false })
