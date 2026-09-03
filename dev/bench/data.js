@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788445642863,
+  "lastUpdate": 1788462002924,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -13775,6 +13775,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.369205,
             "range": "3 replicas; min 0.935415; max 1.45291; MAD 0.083706; worst 1.45291",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2f7228f0c718b4e1a88a1be95028aaf279b29f78",
+          "message": "Merge pull request #489 from serjflint/test/quality-loops-20260903-batch-3\n\ntest: classify clean-exit watchdog check as integration",
+          "timestamp": "2026-09-03T23:58:34+05:00",
+          "tree_id": "587c499aad6310e4feb97d524c73ebc77c5ad2dd",
+          "url": "https://github.com/serjflint/saitenka/commit/2f7228f0c718b4e1a88a1be95028aaf279b29f78"
+        },
+        "date": 1788462001776,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.038698,
+            "range": "3 replicas; min 4.92996; max 6.48357; MAD 0.444869",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.126482,
+            "range": "3 replicas; min 7.20961; max 10.9786; MAD 0.916873; worst 10.9786",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 17.75506,
+            "range": "3 replicas; min 14.3651; max 19.1083; MAD 1.35327",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 17.984851,
+            "range": "3 replicas; min 14.559; max 24.2151; MAD 3.42582; worst 24.2151",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.302357,
+            "range": "3 replicas; min 12.8596; max 73.1039; MAD 1.44274",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.088711,
+            "range": "3 replicas; min 0.066658; max 0.090634; MAD 0.001923; worst 0.090634",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.662644,
+            "range": "3 replicas; min 30.6651; max 44.9594; MAD 5.29673; worst 44.9594",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.668324,
+            "range": "3 replicas; min 2.51794; max 18.5062; MAD 0.150382; worst 18.5062",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.081767,
+            "range": "3 replicas; min 1.06777; max 2.96053; MAD 0.013993; worst 2.96053",
             "unit": "ms"
           }
         ]
