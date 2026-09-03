@@ -15,13 +15,16 @@ test -f "$repo_dir/.agents/skills/test-adequacy/SKILL.md"
 test -f "$repo_dir/.agents/skills/contribute/SKILL.md"
 test -f "$repo_dir/.agents/skills/assurance-pipeline/SKILL.md"
 
-uv run python - "$repo_dir/.agents/grow/contracts.json" "$skill_dir/SKILL.md" <<'PY'
+uv run python - "$repo_dir/.agents/grow/contracts.json" "$skill_dir/SKILL.md" "$repo_dir/.agents/grow/harness.js" <<'PY'
 import json, sys
 contract = json.load(open(sys.argv[1], encoding="utf-8"))
 skill = open(sys.argv[2], encoding="utf-8").read()
+harness = open(sys.argv[3], encoding="utf-8").read()
 phase = contract["lifecycle"]["required_before_receipt"]
 marker = f"Mandatory pre-receipt phase — {phase}."
 assert marker in skill, f"grow-loop skill missing terminal phase marker: {marker}"
+assert "source: gap.source" in harness and "selection_outcome: gap.selection_outcome" in harness
+assert "phase: 'Objective gate', label: 'revert'" in harness
 PY
 
 echo "grow-loop skill smoke: ok"

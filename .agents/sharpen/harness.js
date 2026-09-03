@@ -406,8 +406,14 @@ async function recordOutcome(state, prop, reviewResult, extraNote) {
     : 'null (terminal outcome, no review reached)'
   const wantPr = canOpenPr && state === 'in-progress' && prop
   const axes = prop ? {
-    efficacy: gate?.efficacy_pass, conformance: { before: base.before, decisions: prop.proposals.map(p => p.change), diff: prop.diff },
-    preservation: gate?.preservation_pass,
+    efficacy: { status: gate?.efficacy_pass ? 'pass' : 'fail', evidence: gate?.report ?? 'gate missing' },
+    conformance: {
+      status: 'pass', evidence: 'baseline reviewed against proposed assertions',
+      detail: { before: base.before, decisions: prop.proposals.map(p => p.change), diff: prop.diff },
+    },
+    ...(gate?.preservation_pass == null ? {} : {
+      preservation: { status: gate.preservation_pass ? 'pass' : 'fail', evidence: gate.report },
+    }),
   } : {}
   const recorded = await agent(
     `Append one Sharpen ledger record and stop before outward action. ${REL} The ledger is \`.ledger.sharpen.jsonl\`. Touch ONLY the ledger.\n` +

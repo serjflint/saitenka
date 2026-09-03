@@ -69,6 +69,8 @@ def _validate_reflection(record: dict, root: Path) -> None:
     persisted = ledger.run_receipt(reflection_id)
     if persisted is None or persisted.get("trace_sha") != trace_sha:
         raise ValueError("reflection receipt is not present in .reflection.grow.jsonl")
+    if gr._canonical_sha(persisted.get("trace")) != trace_sha:
+        raise ValueError("reflection trace differs from its durable digest")
     expected_findings = [
         gr.finding_id(finding.get("category", ""), finding.get("subject", ""))
         for finding in reflection["findings"]
@@ -91,9 +93,34 @@ def _validate_reflection(record: dict, root: Path) -> None:
             raise ValueError("reflection receipt belongs to a different Grow gap")
         if persisted.get("trace", {}).get("outcome") != record.get("state"):
             raise ValueError("reflection receipt belongs to a different Grow outcome")
+        if trace_gap.get("selection_outcome") != "gap" or trace_gap.get("found") is not True:
+            raise ValueError("reflection receipt did not select a Grow gap")
     expected_module = record.get("audit_module")
-    if expected_module and trace_gap.get("module") != expected_module:
-        raise ValueError("reflection receipt belongs to a different module audit")
+    if expected_module:
+        expected_tests = sorted(record.get("tests", []))
+        if (
+            trace_gap.get("module") != expected_module
+            or trace_gap.get("selection_outcome") != "no-orphan"
+            or trace_gap.get("found") is not False
+            or trace_gap.get("target_symbol") is not None
+            or trace_gap.get("dimension") is not None
+            or sorted(trace_gap.get("tests", [])) != expected_tests
+            or persisted.get("trace", {}).get("outcome") != "no-gap"
+        ):
+            raise ValueError("reflection receipt belongs to a different module audit")
+
+
+def _has_valid_review(record: dict) -> bool:
+    review = record.get("review")
+    if not isinstance(review, dict):
+        return False
+    identities = [review.get(key) for key in ("author", "skeptic", "judge")]
+    normalized = {
+        item.strip().casefold() for item in identities if isinstance(item, str) and item.strip()
+    }
+    return len(normalized) == 3 and all(
+        review.get(key) == "UPHELD" for key in ("skeptic_verdict", "judge_verdict", "verdict")
+    )
 
 
 def _has_valid_reflection(record: dict, root: Path) -> bool:
@@ -124,7 +151,7 @@ def _symbol_nodes(module_src: str, symbol: str) -> list[ast.AST]:
         if node is None:
             raise KeyError(symbol)
         body = node.body
-    nodes = [n for n in body if isinstance(n, _DEFS) and n.name == last]
+    nodes: list[ast.AST] = [n for n in body if isinstance(n, _DEFS) and n.name == last]
     if not nodes:
         raise KeyError(symbol)
     return nodes
@@ -231,6 +258,8 @@ class Ledger:
             return STALE_CONTRACT
         if not _has_valid_reflection(rec, root):
             return STALE_CONTRACT
+        if rec.get("state") == "closed" and not _has_valid_review(rec):
+            return STALE_CONTRACT
         module_key, _, symbol = rec.get("target_symbol", "").partition("::")
         try:
             src = (root / SRC / module_key).read_text(encoding="utf-8")
@@ -269,10 +298,16 @@ def prepare_record(
     source = record.get("source")
     target_symbol = record.get("target_symbol")
     dimension = record.get("dimension")
-    if not all(isinstance(value, str) and value for value in (source, target_symbol, dimension)):
+    if not isinstance(source, str) or not source:
+        raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    if not isinstance(target_symbol, str) or not target_symbol:
+        raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    if not isinstance(dimension, str) or not dimension:
         raise ValueError("record requires non-empty source, target_symbol, and dimension")
     if require_reflection:
         _validate_reflection(record, root)
+    if record.get("state") == "closed" and not _has_valid_review(record):
+        raise ValueError("closed record requires three distinct review identities and UPHELD votes")
     module_key, separator, symbol = target_symbol.partition("::")
     if not separator or not module_key or not symbol:
         raise ValueError("target_symbol must be module_key::dotted.symbol")
@@ -306,7 +341,6 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError("audit record requires a non-empty tests list")
     if record.get("state") != "no-gap":
         raise ValueError("audit record state must be no-gap")
-    _validate_reflection(record, root)
     source_root = (root / SRC).resolve()
     module_path = (source_root / module_key).resolve()
     try:
@@ -326,6 +360,7 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
             or test_path.suffix != ".py"
         ):
             raise ValueError("audit tests must be existing test_*.py files")
+    _validate_reflection(record, root)
     prepared = dict(record)
     prepared["tests"] = sorted(test_files)
     prepared["audit_sha"] = audit_sha(root, module_key)

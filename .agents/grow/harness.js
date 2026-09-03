@@ -333,8 +333,9 @@ const gap = await agent(
 )
 
 trace.gap = gap ? {
-  target_symbol: gap.target_symbol || null, kind: gap.kind, dimension: gap.dimension,
-  module: gap.module, status: gap.status, selection_outcome: gap.selection_outcome,
+  found: gap.found, source: gap.source, target_symbol: gap.target_symbol || null,
+  kind: gap.kind, dimension: gap.dimension || null, module: gap.module, tests: gap.tests,
+  status: gap.status, selection_outcome: gap.selection_outcome,
 } : null
 
 if (!gap || !gap.found) {
@@ -643,7 +644,7 @@ async function finish(result) {
 async function revert(prop) {
   await agent(
     `${REL} Run \`git checkout -- ${prop.test_file.replace('overlay/', '')}\` to discard the edit. Confirm the tree is clean.`,
-    { phase: 'Gate', label: 'revert', effort: 'low' },
+    { phase: 'Objective gate', label: 'revert', effort: 'low' },
   )
 }
 

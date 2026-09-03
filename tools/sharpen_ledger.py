@@ -111,6 +111,7 @@ def _valid_outer_reflection(record: dict, toolset_version: int) -> bool:
     )
     if not valid:
         return False
+    assert isinstance(decision, dict)
     try:
         datetime.fromisoformat(decision["accepted_at"])
     except (TypeError, ValueError):

@@ -15,13 +15,49 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
 import grow_ledger as gl
 
 MANIFEST = {"type": "manifest", "toolset_version": 1}
+GAP_TRACE = {
+    "gap": {
+        "found": True,
+        "source": "invariant",
+        "target_symbol": "app/x.py::crisp",
+        "dimension": "scale=2.0",
+        "module": "app/x.py",
+        "tests": ["tests/test_x.py"],
+        "selection_outcome": "gap",
+    },
+    "outcome": "closed",
+}
+AUDIT_TRACE = {
+    "gap": {
+        "found": False,
+        "target_symbol": None,
+        "dimension": None,
+        "module": "app/x.py",
+        "tests": ["tests/test_x.py"],
+        "selection_outcome": "no-orphan",
+    },
+    "outcome": "no-gap",
+}
 REFLECTION = {
     "reflection_id": "a" * 16,
-    "trace_sha": "b" * 64,
+    "trace_sha": gl.gr._canonical_sha(GAP_TRACE),
     "introspection": "audited",
     "findings": [],
     "appended": True,
     "escalations": [],
+}
+AUDIT_REFLECTION = {
+    **REFLECTION,
+    "reflection_id": "c" * 16,
+    "trace_sha": gl.gr._canonical_sha(AUDIT_TRACE),
+}
+REVIEW = {
+    "author": "author-1",
+    "skeptic": "skeptic-1",
+    "judge": "judge-1",
+    "skeptic_verdict": "UPHELD",
+    "judge_verdict": "UPHELD",
+    "verdict": "UPHELD",
 }
 
 MODULE_V1 = "def helper(x):\n    return x + 1\n\n\ndef crisp(text, scale):\n    return (text.upper(), scale)\n"
@@ -106,16 +142,21 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
                 "type": "run-reflection",
                 "reflection_id": REFLECTION["reflection_id"],
                 "trace_sha": REFLECTION["trace_sha"],
-                "trace": {
-                    "gap": {
-                        "source": "invariant",
-                        "target_symbol": "app/x.py::crisp",
-                        "dimension": "scale=2.0",
-                        "module": "app/x.py",
-                    },
-                    "outcome": "closed",
-                },
+                "trace": GAP_TRACE,
                 "introspection": REFLECTION["introspection"],
+                "finding_ids": [],
+                "escalations": [],
+                "loop_version": 1,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "run-reflection",
+                "reflection_id": AUDIT_REFLECTION["reflection_id"],
+                "trace_sha": AUDIT_REFLECTION["trace_sha"],
+                "trace": AUDIT_TRACE,
+                "introspection": AUDIT_REFLECTION["introspection"],
                 "finding_ids": [],
                 "escalations": [],
                 "loop_version": 1,
@@ -132,15 +173,22 @@ def _ledger(root: Path, records: list[dict]) -> gl.Ledger:
     if gap_record is not None:
         reflection_path = root / ".reflection.grow.jsonl"
         reflection_lines = [json.loads(line) for line in reflection_path.read_text().splitlines()]
-        reflection_lines[-1]["trace"] = {
+        reflection_lines[1]["trace"] = {
             "gap": {
+                "found": True,
                 "source": gap_record.get("source"),
                 "target_symbol": gap_record.get("target_symbol"),
                 "dimension": gap_record.get("dimension"),
                 "module": gap_record.get("target_symbol", "").partition("::")[0],
+                "tests": ["tests/test_x.py"],
+                "selection_outcome": "gap",
             },
             "outcome": gap_record.get("state"),
         }
+        trace_sha = gl.gr._canonical_sha(reflection_lines[1]["trace"])
+        reflection_lines[1]["trace_sha"] = trace_sha
+        if "reflection" in gap_record:
+            gap_record["reflection"] = {**gap_record["reflection"], "trace_sha": trace_sha}
         reflection_path.write_text(
             "".join(json.dumps(record) + "\n" for record in reflection_lines), encoding="utf-8"
         )
@@ -160,6 +208,7 @@ def _rec(*, state: str, module_src: str = MODULE_V1, **extra) -> dict:
         "toolset_version": 1,
         "contract_version": gl.CONTRACT_VERSION,
         "reflection": REFLECTION,
+        "review": REVIEW,
         "state": state,
         **extra,
     }
@@ -248,7 +297,7 @@ def test_no_gap_audit_is_current_until_the_module_or_mapped_tests_change(tmp_pat
             "audit_module": "app/x.py",
             "tests": ["tests/test_x.py"],
             "state": "no-gap",
-            "reflection": REFLECTION,
+            "reflection": AUDIT_REFLECTION,
         },
         root,
         ledger,
@@ -311,6 +360,15 @@ def test_current_contract_without_reflection_cannot_suppress_a_gap(tmp_path):
     assert ledger.status(record["gap_id"], root) == gl.STALE_CONTRACT
 
 
+def test_closed_gap_without_review_cannot_suppress(tmp_path):
+    root = _repo(tmp_path)
+    record = _rec(state="closed")
+    record.pop("review")
+    ledger = _ledger(root, [MANIFEST, record])
+
+    assert ledger.status(record["gap_id"], root) == gl.STALE_CONTRACT
+
+
 def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
@@ -320,7 +378,7 @@ def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
             "audit_module": "app/x.py",
             "tests": ["tests/test_x.py"],
             "state": "no-gap",
-            "reflection": REFLECTION,
+            "reflection": AUDIT_REFLECTION,
         },
         root,
         ledger,
@@ -329,7 +387,7 @@ def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
     assert prepared["audit_sha"] == gl.audit_sha(root, "app/x.py")
     assert prepared["toolset_version"] == 7
     assert prepared["contract_version"] == gl.CONTRACT_VERSION
-    assert prepared["reflection"] == REFLECTION
+    assert prepared["reflection"] == AUDIT_REFLECTION
 
 
 def test_prepare_record_rejects_missing_or_unwritten_reflection(tmp_path):
@@ -373,6 +431,51 @@ def test_prepare_record_rejects_a_receipt_from_another_gap(tmp_path):
     }
     with pytest.raises(ValueError, match="different Grow gap"):
         gl.prepare_record(record, root, ledger, require_reflection=True)
+
+
+def test_prepare_audit_rejects_a_gap_reflection_replay(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="different module audit"):
+        gl.prepare_audit_record(
+            {
+                "audit_module": "app/x.py",
+                "tests": ["tests/test_x.py"],
+                "state": "no-gap",
+                "reflection": REFLECTION,
+            },
+            root,
+            ledger,
+        )
+
+
+def test_prepare_record_rejects_a_tampered_durable_trace(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    reflection_path = root / ".reflection.grow.jsonl"
+    lines = [json.loads(line) for line in reflection_path.read_text().splitlines()]
+    lines[1]["trace"]["gap"]["dimension"] = "tampered"
+    reflection_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in lines), encoding="utf-8"
+    )
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="durable digest"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "app/x.py::crisp",
+                "dimension": "scale=2.0",
+                "state": "closed",
+                "reflection": REFLECTION,
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+            require_reflection=True,
+        )
 
 
 def test_prepare_record_rejects_reflection_from_another_dimension(tmp_path):
@@ -429,7 +532,7 @@ def test_prepare_audit_record_rejects_missing_or_directory_test_paths(tmp_path):
                     "audit_module": "app/x.py",
                     "tests": [test_path],
                     "state": "no-gap",
-                    "reflection": REFLECTION,
+                    "reflection": AUDIT_REFLECTION,
                 },
                 root,
                 ledger,
@@ -465,6 +568,7 @@ def test_append_cli_fills_identity_fields(monkeypatch, tmp_path, capsys):
         "dimension": "scale=2.0",
         "state": "closed",
         "reflection": REFLECTION,
+        "review": REVIEW,
     }
     monkeypatch.setattr(
         sys,
@@ -494,7 +598,7 @@ def test_append_cli_fills_no_gap_audit_identity(monkeypatch, tmp_path, capsys):
         "audit_module": "app/x.py",
         "tests": ["tests/test_x.py"],
         "state": "no-gap",
-        "reflection": REFLECTION,
+        "reflection": AUDIT_REFLECTION,
     }
     monkeypatch.setattr(
         sys,
