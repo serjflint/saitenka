@@ -202,6 +202,8 @@ def test_the_watchdog_dumps_every_thread_and_forces_exit_on_a_hung_shutdown(tmp_
         assert "ThreadPoolExecu" in text, "…and the worker it is waiting on"
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_a_clean_exit_leaves_no_shutdown_dump_behind(tmp_path):
     """The negative control for the file's meaning: if a healthy run also left one, its presence in
     a report would say nothing."""
