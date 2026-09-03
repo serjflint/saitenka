@@ -91,21 +91,28 @@ owners, missing guarantees, and scope guard. A counterexample may reroute the ne
 permission to broaden the product invariant.
 
 Stop when the evidence saturates: the supported scenario is coherent across its owners, every applicable
-counterexample class has a proof, the deterministic gates are green, and the residual uncertainty is
+counterexample class has a proof, the applicable deterministic checks are green, and the residual uncertainty is
 explicit. Do not stop because coverage, mutation score, or test count reached a pleasing number.
 
-## 5. Complete one exact tree
+If re-enfolding leaves no justified tracked change, complete a local no-change result: preserve the
+discriminator, falsified hypotheses, final whole, and residual uncertainty in the scratch ledger, then
+stop. Do not create an empty commit, run change-only gates/reviews, or open a PR.
+
+## 5. Complete one exact tree when an artifact exists
 
 Run affected checks during editing, then the full deterministic and free-threaded gates required by the
 repository. Commit the final artifact before review.
 
-Give two isolated adversarial reviewers the base, exact head, diff, frozen invariant/scope, and validation
-digest; withhold author rationale. Also include `.agents/rules/searching.md`, the shell-search ban, permitted
-navigation surfaces, and `uv run` for Python—the safety envelope is not design rationale. Record P0-P3
-findings and the reviewed-input digest. **Every launched reviewer must finish.** Fix every P0/P1; resolve
-each P2 or obtain an explicit acceptance from the human owner; record P3. Any change to tracked reviewed
-bytes or to the frozen invariant, scope, or validation evidence invalidates all earlier approvals. Updating
-only the git-ignored review table with the verdict does not alter the reviewed inputs.
+Freeze a review packet containing the base/head/diff, supported scenario, invariant, accepted dossier and
+human decision, affected owners, discriminator, scope guard, final scenario trace, mechanism-proof matrix,
+validation, residual uncertainty, and follow-ups; hash it. Give two isolated adversarial reviewers that
+packet and withhold author rationale. Also include `.agents/rules/searching.md`, the shell-search ban,
+permitted navigation surfaces, and `uv run` for Python—the safety envelope is not design rationale.
+
+Record P0-P3 findings and the reviewed-packet digest. **Every launched reviewer must finish.** Fix every
+P0/P1; resolve each P2 or obtain an explicit acceptance from the human owner; record P3. Any change to
+tracked reviewed bytes or a frozen packet field invalidates all earlier approvals. Updating only the
+separate git-ignored review-return table does not alter the reviewed packet.
 
 On an outward path, let `contribute` open a lean ready PR from the repository template after the evidence
 ledger is complete. Preserve residual risks and follow-ups without smuggling them into the current scope.

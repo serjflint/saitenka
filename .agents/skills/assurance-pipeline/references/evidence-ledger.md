@@ -32,9 +32,9 @@ Preserve falsified hypotheses: they are evidence against repeating an attractive
 
 ## Routing
 
-| Finding | Route | Eligibility / trust evidence | Why this is the smallest primitive | Invocation / artifact |
+| Finding | Route | Eligibility / freshness evidence | Why this is the smallest primitive | Invocation / artifact |
 | --- | --- | --- | --- | --- |
-| | Grow / Sharpen / adequacy / contribute / no change | idle/exclusion, baseline, proof, restoration, reviews | | |
+| | Grow / Sharpen / adequacy / contribute / no change | idle/exclusion, baseline, proof, restoration, reviews, current content hash/version/disposition | | |
 
 ## Mechanism proofs
 
@@ -62,17 +62,28 @@ separately for mutation survivors, fuzz crashers, and symbolic counterexamples.
 | | full deterministic | | |
 | | free-threaded | | |
 
-## Exact-head reviews
+## Frozen review packet
 
-Frozen review-input digest (base + head + diff + invariant + scope + validation):
+Copy the following into a separate immutable scratch file and hash it before launching reviewers:
 
-| Reviewer invocation | Model / isolation | Reviewed digest | Verdict | Findings / resolution / human P2 owner |
+- base, head, and diff digest;
+- supported scenario and product invariant;
+- accepted dossier and human design decision;
+- affected owners, discriminator, and scope guard;
+- final scenario trace and mechanism-proof matrix;
+- validation evidence, residual uncertainty, and follow-ups.
+
+Frozen reviewed-packet path and digest:
+
+## Review returns
+
+| Reviewer invocation | Model / isolation | Reviewed packet digest | Verdict | Findings / resolution / human P2 owner |
 | --- | --- | --- | --- | --- |
 | | | | | P0-P3 |
 
-List every launched reviewer, including timeouts or failures. If any frozen review input changes, mark
-every earlier row invalid and launch fresh review. Appending returned verdicts to this git-ignored review
-table does not change the frozen inputs. Only the human owner may accept a P2; record that decision.
+List every launched reviewer, including timeouts or failures. If any frozen packet field changes, mark
+every earlier row invalid and launch fresh review. Appending returned verdicts to this separate git-ignored
+table does not change the packet. Only the human owner may accept a P2; record that decision.
 
 ## Final re-enfolding
 

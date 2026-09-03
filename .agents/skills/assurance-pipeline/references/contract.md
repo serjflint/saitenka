@@ -22,13 +22,15 @@ The pipeline may consume a completed Grow/Sharpen receipt or invoke a dry-run on
 is active and the target passes the child loop's idle/exclusion rules. Those candidate edits revert. Once
 implementation starts, `write-test` materializes additive package tests. A reverted Sharpen edit is never
 replayed: its coordinate may motivate a new additive package oracle, while changing the old assertion stays
-a later standalone Sharpen run. Discovery may consume a complete existing adequacy coordinate, but
-hardening it and replaying the instrument wait until the design is accepted. The pipeline records which
+a later standalone Sharpen run. Discovery may consume a complete existing adequacy coordinate, but both
+hardening and instrument replay wait until the design is accepted. The pipeline records which
 evidence was consumed and never treats an agent verdict as a substitute for deterministic proof.
 
 A Grow/Sharpen receipt contributes trusted proof only when it records a green mapped baseline, a
-proof-complete candidate, exact restoration, and two valid isolated reviews. Other dry-runs may contribute
-an untrusted coordinate or falsified hypothesis, never a passing proof. Record the eligibility evidence.
+proof-complete candidate, exact restoration, and two valid isolated reviews **and** remains current. Recompute
+the child-defined target/source content hash, require the current loop/toolset/contract version, and confirm
+the ledger's current disposition still admits the receipt. Stale or other dry-runs may contribute an
+untrusted coordinate or falsified hypothesis, never a passing proof. Record the freshness evidence.
 
 ## Entry and decision checkpoint
 
@@ -98,17 +100,22 @@ outside the frozen invariant.
 
 ## Completion and invalidation
 
-A pipeline result is complete only when:
+A **no-change result** completes locally when the discriminator is preserved, the falsified hypothesis is
+re-enfolded into the final whole, residual uncertainty is explicit, and no tracked change is justified. It
+does not create an empty commit, run artifact-only gates/reviews, or open a PR.
+
+An **artifact result** is complete only when:
 
 - the final scenario trace has no contradictory generation, identity, policy, or ordering among its owners;
 - every mechanism claimed necessary has direct proof or a recorded non-applicability reason;
 - all temporary perturbations restored exact bytes;
 - repository-required deterministic and free-threaded gates passed on the final head;
 - two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or accepted by the human owner, and P3 recorded;
-- every approval names the same reviewed-input digest, and the worktree is clean.
+- every approval names the same reviewed-packet digest, and the worktree is clean.
 
-The reviewed-input digest binds the base, head, diff, frozen invariant, scope guard, and validation evidence.
-Any change to one of those inputs invalidates all previous approvals. Appending returned verdicts to the
-git-ignored review table does not change that frozen input. A reviewer timeout or abandoned invocation is
-unfinished, not an implicit pass. Only the human owner may accept a P2. If evidence saturates with no
-justified change, a well-supported no-change result is successful research.
+The reviewed packet binds the base, head, diff, supported scenario, invariant, accepted dossier and human
+decision, affected owners, discriminator, scope guard, final scenario trace, mechanism-proof matrix,
+validation evidence, residual uncertainty, and follow-ups. Any change to one of those fields invalidates
+all approvals. Appending returned verdicts to a separate git-ignored review table does not change the
+packet. A reviewer timeout or abandoned invocation is unfinished, not an implicit pass. Only the human
+owner may accept a P2.
