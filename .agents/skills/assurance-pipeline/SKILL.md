@@ -99,9 +99,11 @@ explicit. Do not stop because coverage, mutation score, or test count reached a 
 
 If re-enfolding leaves no justified tracked change, complete a local no-change result: preserve the
 discriminator, falsified hypotheses, final whole, and residual uncertainty in the scratch ledger, then
-restore every pipeline-created tracked byte to its pre-implementation digest and require a clean tracked
-worktree and index. Child dry-run ledgers remain in their dedicated worktrees under their own contracts;
-record their paths/disposition. Do not create an empty commit, run change-only gates/reviews, or open a PR.
+use the pre-implementation candidate manifest to restore modified paths and remove only paths recorded as
+absent before the run. Require the full status, including untracked files, and index to match the baseline
+except explicitly enumerated scratch ledgers. Child dry-run ledgers remain in their dedicated worktrees
+under their own contracts; record their paths/disposition. Do not create an empty commit, run change-only
+gates/reviews, or open a PR.
 
 ## 5. Complete one exact tree when an artifact exists
 

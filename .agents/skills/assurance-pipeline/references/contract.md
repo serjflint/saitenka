@@ -101,10 +101,12 @@ outside the frozen invariant.
 
 A **no-change result** completes locally when the discriminator is preserved, the falsified hypothesis is
 re-enfolded into the final whole, residual uncertainty is explicit, and no tracked change is justified. It
-also restores every pipeline-created tracked byte to its pre-implementation digest and leaves the package
-worktree/index clean. Child-loop ledger-only results stay in their dedicated worktrees under the child
-contract, with their location/disposition recorded. No-change does not create an empty commit, run
-artifact-only gates/reviews, or open a PR.
+also uses a pre-implementation candidate manifest covering every pipeline-touched tracked or untracked path:
+restore paths that existed to their exact digest, and remove only paths recorded as absent. The final full
+status (`--untracked-files=all`) and index must match the baseline except explicitly enumerated scratch
+ledgers. Child-loop ledger-only results stay in their dedicated worktrees under the child contract, with
+their location/disposition recorded. No-change does not create an empty commit, run artifact-only
+gates/reviews, or open a PR.
 
 An **artifact result** is complete only when:
 

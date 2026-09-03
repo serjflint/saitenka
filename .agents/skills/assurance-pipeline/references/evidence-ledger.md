@@ -16,7 +16,9 @@ keep run-specific hashes, counts, commands, and dead hypotheses in the ledger.
 - Accepted dossier / human decision:
 - Final change type:
 - Contribution mode: prepare-only / publish-only / not applicable
-- Pre-implementation tracked-tree/index digest:
+- Pre-implementation full status (`--untracked-files=all`) and index digest:
+- Candidate path manifest (path + absent-before or exact digest):
+- Explicit scratch-ledger exclusions:
 
 ## Whole-system model
 
@@ -105,6 +107,6 @@ Publication-worktree verification after all reviewers (HEAD + packet/diff digest
 - Residual uncertainty:
 - Follow-ups outside scope:
 - Evidence-saturation rationale:
-- No-change restoration / tracked-tree / index result:
+- No-change restoration / full-status / index result:
 - Child dry-run ledger paths and disposition:
 - Final disposition: no change / local proof / ready PR / blocked
