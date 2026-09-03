@@ -36,7 +36,7 @@ Preserve falsified hypotheses: they are evidence against repeating an attractive
 
 | Finding | Route | Eligibility / freshness evidence | Why this is the smallest primitive | Invocation / artifact |
 | --- | --- | --- | --- | --- |
-| | Grow / Sharpen / adequacy / contribute / no change | coordinate only, or exact current replay with source/test/candidate/version/restoration/review bindings | | |
+| | Grow / Sharpen / adequacy / contribute / no change | Grow/Sharpen receipt is coordinate-only; package proof is fresh | | |
 
 ## Mechanism proofs
 

@@ -63,9 +63,10 @@ Choose by the evidence gap and current phase, not by a preferred artifact:
 
 Grow and Sharpen remain idle-time loops: invoke them only before implementation, only when their cadence
 and exclusion rules say the target is idle, and only in their existing dry-run mode. Their candidate edits
-revert. A receipt supplies a coordinate and historical evidence, not current package proof. Count its proof
-only after replaying the exact candidate against the current baseline and binding source, test, candidate,
-and child-contract digests. The pipeline never consumes a child working tree.
+revert. A receipt supplies a coordinate and historical evidence, not current package proof. Child receipts
+do not retain canonical candidate bytes, so never replay them. After human acceptance, build a fresh
+additive package oracle through `write-test` and prove it on the current tree. The pipeline never consumes
+a child working tree.
 After a design is accepted or feature work begins, materialize only additive package tests through
 `write-test`; never replay a reverted Sharpen edit or invent an embedded Grow/Sharpen mode. A Sharpen
 receipt can justify an additive package oracle; changing the old assertion remains a later standalone

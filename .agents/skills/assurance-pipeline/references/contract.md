@@ -26,10 +26,10 @@ a later standalone Sharpen run. Discovery may consume a complete existing adequa
 hardening and instrument replay wait until the design is accepted. The pipeline records which
 evidence was consumed and never treats an agent verdict as a substitute for deterministic proof.
 
-A Grow/Sharpen receipt is historical evidence, never current package proof by itself. To count it as proof,
-recover the exact candidate bytes and replay every applicable child arm against a current green baseline;
-bind the surrounding source, mapped tests, candidate diff, current loop/toolset/contract version, restoration,
-and new review results. Otherwise it contributes only an untrusted coordinate or falsified hypothesis.
+A Grow/Sharpen receipt is historical evidence and a coordinate, never current package proof. Child dry-runs
+do not guarantee a persisted canonical candidate patch, so the pipeline never replays them. After human
+acceptance, author a fresh additive package oracle through `write-test` and prove it on the current tree.
+A coordinate that only warrants changing an existing assertion remains a later standalone Sharpen run.
 
 ## Entry and decision checkpoint
 
