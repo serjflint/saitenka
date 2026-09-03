@@ -10,51 +10,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, Language, looks_japanese
+from saitenka_tokenize.languages import (
+    MAIN_LANG,
+    SECOND_LANG,
+    Language,
+    equivalent_language_bases,
+    language_base,
+    looks_japanese,
+)
 
 EN_LANGS = {"en", "eng", "en-us", "en-gb", "eng-us", "english"}
 JP_LANGS = {"ja", "jpn", "jp", "japanese"}
-_ISO_639_ALIASES = {
-    "be": ("bel",),
-    "bg": ("bul",),
-    "ca": ("cat",),
-    "da": ("dan",),
-    "de": ("deu", "ger"),
-    "el": ("ell", "gre"),
-    "en": ("eng",),
-    "es": ("spa",),
-    "fi": ("fin",),
-    "fr": ("fra", "fre"),
-    "it": ("ita",),
-    "jp": ("jpn", "ja", "japanese"),
-    "mk": ("mkd", "mac"),
-    "nb": ("nob",),
-    "nl": ("nld", "dut"),
-    "nn": ("nno",),
-    "no": ("nor",),
-    "pl": ("pol",),
-    "pt": ("por",),
-    "ro": ("ron", "rum"),
-    "ru": ("rus",),
-    "sr": ("srp",),
-    "sv": ("swe",),
-    "uk": ("ukr",),
-}
 
 
 def _tag_matches_preference(lang: str, want: str) -> bool:
     low = lang.lower()
     return low == want or low.startswith(f"{want}-")
-
-
-def _equivalent_bases(base: str) -> tuple[str, ...]:
-    aliases = _ISO_639_ALIASES.get(base)
-    if aliases is not None:
-        return (base, *aliases)
-    for canonical, candidates in _ISO_639_ALIASES.items():
-        if base in candidates:
-            return (base, canonical, *(candidate for candidate in candidates if candidate != base))
-    return (base,)
 
 
 def wanted_languages(slang: str) -> list[str]:
@@ -66,7 +37,7 @@ def wanted_languages(slang: str) -> list[str]:
         wanted.append(code)
         base = code.partition("-")[0]
         region = code.removeprefix(f"{base}-") if base != code else ""
-        equivalent = _equivalent_bases(base)
+        equivalent = equivalent_language_bases(base)
         if region:
             wanted.extend(f"{alias}-{region}" for alias in equivalent[1:])
         if base != code:
@@ -232,7 +203,7 @@ def primary_role(
 
 
 def language_name(lang: str | None) -> str:
-    low = (lang or "").lower()
+    low = language_base(lang or "")
     if low in JP_LANGS:
         return "Japanese"
     if low in EN_LANGS:

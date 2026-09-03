@@ -20,7 +20,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
+from saitenka_tokenize.languages import (
+    MAIN_LANG,
+    ReaderLanguages,
+    canonical_language_tag,
+    language_base,
+)
 
 from saitenka.app.config import ProfileOptions
 
@@ -29,29 +34,10 @@ from saitenka.app.config import ProfileOptions
 # accepted while obvious garbage ("", "!!", "1") is rejected loudly at config-load time.
 _LANG_CODE = re.compile(r"^[A-Za-z]{2,}(?:-[A-Za-z0-9]+)*$")
 
-# Alias → the canonical internal code the rest of the app already keys on (``MAIN_LANG``/``SECOND_LANG``
-# and each provider's ``languages`` set — ``subtitle_providers.py``). Canonicalising ONCE at resolution
-# is the SSOT that keeps tokenizer selection and provider gating in agreement: without it a profile
-# written ``language = "ja"`` (valid ISO-639-1) tokenizes as unidic yet silently fails the provider gate,
-# since providers key on the exact literal ``"jp"``.
-_CANONICAL = {
-    "ja": "jp",
-    "jp": "jp",
-    "jpn": "jp",
-    "japanese": "jp",
-    "en": "en",
-    "eng": "en",
-    "english": "en",
-}
-
 
 def canonical_language(code: str) -> str:
     """Fold an aliased primary subtag while retaining any region/script preference."""
-    base, separator, suffix = code.partition("-")
-    canonical = _CANONICAL.get(base.lower())
-    if canonical is None:
-        return code
-    return f"{canonical}{separator}{suffix}" if separator else canonical
+    return canonical_language_tag(code)
 
 
 @dataclass(frozen=True)
@@ -81,7 +67,24 @@ def validate_language_code(code: str) -> str:
 # the deinflector ships rules for every one (only fr does today); an unlisted language must name its
 # tokenizer explicitly. Onboarding a writing system = extend one set (Cyrillic/Greek already work).
 _LATIN_SCRIPT = frozenset(
-    {"fr", "es", "de", "it", "pt", "nl", "ca", "ro", "sv", "da", "no", "nb", "nn", "fi", "pl"}
+    {
+        "en",
+        "fr",
+        "es",
+        "de",
+        "it",
+        "pt",
+        "nl",
+        "ca",
+        "ro",
+        "sv",
+        "da",
+        "no",
+        "nb",
+        "nn",
+        "fi",
+        "pl",
+    }
 )
 _CYRILLIC_SCRIPT = frozenset({"ru", "uk", "be", "bg", "sr", "mk"})
 _GREEK_SCRIPT = frozenset({"el"})
@@ -91,7 +94,7 @@ _EUROPEAN_SCRIPTS = _LATIN_SCRIPT | _CYRILLIC_SCRIPT | _GREEK_SCRIPT
 
 def _base_code(language: str) -> str:
     """The primary subtag, lowercased (``de-CH`` → ``de``)."""
-    return language.split("-", 1)[0].lower()
+    return language_base(language)
 
 
 def primary_font_for(language: str) -> str | None:

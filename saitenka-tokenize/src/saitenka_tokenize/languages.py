@@ -33,6 +33,60 @@ class ReaderLanguages:
 
 DEFAULT_LANGUAGES = ReaderLanguages()  # today's JP-main / EN-second default
 
+_ISO_639_ALIASES = {
+    "be": ("bel",),
+    "bg": ("bul",),
+    "ca": ("cat",),
+    "da": ("dan",),
+    "de": ("deu", "ger"),
+    "el": ("ell", "gre"),
+    "en": ("eng", "english"),
+    "es": ("spa",),
+    "fi": ("fin",),
+    "fr": ("fra", "fre"),
+    "it": ("ita",),
+    "jp": ("jpn", "ja", "japanese"),
+    "mk": ("mkd", "mac"),
+    "nb": ("nob",),
+    "nl": ("nld", "dut"),
+    "nn": ("nno",),
+    "no": ("nor",),
+    "pl": ("pol",),
+    "pt": ("por",),
+    "ro": ("ron", "rum"),
+    "ru": ("rus",),
+    "sr": ("srp",),
+    "sv": ("swe",),
+    "uk": ("ukr",),
+}
+
+
+def equivalent_language_bases(code: str) -> tuple[str, ...]:
+    """Known ISO/legacy spellings for one primary language subtag, input spelling first."""
+    base = code.lower()
+    aliases = _ISO_639_ALIASES.get(base)
+    if aliases is not None:
+        return (base, *aliases)
+    for canonical, candidates in _ISO_639_ALIASES.items():
+        if base in candidates:
+            return (base, canonical, *(candidate for candidate in candidates if candidate != base))
+    return (base,)
+
+
+def language_base(code: str) -> str:
+    """Canonical primary subtag for a language tag (``fra-CA`` -> ``fr``)."""
+    base = code.partition("-")[0].lower()
+    equivalents = equivalent_language_bases(base)
+    return next((candidate for candidate in equivalents if candidate in _ISO_639_ALIASES), base)
+
+
+def canonical_language_tag(code: str) -> str:
+    """Canonicalize a known primary subtag while preserving its region/script suffix."""
+    _base, separator, suffix = code.partition("-")
+    canonical = language_base(code)
+    return f"{canonical}{separator}{suffix}" if separator else canonical
+
+
 # Unicode blocks that mark text as Japanese — content-based language ID when a subtitle track carries
 # no (or a wrong) language tag. Kana is unambiguously Japanese; CJK ideographs are shared with Chinese,
 # but for a JP-immersion tool choosing between Japanese and a Latin-script fallback their presence,

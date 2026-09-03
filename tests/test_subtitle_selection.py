@@ -137,6 +137,7 @@ def test_an_untagged_track_with_no_sample_defaults_to_the_target() -> None:
 
 def test_language_name_falls_back_to_the_raw_tag() -> None:
     assert language_name("jpn") == "Japanese"
+    assert language_name("jp-JP") == "Japanese"
     assert language_name("eng") == "English"
     assert language_name("kor") == "kor"
     assert language_name(None) == "unknown language"

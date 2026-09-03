@@ -17,6 +17,7 @@ from saitenka_dict import (
     TermQuery,
     TermResultMode,
 )
+from saitenka_tokenize.languages import language_base
 
 from saitenka import otel_metrics
 from saitenka.app.dictionary_surface import (
@@ -195,7 +196,7 @@ class DictionarySourceAdapter:
         """
         message = (
             "（辞書に見つかりませんでした）"
-            if self.options.language in {"jp", "ja"}
+            if language_base(self.options.language) == "jp"
             else "(not found in dictionary)"
         )
         surface = inflected or token.surface

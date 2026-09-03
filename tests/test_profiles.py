@@ -560,6 +560,18 @@ def test_regional_japanese_alias_keeps_one_profile_identity() -> None:
     assert (profile.langs.main, profile.tokenizer, profile.slang) == ("jp-JP", "unidic", "jp")
 
 
+@pytest.mark.parametrize(
+    ("configured", "canonical"),
+    [("eng-GB", "en-GB"), ("fra-CA", "fr-CA"), ("deu-CH", "de-CH")],
+)
+def test_regional_latin_aliases_share_the_latin_profile_identity(
+    configured: str, canonical: str
+) -> None:
+    profile = resolve_profile({"profile": {"language": configured}})
+
+    assert (profile.langs.main, profile.tokenizer) == (canonical, "latin")
+
+
 def test_explicit_profile_slang_wins_over_the_derived_one():
     # A profile can pin its own track priority (e.g. a release that tags French as the 3-letter "fra").
     cfg = {

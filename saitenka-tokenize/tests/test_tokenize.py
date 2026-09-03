@@ -10,15 +10,26 @@ from __future__ import annotations
 import pytest
 from saitenka_tokenize import (
     Token,
+    canonical_language_tag,
+    equivalent_language_bases,
     get_tokenizer,
     has_kanji,
     is_kana,
     kata_to_hira,
+    language_base,
     merge_dict_compounds,
     phrase_terms,
     query_token,
     register_tokenizer,
 )
+
+
+def test_language_identity_normalizes_aliases_without_losing_regions():
+    assert (
+        canonical_language_tag("fra-CA"),
+        language_base("jp-JP"),
+        equivalent_language_bases("deu"),
+    ) == ("fr-CA", "jp", ("deu", "de", "ger"))
 
 
 def _tok(surface: str, pos: str = "名詞", start: int = 0) -> Token:
