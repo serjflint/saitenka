@@ -114,6 +114,16 @@ def matching_tagged_track(tracks: list[dict], wants: list[str]) -> dict | None:
     )
 
 
+def _fallback_primary(tracks: list[dict], en: dict | None) -> dict | None:
+    selected = sorted(
+        (track for track in tracks if track.get("selected")),
+        key=lambda track: track.get("main-selection", 0),
+    )
+    if selected and selected[0] is not en:
+        return selected[0]
+    return tracks[0] if en is None and tracks else None
+
+
 def _fill_untagged_tracks(
     tracks: list[dict],
     jp: dict | None,
@@ -124,14 +134,8 @@ def _fill_untagged_tracks(
 ) -> tuple[dict | None, dict | None]:
     untagged = [track for track in tracks if not str(track.get("lang") or "").strip()]
     fallback = tracks if allow_tagged_fallback else untagged
-    selected = sorted(
-        (track for track in fallback if track.get("selected")),
-        key=lambda track: track.get("main-selection", 0),
-    )
-    if jp is None and selected and selected[0] is not en:
-        jp = selected[0]
-    if jp is None and en is None and fallback:
-        jp = fallback[0]
+    if jp is None:
+        jp = _fallback_primary(fallback, en)
     if en is None:
         candidates = fallback if allow_tagged_fallback and not primary_matched else untagged
         en = next((track for track in candidates if track.get("id") != (jp or {}).get("id")), None)
