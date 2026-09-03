@@ -1,8 +1,8 @@
 ---
 name: assurance-pipeline
 description: >-
-  Compose Saitenka's architecture inquiry, Grow, Sharpen, test-adequacy, and contribution loops into
-  one package-level assurance case. Use for "run the assurance pipeline", "gather proofs", "turn this
+  Compose Saitenka's architecture inquiry and evidence from Grow, Sharpen, test-adequacy, and contribution
+  work into one package-level assurance case. Use for "run the assurance pipeline", "gather proofs", "turn this
   test finding into a module/package improvement", "combine Grow and Sharpen", or when a supported
   scenario crosses several owners and one-test ratchets are too local. Routes each falsifiable finding
   to the smallest proof-producing primitive, re-enfolds counterexamples, and requires exact-head review.
@@ -20,39 +20,53 @@ does not weaken, duplicate, or replace their gates. Read
 [`references/contract.md`](references/contract.md) and start an
 [`evidence ledger`](references/evidence-ledger.md) before changing an artifact.
 
-## 0. Freeze the whole
+## 0. Freeze the whole and entry state
 
 Record the base commit, supported scenario, product invariant, affected owners, and a scope guard. State
-what observation would falsify the current architecture hypothesis. Line coverage, test count, module
-size, and a tidy dependency graph are signals only; none is the invariant.
+what observation would falsify the current architecture hypothesis. Choose one entry state:
+
+- **fresh inquiry** — research and discriminate read-only, then stop for the human's design choice;
+- **accepted dossier** — record the accepted architecture-inquiry dossier and human decision, then resume
+  from its invariant and discriminator without re-running the inquiry.
+
+Line coverage, test count, module size, and a tidy dependency graph are signals only; none is the invariant.
 
 Work in a clean dedicated worktree. Default to local-only evidence. Outward action requires the user's
 explicit request; this skill never merges.
 
 ## 1. Inquire before routing
 
-Use `architecture-inquiry` to trace the scenario whole-to-parts-to-whole: declared, enforced, and true
-behavior; writers and readers; authority reachability; supplied and absent guarantees. When external
-mechanisms are genuinely missing, use `research` and verify primary sources. Stop research at evidence
-saturation, then construct the smallest deterministic discriminator.
+In **fresh inquiry**, use `architecture-inquiry` to trace the scenario whole-to-parts-to-whole: declared,
+enforced, and true behavior; writers and readers; authority reachability; supplied and absent guarantees.
+When external mechanisms are genuinely missing, use `research` and verify primary sources. Stop research
+at evidence saturation, then construct the smallest deterministic discriminator.
 
 Run the discriminator against the base. Record falsified hypotheses instead of manufacturing a test or
-fix after the premise fails.
+fix after the premise fails. Present the re-enfolded dossier and stop for a human choice before any source
+or package implementation. In **accepted dossier**, verify the recorded base and discriminator still hold;
+do not recursively re-enter architecture inquiry.
 
 ## 2. Route the finding
 
-Choose by the evidence gap, not by a preferred artifact:
+Choose by the evidence gap and current phase, not by a preferred artifact:
 
-| Finding | Proof-producing primitive |
+| Phase and finding | Proof-producing primitive |
 | --- | --- |
-| Supported scenario is absent | `grow-loop` |
-| Existing oracle is weak or non-live | `sharpen-loop` |
-| Pure-core behavior is under-specified | `test-adequacy` |
-| Production code contradicts the invariant | `contribute` |
+| Discovery; supported scenario is absent | consume a completed Grow receipt, or eligible `grow-loop` dry-run |
+| Discovery; existing oracle is weak | consume a completed Sharpen receipt, or eligible `sharpen-loop` dry-run |
+| Discovery; pure-core behavior is under-specified | `test-adequacy` coordinate |
+| Implementation; test must join the package tree | `write-test` inside the contribution worktree |
+| Implementation; production contradicts the accepted invariant | `contribute` |
 | Architecture hypothesis is false | ledger the no-change result and re-enfold |
 
-Each invoked loop retains its own baseline, isolation, liveness, restoration, review, and scope rules.
-Return its evidence to this pipeline; a passing candidate is an input, not terminal success.
+Grow and Sharpen remain idle-time loops: invoke them only before implementation, only when their cadence
+and exclusion rules say the target is idle, and only in their existing dry-run mode. Their candidate edits
+revert. The pipeline consumes their coordinates, receipts, and proof evidence—not their working trees.
+After a design is accepted or feature work begins, materialize package tests through `write-test`; never
+invent an embedded Grow/Sharpen mode.
+
+Every child retains its own baseline, isolation, liveness, restoration, review, and scope rules. A passing
+child candidate is an input to the assurance case, not terminal package success.
 
 ## 3. Escalate only when the invariant crosses owners
 
@@ -61,9 +75,10 @@ multiple owners to agree, or the discriminator exposes mixed identities, generat
 policy across those owners. Widen only along that same invariant and production path. Unrelated defects,
 cleanup, and attractive refactors become follow-ups.
 
-For every independent mechanism in the final change, require an exact base/branch behavioral
-discriminator, an oracle-liveness witness, and semantic deletion or an equivalent evidence-subtraction
-check. Coverage is a locator; the proof is that the claimed guarantee fails when its mechanism is removed.
+Classify the final change and apply the proof matrix in `references/contract.md`. Bug fixes and behavioral
+features require fail-base/pass-head evidence; behavior-preserving refactors require the same acceptance
+suite on both plus their boundary/retirement proof. Liveness and evidence subtraction apply to claimed
+behavioral or test mechanisms, with any non-applicability justified. Coverage is only a locator.
 
 ## 4. Re-enfold after every counterexample
 
@@ -80,12 +95,13 @@ explicit. Do not stop because coverage, mutation score, or test count reached a 
 Run affected checks during editing, then the full deterministic and free-threaded gates required by the
 repository. Commit the final artifact before review.
 
-Give isolated adversarial reviewers only the base, exact head, diff, claimed invariant, and validation;
+Give two isolated adversarial reviewers only the base, exact head, diff, claimed invariant, and validation;
 withhold author rationale. Record P0-P3 findings and the reviewed commit. **Every launched reviewer must
-finish.** Any artifact change invalidates all earlier approvals, so rerun the relevant proof and review
-the new exact head.
+finish.** Fix every P0/P1; resolve or explicitly accept each P2; record P3. Any change to tracked reviewed
+bytes invalidates all earlier approvals, so rerun the relevant proof and review the new exact head. Updating
+the git-ignored scratch ledger with a verdict does not alter the reviewed artifact.
 
-On an outward path, use `contribute` and `pr-ticket-describe` to open a lean ready PR after the evidence
+On an outward path, let `contribute` open a lean ready PR from the repository template after the evidence
 ledger is complete. Preserve residual risks and follow-ups without smuggling them into the current scope.
 
 ## Verify

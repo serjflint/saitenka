@@ -11,14 +11,25 @@ system's architecture should be copied.
 | Surface | Supplies | Does not establish |
 | --- | --- | --- |
 | `architecture-inquiry` | product invariant, whole-system trace, falsifiable discriminator | implementation fitness by itself |
-| `grow-loop` | one genuinely missing scenario and live additive oracle | package coherence |
-| `sharpen-loop` | one stronger existing oracle with preservation evidence | new scenario coverage or source correctness |
+| `grow-loop` | idle-time dry-run receipt for one missing scenario and live additive oracle | a retained edit in the package worktree |
+| `sharpen-loop` | idle-time dry-run receipt for one stronger oracle with preservation evidence | a retained edit in the package worktree |
 | `test-adequacy` | survivor, crasher, or counterexample plus instrument replay | relevance outside the pure core |
+| `write-test` | a test materialized in the active contribution worktree | package coherence by itself |
 | `contribute` | coherent source/tooling change, repository gates, PR packaging | the outer assurance claim unless its evidence is returned |
 | `assurance-pipeline` | routing, composition, re-enfolding, scope, exact-tree completion | permission to weaken a child contract |
 
-The pipeline may consume a completed child-loop artifact or invoke a child loop. It must record which.
-It never treats an agent verdict as a substitute for a deterministic proof.
+The pipeline may consume a completed Grow/Sharpen receipt or invoke a dry-run only while no feature work
+is active and the target passes the child loop's idle/exclusion rules. Those candidate edits revert. Once
+implementation starts, `write-test` materializes any final test in the package tree. The pipeline records
+which evidence was consumed and never treats an agent verdict as a substitute for deterministic proof.
+
+## Entry and decision checkpoint
+
+A fresh run creates a read-only architecture dossier. It may gather dry-run test evidence, but it stops
+before source/package implementation until the human records an accepted arrangement. A resumed run names
+that dossier, decision, base, invariant, and discriminator. It validates them, then proceeds without
+recursively invoking architecture inquiry. An outward-action request is authorization to publish completed
+work, not evidence that an architecture choice was accepted.
 
 ## Package-escalation test
 
@@ -34,11 +45,21 @@ The following do not justify escalation alone: high LOC, many uncovered lines, a
 reviewer's unrelated observation, a general desire for cleaner layers, or several tests that merely touch
 the same module.
 
-## Proof obligations
+## Proof obligations by change type
+
+Classify each final artifact before selecting obligations:
+
+| Change type | Baseline/branch obligation | Additional evidence |
+| --- | --- | --- |
+| Bug fix or behavioral feature | supported observation fails on base and passes on head | live oracle; evidence subtraction for each claimed behavioral mechanism; integration where owners meet |
+| Behavior-preserving refactor | same acceptance suite passes on base and head | boundary/reachability or retirement proof; preservation evidence; semantic deletion only for a claimed retired policy/mechanism |
+| Test-only growth/hardening | child loop's exact liveness, restoration, preservation, and review contract | final suite and exact-head review |
+| Tooling or documentation | source-backed tool/reader failure on base and contract/smoke proof on head | path rot-guard and reader check as applicable |
 
 Every claimed mechanism gets a row in the ledger. Applicable evidence is cumulative:
 
-- **Exact A/B:** the supported observation fails on the recorded base and passes on the recorded head.
+- **Exact baseline/branch comparison:** use the change-type obligation above; A/B does not always mean
+  fail-base/pass-head.
 - **Oracle liveness:** a deliberate relevant perturbation makes the oracle fail.
 - **Evidence subtraction:** delete or neutralize the claimed mechanism; the focused proof must fail, then
   restore the exact bytes. This is semantic deletion, not line coverage.
@@ -51,8 +72,8 @@ Every claimed mechanism gets a row in the ledger. Applicable evidence is cumulat
 - **Exact-head adversarial review:** reviewers attack the final artifact and the stated proof, not the
   author's story.
 
-Not every row needs every proof kind. A skipped proof needs a reason tied to the mechanism. “Tests pass”
-and “coverage increased” are never sufficient reasons.
+Not every row needs every proof kind. Select the obligation before authoring, and give every skipped proof
+a reason tied to the change type and mechanism. “Tests pass” and “coverage increased” are never sufficient.
 
 ## Counterexample and widening discipline
 
@@ -76,9 +97,10 @@ A pipeline result is complete only when:
 - every mechanism claimed necessary has direct proof or a recorded non-applicability reason;
 - all temporary perturbations restored exact bytes;
 - repository-required deterministic and free-threaded gates passed on the final head;
-- every launched reviewer returned and all required findings were resolved or explicitly accepted;
+- two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or explicitly accepted, and P3 recorded;
 - every approval names the final commit, and the worktree is clean.
 
-Any artifact edit after review invalidates all previous approvals. A reviewer timeout or abandoned
-invocation is an unfinished review, not an implicit pass. If evidence saturates with no justified change,
-a well-supported no-change result is successful research.
+Any change to tracked reviewed bytes after review invalidates all previous approvals. Scratch-ledger
+bookkeeping is outside the reviewed tree. A reviewer timeout or abandoned invocation is unfinished, not an
+implicit pass. If evidence saturates with no justified change, a well-supported no-change result is
+successful research.

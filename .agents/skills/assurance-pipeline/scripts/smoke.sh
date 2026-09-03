@@ -15,8 +15,10 @@ have .agents/skills/architecture-inquiry/SKILL.md
 have .agents/skills/grow-loop/SKILL.md
 have .agents/skills/sharpen-loop/SKILL.md
 have .agents/skills/test-adequacy/SKILL.md
+have .agents/skills/write-test/SKILL.md
 have .agents/skills/research/SKILL.md
 have .agents/skills/contribute/SKILL.md
+have .github/PULL_REQUEST_TEMPLATE.md
 have .agents/rules/searching.md
 have tools/skill_check.py
 if [ "$fail" -eq 0 ]; then echo "assurance-pipeline smoke OK"; else echo "assurance-pipeline smoke FAILED"; exit 1; fi

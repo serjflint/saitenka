@@ -12,6 +12,9 @@ keep run-specific hashes, counts, commands, and dead hypotheses in the ledger.
 - Affected owners:
 - Scope guard:
 - Outward mode: local-only / ready PR
+- Entry state: fresh inquiry / accepted dossier
+- Accepted dossier / human decision:
+- Final change type:
 
 ## Whole-system model
 
@@ -35,12 +38,13 @@ Preserve falsified hypotheses: they are evidence against repeating an attractive
 
 ## Mechanism proofs
 
-| Mechanism / guarantee | Exact A/B | Liveness | Evidence subtraction | Preservation / integration | Restore digest |
+| Mechanism / guarantee | Baseline/branch obligation | Liveness | Evidence subtraction | Preservation / integration | Restore digest |
 | --- | --- | --- | --- | --- | --- |
 | | | | | | |
 
-For every blank or skipped cell, record why the proof is not applicable. Record canonical instrument
-replay separately for mutation survivors, fuzz crashers, and symbolic counterexamples.
+Select the obligation from `contract.md` before filling the table. For every blank or skipped cell, record
+why the proof is not applicable to that change type and mechanism. Record canonical instrument replay
+separately for mutation survivors, fuzz crashers, and symbolic counterexamples.
 
 ## Re-enfolding checkpoints
 
@@ -64,8 +68,9 @@ replay separately for mutation survivors, fuzz crashers, and symbolic counterexa
 | --- | --- | --- | --- | --- |
 | | | | | P0-P3 |
 
-List every launched reviewer, including timeouts or failures. If the artifact changes, mark every earlier
-row invalid and launch fresh review on the new commit.
+List every launched reviewer, including timeouts or failures. If tracked reviewed bytes change, mark every
+earlier row invalid and launch fresh review on the new commit. Appending verdicts to this git-ignored
+scratch ledger does not change the reviewed artifact.
 
 ## Final re-enfolding
 
