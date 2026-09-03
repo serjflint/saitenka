@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788436065120,
+  "lastUpdate": 1788445642863,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -13697,6 +13697,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.146298,
             "range": "3 replicas; min 1.00446; max 1.4317; MAD 0.141838; worst 1.4317",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "364eaaed8945743b390a10e359079b813812045e",
+          "message": "Merge pull request #488 from serjflint/feat/assurance-pipeline\n\nfeat: add package assurance pipeline",
+          "timestamp": "2026-09-03T19:25:32+05:00",
+          "tree_id": "5bb77807aa7517b4f464ad264bcf56d5238e6574",
+          "url": "https://github.com/serjflint/saitenka/commit/364eaaed8945743b390a10e359079b813812045e"
+        },
+        "date": 1788445641595,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.500326,
+            "range": "3 replicas; min 6.40819; max 6.50642; MAD 0.006096",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.545129,
+            "range": "3 replicas; min 9.07383; max 9.71894; MAD 0.173807; worst 9.71894",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.603008,
+            "range": "3 replicas; min 18.5667; max 20.6999; MAD 0.096855",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.908937,
+            "range": "3 replicas; min 18.6808; max 20.9273; MAD 0.018382; worst 20.9273",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.530928,
+            "range": "3 replicas; min 12.4557; max 16.6463; MAD 2.07525",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.123822,
+            "range": "3 replicas; min 0.090225; max 0.130974; MAD 0.007152; worst 0.130974",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.042087,
+            "range": "3 replicas; min 39.2281; max 44.7879; MAD 0.745847; worst 44.7879",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.183568,
+            "range": "3 replicas; min 2.55456; max 3.80059; MAD 0.617021; worst 3.80059",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.369205,
+            "range": "3 replicas; min 0.935415; max 1.45291; MAD 0.083706; worst 1.45291",
             "unit": "ms"
           }
         ]
