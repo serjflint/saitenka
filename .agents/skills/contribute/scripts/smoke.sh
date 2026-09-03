@@ -46,7 +46,7 @@ if ref.is_file():
 
 need((repo / "CONTRIBUTING.md").is_file(), "repo CONTRIBUTING.md missing (SKILL.md links it)")
 need((repo / "AGENTS.md").is_file(), "AGENTS.md missing (SKILL.md links it)")
-for sib in ("write-test", "dev-gate", "sharpen-loop"):
+for sib in ("write-test", "dev-gate", "sharpen-loop", "assurance-pipeline"):
     need((repo / ".agents" / "skills" / sib).is_dir(), f"neighbor skill missing: {sib}")
 
 if fail:

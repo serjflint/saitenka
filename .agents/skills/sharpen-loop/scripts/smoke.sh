@@ -10,6 +10,7 @@ test -f "$repo_dir/.agents/sharpen/SPEC.md"
 test -f "$repo_dir/.agents/sharpen/ADAPTERS.md"
 test -f "$repo_dir/.agents/sharpen/PROMPTS.md"
 test -f "$repo_dir/.agents/sharpen/contracts.json"
+test -f "$repo_dir/.agents/skills/assurance-pipeline/SKILL.md"
 
 uv run python - "$repo_dir" <<'PY'
 import json

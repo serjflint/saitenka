@@ -13,4 +13,5 @@ have tools/fuzz/fuzz_sub_index.py        # the `poe fuzz` target
 have tests/test_sub_index_properties.py  # the survivor -> property + @example example
 have tests/test_mutate_targets.py        # the allowlist rot-guard the skill points at
 have tests/conftest.py                   # the crosshair backend registration
+have .agents/skills/assurance-pipeline/SKILL.md
 if [ "$fail" -eq 0 ]; then echo "test-adequacy smoke OK"; else echo "test-adequacy smoke FAILED"; exit 1; fi

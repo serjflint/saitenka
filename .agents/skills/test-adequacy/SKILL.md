@@ -51,6 +51,9 @@ the coordinate back as data: survivor, minimized crasher, or symbolic counterexa
 step then uses the `write-test` decision tree to kill the bug class with a property plus pinned `@example`,
 and this skill reruns the originating instrument to verify the result.
 
+When invoked by `assurance-pipeline`, return the coordinate, regression proof, and canonical instrument
+replay. Re-enfolding decides whether that pure-core proof contributes to the package invariant.
+
 ## Fuzz — `poe fuzz`
 
 atheris / libFuzzer byte-mutation of the subtitle parser. **Contract:** `parse_cues` is robust — any input

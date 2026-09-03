@@ -13,5 +13,6 @@ test -f "$repo_dir/.agents/grow/contracts.json"
 test -f "$repo_dir/.agents/skills/write-test/SKILL.md"
 test -f "$repo_dir/.agents/skills/test-adequacy/SKILL.md"
 test -f "$repo_dir/.agents/skills/contribute/SKILL.md"
+test -f "$repo_dir/.agents/skills/assurance-pipeline/SKILL.md"
 
 echo "grow-loop skill smoke: ok"
