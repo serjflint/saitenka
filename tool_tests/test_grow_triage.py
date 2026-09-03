@@ -8,6 +8,7 @@ PRODUCT of the two axes, not a sum (the Grow↔Sharpen distinction).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -119,12 +120,33 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
     test_path.write_text("def test_x():\n    assert True\n", encoding="utf-8")
     ledger_path = tmp_path / ".ledger.grow.jsonl"
     ledger_path.write_text('{"type":"manifest","toolset_version":3}\n', encoding="utf-8")
+    trace = {
+        "gap": {
+            "found": False,
+            "target_symbol": None,
+            "dimension": None,
+            "module": module,
+            "tests": tests,
+            "selection_outcome": "no-orphan",
+        },
+        "outcome": "no-gap",
+    }
+    trace_sha = gl.gr._canonical_sha(trace)
     (tmp_path / ".reflection.grow.jsonl").write_text(
-        '{"type":"manifest","loop_version":1}\n'
-        '{"type":"run-reflection","reflection_id":"aaaaaaaaaaaaaaaa",'
-        '"trace_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",'
-        '"trace":{"gap":{"module":"app/x.py"}},"introspection":"fixture",'
-        '"finding_ids":[],"escalations":[]}\n',
+        json.dumps({"type": "manifest", "loop_version": 1})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "run-reflection",
+                "reflection_id": "a" * 16,
+                "trace_sha": trace_sha,
+                "trace": trace,
+                "introspection": "fixture",
+                "finding_ids": [],
+                "escalations": [],
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     ledger = gl.Ledger.load(ledger_path)
@@ -136,7 +158,7 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
                 "state": "no-gap",
                 "reflection": {
                     "reflection_id": "a" * 16,
-                    "trace_sha": "b" * 64,
+                    "trace_sha": trace_sha,
                     "introspection": "fixture",
                     "findings": [],
                     "appended": True,
