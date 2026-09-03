@@ -25,47 +25,80 @@ def _require(condition: object, message: str) -> None:
 def _text(value: object, name: str) -> str:
     _require(isinstance(value, str) and bool(value.strip()), f"{name} is required")
     assert isinstance(value, str)
-    return value
+    return value.strip()
 
 
-def _validate_packet(packet: dict, result: str) -> None:
-    _require(packet.get("version") == 1, "packet version must be 1")
+def _validate_proof_rows(packet: dict, receipt: dict) -> None:
+    proofs = packet.get("mechanism_proofs")
+    _require(isinstance(proofs, list) and proofs, "packet mechanism_proofs is required")
+    for proof in proofs:
+        _require(isinstance(proof, dict), "mechanism proof must be an object")
+        for key in ("mechanism", "obligation", "evidence"):
+            _text(proof.get(key), f"mechanism proof {key}")
+        _require(
+            proof.get("disposition") in {"proved", "not-applicable"}, "invalid proof disposition"
+        )
+    evidence = packet.get("validation_evidence")
+    _require(isinstance(evidence, list) and evidence, "packet validation_evidence is required")
+    for row in evidence:
+        _require(isinstance(row, dict), "validation evidence must be an object")
+        _text(row.get("command"), "validation command")
+        _require(row.get("result") == "pass", "validation evidence must pass")
+        _require(row.get("head") == receipt["head"], "validation evidence lacks exact head")
+
+
+def _validate_packet(packet: dict, receipt: dict, result: str) -> datetime:
+    _require(packet.get("version") == 2, "packet version must be 2")
     _require(packet.get("result") == result, "packet result differs from receipt")
+    for key in ("base", "head", "tree_digest", "diff_digest", "index_digest"):
+        _require(packet.get(key) == receipt.get(key), f"packet {key} differs from receipt")
     _require(
         packet.get("entry_state") in {"fresh-inquiry", "accepted-dossier"}, "invalid entry state"
     )
     for key in (
         "supported_scenario",
         "product_invariant",
-        "accepted_dossier",
         "scope_guard",
         "discriminator",
         "final_scenario_trace",
     ):
         _text(packet.get(key), f"packet {key}")
+    dossier = packet.get("accepted_dossier")
+    _require(isinstance(dossier, dict), "packet accepted_dossier is required")
+    assert isinstance(dossier, dict)
+    _text(dossier.get("id"), "accepted dossier id")
+    _require(dossier.get("base") == receipt["base"], "accepted dossier base differs")
     decision = packet.get("human_decision")
     _require(isinstance(decision, dict), "packet human_decision is required")
     assert isinstance(decision, dict)
     for key in ("decision_id", "decision", "accepted_at"):
         _text(decision.get(key), f"human_decision {key}")
-    datetime.fromisoformat(decision["accepted_at"])
+    expected_decision = "no-change" if result == "no-change" else "implement"
+    _require(decision.get("decision") == expected_decision, "human decision differs from result")
+    accepted_at = datetime.fromisoformat(decision["accepted_at"])
+    _require(dossier.get("decision_id") == decision["decision_id"], "dossier decision differs")
     owners = packet.get("affected_owners")
     _require(
-        isinstance(owners, list) and owners and all(isinstance(x, str) and x for x in owners),
-        "packet affected_owners are required",
+        isinstance(owners, list)
+        and len(owners) >= 2
+        and len({_text(x, "affected owner").casefold() for x in owners}) == len(owners),
+        "packet requires at least two distinct affected owners",
     )
-    for key in ("mechanism_proofs", "validation_evidence"):
-        value = packet.get(key)
-        _require(isinstance(value, list) and value, f"packet {key} is required")
+    _validate_proof_rows(packet, receipt)
     for key in ("residual_uncertainty", "followups", "falsified_hypotheses"):
         _require(isinstance(packet.get(key), list), f"packet {key} must be a list")
     if result == "no-change":
         _require(
             bool(packet["falsified_hypotheses"]), "no-change packet requires a falsified hypothesis"
         )
+        _require(
+            packet.get("no_change_baseline") == receipt.get("no_change_baseline"),
+            "no-change baseline differs",
+        )
+    return accepted_at
 
 
-def _validate_events(receipt: dict, expected_stages: list[str]) -> None:
+def _validate_events(receipt: dict, expected_stages: list[str]) -> dict[str, datetime]:
     events = receipt.get("events")
     _require(isinstance(events, list), "ordered events are required")
     assert isinstance(events, list)
@@ -79,6 +112,7 @@ def _validate_events(receipt: dict, expected_stages: list[str]) -> None:
     _require(
         times == sorted(times) and len(set(times)) == len(times), "stage timestamps are not ordered"
     )
+    return {event["stage"]: timestamp for event, timestamp in zip(events, times, strict=True)}
 
 
 def _validate_review_findings(findings: object) -> None:
@@ -116,17 +150,30 @@ def _validate_identity(receipt: dict) -> None:
     )
 
 
-def _validate_no_change(receipt: dict) -> None:
-    _validate_events(receipt, NO_CHANGE_STAGES)
+def _validate_no_change(receipt: dict) -> dict[str, datetime]:
+    events = _validate_events(receipt, NO_CHANGE_STAGES)
     _require(receipt.get("disposition") == "no-change", "invalid no-change disposition")
     _require(receipt["base"] == receipt["head"], "no-change base and head differ")
+    baseline = receipt.get("no_change_baseline")
+    _require(isinstance(baseline, dict), "no-change baseline is required")
+    assert isinstance(baseline, dict)
+    for key in ("base", "head", "tree_digest", "index_digest"):
+        _require(baseline.get(key) == receipt[key], f"no-change baseline {key} differs")
     _require(
-        receipt.get("baseline_index_digest") == receipt["index_digest"],
-        "no-change index differs from baseline",
+        baseline.get("scratch_exclusions") == receipt["scratch_exclusions"],
+        "baseline exclusions differ",
     )
-    manifest = receipt.get("candidate_manifest")
+    _require(
+        isinstance(baseline.get("status_entries"), list), "baseline status entries are required"
+    )
+    manifest = baseline.get("candidate_manifest")
     _require(isinstance(manifest, list) and manifest, "no-change candidate manifest is required")
     assert isinstance(manifest, list)
+    _require(
+        baseline.get("touched_paths")
+        == [item.get("path") for item in manifest if isinstance(item, dict)],
+        "no-change touched paths differ from candidate manifest",
+    )
     for item in manifest:
         _require(isinstance(item, dict), "candidate manifest item must be an object")
         _text(item.get("path"), "candidate path")
@@ -139,15 +186,30 @@ def _validate_no_change(receipt: dict) -> None:
             or (not item["existed_before"] and digest is None),
             "invalid candidate digest",
         )
+    return events
 
 
-def _validate_contribution(receipt: dict, disposition: str) -> int | None:
+def _timestamp(row: dict, name: str) -> datetime:
+    return datetime.fromisoformat(_text(row.get("completed_at"), f"{name} completed_at"))
+
+
+def _validate_contribution(
+    receipt: dict, disposition: str, events: dict[str, datetime]
+) -> int | None:
     contribution = receipt.get("contribution")
     _require(isinstance(contribution, dict), "contribution evidence is required")
     assert isinstance(contribution, dict)
+    prepare = contribution.get("prepare_only")
+    _require(isinstance(prepare, dict), "prepare-only was not completed on head")
+    assert isinstance(prepare, dict)
     _require(
-        contribution.get("prepare_only") == {"status": "completed", "head": receipt["head"]},
+        prepare.get("status") == "completed" and prepare.get("head") == receipt["head"],
         "prepare-only was not completed on head",
+    )
+    prepare_at = _timestamp(prepare, "prepare-only")
+    _require(
+        events["gate"] <= prepare_at <= events["freeze-packet"],
+        "prepare-only chronology is invalid",
     )
     publish = contribution.get("publish_only")
     publish_generation = None
@@ -157,6 +219,11 @@ def _validate_contribution(receipt: dict, disposition: str) -> int | None:
         _require(
             publish.get("status") == "completed" and publish.get("head") == receipt["head"],
             "publish-only did not use head",
+        )
+        published_at = _timestamp(publish, "publish-only")
+        _require(
+            events["review"] <= published_at <= events["publish"],
+            "publish-only chronology is invalid",
         )
         publish_generation = publish.get("review_generation")
         _require(
@@ -169,7 +236,7 @@ def _validate_contribution(receipt: dict, disposition: str) -> int | None:
     return publish_generation
 
 
-def _validate_gates(receipt: dict) -> None:
+def _validate_gates(receipt: dict, events: dict[str, datetime]) -> None:
     gates = receipt.get("gates")
     _require(
         isinstance(gates, list)
@@ -184,32 +251,55 @@ def _validate_gates(receipt: dict) -> None:
             "gate is not passing on head",
         )
         _text(gate.get("command"), "gate command")
+        completed_at = _timestamp(gate, "gate")
+        _require(
+            events["re-enfold"] <= completed_at <= events["gate"],
+            "gate chronology is invalid",
+        )
 
 
-def _validate_reviews(receipt: dict, publish_generation: int | None) -> None:
+def _validate_reviews(
+    receipt: dict, publish_generation: int | None, events: dict[str, datetime]
+) -> None:
     reviews = receipt.get("reviews")
-    if not isinstance(reviews, list) or len(reviews) != 2:
-        raise ValueError("exactly two reviews are required")
+    if not isinstance(reviews, list) or not reviews:
+        raise ValueError("review attempts are required")
     _require(all(isinstance(review, dict) for review in reviews), "review must be an object")
     identities: set[str] = set()
     invocations: set[str] = set()
     generations = {review.get("generation") for review in reviews}
     _require(
-        len(generations) == 1
-        and all(isinstance(generation, int) and generation >= 1 for generation in generations),
-        "reviews must share one generation",
+        all(isinstance(generation, int) and generation >= 1 for generation in generations),
+        "invalid review generation",
+    )
+    _require(
+        all(review.get("status") in {"completed", "failed", "canceled"} for review in reviews),
+        "review attempt is unfinished",
+    )
+    latest = max(generations)
+    completed_latest = [
+        review
+        for review in reviews
+        if review.get("generation") == latest and review.get("status") == "completed"
+    ]
+    _require(len(completed_latest) == 2, "latest generation requires exactly two reviews")
+    _require(
+        all(
+            review.get("status") == "completed"
+            for review in reviews
+            if review.get("generation") == latest
+        ),
+        "latest review generation did not complete",
     )
     if publish_generation is not None:
-        _require(
-            publish_generation in generations, "publish-only used a different review generation"
-        )
+        _require(publish_generation == latest, "publish-only used a different review generation")
     expected = {
         key: receipt[key]
         for key in ("head", "diff_digest", "packet_digest", "tree_digest", "index_digest")
     }
-    for review in reviews:
-        identity = _text(review.get("identity"), "review identity")
-        invocation = _text(review.get("invocation"), "review invocation")
+    for review in completed_latest:
+        identity = _text(review.get("identity"), "review identity").casefold()
+        invocation = _text(review.get("invocation"), "review invocation").casefold()
         _require(
             identity not in identities and invocation not in invocations,
             "reviewers must be distinct",
@@ -223,6 +313,16 @@ def _validate_reviews(receipt: dict, publish_generation: int | None) -> None:
             "review isolation is invalid",
         )
         _validate_review_findings(review.get("findings"))
+        review_times = receipt.get("review_completed_at")
+        _require(isinstance(review_times, dict), "review completion times are required")
+        assert isinstance(review_times, dict)
+        completed_at = datetime.fromisoformat(
+            _text(review_times.get(review["invocation"].strip()), "review completed_at")
+        )
+        _require(
+            events["freeze-packet"] <= completed_at <= events["review"],
+            "review chronology is invalid",
+        )
         _require(
             review.get("pre") == expected and review.get("post") == expected,
             "review did not verify the exact packet before and after",
@@ -230,26 +330,33 @@ def _validate_reviews(receipt: dict, publish_generation: int | None) -> None:
 
 
 def validate(receipt: dict, packet: dict) -> None:
-    _require(receipt.get("version") == 2, "receipt version must be 2")
+    _require(receipt.get("version") == 3, "receipt version must be 3")
     result = receipt.get("result")
     _require(result in {"artifact", "no-change"}, "result must be artifact or no-change")
     assert isinstance(result, str)
-    _validate_packet(packet, result)
     _validate_identity(receipt)
+    accepted_at = _validate_packet(packet, receipt, result)
     if result == "no-change":
-        _validate_no_change(receipt)
+        events = _validate_no_change(receipt)
+        _require(
+            events["inquire"] <= accepted_at <= events["route"],
+            "human decision chronology is invalid",
+        )
         return
     disposition = receipt.get("disposition")
     _require(
         disposition in {"local-proof", "ready-pr", "published"}, "invalid artifact disposition"
     )
     assert isinstance(disposition, str)
-    _validate_events(
+    events = _validate_events(
         receipt, [*ARTIFACT_STAGES, *(["publish"] if disposition == "published" else [])]
     )
-    publish_generation = _validate_contribution(receipt, disposition)
-    _validate_gates(receipt)
-    _validate_reviews(receipt, publish_generation)
+    _require(
+        events["inquire"] <= accepted_at <= events["route"], "human decision chronology is invalid"
+    )
+    publish_generation = _validate_contribution(receipt, disposition, events)
+    _validate_gates(receipt, events)
+    _validate_reviews(receipt, publish_generation, events)
 
 
 def _git(repo: Path, *args: str) -> bytes:
@@ -297,7 +404,11 @@ def verify_live(receipt: dict, packet_bytes: bytes, repo: Path) -> None:
     unexpected = _unexpected_status(repo, receipt["scratch_exclusions"])
     _require(not unexpected, f"worktree status differs from receipt: {unexpected}")
     if receipt["result"] == "no-change":
-        for item in receipt["candidate_manifest"]:
+        _require(
+            unexpected == receipt["no_change_baseline"]["status_entries"],
+            "current status differs from no-change baseline",
+        )
+        for item in receipt["no_change_baseline"]["candidate_manifest"]:
             path = _path(repo, item["path"])
             if item["existed_before"]:
                 _require(path.is_file(), f"candidate path missing: {item['path']}")

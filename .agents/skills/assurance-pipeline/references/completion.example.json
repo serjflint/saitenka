@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "result": "artifact",
   "disposition": "ready-pr",
   "base": "0000000000000000000000000000000000000000",
@@ -19,14 +19,18 @@
     {"stage": "freeze-packet", "completed_at": "2026-09-03T10:05:00Z", "evidence": "packet hashed"},
     {"stage": "review", "completed_at": "2026-09-03T10:06:00Z", "evidence": "generation 1 completed"}
   ],
-  "contribution": {"prepare_only": {"status": "completed", "head": "1111111111111111111111111111111111111111"}, "publish_only": null},
+  "contribution": {"prepare_only": {"status": "completed", "head": "1111111111111111111111111111111111111111", "completed_at": "2026-09-03T10:04:30Z"}, "publish_only": null},
   "gates": [
-    {"name": "deterministic", "status": "pass", "head": "1111111111111111111111111111111111111111", "command": "uv run poe all"},
-    {"name": "free-threaded", "status": "pass", "head": "1111111111111111111111111111111111111111", "command": "uv run poe test-ft"}
+    {"name": "deterministic", "status": "pass", "head": "1111111111111111111111111111111111111111", "command": "uv run poe all", "completed_at": "2026-09-03T10:03:30Z"},
+    {"name": "free-threaded", "status": "pass", "head": "1111111111111111111111111111111111111111", "command": "uv run poe test-ft", "completed_at": "2026-09-03T10:03:45Z"}
   ],
   "reviews": [
     {"identity": "reviewer-a", "invocation": "review-a", "generation": 1, "status": "completed", "read_only": true, "isolation": "disposable-worktree", "findings": [], "pre": {"head": "1111111111111111111111111111111111111111", "diff_digest": "2222222222222222222222222222222222222222222222222222222222222222", "packet_digest": "3333333333333333333333333333333333333333333333333333333333333333", "tree_digest": "4444444444444444444444444444444444444444", "index_digest": "5555555555555555555555555555555555555555555555555555555555555555"}, "post": {"head": "1111111111111111111111111111111111111111", "diff_digest": "2222222222222222222222222222222222222222222222222222222222222222", "packet_digest": "3333333333333333333333333333333333333333333333333333333333333333", "tree_digest": "4444444444444444444444444444444444444444", "index_digest": "5555555555555555555555555555555555555555555555555555555555555555"}},
     {"identity": "reviewer-b", "invocation": "review-b", "generation": 1, "status": "completed", "read_only": true, "isolation": "context-free", "findings": [], "pre": {"head": "1111111111111111111111111111111111111111", "diff_digest": "2222222222222222222222222222222222222222222222222222222222222222", "packet_digest": "3333333333333333333333333333333333333333333333333333333333333333", "tree_digest": "4444444444444444444444444444444444444444", "index_digest": "5555555555555555555555555555555555555555555555555555555555555555"}, "post": {"head": "1111111111111111111111111111111111111111", "diff_digest": "2222222222222222222222222222222222222222222222222222222222222222", "packet_digest": "3333333333333333333333333333333333333333333333333333333333333333", "tree_digest": "4444444444444444444444444444444444444444", "index_digest": "5555555555555555555555555555555555555555555555555555555555555555"}}
   ],
+  "review_completed_at": {
+    "review-a": "2026-09-03T10:05:30Z",
+    "review-b": "2026-09-03T10:05:45Z"
+  },
   "publication_verified": false
 }

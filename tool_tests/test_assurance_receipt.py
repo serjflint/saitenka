@@ -82,13 +82,17 @@ def test_live_verification_rejects_untracked_non_scratch_path(tmp_path, monkeypa
     ("mutate", "message"),
     [
         (lambda r, _p: r["events"].reverse(), "stage order"),
-        (lambda r, _p: r["reviews"].pop(), "two reviews"),
+        (lambda r, _p: r["reviews"].pop(), "exactly two reviews"),
         (lambda r, _p: r["reviews"][1].update(identity="reviewer-a"), "distinct"),
         (lambda r, _p: r["reviews"][0].update(read_only=False), "read-only"),
         (lambda r, _p: r["reviews"][1]["post"].update(head="0" * 40), "exact packet"),
         (lambda r, _p: r["contribution"].update(prepare_only=None), "prepare-only"),
         (lambda _r, p: p.update(human_decision={}), "decision_id"),
         (lambda _r, p: p.update(mechanism_proofs=[]), "mechanism_proofs"),
+        (lambda _r, p: p.update(mechanism_proofs=[None]), "object"),
+        (lambda r, p: p.update(head=r["base"]), "packet head differs"),
+        (lambda r, _p: r["reviews"][1].update(identity=" reviewer-a "), "distinct"),
+        (lambda r, _p: r["reviews"].append({"generation": 2, "status": "running"}), "unfinished"),
     ],
 )
 def test_counterexamples_fail_closed(mutate, message):
@@ -100,6 +104,17 @@ def test_counterexamples_fail_closed(mutate, message):
 
 def test_no_change_requires_falsification_manifest_and_restored_index():
     receipt, packet = _examples()
+    manifest = [{"path": "vibe/candidate", "existed_before": False, "sha256": None}]
+    baseline = {
+        "base": receipt["base"],
+        "head": receipt["base"],
+        "tree_digest": receipt["tree_digest"],
+        "index_digest": receipt["index_digest"],
+        "scratch_exclusions": [],
+        "status_entries": [],
+        "touched_paths": ["vibe/candidate"],
+        "candidate_manifest": manifest,
+    }
     receipt.update(
         result="no-change",
         disposition="no-change",
@@ -108,11 +123,52 @@ def test_no_change_requires_falsification_manifest_and_restored_index():
             {"stage": stage, "completed_at": f"2026-09-03T10:0{index}:00Z", "evidence": stage}
             for index, stage in enumerate(verify.NO_CHANGE_STAGES)
         ],
-        baseline_index_digest=receipt["index_digest"],
-        candidate_manifest=[{"path": "vibe/candidate", "existed_before": False, "sha256": None}],
+        no_change_baseline=baseline,
     )
-    packet.update(result="no-change", falsified_hypotheses=["ordering premise was false"])
+    packet.update(
+        result="no-change",
+        head=receipt["head"],
+        accepted_dossier={**packet["accepted_dossier"], "base": receipt["base"]},
+        human_decision={**packet["human_decision"], "decision": "no-change"},
+        validation_evidence=[{**packet["validation_evidence"][0], "head": receipt["head"]}],
+        falsified_hypotheses=["ordering premise was false"],
+        no_change_baseline=baseline,
+    )
     verify.validate(receipt, packet)
-    receipt["candidate_manifest"] = []
+    empty_baseline = {**baseline, "candidate_manifest": []}
+    receipt["no_change_baseline"] = empty_baseline
+    packet["no_change_baseline"] = empty_baseline
     with pytest.raises(ValueError, match="manifest"):
+        verify.validate(receipt, packet)
+
+
+def test_human_decision_and_review_chronology_are_enforced():
+    receipt, packet = copy.deepcopy(_examples())
+    packet["human_decision"]["accepted_at"] = "2099-01-01T00:00:00Z"
+    with pytest.raises(ValueError, match="human decision chronology"):
+        verify.validate(receipt, packet)
+
+    receipt, packet = copy.deepcopy(_examples())
+    receipt["review_completed_at"]["review-b"] = "2026-09-03T10:04:00Z"
+    with pytest.raises(ValueError, match="review chronology"):
+        verify.validate(receipt, packet)
+
+
+def test_terminal_failed_older_review_generation_is_recorded_but_does_not_count():
+    receipt, packet = copy.deepcopy(_examples())
+    for review in receipt["reviews"]:
+        review["generation"] = 2
+    receipt["reviews"].insert(
+        0,
+        {"identity": "old", "invocation": "old-review", "generation": 1, "status": "failed"},
+    )
+    verify.validate(receipt, packet)
+
+
+def test_failed_attempt_in_latest_review_generation_invalidates_it():
+    receipt, packet = copy.deepcopy(_examples())
+    receipt["reviews"].append(
+        {"identity": "third", "invocation": "third-review", "generation": 1, "status": "failed"}
+    )
+    with pytest.raises(ValueError, match="latest review generation"):
         verify.validate(receipt, packet)

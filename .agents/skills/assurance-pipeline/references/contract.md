@@ -121,13 +121,12 @@ An **artifact result** is complete only when:
 These claims must be materialized in a versioned JSON completion receipt and accepted by
 `scripts/verify_receipt.py`; prose or an agent's aggregate success claim is not a completion signal.
 
-The reviewed packet binds the base, head, diff, supported scenario, invariant, accepted dossier and human
-decision, affected owners, discriminator, scope guard, final scenario trace, mechanism-proof matrix,
-validation evidence, residual uncertainty, and follow-ups. Any change to one of those fields invalidates
-all approvals. Appending returned verdicts to a separate git-ignored review table does not change the
-packet. A reviewer timeout or abandoned invocation is unfinished, not an implicit pass. Only the human
-owner may accept a P2. Prefer a disposable worktree per reviewer; regardless, repeat the same HEAD, digest,
-tracked-tree, and index checks in the publication worktree after every reviewer has returned.
+The reviewed packet binds base, head, tree, index, canonical diff, supported scenario, invariant, accepted
+dossier and human decision, affected owners, discriminator, scope guard, final scenario trace, typed
+mechanism proofs, validation evidence, residual uncertainty, and follow-ups. A no-change packet also binds
+the frozen baseline, touched-path manifest, and scratch exclusions. Any change to one of those fields
+invalidates all approvals. Every launched review attempt is recorded with a terminal state; only the two
+completed reviewers in the latest generation count. Only the human owner may accept a P2.
 
 Canonical diff bytes are `git diff --no-ext-diff --no-textconv --binary BASE...HEAD`; record the SHA-256
 tool used. If a reviewer cannot return, terminate it through the host, record the terminal failure, invalidate
