@@ -59,6 +59,54 @@ def test_completion_from_a_retired_episode_is_ignored() -> None:
     )
 
 
+def test_completion_from_a_reconfigured_provider_is_ignored() -> None:
+    submitted = []
+    track_port_reads = []
+
+    def submit(**job) -> bool:
+        submitted.append(job)
+        return True
+
+    def track_ports():
+        track_port_reads.append(True)
+        raise AssertionError("an old provider result must not mutate tracks")
+
+    owner = SubtitleAcquisitionController(
+        ipc=cast("MpvIPC", object()),
+        stop=threading.Event(),
+        get=lambda _name: None,
+        notifications=Notifications(),
+        track_ports=track_ports,
+        submitter=submit,
+    )
+    request = SubtitleFetchRequest(
+        fetch=lambda: (None, "unused"),
+        select_if_unchanged=False,
+        initial_sid=None,
+        replace=False,
+        force_select=False,
+    )
+    owner.submit(request, name="background")
+
+    owner.configure_retry(None)
+    submitted[0]["on_finished"](
+        EffectFinished(
+            EffectId(1),
+            Owner.SUBTITLE,
+            submitted[0]["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=SubtitleFetchResult(
+                path=None,
+                status="late",
+                select_if_unchanged=False,
+                initial_sid=None,
+            ),
+        )
+    )
+
+    assert track_port_reads == []
+
+
 def test_retiring_an_episode_retires_its_retry_configuration() -> None:
     messages = []
 

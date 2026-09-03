@@ -31,7 +31,7 @@ class _RetryState:
 
 
 class SubtitleAcquisitionController:
-    """Own provider retries, fetch identity, and episode-safe result application."""
+    """Own provider retries, fetch identity, and source-safe result application."""
 
     def __init__(
         self,
@@ -50,7 +50,7 @@ class SubtitleAcquisitionController:
         self._track_ports = track_ports
         self._submitter = submitter
         self._sequence = 0
-        self._episode_generation = 0
+        self._source_generation = 0
         self._force_select_revision = 0
         self._retry = _RetryState()
 
@@ -59,6 +59,7 @@ class SubtitleAcquisitionController:
         return self._retry.retry_active
 
     def configure_retry(self, factory: ProviderFetchFactory | None) -> None:
+        self._retire_source_generation()
         subtitle_modes.configure_retry(self._retry, factory)
 
     def start(
@@ -103,7 +104,7 @@ class SubtitleAcquisitionController:
         name: str,
         on_done: Callable[[], None] | None = None,
     ) -> None:
-        episode_generation = self._episode_generation
+        source_generation = self._source_generation
         self._sequence += 1
         identity = (self._sequence, name)
         force_select_revision = None
@@ -113,7 +114,7 @@ class SubtitleAcquisitionController:
 
         def finish(completion: EffectFinished) -> None:
             if (
-                episode_generation != self._episode_generation
+                source_generation != self._source_generation
                 or self._stop.is_set()
                 or (
                     force_select_revision is not None
@@ -146,6 +147,9 @@ class SubtitleAcquisitionController:
 
     def retire_episode(self) -> None:
         """Retire acquisition identity and retry state with the episode."""
-        self._episode_generation += 1
+        self._retire_source_generation()
+
+    def _retire_source_generation(self) -> None:
+        self._source_generation += 1
         self._force_select_revision += 1
         self._retry = _RetryState()
