@@ -19,7 +19,13 @@ from util import FakeIPC, keybind_registry, press, session_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions
-from saitenka.app.features.profiles.profile_controller import ProfileSwitchStatus
+from saitenka.app.features.profiles.profile_controller import (
+    ProfileAftermath,
+    ProfileController,
+    ProfileInvalidation,
+    ProfileSubtitles,
+    ProfileSwitchStatus,
+)
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 from saitenka.app.session.factory import (
     SessionIdentity,
@@ -459,6 +465,37 @@ def test_same_primary_profile_switch_reestablishes_an_open_translation(request):
         8,
     )
     assert ("set_property", "secondary-sid", 8) in reader.graph.ipc.commands
+
+
+def test_legacy_profile_callback_retokenizes_a_second_only_change():
+    selected = []
+    retokenized = []
+
+    def nothing():
+        return None
+
+    controller = ProfileController(
+        DEFAULT_PROFILE,
+        None,
+        ProfileInvalidation(nothing, nothing, nothing),
+        ProfileSubtitles(
+            lambda: "ja,jpn,jp",
+            lambda _slang: True,
+            selected.append,
+            lambda: retokenized.append(True),
+            current_second_slang=lambda: "en",
+        ),
+        ProfileAftermath(nothing, lambda _text, _kind: None),
+    )
+    controller.configure_cycle([DEFAULT_PROFILE, _JP_DE_SUBS])
+
+    outcome = controller.switch_to(1)
+
+    assert (outcome.status, selected, retokenized) == (
+        ProfileSwitchStatus.COMMITTED,
+        ["ja,jpn,jp"],
+        [True],
+    )
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")

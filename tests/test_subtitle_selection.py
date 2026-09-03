@@ -46,6 +46,12 @@ def test_no_tracks_selects_nothing() -> None:
     assert initial([], "ja,jpn,jp") == SubtitleStartup(SubtitleTracks(None, None), None)
 
 
+def test_an_unrelated_tagged_track_does_not_claim_either_configured_role() -> None:
+    tracks = [track(7, "eng", selected=True)]
+
+    assert initial(tracks, "fr", "de") == SubtitleStartup(SubtitleTracks(None, None), None)
+
+
 def test_startup_prefers_the_target_language_then_tagged_english() -> None:
     assert initial([track(1, "eng"), track(2, "jpn")], "ja,jpn,jp").active == MAIN_LANG
     assert initial([track(1, "eng")], "ja,jpn,jp").active == SECOND_LANG

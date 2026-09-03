@@ -115,36 +115,45 @@ def matching_tagged_track(tracks: list[dict], wants: list[str]) -> dict | None:
 
 
 def _fill_untagged_tracks(
-    tracks: list[dict], jp: dict | None, en: dict | None, *, primary_matched: bool
+    tracks: list[dict],
+    jp: dict | None,
+    en: dict | None,
+    *,
+    primary_matched: bool,
+    allow_tagged_fallback: bool,
 ) -> tuple[dict | None, dict | None]:
+    untagged = [track for track in tracks if not str(track.get("lang") or "").strip()]
+    fallback = tracks if allow_tagged_fallback else untagged
     selected = sorted(
-        (track for track in tracks if track.get("selected")),
+        (track for track in fallback if track.get("selected")),
         key=lambda track: track.get("main-selection", 0),
     )
     if jp is None and selected and selected[0] is not en:
         jp = selected[0]
-    if jp is None and en is None and tracks:
-        jp = tracks[0]
+    if jp is None and en is None and fallback:
+        jp = fallback[0]
     if en is None:
-        candidates = (track for track in tracks if track.get("id") != (jp or {}).get("id"))
-        en = next(
-            (
-                track
-                for track in candidates
-                if not primary_matched or not str(track.get("lang") or "").strip()
-            ),
-            None,
-        )
+        candidates = fallback if allow_tagged_fallback and not primary_matched else untagged
+        en = next((track for track in candidates if track.get("id") != (jp or {}).get("id")), None)
     return jp, en
 
 
 def discover(tracks: list[dict], slang: str, second_slang: str = "en") -> SubtitleTracks:
     """Classify the track list into the target-language and secondary sids."""
-    jp = matching_track(tracks, wanted_languages(slang))
-    en = matching_track(tracks, wanted_languages(second_slang))
+    primary_wants = wanted_languages(slang)
+    second_wants = wanted_languages(second_slang)
+    jp = matching_track(tracks, primary_wants)
+    en = matching_track(tracks, second_wants)
     if jp is not None and en is not None and jp.get("id") == en.get("id"):
         en = None
-    jp, en = _fill_untagged_tracks(tracks, jp, en, primary_matched=jp is not None)
+    jp, en = _fill_untagged_tracks(
+        tracks,
+        jp,
+        en,
+        primary_matched=jp is not None,
+        allow_tagged_fallback=bool(JP_LANGS.intersection(primary_wants))
+        and bool(EN_LANGS.intersection(second_wants)),
+    )
     return SubtitleTracks(
         jp_sid=jp.get("id") if jp is not None else None,
         en_sid=en.get("id") if en is not None else None,
