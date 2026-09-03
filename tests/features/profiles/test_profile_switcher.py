@@ -601,6 +601,26 @@ def test_cycle_reconfigures_translation_when_only_the_second_language_changes(re
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_alias_equivalent_primary_retokenizes_the_current_cue(request):
+    old = Profile("fr", ReaderLanguages("fr", "en"), "oldtok", slang="fr")
+    new = Profile("fra", ReaderLanguages("fr", "de"), "newtok", slang="fra")
+    register_tokenizer("oldtok", lambda: _TaggedTokenizer("old"))
+    register_tokenizer("newtok", lambda: _TaggedTokenizer("new"))
+    reader = _headless(request, profile=old, profiles=[old, new])
+    reader.graph.ipc.props["track-list"] = [{"type": "sub", "id": 6, "lang": "fra"}]
+    reader.graph.profile_integration.select_subtitle_track("fr", "en")
+    reader.graph.cue.set_subtitle("bonjour")
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    assert (
+        outcome.status,
+        reader.graph.track_commands.current().primary_sid,
+        reader.graph.subtitle_presentation.cue.current.tokens[0].lemma,
+    ) == (ProfileSwitchStatus.COMMITTED, 6, "new")
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_second_only_cycle_preserves_the_active_secondary_role(request):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])

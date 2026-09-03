@@ -517,7 +517,8 @@ def configure_providers(configure_retry, configure_picker, cfg: ProviderConfig) 
     configure_retry(
         provider_fetch_factory(cfg.enabled_providers, cfg, force=True)
         if cfg.enabled_providers
-        else None
+        else None,
+        target_language=cfg.language,
     )
     picker = (
         partial(

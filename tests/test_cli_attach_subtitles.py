@@ -25,8 +25,9 @@ class SessionController:
     def fetch_japanese_subs_async(self, fetch):
         self.fetch = fetch
 
-    def configure_subtitle_retry(self, factory):
+    def configure_subtitle_retry(self, factory, *, target_language="jp"):
         self.retry_factory = factory
+        self.target_language = target_language
 
     def configure_sub_picker(self, lister):
         self.picker_lister = lister

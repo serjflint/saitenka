@@ -47,10 +47,10 @@ class ProfileSubtitles:
 
     current_subtitle_slang: Callable[[], str]
     has_subtitle_track: Callable[[str], bool]
-    select_subtitle_track: Callable[[str], None]
+    select_subtitle_track: Callable[[str], object]
     retokenize_current_cue: Callable[[], None]
     current_second_slang: Callable[[], str] = _default_second_slang
-    select_subtitle_languages: Callable[[str, str], None] | None = None
+    select_subtitle_languages: Callable[[str, str], bool | None] | None = None
     select_translation_track: Callable[[str], None] = _ignore_second_slang
     select_degraded_subtitle_languages: Callable[[str, str], None] | None = None
 
@@ -229,7 +229,9 @@ class ProfileController:
             )
             return _TrackSwitch.MISSING
         if self._subtitles.select_subtitle_languages is not None:
-            self._subtitles.select_subtitle_languages(slang, second_slang)
+            changed = self._subtitles.select_subtitle_languages(slang, second_slang)
+            if changed is not None:
+                return _TrackSwitch.SWITCHED if changed else _TrackSwitch.UNCHANGED
             return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED
         self._subtitles.select_subtitle_track(slang)
         return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED

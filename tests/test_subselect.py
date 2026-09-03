@@ -489,9 +489,11 @@ class _FakeReader:
     def __init__(self):
         self.retry_factory = "unset"
         self.picker_lister = "unset"
+        self.target_language = "unset"
 
-    def configure_subtitle_retry(self, factory):
+    def configure_subtitle_retry(self, factory, *, target_language="jp"):
         self.retry_factory = factory
+        self.target_language = target_language
 
     def configure_sub_picker(self, lister):
         self.picker_lister = lister
@@ -537,10 +539,15 @@ def test_configure_providers_wires_retry_and_picker():
     subselect.configure_providers(
         reader.configure_subtitle_retry,
         reader.configure_sub_picker,
-        subselect.ProviderConfig(enabled_providers=("jimaku", "tsukihime"), tsukihime_config={}),
+        subselect.ProviderConfig(
+            enabled_providers=("jimaku", "tsukihime"),
+            tsukihime_config={},
+            language="fr",
+        ),
     )
     assert callable(reader.retry_factory)  # a force-refetch retry factory
     assert callable(reader.picker_lister)  # the Ctrl+J source picker
+    assert reader.target_language == "fr"
 
 
 def test_configure_providers_clears_runtime_callbacks_when_no_provider():

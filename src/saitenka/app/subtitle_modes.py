@@ -68,11 +68,12 @@ class SubtitleFetchResult:
     #: it still equals the current one — mpv answers `sid` with an int or a string.
     initial_sid: object
     replace: bool = (
-        False  # a user retry: swap the on-screen (mistimed) JP for the fresh re-synced one
+        False  # a user retry: swap the on-screen target track for the fresh re-synced one
     )
     force_select: bool = (
-        False  # an explicit picker choice: select the fetched track NOW, even from English
+        False  # an explicit picker choice: select the fetched track now from either role
     )
+    target_language: str = MAIN_LANG
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +83,16 @@ class SubtitleFetchRequest:
     initial_sid: object
     replace: bool
     force_select: bool
+    target_language: str = MAIN_LANG
+
+
+@dataclass(frozen=True, slots=True)
+class FetchSource:
+    name: str = "sub-provider"
+    target_language: str = MAIN_LANG
+
+
+DEFAULT_FETCH_SOURCE = FetchSource()
 
 
 if TYPE_CHECKING:
@@ -93,6 +104,7 @@ class SubtitleRetryState(Protocol):
     retry_factory: ProviderFetchFactory | None
     retry_active: bool
     retry_lock: threading.Lock
+    target_language: str
 
 
 class FetchSubmitter(Protocol):
@@ -114,7 +126,10 @@ def run_fetch(request: object, cancelled: threading.Event) -> object:
         path, status = request.fetch()
     except Exception as exc:  # provider failures are soft and user-visible
         log.warning("background subtitle fetch failed", exc_info=True)
-        path, status = None, f"Japanese subtitle fetch failed: {exc}"
+        path, status = (
+            None,
+            f"{language_name(request.target_language)} subtitle fetch failed: {exc}",
+        )
     return SubtitleFetchResult(
         path,
         status,
@@ -122,6 +137,7 @@ def run_fetch(request: object, cancelled: threading.Event) -> object:
         request.initial_sid,
         request.replace,
         request.force_select,
+        request.target_language,
     )
 
 
@@ -144,11 +160,12 @@ def finish_fetch(request: SubtitleFetchRequest, completion: EffectFinished) -> S
 def unavailable_fetch(request: SubtitleFetchRequest) -> SubtitleFetchResult:
     return SubtitleFetchResult(
         None,
-        "Japanese subtitle fetch unavailable",
+        f"{language_name(request.target_language)} subtitle fetch unavailable",
         request.select_if_unchanged,
         request.initial_sid,
         request.replace,
         request.force_select,
+        request.target_language,
     )
 
 
@@ -428,25 +445,34 @@ def start_fetch(
     get: PropertyGet,
     fetch: ProviderFetch,
     *,
-    name: str = "sub-provider",
+    source: FetchSource = DEFAULT_FETCH_SOURCE,
     select_if_unchanged: bool = False,
     replace: bool = False,
     force_select: bool = False,
     on_done: Callable[[], None] | None = None,
 ) -> None:
-    """Run provider I/O off-thread; mpv IPC stays on the reader thread. ``replace`` (a user retry)
-    swaps the current on-screen JP track for the freshly fetched/re-synced one; the background path
-    leaves ``replace`` false so it never disrupts what you're watching. ``force_select`` (the picker's
-    explicit choice) selects the fetched track NOW even from English, overriding the keep-current
-    background contract."""
+    """Run provider I/O off-thread; mpv IPC stays on the reader thread."""
     initial_sid = get("sid") if select_if_unchanged else None
 
-    request = SubtitleFetchRequest(fetch, select_if_unchanged, initial_sid, replace, force_select)
-    submit(request, name=name, on_done=on_done)
+    request = SubtitleFetchRequest(
+        fetch,
+        select_if_unchanged,
+        initial_sid,
+        replace,
+        force_select,
+        source.target_language,
+    )
+    submit(request, name=source.name, on_done=on_done)
 
 
-def configure_retry(source: SubtitleRetryState, factory: ProviderFetchFactory | None) -> None:
+def configure_retry(
+    source: SubtitleRetryState,
+    factory: ProviderFetchFactory | None,
+    *,
+    target_language: str = MAIN_LANG,
+) -> None:
     source.retry_factory = factory
+    source.target_language = target_language
 
 
 def _finish_retry(source: SubtitleRetryState) -> None:
@@ -508,7 +534,7 @@ def _start_resync_window(
         submit,
         get,
         do,
-        name="subtitle-resync",
+        source=FetchSource("subtitle-resync", retry.target_language),
         replace=True,
         on_done=lambda: _finish_retry(retry),
     )
@@ -524,21 +550,21 @@ def _start_provider_fetch(
     factory = retry.retry_factory
     if factory is None:
         _finish_retry(retry)
-        toast("No Japanese subtitle providers enabled", "warn")
+        toast(f"No {language_name(retry.target_language)} subtitle providers enabled", "warn")
         return
     try:
         fetch = factory(video_path)
     except Exception as exc:
         _finish_retry(retry)
         log.warning("subtitle retry setup failed", exc_info=True)
-        toast(f"Japanese subtitle search failed: {exc}", "warn")
+        toast(f"{language_name(retry.target_language)} subtitle search failed: {exc}", "warn")
         return
-    toast("Searching Japanese subtitle providers…")
+    toast(f"Searching {language_name(retry.target_language)} subtitle providers…")
     start_fetch(
         submit,
         get,
         fetch,
-        name="subtitle-retry",
+        source=FetchSource("subtitle-retry", retry.target_language),
         replace=True,
         on_done=lambda: _finish_retry(retry),
     )
@@ -587,8 +613,17 @@ def _reset_sub_delay(ipc) -> None:
     _send(ipc, "reset-sub-delay", "set_property", "sub-delay", 0.0)
 
 
-def _replace_japanese_track(
-    ports: TrackPorts, path, status: str, *, toast: str = "Japanese subtitles re-synced"
+def _mpv_language_tag(language: str) -> str:
+    return "jpn" if language == MAIN_LANG else language
+
+
+def _replace_target_track(
+    ports: TrackPorts,
+    path,
+    status: str,
+    *,
+    target_language: str = MAIN_LANG,
+    toast: str | None = None,
 ) -> None:
     """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry, or an
     explicit picker choice). Drops the stale external track(s) first — mpv caches an already-loaded
@@ -600,7 +635,13 @@ def _replace_japanese_track(
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
     _send(
-        ports.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
+        ports.ipc,
+        "add-target",
+        "sub-add",
+        str(path),
+        "select",
+        "",
+        _mpv_language_tag(target_language),
     )  # mpv selects it now
     _reset_sub_delay(ports.ipc)  # our file is the timing truth; drop any persisted/stale offset
     # The just-selected track, not discover_tracks' first JP. mpv answers `sid` with a track id or
@@ -616,19 +657,25 @@ def _replace_japanese_track(
     ports.clear_cue()
     ports.rebuild_index()  # replaces the index on success; retains it if the just-added track
     # can't resolve yet (rebuild is fail-soft) rather than blanking the cues
-    ports.toast(toast)
+    ports.toast(toast or f"{language_name(target_language)} subtitles re-synced")
     log.info("%s", status)
 
 
-def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> None:
-    """Non-disruptive arrival: add the fetched JP track but keep the current selection unless the user
-    hasn't touched it and had no JP yet (then auto-select). Leaves English on screen for an explicit
-    Alt+t otherwise — the background-fetch contract."""
+def _add_background_target(ports: TrackPorts, result: SubtitleFetchResult) -> None:
+    """Add a fetched target track without replacing a user-changed selection."""
     path, status = result.path, result.status
     current_sid = ports.get("sid")
     state = ports.tracks()
     had_japanese = state.jp_sid is not None
-    _send(ports.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
+    _send(
+        ports.ipc,
+        "add-target-background",
+        "sub-add",
+        str(path),
+        "auto",
+        "",
+        _mpv_language_tag(result.target_language),
+    )
     found = discover_tracks(ports.ipc, state.slang, state.second_slang)
     state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     select_japanese = selects_background_japanese(
@@ -646,7 +693,7 @@ def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> 
             "sid",
             current_sid if current_sid is not None else "no",
         )
-        ports.toast("Japanese subtitles ready — Alt+t to switch")
+        ports.toast(f"{language_name(result.target_language)} subtitles ready — Alt+t to switch")
         log.info("%s", status)
         return
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
@@ -658,7 +705,7 @@ def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> 
     if ports.translation_visible():
         setup_secondary(ports)
     ports.rebuild_index()  # replaces on success; retains prior cues if unresolved
-    ports.toast("Japanese subtitles ready")
+    ports.toast(f"{language_name(result.target_language)} subtitles ready")
     log.info("%s", status)
 
 
@@ -673,12 +720,17 @@ def apply_fetch_result(ports: TrackPorts, result: SubtitleFetchResult) -> None:
         log.warning("%s", result.status)
         ports.toast(result.status, "warn")
     elif action is FetchAction.REPLACE:
-        toast = "Japanese subtitles selected" if result.force_select else None
-        _replace_japanese_track(
+        toast = (
+            f"{language_name(result.target_language)} subtitles selected"
+            if result.force_select
+            else None
+        )
+        _replace_target_track(
             ports,
             result.path,
             result.status,
-            **({"toast": toast} if toast else {}),
+            target_language=result.target_language,
+            toast=toast,
         )
     else:
-        _add_background_japanese(ports, result)
+        _add_background_target(ports, result)

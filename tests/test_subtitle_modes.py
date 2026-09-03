@@ -525,6 +525,35 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     assert messages == ["Japanese subtitles ready"]
 
 
+def test_provider_arrival_uses_the_configured_target_language(tmp_path, monkeypatch):
+    ipc = FakeIPC()
+    reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
+    reader.graph.cue.configure_subtitle_mode(
+        subtitle_modes.select_initial(ipc, "fr", "de"),
+        slang="fr",
+        second_slang="de",
+    )
+    messages = []
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, *_args: messages.append(text)
+    )
+    monkeypatch.setattr(
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
+    )
+    path = tmp_path / "episode.fr.srt"
+    path.write_text("Français", encoding="utf-8")
+    reader.graph.subtitle_acquisition.configure_retry(None, target_language="fr")
+    ipc.commands.clear()
+
+    reader.graph.subtitle_acquisition.fetch_background(lambda: (path, "universal: ready"))
+    jobs.finish()
+
+    tracks = reader.graph.track_commands.current()
+    assert (tracks.slang, tracks.jp_sid, tracks.language) == ("fr", 9, MAIN_LANG)
+    assert ("sub-add", str(path), "auto", "", "fr") in ipc.commands
+    assert messages == ["fr subtitles ready"]
+
+
 def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path, monkeypatch):
     other = {"id": 7, "type": "sub", "lang": "kor"}
     ipc = FakeIPC([EN.copy(), other])
@@ -597,7 +626,7 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch, make_sessio
     path = Path(tmp_path / "episode.synced.srt")
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader.graph.track_commands.ports(), path, "resynced")
+    subtitle_modes._replace_target_track(reader.graph.track_commands.ports(), path, "resynced")
 
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
 
@@ -786,13 +815,14 @@ def test_runtime_retry_keeps_current_subs_when_window_retiming_fails(tmp_path, m
         ("JA", ["ja"], True),  # case-insensitive
         ("Japanese", ["ja"], True),  # full language name
         ("ger", ["ja", "jpn", "jp"], False),  # unrelated tag never matches
+        ("frp", ["fr"], False),  # a longer ISO code is not a regional fr tag
         (None, ["ja"], True),  # untagged track is a wildcard — load-bearing for foreign-only files
         ("", ["ja"], True),  # empty tag likewise matches
         ("ja", [""], False),  # empty want is ignored, not a wildcard
         ("ja", [], False),  # no wants → no match
     ],
 )
-def test_lang_matches_prefix_rule_and_wildcard_edges(lang, wants, expected):
+def test_lang_matches_alias_and_wildcard_edges(lang, wants, expected):
     assert subtitle_selection.lang_matches(lang, wants) is expected
 
 
@@ -1139,7 +1169,7 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader.graph.track_commands.ports(), path, "resynced")
+    subtitle_modes._replace_target_track(reader.graph.track_commands.ports(), path, "resynced")
 
     assert (
         reader.graph.track_commands.navigation.current.sub_index is old
@@ -1171,7 +1201,7 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(
     reader.graph.track_commands.declare(SubtitleLanguageChanged(SECOND_LANG))  # English on screen
     replaced: list = []
     monkeypatch.setattr(
-        subtitle_modes, "_replace_japanese_track", lambda *a, **_k: replaced.append(a)
+        subtitle_modes, "_replace_target_track", lambda *a, **_k: replaced.append(a)
     )
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
     monkeypatch.setattr(

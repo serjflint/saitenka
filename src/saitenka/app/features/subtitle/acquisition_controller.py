@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import MAIN_LANG
+
 from saitenka.app import subtitle_modes
 from saitenka.runtime import EffectFinished, Owner
 
@@ -28,6 +30,7 @@ class _RetryState:
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
+        self.target_language = MAIN_LANG
 
 
 class SubtitleAcquisitionController:
@@ -58,9 +61,14 @@ class SubtitleAcquisitionController:
     def retry_in_flight(self) -> bool:
         return self._retry.retry_active
 
-    def configure_retry(self, factory: ProviderFetchFactory | None) -> None:
+    def configure_retry(
+        self,
+        factory: ProviderFetchFactory | None,
+        *,
+        target_language: str = MAIN_LANG,
+    ) -> None:
         self._retire_source_generation()
-        subtitle_modes.configure_retry(self._retry, factory)
+        subtitle_modes.configure_retry(self._retry, factory, target_language=target_language)
 
     def start(
         self,
@@ -70,13 +78,17 @@ class SubtitleAcquisitionController:
         select_if_unchanged: bool = False,
         replace: bool = False,
         force_select: bool = False,
+        target_language: str | None = None,
         on_done: Callable[[], None] | None = None,
     ) -> None:
         subtitle_modes.start_fetch(
             self.submit,
             self._get,
             fetch,
-            name=name,
+            source=subtitle_modes.FetchSource(
+                name,
+                target_language or self._retry.target_language,
+            ),
             select_if_unchanged=select_if_unchanged,
             replace=replace,
             force_select=force_select,
@@ -95,7 +107,11 @@ class SubtitleAcquisitionController:
         )
 
     def fetch_background(self, fetch: ProviderFetch) -> None:
-        self.start(fetch, select_if_unchanged=True)
+        self.start(
+            fetch,
+            select_if_unchanged=True,
+            target_language=self._retry.target_language,
+        )
 
     def submit(
         self,

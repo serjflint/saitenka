@@ -26,6 +26,7 @@ _ISO_639_ALIASES = {
     "fi": ("fin",),
     "fr": ("fra", "fre"),
     "it": ("ita",),
+    "jp": ("jpn", "ja", "japanese"),
     "mk": ("mkd", "mac"),
     "nb": ("nob",),
     "nl": ("nld", "dut"),
@@ -39,15 +40,6 @@ _ISO_639_ALIASES = {
     "sv": ("swe",),
     "uk": ("ukr",),
 }
-
-
-def lang_matches(lang: str | None, wants: list[str]) -> bool:
-    low = (lang or "").lower()
-    if not low:
-        return any(wants)
-    return any(
-        want and (low == want or low.startswith(want) or want.startswith(low)) for want in wants
-    )
 
 
 def _tag_matches_preference(lang: str, want: str) -> bool:
@@ -81,6 +73,14 @@ def wanted_languages(slang: str) -> list[str]:
             wanted.append(base)
         wanted.extend(equivalent[1:])
     return list(dict.fromkeys(wanted))
+
+
+def lang_matches(lang: str | None, wants: list[str]) -> bool:
+    low = (lang or "").lower()
+    if not low:
+        return any(wants)
+    expanded = [candidate for want in wants for candidate in wanted_languages(want)]
+    return any(_tag_matches_preference(low, want) for want in expanded)
 
 
 @dataclass(frozen=True)

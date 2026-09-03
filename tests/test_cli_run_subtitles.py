@@ -172,8 +172,9 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
         startup_fetch = None
         picker_lister = None
 
-        def configure_subtitle_retry(self, factory):
+        def configure_subtitle_retry(self, factory, *, target_language="jp"):
             self.retry_factory = factory
+            self.target_language = target_language
 
         def fetch_japanese_subs_async(self, fetch):
             self.startup_fetch = fetch
@@ -234,7 +235,7 @@ def test_run_with_no_current_provider_clears_runtime_callbacks(tmp_path):
         rebind_episode=lambda: None,
         rebuild_index=lambda: None,
         configure_mode=lambda *_a, **_kw: None,
-        configure_retry=retry.append,
+        configure_retry=lambda factory, **_kwargs: retry.append(factory),
         configure_picker=picker.append,
         fetch_japanese=lambda _fetch: None,
         start_prefetch=lambda: None,

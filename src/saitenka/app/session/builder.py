@@ -739,6 +739,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             subtitle_acquisition.submit,
             playback_observation.query,
             lifecycle_surfaces,
+            lambda: profile_session.profile.langs.main,
         )
 
     interaction = InteractionCoordinator(
