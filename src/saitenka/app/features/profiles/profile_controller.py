@@ -230,9 +230,7 @@ class ProfileController:
             return _TrackSwitch.MISSING
         if self._subtitles.select_subtitle_languages is not None:
             changed = self._subtitles.select_subtitle_languages(slang, second_slang)
-            if changed is not None:
-                return _TrackSwitch.SWITCHED if changed else _TrackSwitch.UNCHANGED
-            return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED
+            return _classify_track_switch(changed=changed, primary_unchanged=primary_unchanged)
         self._subtitles.select_subtitle_track(slang)
         return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED
 
@@ -245,3 +243,8 @@ class _TrackSwitch(StrEnum):
     UNCHANGED = "unchanged"
     SWITCHED = "switched"
     MISSING = "missing"
+
+
+def _classify_track_switch(*, changed: bool | None, primary_unchanged: bool) -> _TrackSwitch:
+    selected_another_track = not primary_unchanged if changed is None else changed
+    return _TrackSwitch.SWITCHED if selected_another_track else _TrackSwitch.UNCHANGED
