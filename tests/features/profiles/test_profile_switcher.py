@@ -621,6 +621,35 @@ def test_alias_equivalent_primary_retokenizes_the_current_cue(request):
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_alias_equivalent_primary_preserves_the_active_secondary_role(request):
+    old = Profile("fr", ReaderLanguages("fr", "en"), "latin", slang="fr")
+    new = Profile("fra", ReaderLanguages("fr", "en"), "latin", slang="fra")
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=old, profiles=[old, new])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 6, "lang": "fra"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("fr", "en")
+    reader.graph.ipc.props["sid"] = 6
+    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
+    reader.graph.ipc.props["sid"] = 7
+    reader.graph.ipc.commands.clear()
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (outcome.status, tracks.language, tracks.primary_sid, tracks.slang) == (
+        ProfileSwitchStatus.COMMITTED,
+        "en",
+        7,
+        "fra",
+    )
+    assert ("set_property", "sid", 7) in reader.graph.ipc.commands
+    assert ("set_property", "sid", 6) not in reader.graph.ipc.commands
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_second_only_cycle_preserves_the_active_secondary_role(request):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])

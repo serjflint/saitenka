@@ -93,7 +93,9 @@ class ProfileIntegration:
 
     def select_subtitle_track(self, new_slang: str, second_slang: str) -> bool:
         current = self.tracks.current
-        preferred_role = current.language if current.slang == new_slang else None
+        discovered = subtitle_modes.discover_tracks(self.ipc, new_slang, second_slang)
+        same_target = discovered.jp_sid is not None and discovered.jp_sid == current.jp_sid
+        preferred_role = current.language if same_target else None
         startup = subtitle_modes.select_initial(
             self.ipc,
             new_slang,

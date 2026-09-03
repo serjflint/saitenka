@@ -68,7 +68,8 @@ class PickerController:
     def close(self) -> None:
         sub_picker.close_picker(self.store, self.panel, self._surfaces)
 
-    def configure_listing(self, lister: Callable[[str], tuple]) -> None:
+    def configure_listing(self, lister: Callable[[str], tuple] | None) -> None:
+        self.close()
         self.lister = lister
 
     def open(
