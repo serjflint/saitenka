@@ -554,6 +554,12 @@ def test_profile_region_subtag_is_folded_off_for_slang():
     assert resolve_profile(cfg).slang == "de"
 
 
+def test_regional_japanese_alias_keeps_one_profile_identity() -> None:
+    profile = resolve_profile({"profile": {"language": "ja-JP"}})
+
+    assert (profile.langs.main, profile.tokenizer, profile.slang) == ("jp-JP", "unidic", "jp")
+
+
 def test_explicit_profile_slang_wins_over_the_derived_one():
     # A profile can pin its own track priority (e.g. a release that tags French as the 3-letter "fra").
     cfg = {

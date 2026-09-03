@@ -46,9 +46,12 @@ _CANONICAL = {
 
 
 def canonical_language(code: str) -> str:
-    """Fold a language alias onto the canonical internal code (``ja``/``jpn`` → ``jp``); pass any other
-    code through unchanged. Applied to both main and second so every downstream literal agrees."""
-    return _CANONICAL.get(code.lower(), code)
+    """Fold an aliased primary subtag while retaining any region/script preference."""
+    base, separator, suffix = code.partition("-")
+    canonical = _CANONICAL.get(base.lower())
+    if canonical is None:
+        return code
+    return f"{canonical}{separator}{suffix}" if separator else canonical
 
 
 @dataclass(frozen=True)
@@ -104,7 +107,7 @@ def default_tokenizer_for(language: str) -> str:
     Japanese → ``unidic``; a whitespace-segmented European script (Latin/Cyrillic/Greek) → ``latin``. Any
     other language must name its tokenizer explicitly — there is no safe guess, and silently falling back
     would mis-segment an unknown script with no signal. Fail fast instead."""
-    if language == "jp":
+    if _base_code(language) == "jp":
         return "unidic"
     if _base_code(language) in _EUROPEAN_SCRIPTS:
         return "latin"
