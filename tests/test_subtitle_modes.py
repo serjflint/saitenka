@@ -655,6 +655,7 @@ def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypat
     reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
     startup = subtitle_modes.select_initial(ipc, "fr", "de", preferred_role=SECOND_LANG)
     reader.graph.cue.configure_subtitle_mode(startup, slang="fr", second_slang="de")
+    hold_translation(reader)
     reader.graph.subtitle_acquisition.configure_retry(None, target_language="fr")
     retimed = tmp_path / "episode.retimed.de.srt"
     retimed.write_text("Deutsch", encoding="utf-8")
@@ -670,7 +671,12 @@ def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypat
     jobs.finish()
 
     state = reader.graph.track_commands.current()
-    assert (state.language, state.jp_sid, state.en_sid) == (SECOND_LANG, 2, 9)
+    assert (state.language, state.jp_sid, state.en_sid, state.secondary_sid) == (
+        SECOND_LANG,
+        2,
+        9,
+        2,
+    )
     assert ("sub-add", str(retimed), "select", "", "de") in ipc.commands
     assert ("sub-remove", 1) in ipc.commands and ("sub-remove", 2) not in ipc.commands
 

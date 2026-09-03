@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import util
 
 from saitenka.app import subselect
@@ -51,6 +52,27 @@ class SessionController:
             start_prefetch=lambda: None,
             toast=lambda *_a, **_kw: None,
         )
+
+
+def test_attach_retires_provider_generations_before_fallible_index_rebuild():
+    reader, ipc = SessionController(), IPC()
+    reader.retry_factory = object()
+    reader.picker_lister = object()
+    ports = replace(
+        reader.reslot_ports,
+        rebuild_index=lambda: (_ for _ in ()).throw(RuntimeError("index unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="index unavailable"):
+        attach_commands._finish_attach_subtitle_startup(
+            ports,
+            ipc,
+            None,
+            subselect.ProviderConfig(),
+            fetch_in_background=(),
+        )
+
+    assert reader.retry_factory is None and reader.picker_lister is None
 
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):

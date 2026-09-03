@@ -102,16 +102,16 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
 def _finish_attach_subtitle_startup(
     ports: ReslotPorts, ipc, startup, cfg: ProviderConfig, *, fetch_in_background: tuple[str, ...]
 ) -> None:
+    from saitenka.app.subselect import configure_providers, provider_fetch_factory
+
+    configure_providers(
+        ports.configure_retry, ports.configure_picker, cfg
+    )  # retire prior source generations before fallible mode/index work
     if startup is not None:
         with otel_metrics.traced("startup.subtitle_mode_configure"):
             ports.configure_mode(startup, slang=cfg.slang, second_slang=cfg.second_language)
     with otel_metrics.traced("startup.subtitle_index"):
         ports.rebuild_index()
-    from saitenka.app.subselect import configure_providers, provider_fetch_factory
-
-    configure_providers(
-        ports.configure_retry, ports.configure_picker, cfg
-    )  # shared with run: manual re-sync retry + Ctrl+J source picker
     if not fetch_in_background:
         return
     video_path = ipc.query("path")

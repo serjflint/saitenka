@@ -678,6 +678,8 @@ def _replace_target_track(
     )
     ports.declare(SubtitleLanguageChanged(target_role))
     ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
     ports.rebuild_index()  # replaces the index on success; retains it if the just-added track
     # can't resolve yet (rebuild is fail-soft) rather than blanking the cues
     ports.toast(toast or f"{language_name(target_language)} subtitles re-synced")
