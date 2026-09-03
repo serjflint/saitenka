@@ -13,15 +13,22 @@ system's architecture should be copied.
 | `architecture-inquiry` | product invariant, whole-system trace, falsifiable discriminator | implementation fitness by itself |
 | `grow-loop` | idle-time dry-run receipt for one missing scenario and live additive oracle | a retained edit in the package worktree |
 | `sharpen-loop` | idle-time dry-run receipt for one stronger oracle with preservation evidence | a retained edit in the package worktree |
-| `test-adequacy` | survivor, crasher, or counterexample plus instrument replay | relevance outside the pure core |
+| `test-adequacy` | survivor, crasher, or counterexample plus instrument replay after acceptance | a discovery-only reverting mode |
 | `write-test` | a test materialized in the active contribution worktree | package coherence by itself |
 | `contribute` | coherent source/tooling change, repository gates, PR packaging | the outer assurance claim unless its evidence is returned |
 | `assurance-pipeline` | routing, composition, re-enfolding, scope, exact-tree completion | permission to weaken a child contract |
 
 The pipeline may consume a completed Grow/Sharpen receipt or invoke a dry-run only while no feature work
 is active and the target passes the child loop's idle/exclusion rules. Those candidate edits revert. Once
-implementation starts, `write-test` materializes any final test in the package tree. The pipeline records
-which evidence was consumed and never treats an agent verdict as a substitute for deterministic proof.
+implementation starts, `write-test` materializes additive package tests. A reverted Sharpen edit is never
+replayed: its coordinate may motivate a new additive package oracle, while changing the old assertion stays
+a later standalone Sharpen run. Discovery may consume a complete existing adequacy coordinate, but
+hardening it and replaying the instrument wait until the design is accepted. The pipeline records which
+evidence was consumed and never treats an agent verdict as a substitute for deterministic proof.
+
+A Grow/Sharpen receipt contributes trusted proof only when it records a green mapped baseline, a
+proof-complete candidate, exact restoration, and two valid isolated reviews. Other dry-runs may contribute
+an untrusted coordinate or falsified hypothesis, never a passing proof. Record the eligibility evidence.
 
 ## Entry and decision checkpoint
 
@@ -97,10 +104,11 @@ A pipeline result is complete only when:
 - every mechanism claimed necessary has direct proof or a recorded non-applicability reason;
 - all temporary perturbations restored exact bytes;
 - repository-required deterministic and free-threaded gates passed on the final head;
-- two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or explicitly accepted, and P3 recorded;
-- every approval names the final commit, and the worktree is clean.
+- two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or accepted by the human owner, and P3 recorded;
+- every approval names the same reviewed-input digest, and the worktree is clean.
 
-Any change to tracked reviewed bytes after review invalidates all previous approvals. Scratch-ledger
-bookkeeping is outside the reviewed tree. A reviewer timeout or abandoned invocation is unfinished, not an
-implicit pass. If evidence saturates with no justified change, a well-supported no-change result is
-successful research.
+The reviewed-input digest binds the base, head, diff, frozen invariant, scope guard, and validation evidence.
+Any change to one of those inputs invalidates all previous approvals. Appending returned verdicts to the
+git-ignored review table does not change that frozen input. A reviewer timeout or abandoned invocation is
+unfinished, not an implicit pass. Only the human owner may accept a P2. If evidence saturates with no
+justified change, a well-supported no-change result is successful research.

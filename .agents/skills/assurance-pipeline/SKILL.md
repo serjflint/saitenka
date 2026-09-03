@@ -2,21 +2,21 @@
 name: assurance-pipeline
 description: >-
   Compose Saitenka's architecture inquiry and evidence from Grow, Sharpen, test-adequacy, and contribution
-  work into one package-level assurance case. Use for "run the assurance pipeline", "gather proofs", "turn this
-  test finding into a module/package improvement", "combine Grow and Sharpen", or when a supported
+  work into one package-level assurance case. Use for "run the assurance pipeline", "gather package-level
+  proofs", "turn this test finding into a module/package improvement", "combine Grow and Sharpen", or when a supported
   scenario crosses several owners and one-test ratchets are too local. Routes each falsifiable finding
   to the smallest proof-producing primitive, re-enfolds counterexamples, and requires exact-head review.
   NOT for one missing test (grow-loop), one weak assertion (sharpen-loop), one pure-core campaign
-  (test-adequacy), one bounded PR (contribute), or an architecture decision without implementation
-  (architecture-inquiry).
+  (test-adequacy), one bounded PR (contribute), routine pre-push evidence (dev-gate), or an architecture
+  decision without implementation (architecture-inquiry).
 metadata:
   project: saitenka
 ---
 
 # assurance-pipeline
 
-Build one assurance case around a supported product scenario. The pipeline composes existing loops; it
-does not weaken, duplicate, or replace their gates. Read
+Build one assurance case around a supported product scenario. The pipeline composes existing loop evidence;
+it does not weaken, duplicate, or replace child gates. Read
 [`references/contract.md`](references/contract.md) and start an
 [`evidence ledger`](references/evidence-ledger.md) before changing an artifact.
 
@@ -54,16 +54,20 @@ Choose by the evidence gap and current phase, not by a preferred artifact:
 | --- | --- |
 | Discovery; supported scenario is absent | consume a completed Grow receipt, or eligible `grow-loop` dry-run |
 | Discovery; existing oracle is weak | consume a completed Sharpen receipt, or eligible `sharpen-loop` dry-run |
-| Discovery; pure-core behavior is under-specified | `test-adequacy` coordinate |
-| Implementation; test must join the package tree | `write-test` inside the contribution worktree |
+| Discovery; pure-core behavior is under-specified | consume a complete existing adequacy coordinate only |
+| Implementation; additive test must join the package tree | `write-test` inside the contribution worktree |
+| Implementation; existing assertion is weak | additive package oracle now; separate Sharpen follow-up when idle |
+| Implementation; accepted pure-core coordinate | `test-adequacy` hardening and replay |
 | Implementation; production contradicts the accepted invariant | `contribute` |
 | Architecture hypothesis is false | ledger the no-change result and re-enfold |
 
 Grow and Sharpen remain idle-time loops: invoke them only before implementation, only when their cadence
 and exclusion rules say the target is idle, and only in their existing dry-run mode. Their candidate edits
 revert. The pipeline consumes their coordinates, receipts, and proof evidence—not their working trees.
-After a design is accepted or feature work begins, materialize package tests through `write-test`; never
-invent an embedded Grow/Sharpen mode.
+After a design is accepted or feature work begins, materialize only additive package tests through
+`write-test`; never replay a reverted Sharpen edit or invent an embedded Grow/Sharpen mode. A Sharpen
+receipt can justify an additive package oracle; changing the old assertion remains a later standalone
+Sharpen run when the module is idle.
 
 Every child retains its own baseline, isolation, liveness, restoration, review, and scope rules. A passing
 child candidate is an input to the assurance case, not terminal package success.
@@ -95,11 +99,13 @@ explicit. Do not stop because coverage, mutation score, or test count reached a 
 Run affected checks during editing, then the full deterministic and free-threaded gates required by the
 repository. Commit the final artifact before review.
 
-Give two isolated adversarial reviewers only the base, exact head, diff, claimed invariant, and validation;
-withhold author rationale. Record P0-P3 findings and the reviewed commit. **Every launched reviewer must
-finish.** Fix every P0/P1; resolve or explicitly accept each P2; record P3. Any change to tracked reviewed
-bytes invalidates all earlier approvals, so rerun the relevant proof and review the new exact head. Updating
-the git-ignored scratch ledger with a verdict does not alter the reviewed artifact.
+Give two isolated adversarial reviewers the base, exact head, diff, frozen invariant/scope, and validation
+digest; withhold author rationale. Also include `.agents/rules/searching.md`, the shell-search ban, permitted
+navigation surfaces, and `uv run` for Python—the safety envelope is not design rationale. Record P0-P3
+findings and the reviewed-input digest. **Every launched reviewer must finish.** Fix every P0/P1; resolve
+each P2 or obtain an explicit acceptance from the human owner; record P3. Any change to tracked reviewed
+bytes or to the frozen invariant, scope, or validation evidence invalidates all earlier approvals. Updating
+only the git-ignored review table with the verdict does not alter the reviewed inputs.
 
 On an outward path, let `contribute` open a lean ready PR from the repository template after the evidence
 ledger is complete. Preserve residual risks and follow-ups without smuggling them into the current scope.

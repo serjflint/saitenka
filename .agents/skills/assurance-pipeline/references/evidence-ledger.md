@@ -32,9 +32,9 @@ Preserve falsified hypotheses: they are evidence against repeating an attractive
 
 ## Routing
 
-| Finding | Route | Why this is the smallest primitive | Invocation / artifact |
-| --- | --- | --- | --- |
-| | Grow / Sharpen / adequacy / contribute / no change | | |
+| Finding | Route | Eligibility / trust evidence | Why this is the smallest primitive | Invocation / artifact |
+| --- | --- | --- | --- | --- |
+| | Grow / Sharpen / adequacy / contribute / no change | idle/exclusion, baseline, proof, restoration, reviews | | |
 
 ## Mechanism proofs
 
@@ -64,13 +64,15 @@ separately for mutation survivors, fuzz crashers, and symbolic counterexamples.
 
 ## Exact-head reviews
 
-| Reviewer invocation | Model / isolation | Reviewed commit | Verdict | Findings / resolution |
+Frozen review-input digest (base + head + diff + invariant + scope + validation):
+
+| Reviewer invocation | Model / isolation | Reviewed digest | Verdict | Findings / resolution / human P2 owner |
 | --- | --- | --- | --- | --- |
 | | | | | P0-P3 |
 
-List every launched reviewer, including timeouts or failures. If tracked reviewed bytes change, mark every
-earlier row invalid and launch fresh review on the new commit. Appending verdicts to this git-ignored
-scratch ledger does not change the reviewed artifact.
+List every launched reviewer, including timeouts or failures. If any frozen review input changes, mark
+every earlier row invalid and launch fresh review. Appending returned verdicts to this git-ignored review
+table does not change the frozen inputs. Only the human owner may accept a P2; record that decision.
 
 ## Final re-enfolding
 
