@@ -262,15 +262,10 @@ def _validate_gates(receipt: dict, events: dict[str, datetime]) -> None:
         )
 
 
-def _validate_reviews(
-    receipt: dict, publish_generation: int | None, events: dict[str, datetime]
-) -> None:
-    reviews = receipt.get("reviews")
-    if not isinstance(reviews, list) or not reviews:
-        raise ValueError("review attempts are required")
+def _latest_review_pair(reviews: object, publish_generation: int | None) -> list[dict]:
+    _require(isinstance(reviews, list) and reviews, "review attempts are required")
+    assert isinstance(reviews, list)
     _require(all(isinstance(review, dict) for review in reviews), "review must be an object")
-    identities: set[str] = set()
-    invocations: set[str] = set()
     generations = {review.get("generation") for review in reviews}
     _require(
         all(isinstance(generation, int) and generation >= 1 for generation in generations),
@@ -297,40 +292,55 @@ def _validate_reviews(
     )
     if publish_generation is not None:
         _require(publish_generation == latest, "publish-only used a different review generation")
+    return completed_latest
+
+
+def _validate_completed_review(
+    review: dict, receipt: dict, events: dict[str, datetime]
+) -> tuple[str, str]:
+    identity = _text(review.get("identity"), "review identity").casefold()
+    invocation = _text(review.get("invocation"), "review invocation").casefold()
+    _require(review.get("read_only") is True, "reviewer was not read-only")
+    _require(
+        review.get("isolation") in {"disposable-worktree", "context-free"},
+        "review isolation is invalid",
+    )
+    _validate_review_findings(review.get("findings"))
+    review_times = receipt.get("review_completed_at")
+    _require(isinstance(review_times, dict), "review completion times are required")
+    assert isinstance(review_times, dict)
+    completed_at = datetime.fromisoformat(
+        _text(review_times.get(review["invocation"].strip()), "review completed_at")
+    )
+    _require(
+        events["freeze-packet"] <= completed_at <= events["review"],
+        "review chronology is invalid",
+    )
     expected = {
         key: receipt[key]
         for key in ("head", "diff_digest", "packet_digest", "tree_digest", "index_digest")
     }
+    _require(
+        review.get("pre") == expected and review.get("post") == expected,
+        "review did not verify the exact packet before and after",
+    )
+    return identity, invocation
+
+
+def _validate_reviews(
+    receipt: dict, publish_generation: int | None, events: dict[str, datetime]
+) -> None:
+    completed_latest = _latest_review_pair(receipt.get("reviews"), publish_generation)
+    identities: set[str] = set()
+    invocations: set[str] = set()
     for review in completed_latest:
-        identity = _text(review.get("identity"), "review identity").casefold()
-        invocation = _text(review.get("invocation"), "review invocation").casefold()
+        identity, invocation = _validate_completed_review(review, receipt, events)
         _require(
             identity not in identities and invocation not in invocations,
             "reviewers must be distinct",
         )
         identities.add(identity)
         invocations.add(invocation)
-        _require(review.get("status") == "completed", "every reviewer must complete")
-        _require(review.get("read_only") is True, "reviewer was not read-only")
-        _require(
-            review.get("isolation") in {"disposable-worktree", "context-free"},
-            "review isolation is invalid",
-        )
-        _validate_review_findings(review.get("findings"))
-        review_times = receipt.get("review_completed_at")
-        _require(isinstance(review_times, dict), "review completion times are required")
-        assert isinstance(review_times, dict)
-        completed_at = datetime.fromisoformat(
-            _text(review_times.get(review["invocation"].strip()), "review completed_at")
-        )
-        _require(
-            events["freeze-packet"] <= completed_at <= events["review"],
-            "review chronology is invalid",
-        )
-        _require(
-            review.get("pre") == expected and review.get("post") == expected,
-            "review did not verify the exact packet before and after",
-        )
 
 
 def validate(receipt: dict, packet: dict) -> None:
