@@ -18,6 +18,7 @@ have .agents/skills/test-adequacy/SKILL.md
 have .agents/skills/write-test/SKILL.md
 have .agents/skills/research/SKILL.md
 have .agents/skills/contribute/SKILL.md
+have .agents/skills/dev-gate/SKILL.md
 have .github/PULL_REQUEST_TEMPLATE.md
 have .agents/rules/searching.md
 have tools/skill_check.py

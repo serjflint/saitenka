@@ -37,6 +37,17 @@ PoC feeds the review, a review finding sends you back to the design.
 
 ## The loop
 
+When `assurance-pipeline` owns a package case, split this loop explicitly:
+
+- **prepare-only** runs diagnosis, architecture check, implementation, and repository gates (steps 1–4),
+  then returns the exact unreviewed/unpublished tree. It does not push or open a PR.
+- The outer pipeline freezes its complete evidence packet; its two exact-packet reviews satisfy step 5.
+- **publish-only** verifies the unchanged head, packet, gates, and reviews, then performs step 6 only. It
+  makes no artifact edit and launches no new review. Failed validation returns to prepare-only and
+  invalidates the packet.
+
+Outside that named handoff, the ordinary loop below remains unchanged.
+
 1. **Restore context first.** Memory, Basic Memory, the relevant issues/PRs. Don't diagnose
    from a blank slate — half the answer is usually already recorded.
 2. **Diagnose to root cause — grounded and offline.** The signature move: reconstruct the
@@ -79,8 +90,9 @@ PoC feeds the review, a review finding sends you back to the design.
    **Humans talk; agents build** — the human posts the issue/PR discussion and makes the
    hold-vs-post and design calls; you produce the artifacts and the review, not the voice.
 
-When invoked by `assurance-pipeline`, return the exact-head diff, deterministic gate results, and every
-launched review. The outer pipeline owns re-enfolding and does not treat PR readiness as package proof.
+When invoked by `assurance-pipeline`, return the exact-head diff and deterministic gate results from
+prepare-only, then the outward PR identity from publish-only. The outer pipeline owns re-enfolding and
+does not treat PR readiness as package proof.
 
 ## Anti-patterns
 

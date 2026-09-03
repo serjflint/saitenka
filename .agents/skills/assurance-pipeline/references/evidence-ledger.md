@@ -15,6 +15,8 @@ keep run-specific hashes, counts, commands, and dead hypotheses in the ledger.
 - Entry state: fresh inquiry / accepted dossier
 - Accepted dossier / human decision:
 - Final change type:
+- Contribution mode: prepare-only / publish-only / not applicable
+- Pre-implementation tracked-tree/index digest:
 
 ## Whole-system model
 
@@ -34,7 +36,7 @@ Preserve falsified hypotheses: they are evidence against repeating an attractive
 
 | Finding | Route | Eligibility / freshness evidence | Why this is the smallest primitive | Invocation / artifact |
 | --- | --- | --- | --- | --- |
-| | Grow / Sharpen / adequacy / contribute / no change | idle/exclusion, baseline, proof, restoration, reviews, current content hash/version/disposition | | |
+| | Grow / Sharpen / adequacy / contribute / no change | coordinate only, or exact current replay with source/test/candidate/version/restoration/review bindings | | |
 
 ## Mechanism proofs
 
@@ -73,9 +75,14 @@ Copy the following into a separate immutable scratch file and hash it before lau
 - final scenario trace and mechanism-proof matrix;
 - validation evidence, residual uncertainty, and follow-ups.
 
+Canonical diff command: `git diff --no-ext-diff --no-textconv --binary BASE...HEAD`
+SHA-256 tool/version:
+
 Frozen reviewed-packet path and digest:
 
 ## Review returns
+
+Review generation:
 
 | Reviewer invocation | Model / isolation | Pre/post revision, digest, tree, index | Verdict | Findings / resolution / human P2 owner |
 | --- | --- | --- | --- | --- |
@@ -84,6 +91,9 @@ Frozen reviewed-packet path and digest:
 List every launched reviewer, including timeouts or failures. If any frozen packet field changes, mark
 every earlier row invalid and launch fresh review. Appending returned verdicts to this separate git-ignored
 table does not change the packet. Only the human owner may accept a P2; record that decision.
+
+If an invocation cannot return, record its host-confirmed terminal status, invalidate the whole generation,
+and launch two new reviewers. A failed/canceled reviewer does not count.
 
 Publication-worktree verification after all reviewers (HEAD + packet/diff digests + tracked tree + index):
 
@@ -95,4 +105,6 @@ Publication-worktree verification after all reviewers (HEAD + packet/diff digest
 - Residual uncertainty:
 - Follow-ups outside scope:
 - Evidence-saturation rationale:
+- No-change restoration / tracked-tree / index result:
+- Child dry-run ledger paths and disposition:
 - Final disposition: no change / local proof / ready PR / blocked

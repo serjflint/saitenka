@@ -18,7 +18,7 @@ system's architecture should be copied.
 | `contribute` | coherent source/tooling change, repository gates, PR packaging | the outer assurance claim unless its evidence is returned |
 | `assurance-pipeline` | routing, composition, re-enfolding, scope, exact-tree completion | permission to weaken a child contract |
 
-The pipeline may consume a completed Grow/Sharpen receipt or invoke a dry-run only while no feature work
+The pipeline may consume a Grow/Sharpen coordinate or invoke a dry-run only while no feature work
 is active and the target passes the child loop's idle/exclusion rules. Those candidate edits revert. Once
 implementation starts, `write-test` materializes additive package tests. A reverted Sharpen edit is never
 replayed: its coordinate may motivate a new additive package oracle, while changing the old assertion stays
@@ -26,11 +26,10 @@ a later standalone Sharpen run. Discovery may consume a complete existing adequa
 hardening and instrument replay wait until the design is accepted. The pipeline records which
 evidence was consumed and never treats an agent verdict as a substitute for deterministic proof.
 
-A Grow/Sharpen receipt contributes trusted proof only when it records a green mapped baseline, a
-proof-complete candidate, exact restoration, and two valid isolated reviews **and** remains current. Recompute
-the child-defined target/source content hash, require the current loop/toolset/contract version, and confirm
-the ledger's current disposition still admits the receipt. Stale or other dry-runs may contribute an
-untrusted coordinate or falsified hypothesis, never a passing proof. Record the freshness evidence.
+A Grow/Sharpen receipt is historical evidence, never current package proof by itself. To count it as proof,
+recover the exact candidate bytes and replay every applicable child arm against a current green baseline;
+bind the surrounding source, mapped tests, candidate diff, current loop/toolset/contract version, restoration,
+and new review results. Otherwise it contributes only an untrusted coordinate or falsified hypothesis.
 
 ## Entry and decision checkpoint
 
@@ -102,7 +101,10 @@ outside the frozen invariant.
 
 A **no-change result** completes locally when the discriminator is preserved, the falsified hypothesis is
 re-enfolded into the final whole, residual uncertainty is explicit, and no tracked change is justified. It
-does not create an empty commit, run artifact-only gates/reviews, or open a PR.
+also restores every pipeline-created tracked byte to its pre-implementation digest and leaves the package
+worktree/index clean. Child-loop ledger-only results stay in their dedicated worktrees under the child
+contract, with their location/disposition recorded. No-change does not create an empty commit, run
+artifact-only gates/reviews, or open a PR.
 
 An **artifact result** is complete only when:
 
@@ -121,3 +123,16 @@ all approvals. Appending returned verdicts to a separate git-ignored review tabl
 packet. A reviewer timeout or abandoned invocation is unfinished, not an implicit pass. Only the human
 owner may accept a P2. Prefer a disposable worktree per reviewer; regardless, repeat the same HEAD, digest,
 tracked-tree, and index checks in the publication worktree after every reviewer has returned.
+
+Canonical diff bytes are `git diff --no-ext-diff --no-textconv --binary BASE...HEAD`; record the SHA-256
+tool used. If a reviewer cannot return, terminate it through the host, record the terminal failure, invalidate
+the entire review generation, and start a new two-review generation. Failed/canceled reviewers never count.
+
+## Contribution handoff modes
+
+- **prepare-only:** `contribute` performs diagnosis, design, implementation, and repository gates, then
+  returns the unreviewed/unpublished exact tree. It does not push or open a PR.
+- The pipeline freezes the complete packet and its two reviews also satisfy `contribute`'s review phase.
+- **publish-only:** after both approvals, `contribute` verifies the unchanged head, packet, gates, and
+  reviews, then performs PR packaging only. It neither edits artifacts nor launches another review; failed
+  validation returns to prepare-only and invalidates the packet.

@@ -52,18 +52,20 @@ Choose by the evidence gap and current phase, not by a preferred artifact:
 
 | Phase and finding | Proof-producing primitive |
 | --- | --- |
-| Discovery; supported scenario is absent | consume a completed Grow receipt, or eligible `grow-loop` dry-run |
-| Discovery; existing oracle is weak | consume a completed Sharpen receipt, or eligible `sharpen-loop` dry-run |
+| Discovery; supported scenario is absent | consume a Grow coordinate, or eligible `grow-loop` dry-run |
+| Discovery; existing oracle is weak | consume a Sharpen coordinate, or eligible `sharpen-loop` dry-run |
 | Discovery; pure-core behavior is under-specified | consume a complete existing adequacy coordinate only |
 | Implementation; additive test must join the package tree | `write-test` inside the contribution worktree |
 | Implementation; existing assertion is weak | additive package oracle now; separate Sharpen follow-up when idle |
 | Implementation; accepted pure-core coordinate | `test-adequacy` hardening and replay |
-| Implementation; production contradicts the accepted invariant | `contribute` |
+| Implementation; production contradicts the accepted invariant | `contribute` prepare-only mode |
 | Architecture hypothesis is false | ledger the no-change result and re-enfold |
 
 Grow and Sharpen remain idle-time loops: invoke them only before implementation, only when their cadence
 and exclusion rules say the target is idle, and only in their existing dry-run mode. Their candidate edits
-revert. The pipeline consumes their coordinates, receipts, and proof evidence—not their working trees.
+revert. A receipt supplies a coordinate and historical evidence, not current package proof. Count its proof
+only after replaying the exact candidate against the current baseline and binding source, test, candidate,
+and child-contract digests. The pipeline never consumes a child working tree.
 After a design is accepted or feature work begins, materialize only additive package tests through
 `write-test`; never replay a reverted Sharpen edit or invent an embedded Grow/Sharpen mode. A Sharpen
 receipt can justify an additive package oracle; changing the old assertion remains a later standalone
@@ -96,7 +98,9 @@ explicit. Do not stop because coverage, mutation score, or test count reached a 
 
 If re-enfolding leaves no justified tracked change, complete a local no-change result: preserve the
 discriminator, falsified hypotheses, final whole, and residual uncertainty in the scratch ledger, then
-stop. Do not create an empty commit, run change-only gates/reviews, or open a PR.
+restore every pipeline-created tracked byte to its pre-implementation digest and require a clean tracked
+worktree and index. Child dry-run ledgers remain in their dedicated worktrees under their own contracts;
+record their paths/disposition. Do not create an empty commit, run change-only gates/reviews, or open a PR.
 
 ## 5. Complete one exact tree when an artifact exists
 
@@ -105,7 +109,9 @@ repository. Commit the final artifact before review.
 
 Freeze a review packet containing the base/head/diff, supported scenario, invariant, accepted dossier and
 human decision, affected owners, discriminator, scope guard, final scenario trace, mechanism-proof matrix,
-validation, residual uncertainty, and follow-ups; hash it. Give two isolated adversarial reviewers that
+validation, residual uncertainty, and follow-ups. Compute the diff bytes with `git diff --no-ext-diff
+--no-textconv --binary BASE...HEAD`, record the SHA-256 tool, then hash the packet. Give two isolated
+adversarial reviewers that
 packet and withhold author rationale. Also include `.agents/rules/searching.md`, the shell-search ban,
 permitted navigation surfaces, and `uv run` for Python—the safety envelope is not design rationale.
 Reviewers are read-only: forbid file edits and `checkout`/`switch`/`stash`/`reset`/`commit`. Prefer a
@@ -118,8 +124,15 @@ P0/P1; resolve each P2 or obtain an explicit acceptance from the human owner; re
 tracked reviewed bytes or a frozen packet field invalidates all earlier approvals. Updating only the
 separate git-ignored review-return table does not alter the reviewed packet.
 
-On an outward path, let `contribute` open a lean ready PR from the repository template after the evidence
-ledger is complete. Preserve residual risks and follow-ups without smuggling them into the current scope.
+If a reviewer cannot return, terminate it through the host and record the terminal failure; invalidate that
+whole review generation and launch two fresh reviewers. A canceled/failed reviewer never counts, and a
+still-running invocation never permits publication.
+
+During implementation, invoke `contribute` prepare-only: diagnose, implement, and gate, but do not review,
+push, or open a PR. The pipeline's two exact-packet reviews satisfy its review phase. On an outward path,
+resume `contribute` publish-only to verify the unchanged head/packet/gates/reviews and perform PR packaging;
+it makes no artifact edit and launches no new review unless that validation fails. Preserve residual risks
+and follow-ups without smuggling them into the current scope.
 
 ## Verify
 
