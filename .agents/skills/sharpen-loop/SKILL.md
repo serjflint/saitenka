@@ -61,6 +61,8 @@ Optional LSP navigation may locate symbols and callers; never invoke or depend o
 - Source, tooling, config, dependency, or product changes route to `contribute` as a separate PR. An
   ordinary test-only Sharpen PR remains in this loop.
 - Repeated reflection evidence that needs external prior art routes to `research`, never into a candidate run.
+- When invoked by `assurance-pipeline`, return the preservation, anti-cheat, and efficacy evidence; the
+  strengthened oracle is an input to re-enfolding, not terminal package proof.
 
 ## Preserve scope
 

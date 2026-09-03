@@ -129,8 +129,9 @@ changes the result.
 
 ## 8. Pilot, then re-enfold again
 
-After the choice, hand a multi-site conversion to `plan-migration`; otherwise hand the bounded pilot directly
-to `contribute`. Require:
+After the choice, hand a multi-site conversion to `plan-migration`; hand a bounded pilot directly to
+`contribute`; or, when the inquiry must compose several quality primitives into one package-level proof,
+return the invariant and discriminator to `assurance-pipeline`. Require:
 
 - an explicit authority/writer model and exact scenario traces; name the ordering or consistency mechanism
   and its failure semantics wherever more than one writer participates;

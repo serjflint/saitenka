@@ -17,6 +17,7 @@ have .agents/skills/architecture-review/SKILL.md
 have .agents/skills/research/SKILL.md
 have .agents/skills/plan-migration/SKILL.md
 have .agents/skills/contribute/SKILL.md
+have .agents/skills/assurance-pipeline/SKILL.md
 have .agents/rules/searching.md
 have tools/skill_check.py
 if [ "$fail" -eq 0 ]; then echo "architecture-inquiry smoke OK"; else echo "architecture-inquiry smoke FAILED"; exit 1; fi

@@ -79,6 +79,9 @@ PoC feeds the review, a review finding sends you back to the design.
    **Humans talk; agents build** — the human posts the issue/PR discussion and makes the
    hold-vs-post and design calls; you produce the artifacts and the review, not the voice.
 
+When invoked by `assurance-pipeline`, return the exact-head diff, deterministic gate results, and every
+launched review. The outer pipeline owns re-enfolding and does not treat PR readiness as package proof.
+
 ## Anti-patterns
 
 - Proposing a fix before the cause reproduces offline.

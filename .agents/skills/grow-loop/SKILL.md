@@ -65,6 +65,8 @@ on the infrastructure-only `pyrefly-lsp` skill.
 - Product bug, source fix, loop-tool change, dependency, or config work → `contribute` as a separate PR.
 - Repeated reflection evidence needing external prior art → `research` outside the candidate run.
 - An ordinary test-only Grow PR stays in this loop; do not nest a full contribution workflow around it.
+- When invoked by `assurance-pipeline`, return the scenario, liveness, restoration, and growth evidence;
+  the additive test is an input to re-enfolding, not terminal package proof.
 
 ## Verify
 
