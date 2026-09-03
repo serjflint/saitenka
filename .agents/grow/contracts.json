@@ -1,11 +1,12 @@
 {
-  "version": 7,
+  "version": 8,
   "gap": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["found", "module", "target_symbol", "dimension", "kind", "source", "tests", "status", "pr_exclusion_checked", "reason"],
+    "required": ["found", "selection_outcome", "module", "target_symbol", "dimension", "kind", "source", "tests", "status", "pr_exclusion_checked", "reason"],
     "properties": {
       "found": {"type": "boolean", "description": "false when triage/scenario-map yields no live orphan gap"},
+      "selection_outcome": {"type": "string", "enum": ["gap", "no-orphan", "no-live"], "description": "no-orphan is valid only after a live module's scenario map completed"},
       "module": {"type": "string", "description": "module key relative to src/saitenka, e.g. app/tooltip.py"},
       "target_symbol": {"type": "string", "description": "module_key::dotted.symbol, e.g. app/dictionary.py::Dictionary._entry_from_row"},
       "dimension": {"type": "string", "description": "the under-specified axis: a coverage-context label, an invariant, a survivor operator, or a filed issue id"},
@@ -161,6 +162,19 @@
       "filed_issues": {"type": "array", "items": {"type": "string"}},
       "filing_blocker": {"type": ["string", "null"], "description": "why a red-on-pristine bug was not filed in a dry run"},
       "note": {"type": "string"}
+    }
+  },
+  "audit_record": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["state", "ledger_appended", "recorded_audit_module", "recorded_audit_sha", "recorded_toolset_version", "recorded_contract_version"],
+    "properties": {
+      "state": {"type": "string", "enum": ["no-gap"]},
+      "ledger_appended": {"type": "boolean"},
+      "recorded_audit_module": {"type": "string"},
+      "recorded_audit_sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "recorded_toolset_version": {"type": "integer", "minimum": 1},
+      "recorded_contract_version": {"type": "integer"}
     }
   },
   "outward": {

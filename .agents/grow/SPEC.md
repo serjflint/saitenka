@@ -87,9 +87,10 @@ and an under-tested dead leaf are both skipped). Every component is a printed co
 
 Ranked gap list → an AutoCover-style **scenario map per top target** (LLM: intents / edges / invariants ∩
 the coverage baseline → orphan scenarios) → each orphan through the four-arm gate. Module-level exclusions
-are hard drops: a module any OPEN PR is editing (grow at rest, don't fight in-flight work). Per-GAP
-exclusion (a `.ledger.grow.jsonl` gap already `closed-current` / `unclosable`) applies when the picked
-module's scenario map is enumerated, not at module triage. repowise steers SELECTION only
+are hard drops: a module any OPEN PR is editing (grow at rest, don't fight in-flight work), or an unchanged
+module whose completed scenario-map audit found no orphan. Per-GAP exclusion (a `.ledger.grow.jsonl` gap
+already `closed-current` / `unclosable`) applies when the picked module's scenario map is enumerated.
+repowise steers SELECTION only
 (grounded-summary-not-ground-truth — verify the deficit you act on). Tiered: v1 = cheap in-stack signals
 (fan-in + seam + churn); fold in survivors / contexts / repowise / complexity as it matures.
 
@@ -197,7 +198,7 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
   "dimension": "warm==cold@entry_cache",           // the under-specified axis
   "target_sha": "<hash of the TARGET SYMBOL's AST source, not the whole module>",
   "toolset_version": 3,
-  "contract_version": 7,
+  "contract_version": 8,
   "state": "open | closed | unclosable | filed | dry-run",
   "test": "tests/test_cache_race.py::test_...",
   "outcome": "coverage-only | bug | robustness | design",
@@ -213,6 +214,22 @@ re-examines) / **unclosable** (recorded infeasible → SKIP). A closed gap stays
 and reopens ONLY when its own target symbol changes. `filed` records a confirmed product issue; `dry-run`
 records a run with no outward action. Any shippable state additionally requires a valid `review` block
 (see *Fidelity* in `ADAPTERS.md`); without one the run is a `dry-run`.
+
+A completed scenario map that finds no orphan appends a separate module-audit record:
+
+```jsonc
+{ "audit_module": "app/subnav.py", "examined": "<iso>",
+  "tests": ["tests/test_subnav_policy.py"], "audit_sha": "<module plus test tree>",
+  "toolset_version": 3, "contract_version": 8, "state": "no-gap",
+  "scenario_map_summary": "source replacement, policy, settle windows, failure, navigation" }
+```
+
+`audit_status` is **audit-unseen** / **audited-current** / **stale-audit** / **stale-toolset**. Current
+no-gap audits are module-level triage exclusions only when current survivor/context evidence remains zero.
+Any byte change to the module or test tree, a toolset bump, or newly positive adequacy evidence reopens the
+audit. The conservative whole-test-tree hash prevents an omitted indirect test from creating a false
+permanent exclusion. This is not an `unclosable` gap: no semantic gap was claimed, so no target symbol or
+dimension is invented.
 
 ## Self-reflection — every run introspects the LOOP (`tools/grow_reflect.py`)
 

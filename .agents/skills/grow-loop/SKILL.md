@@ -52,7 +52,9 @@ Read `.agents/grow/GUIDE.md` only to explain the design or resolve ambiguity.
    mandatory; cross-family routing is recommended, not required.
 8. When `openPr=true`, run `uv run poe all` after reviews and before opening a ready PR. Gate failure
    forces a dry-run/no-PR result. Never merge.
-9. Record real invocation ids, verdicts, applied arms, skipped-axis reasons, and final disposition.
+9. Record real invocation ids, verdicts, applied arms, skipped-axis reasons, and final disposition. If a
+   completed live-module scenario map finds no orphan, append a no-gap module audit so unchanged evidence
+   is not inspected again; a no-live selection records nothing.
 10. Revert the test edit in dry-run mode so only the ledger append remains.
 
 Use `spawn_agent` with `fork_turns="none"` when available. Run author, skeptic, and judge sequentially

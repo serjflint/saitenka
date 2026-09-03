@@ -17,7 +17,9 @@ verbatim — never work around it by touching another file.
 > config-matrix corners) — and subtract what the coverage baseline already exercises and what the grow
 > ledger already records `closed-current`/`unclosable`. Return the single highest-value ORPHAN gap:
 > `{target_symbol, dimension, kind}`. `kind=concurrency` iff the gap is a data race; else `scenario`.
-> Return `found=false` if there is no live module or no orphan gap. Never pick an EXCLUDED module.
+> Set `selection_outcome=gap` for a found gap. Return `found=false, selection_outcome=no-orphan` only
+> after selecting a live module and completing its scenario map; use `selection_outcome=no-live` when no
+> live module was selected. Never pick an EXCLUDED module.
 
 ## Test design (write-test handoff)
 
@@ -110,6 +112,12 @@ failure reverts the test, records a dry-run, and opens no PR.
 > permits the outward action. Persist a non-empty PR result as `open` until merge verification; persist a
 > created issue as `filed`. Otherwise the ledger stays `open`. Include the review and `axes_not_applied`. A ready PR additionally
 > requires verified open-PR exclusion and a green Ship gate. Never merge.
+
+When Select completes a scenario map but returns no orphan, append `{audit_module, tests, state: "no-gap",
+examined, contract_version, scenario_map_summary}` through the same CLI. The CLI computes `audit_sha` and
+`toolset_version`; do not manufacture a semantic gap identity. A current audit prevents immediate repeat
+selection and reopens when the module, test tree, or toolset changes. New positive survivor/context
+evidence overrides the receipt immediately.
 
 ## Reflect (self-reflection on the LOOP — every run)
 

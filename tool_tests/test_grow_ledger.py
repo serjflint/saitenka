@@ -86,6 +86,10 @@ def test_target_sha_ignores_a_comment_only_change():  # normalised via ast.unpar
 def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
     (tmp_path / f"{gl.SRC}/app").mkdir(parents=True)
     (tmp_path / f"{gl.SRC}/app/x.py").write_text(module_src, encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_x.py").write_text(
+        "def test_crisp():\n    assert True\n", encoding="utf-8"
+    )
     return tmp_path
 
 
@@ -183,6 +187,93 @@ def test_append_round_trips_a_record(tmp_path):
     assert gl.Ledger.load(root / ".ledger.grow.jsonl").latest(rec["gap_id"])["state"] == "closed"
 
 
+def test_no_gap_audit_is_current_until_the_module_or_mapped_tests_change(tmp_path):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    prepared = gl.prepare_audit_record(
+        {
+            "audit_module": "app/x.py",
+            "tests": ["tests/test_x.py"],
+            "state": "no-gap",
+        },
+        root,
+        ledger,
+    )
+    ledger.append(prepared)
+
+    assert ledger.audit_status("app/x.py", root) == gl.AUDITED_CURRENT
+
+    (root / "tests/test_x.py").write_text("def test_crisp():\n    assert False\n", encoding="utf-8")
+    assert ledger.audit_status("app/x.py", root) == gl.STALE_AUDIT
+
+    (root / "tests/test_x.py").write_text("def test_crisp():\n    assert True\n", encoding="utf-8")
+    (root / f"{gl.SRC}/app/x.py").write_text(MODULE_V3, encoding="utf-8")
+    assert ledger.audit_status("app/x.py", root) == gl.STALE_AUDIT
+
+
+def test_no_gap_audit_reopens_when_the_toolset_changes(tmp_path):
+    root = _repo(tmp_path)
+    prepared = {
+        "audit_module": "app/x.py",
+        "tests": ["tests/test_x.py"],
+        "audit_sha": gl.audit_sha(root, "app/x.py"),
+        "toolset_version": 1,
+        "state": "no-gap",
+    }
+    ledger = _ledger(root, [{"type": "manifest", "toolset_version": 2}, prepared])
+
+    assert ledger.audit_status("app/x.py", root) == gl.STALE_TOOLSET
+
+
+def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
+
+    prepared = gl.prepare_audit_record(
+        {
+            "audit_module": "app/x.py",
+            "tests": ["tests/test_x.py"],
+            "state": "no-gap",
+        },
+        root,
+        ledger,
+    )
+
+    assert prepared["audit_sha"] == gl.audit_sha(root, "app/x.py")
+    assert prepared["toolset_version"] == 7
+
+
+def test_prepare_audit_record_requires_evidence_and_no_gap_state(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="non-empty tests"):
+        gl.prepare_audit_record(
+            {"audit_module": "app/x.py", "tests": [], "state": "no-gap"}, root, ledger
+        )
+    with pytest.raises(ValueError, match="state must be no-gap"):
+        gl.prepare_audit_record(
+            {"audit_module": "app/x.py", "tests": ["tests/test_x.py"], "state": "closed"},
+            root,
+            ledger,
+        )
+
+
+def test_prepare_audit_record_rejects_missing_or_directory_test_paths(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    for test_path in ["tests/does-not-exist.py", "tests"]:
+        with pytest.raises(ValueError, match=r"existing test_\*\.py"):
+            gl.prepare_audit_record(
+                {"audit_module": "app/x.py", "tests": [test_path], "state": "no-gap"},
+                root,
+                ledger,
+            )
+
+
 def test_prepare_record_owns_identity_and_manifest_version(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
@@ -231,6 +322,35 @@ def test_append_cli_fills_identity_fields(monkeypatch, tmp_path, capsys):
 
     written = json.loads(capsys.readouterr().out)
     assert gl.Ledger.load(ledger.path).latest(written["gap_id"])["state"] == "dry-run"
+
+
+def test_append_cli_fills_no_gap_audit_identity(monkeypatch, tmp_path, capsys):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "audit_module": "app/x.py",
+        "tests": ["tests/test_x.py"],
+        "state": "no-gap",
+    }
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "grow_ledger.py",
+            "--repo",
+            str(root),
+            "--ledger",
+            str(ledger.path),
+            "append",
+            "--record-json",
+            json.dumps(record),
+        ],
+    )
+
+    assert gl._main() == 0
+
+    written = json.loads(capsys.readouterr().out)
+    assert gl.Ledger.load(ledger.path).latest_audit("app/x.py")["audit_sha"] == written["audit_sha"]
 
 
 def test_prepare_record_rejects_a_target_outside_source_root(tmp_path):

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+import grow_ledger as gl
 import grow_triage as gt
 from tool_json import InstrumentError
 
@@ -84,6 +85,56 @@ def test_excluded_candidates_are_skipped_by_the_scorer():
     gt.score_candidates([live, dead])
     assert dead.score == 0.0  # untouched — never scored
     assert live.score > 0.0
+
+
+def test_current_no_gap_audit_excludes_candidate_but_stale_audit_does_not():
+    current = _cand("current.py", fan_in=10, priv_seam=5)
+    stale = _cand("stale.py", fan_in=10, priv_seam=5)
+
+    gt.apply_audit_status(current, gl.AUDITED_CURRENT)
+    gt.apply_audit_status(stale, gl.STALE_AUDIT)
+
+    assert current.excluded == "no-gap-audit-current"
+    assert stale.excluded == ""
+
+
+def test_positive_adequacy_evidence_overrides_a_current_no_gap_audit():
+    survivor = _cand("survivor.py", fan_in=10, priv_seam=5, survivors=1)
+    context = _cand("context.py", fan_in=10, priv_seam=5, dead_ctx=1)
+
+    gt.apply_audit_status(survivor, gl.AUDITED_CURRENT)
+    gt.apply_audit_status(context, gl.AUDITED_CURRENT)
+
+    assert survivor.excluded == ""
+    assert context.excluded == ""
+
+
+def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeypatch, tmp_path):
+    module = "app/x.py"
+    tests = ["tests/test_x.py"]
+    (tmp_path / "src/saitenka/app").mkdir(parents=True)
+    (tmp_path / "src/saitenka/app/x.py").write_text("def x():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "tests").mkdir()
+    test_path = tmp_path / tests[0]
+    test_path.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+    ledger_path = tmp_path / ".ledger.grow.jsonl"
+    ledger_path.write_text('{"type":"manifest","toolset_version":3}\n', encoding="utf-8")
+    ledger = gl.Ledger.load(ledger_path)
+    ledger.append(
+        gl.prepare_audit_record(
+            {"audit_module": module, "tests": tests, "state": "no-gap"}, tmp_path, ledger
+        )
+    )
+    monkeypatch.setattr(gt.sl, "map_tests_to_modules", lambda _root: {module: tests})
+    monkeypatch.setattr(gt, "all_modules", lambda _root: [module])
+    monkeypatch.setattr(gt.st, "conformance_by_module", lambda _root, _map: {})
+    monkeypatch.setattr(gt, "fan_in_by_module", lambda _root: {module: 1})
+    monkeypatch.setattr(gt.st, "churn_and_age", lambda _root, _module, _tests: (1, 1))
+
+    assert gt.rank(tmp_path, check_network=False)[0].excluded == "no-gap-audit-current"
+
+    test_path.write_text("def test_x():\n    assert False\n", encoding="utf-8")
+    assert gt.rank(tmp_path, check_network=False)[0].excluded == ""
 
 
 def test_optional_signals_absent_do_not_crash_and_read_as_zero():

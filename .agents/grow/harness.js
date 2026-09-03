@@ -26,7 +26,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 7 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 8 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = '.' // poe tasks + tools run from the launch worktree root
@@ -52,9 +52,10 @@ const GUARD = 'SCOPE: edit ONLY the one target test file named below, and ADDITI
 
 const GAP = {
   type: 'object', additionalProperties: false,
-  required: ['found', 'module', 'target_symbol', 'dimension', 'kind', 'source', 'tests', 'status', 'pr_exclusion_checked', 'reason'],
+  required: ['found', 'selection_outcome', 'module', 'target_symbol', 'dimension', 'kind', 'source', 'tests', 'status', 'pr_exclusion_checked', 'reason'],
   properties: {
     found: { type: 'boolean' },
+    selection_outcome: { type: 'string', enum: ['gap', 'no-orphan', 'no-live'] },
     module: { type: 'string', description: 'module key relative to src/saitenka, e.g. app/tooltip.py' },
     target_symbol: { type: 'string', description: 'module_key::dotted.symbol' },
     dimension: { type: 'string', description: 'the under-specified axis (context label / invariant / survivor / issue id)' },
@@ -142,6 +143,14 @@ function validModuleKey(module) {
   if (typeof module !== 'string' || !module.endsWith('.py')) return false
   const parts = module.slice(0, -3).split('/')
   return parts.length > 0 && parts.every((part) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(part))
+}
+
+function validAuditReceipt(receipt, gap) {
+  return receipt?.ledger_appended === true && receipt.state === 'no-gap' &&
+    receipt.recorded_audit_module === gap.module &&
+    /^[0-9a-f]{64}$/.test(receipt.recorded_audit_sha) &&
+    Number.isInteger(receipt.recorded_toolset_version) && receipt.recorded_toolset_version >= 1 &&
+    receipt.recorded_contract_version === CONTRACT_VERSION
 }
 
 function proposalTargetsGap(gap, proposal) {
@@ -255,6 +264,19 @@ const RECORD = {
   },
 }
 
+const AUDIT_RECORD = {
+  type: 'object', additionalProperties: false,
+  required: ['state', 'ledger_appended', 'recorded_audit_module', 'recorded_audit_sha', 'recorded_toolset_version', 'recorded_contract_version'],
+  properties: {
+    state: { type: 'string', enum: ['no-gap'] },
+    ledger_appended: { type: 'boolean' },
+    recorded_audit_module: { type: 'string' },
+    recorded_audit_sha: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+    recorded_toolset_version: { type: 'integer', minimum: 1 },
+    recorded_contract_version: { type: 'integer' },
+  },
+}
+
 const OUTWARD = {
   type: 'object', additionalProperties: false,
   required: ['pr_url', 'filed_issues'],
@@ -301,14 +323,30 @@ const gap = await agent(
   `Run the Grow triage and pick the highest-value ORPHAN scenario gap. ${REL}\n` +
   `From ${CWD}/ run: \`uv run python tools/grow_triage.py --top 1\`. Set pr_exclusion_checked=true ONLY if it ran with the open-PR exclusion active (gh authenticated, NO --no-network); if gh is unauth you may add --no-network but then set pr_exclusion_checked=false (the harness will refuse to open a PR).\n` +
   (cfg.module ? `The maintainer pinned module=${cfg.module}; use it ONLY if triage lists it as a live (non-excluded) candidate.\n` : '') +
-  `The "→ pick:" line names the module; map it to its test files. Build a scenario map for that module — its intents, edge conditions, and invariant families (agreement, cache-equivalence, back-restores-state, config-matrix corners) — and subtract what the coverage baseline already exercises and what the root \`.ledger.grow.jsonl\` records closed-current/unclosable (\`tools/grow_ledger.py\`). Return the single highest-value orphan gap: target_symbol (module_key::dotted.symbol), dimension, and kind (concurrency iff a data race, else scenario). Return found=false if there is no live module or no orphan gap.`,
+  `The "→ pick:" line names the module; map it to its test files. Build a scenario map for that module — its intents, edge conditions, and invariant families (agreement, cache-equivalence, back-restores-state, config-matrix corners) — and subtract what the coverage baseline already exercises and what the root \`.ledger.grow.jsonl\` records closed-current/unclosable (\`tools/grow_ledger.py\`). Set selection_outcome="gap" and return the single highest-value orphan gap: target_symbol (module_key::dotted.symbol), dimension, and kind (concurrency iff a data race, else scenario). Set selection_outcome="no-orphan" ONLY after selecting a live module and completing its scenario map; use "no-live" when no live module was selected. Both non-gap outcomes return found=false.`,
   { phase: 'Select', schema: GAP, label: 'triage' },
 )
 
 if (!gap || !gap.found) {
   log(`No live gap to grow — ${gap ? gap.reason : 'triage failed'}`)
   trace.notes.push(`no live candidate: ${gap ? gap.reason : 'triage failed'}`)
-  return await finish({ done: false, reason: gap ? gap.reason : 'triage failed', openPr: OPEN_PR })
+  let audit = null
+  if (gap?.selection_outcome === 'no-orphan' && gap.pr_exclusion_checked === true &&
+      validModuleKey(gap.module) && Array.isArray(gap.tests) && gap.tests.length > 0) {
+    phase('Record')
+    audit = await agent(
+      `The scenario map for module ${gap.module} found no orphan gap. ${REL} ` +
+      `Append a no-gap module audit through \`uv run python tools/grow_ledger.py --ledger .ledger.grow.jsonl append --record-json '<record-json>'\`. ` +
+      `The record is {audit_module:${JSON.stringify(gap.module)}, tests:${JSON.stringify(gap.tests)}, state:"no-gap", examined:<UTC ISO timestamp>, contract_version:${CONTRACT_VERSION}, scenario_map_summary:${JSON.stringify(gap.reason)}}. ` +
+      `Do not supply audit_sha or toolset_version; the CLI owns them. Touch only the ledger. Return state="no-gap", ledger_appended=true only after the append succeeds, and the CLI values as recorded_audit_module, recorded_audit_sha, recorded_toolset_version, and recorded_contract_version.`,
+      { phase: 'Record', schema: AUDIT_RECORD, label: 'record-no-gap', effort: 'low' },
+    )
+    if (!validAuditReceipt(audit, gap)) {
+      trace.notes.push('no-gap audit receipt missing or invalid; module remains selectable')
+      audit = null
+    }
+  }
+  return await finish({ done: false, reason: gap ? gap.reason : 'triage failed', audit, openPr: OPEN_PR })
 }
 log(`gap: ${gap.target_symbol} [${gap.kind}] "${gap.dimension}" (${gap.status}) — ${gap.reason}`)
 trace.gap = { target_symbol: gap.target_symbol, kind: gap.kind, dimension: gap.dimension, module: gap.module, status: gap.status }
