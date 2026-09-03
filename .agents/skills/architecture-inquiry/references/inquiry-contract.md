@@ -45,6 +45,11 @@ When ownership is disputed, apply the proportionate trace and attack in
 [`authority-reachability.md`](authority-reachability.md). It is the canonical access-shape taxonomy and
 explains what the existing mechanical meters do not prove.
 
+Before proposing test work, subtract what current canonical evidence already proves and name the additional
+observable proposition. If none remains, propose no test work. Route test-only residue through the canonical
+[Grow/Sharpen additive-vs-mutative boundary](../../../grow/SPEC.md#extend-vs-add--the-boundary-with-sharpen-testsutilpy-model);
+whether the surrounding scenario already has a test does not decide the route.
+
 ## Constraint audit
 
 For every cross-cutting “must”, record:
