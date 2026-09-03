@@ -31,8 +31,10 @@ def _text(value: object, name: str) -> str:
 def _validate_proof_rows(packet: dict, receipt: dict) -> None:
     proofs = packet.get("mechanism_proofs")
     _require(isinstance(proofs, list) and proofs, "packet mechanism_proofs is required")
+    assert isinstance(proofs, list)
     for proof in proofs:
         _require(isinstance(proof, dict), "mechanism proof must be an object")
+        assert isinstance(proof, dict)
         for key in ("mechanism", "obligation", "evidence"):
             _text(proof.get(key), f"mechanism proof {key}")
         _require(
@@ -40,8 +42,10 @@ def _validate_proof_rows(packet: dict, receipt: dict) -> None:
         )
     evidence = packet.get("validation_evidence")
     _require(isinstance(evidence, list) and evidence, "packet validation_evidence is required")
+    assert isinstance(evidence, list)
     for row in evidence:
         _require(isinstance(row, dict), "validation evidence must be an object")
+        assert isinstance(row, dict)
         _text(row.get("command"), "validation command")
         _require(row.get("result") == "pass", "validation evidence must pass")
         _require(row.get("head") == receipt["head"], "validation evidence lacks exact head")
