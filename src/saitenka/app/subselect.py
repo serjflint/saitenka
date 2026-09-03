@@ -573,7 +573,8 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
         _add_and_select(ipc, Path(opts.sub_file).expanduser())
         return f"using sub file {Path(opts.sub_file).name}"
 
-    if opts.jimaku and opts.jimaku_force:
+    jimaku_eligible = bool(enabled_providers_for(opts.language, (("jimaku", True),)))
+    if opts.jimaku and opts.jimaku_force and jimaku_eligible:
         ok, status = fetch_jimaku(
             ipc,
             jimaku_key=opts.jimaku_key,

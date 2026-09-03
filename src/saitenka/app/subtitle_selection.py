@@ -249,15 +249,19 @@ class FetchAction(StrEnum):
 
 
 def fetch_action(
-    *, path_available: bool, force_select: bool, replace: bool, language: Language
+    *,
+    path_available: bool,
+    force_select: bool,
+    replace: bool,
+    language: Language,
+    target_role: Language = MAIN_LANG,
 ) -> FetchAction:
-    """An explicit picker choice always selects; a user retry only swaps while already on the
-    target language, so a retry from English keeps English until the user asks for the switch."""
+    """An explicit picker choice always selects; a user retry swaps only the role it sampled."""
     if not path_available:
         return FetchAction.REPORT_FAILURE
     if force_select:
         return FetchAction.REPLACE
-    if replace and language == MAIN_LANG:
+    if replace and language == target_role:
         return FetchAction.REPLACE
     return FetchAction.BACKGROUND_ADD
 

@@ -94,6 +94,8 @@ class AcquisitionSource(StrEnum):
 class AcquireSubtitles:
     media_path: str
     source: AcquisitionSource
+    target_role: Language = "jp"
+    target_language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +175,11 @@ def _retry(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
     source = (
         AcquisitionSource.RESYNC_CURRENT if inputs.has_external_sub else AcquisitionSource.PROVIDERS
     )
-    return (AcquireSubtitles(inputs.media_path, source),)
+    role = inputs.language if source is AcquisitionSource.RESYNC_CURRENT else "jp"
+    language = None
+    if source is AcquisitionSource.RESYNC_CURRENT and role != "jp":
+        language = inputs.second_language.split(",", 1)[0]
+    return (AcquireSubtitles(inputs.media_path, source, role, language),)
 
 
 def _toggle_annotation_mode(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:

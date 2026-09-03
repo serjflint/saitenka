@@ -9,6 +9,7 @@ written with.
 from __future__ import annotations
 
 import util
+from saitenka_tokenize.languages import MAIN_LANG
 
 from saitenka.app import subselect
 
@@ -374,6 +375,31 @@ def test_jimaku_force_falls_back_to_embedded_on_fetch_failure(tmp_path, monkeypa
     )
     assert "sid=2" in msg  # jimaku failed → embedded JP track selected as fallback
     assert ipc.sets("sid") == [2]
+
+
+def test_jimaku_force_cannot_bypass_profile_language_eligibility(monkeypatch):
+    monkeypatch.setattr(
+        subselect,
+        "fetch_jimaku",
+        lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("ineligible provider called")),
+    )
+    fr = {"id": 6, "type": "sub", "lang": "fr"}
+    de = {"id": 7, "type": "sub", "lang": "de"}
+    ipc = FakeIPC(tracks=[de, fr], path="/v/French - 01.mkv")
+
+    startup, _status, providers = subselect.prepare_attach_startup(
+        ipc,
+        subselect.AttachSubtitleOptions(
+            slang="fr",
+            jimaku=True,
+            jimaku_force=True,
+            language="fr",
+            second_language="de",
+        ),
+    )
+
+    assert (startup.active, startup.tracks.jp_sid) == (MAIN_LANG, 6)
+    assert providers == ()
 
 
 def test_provider_path_runs_configured_order_and_returns_first_success(tmp_path, monkeypatch):

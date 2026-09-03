@@ -631,6 +631,41 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch, make_sessio
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
 
 
+def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypatch):
+    fr = {"id": 2, "type": "sub", "lang": "fr"}
+    source = tmp_path / "episode.de.srt"
+    source.write_text("Deutsch", encoding="utf-8")
+    de = {
+        "id": 1,
+        "type": "sub",
+        "lang": "de",
+        "external": True,
+        "external-filename": str(source),
+    }
+    ipc = FakeIPC([fr, de])
+    ipc.props["path"] = "/videos/episode.mkv"
+    reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
+    startup = subtitle_modes.select_initial(ipc, "fr", "de", preferred_role=SECOND_LANG)
+    reader.graph.cue.configure_subtitle_mode(startup, slang="fr", second_slang="de")
+    reader.graph.subtitle_acquisition.configure_retry(None, target_language="fr")
+    retimed = tmp_path / "episode.retimed.de.srt"
+    retimed.write_text("Deutsch", encoding="utf-8")
+    monkeypatch.setattr("saitenka.app.resync.resync_window", lambda *_a, **_kw: retimed)
+    monkeypatch.setattr(subtitle_modes, "_published", lambda _source, result: result)
+    monkeypatch.setattr(
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
+    )
+    monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a, **_kw: None)
+    ipc.commands.clear()
+
+    reader.command(app_bindings.SUBTITLE_RETRY_MSG)
+    jobs.finish()
+
+    state = reader.graph.track_commands.current()
+    assert (state.language, state.jp_sid, state.en_sid) == (SECOND_LANG, 2, 9)
+    assert ("sub-add", str(retimed), "select", "", "de") in ipc.commands
+
+
 def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypatch):
     ipc = FakeIPC([EN.copy()])
     ipc.props["path"] = "/videos/Show - 02.mkv"

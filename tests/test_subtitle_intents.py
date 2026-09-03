@@ -123,6 +123,27 @@ def test_subtitles_already_on_screen_are_retimed_not_refetched() -> None:
     assert effects == (AcquireSubtitles("/media/ep1.mkv", AcquisitionSource.RESYNC_CURRENT),)
 
 
+def test_retiming_carries_the_active_translation_role() -> None:
+    effects = reduce(
+        SubtitleCommand.RETRY_ACQUISITION,
+        inputs(
+            has_external_sub=True,
+            language=SECOND_LANG,
+            main_language="fr",
+            second_language="de",
+        ),
+    )
+
+    assert effects == (
+        AcquireSubtitles(
+            "/media/ep1.mkv",
+            AcquisitionSource.RESYNC_CURRENT,
+            SECOND_LANG,
+            "de",
+        ),
+    )
+
+
 def test_without_external_subtitles_the_providers_are_queried() -> None:
     effects = reduce(SubtitleCommand.RETRY_ACQUISITION, inputs(has_external_sub=False))
 

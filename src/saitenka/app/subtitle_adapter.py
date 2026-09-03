@@ -296,7 +296,12 @@ class SubtitleCommandCoordinator:
 
     def _acquire(self, effect: subtitle_intents.AcquireSubtitles) -> None:
         apply = self._apply
-        apply.acquisition.begin(effect.media_path, effect.source)
+        apply.acquisition.begin(
+            effect.media_path,
+            effect.source,
+            target_role=effect.target_role,
+            target_language=effect.target_language,
+        )
 
     def _toggle_translation(self) -> None:
         apply = self._apply

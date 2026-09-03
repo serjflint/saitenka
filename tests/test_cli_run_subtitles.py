@@ -110,6 +110,34 @@ def test_explicit_run_jimaku_retains_synchronous_override(tmp_path, monkeypatch)
     assert enabled == ("jimaku",)
 
 
+def test_explicit_jimaku_cannot_bypass_profile_language_eligibility(tmp_path, monkeypatch):
+    fetched = []
+    monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["explicit_flag"])
+    monkeypatch.setattr(
+        cli_run,
+        "_resolve_jimaku_subs",
+        lambda *_args, **_kwargs: fetched.append(True),
+    )
+
+    sub_path, _en_path, background, enabled = cli_run._resolve_subtitles(
+        {
+            "active_profile": "fr",
+            "profiles": {"fr": {"language": "fr", "second": "de"}},
+            "jimaku": {"fetch": True},
+        },
+        "episode.mkv",
+        tmp_path / "episode.mkv",
+        30,
+        tmp_path,
+        cli_run.RunSubtitleOptions(slang="fr", jimaku=True),
+        jimaku_title=None,
+        episode=None,
+    )
+
+    assert sub_path is None and background == () and enabled == ()
+    assert fetched == []
+
+
 def test_tsukihime_is_background_only_and_follows_jimaku(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["cfg_fetch"])
 

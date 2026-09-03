@@ -95,7 +95,14 @@ class SubtitleAcquisitionController:
             on_done=on_done,
         )
 
-    def begin(self, media_path: str, source: AcquisitionSource) -> None:
+    def begin(
+        self,
+        media_path: str,
+        source: AcquisitionSource,
+        *,
+        target_role: str = MAIN_LANG,
+        target_language: str | None = None,
+    ) -> None:
         subtitle_modes.begin_acquisition(
             self.submit,
             self._get,
@@ -104,6 +111,11 @@ class SubtitleAcquisitionController:
             self._ipc,
             media_path,
             source,
+            fetch_source=subtitle_modes.FetchSource(
+                "subtitle-resync",
+                target_language or self._retry.target_language,
+                target_role,
+            ),
         )
 
     def fetch_background(self, fetch: ProviderFetch) -> None:

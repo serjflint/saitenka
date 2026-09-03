@@ -74,6 +74,7 @@ class SubtitleFetchResult:
         False  # an explicit picker choice: select the fetched track now from either role
     )
     target_language: str = MAIN_LANG
+    target_role: Language = MAIN_LANG
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,12 +85,14 @@ class SubtitleFetchRequest:
     replace: bool
     force_select: bool
     target_language: str = MAIN_LANG
+    target_role: Language = MAIN_LANG
 
 
 @dataclass(frozen=True, slots=True)
 class FetchSource:
     name: str = "sub-provider"
     target_language: str = MAIN_LANG
+    target_role: Language = MAIN_LANG
 
 
 DEFAULT_FETCH_SOURCE = FetchSource()
@@ -138,6 +141,7 @@ def run_fetch(request: object, cancelled: threading.Event) -> object:
         request.replace,
         request.force_select,
         request.target_language,
+        request.target_role,
     )
 
 
@@ -166,6 +170,7 @@ def unavailable_fetch(request: SubtitleFetchRequest) -> SubtitleFetchResult:
         request.replace,
         request.force_select,
         request.target_language,
+        request.target_role,
     )
 
 
@@ -461,6 +466,7 @@ def start_fetch(
         replace,
         force_select,
         source.target_language,
+        source.target_role,
     )
     submit(request, name=source.name, on_done=on_done)
 
@@ -508,6 +514,8 @@ def _start_resync_window(
     retry: SubtitleRetryState,
     video_path: str,
     sub: Path,
+    *,
+    source: FetchSource,
 ) -> None:
     """Re-time the subs you already have from the CURRENT playhead onward (no provider query) — the
     user's "sync from here" shortcut. A drifting source (right after the OP, early before it) can't be
@@ -534,7 +542,7 @@ def _start_resync_window(
         submit,
         get,
         do,
-        source=FetchSource("subtitle-resync", retry.target_language),
+        source=source,
         replace=True,
         on_done=lambda: _finish_retry(retry),
     )
@@ -588,6 +596,8 @@ def begin_acquisition(
     ipc,
     video_path: str,
     source,
+    *,
+    fetch_source: FetchSource = DEFAULT_FETCH_SOURCE,
 ) -> None:
     """Carry out a decided subtitle acquisition. Re-timing needs the external file that was on
     screen when the decision was made; if it went away, fall back to querying providers."""
@@ -598,7 +608,15 @@ def begin_acquisition(
         toast("Subtitle sync already running", "warn")
         return
     if current is not None:
-        _start_resync_window(submit, get, toast, retry, video_path, current)
+        _start_resync_window(
+            submit,
+            get,
+            toast,
+            retry,
+            video_path,
+            current,
+            source=fetch_source,
+        )
     else:
         _start_provider_fetch(submit, get, toast, retry, video_path)
 
@@ -623,6 +641,7 @@ def _replace_target_track(
     status: str,
     *,
     target_language: str = MAIN_LANG,
+    target_role: Language = MAIN_LANG,
     toast: str | None = None,
 ) -> None:
     """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry, or an
@@ -647,13 +666,15 @@ def _replace_target_track(
     # The just-selected track, not discover_tracks' first JP. mpv answers `sid` with a track id or
     # None; the string form ("no") only ever goes the other way, on a write.
     selected = ports.get("sid")
+    found = discover_tracks(ports.ipc, ports.tracks().slang, ports.tracks().second_slang)
+    selected_sid = selected if isinstance(selected, int) else None
     ports.declare(
         SubtitleTracksDiscovered(
-            selected if isinstance(selected, int) else None,
-            discover_tracks(ports.ipc, ports.tracks().slang, ports.tracks().second_slang).en_sid,
+            selected_sid if target_role == MAIN_LANG else found.jp_sid,
+            selected_sid if target_role == SECOND_LANG else found.en_sid,
         )
     )
-    ports.declare(SubtitleLanguageChanged(MAIN_LANG))
+    ports.declare(SubtitleLanguageChanged(target_role))
     ports.clear_cue()
     ports.rebuild_index()  # replaces the index on success; retains it if the just-added track
     # can't resolve yet (rebuild is fail-soft) rather than blanking the cues
@@ -715,6 +736,7 @@ def apply_fetch_result(ports: TrackPorts, result: SubtitleFetchResult) -> None:
         force_select=result.force_select,
         replace=result.replace,
         language=ports.tracks().language,
+        target_role=result.target_role,
     )
     if action is FetchAction.REPORT_FAILURE:
         log.warning("%s", result.status)
@@ -730,6 +752,7 @@ def apply_fetch_result(ports: TrackPorts, result: SubtitleFetchResult) -> None:
             result.path,
             result.status,
             target_language=result.target_language,
+            target_role=result.target_role,
             toast=toast,
         )
     else:

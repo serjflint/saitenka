@@ -386,7 +386,7 @@ def _resolve_subtitles(
     fetch_in_background: tuple[str, ...] = ()
     if subs.sub_file:
         sub_path = Path(subs.sub_file).expanduser()
-    elif jimaku_on and subs.jimaku:
+    elif jimaku_on and subs.jimaku and "jimaku" in enabled_providers:
         sub_path = _resolve_jimaku_subs(
             video_path, jimaku_title, episode, subs.jimaku_key, jimaku_cfg, resync=subs.resync
         )
