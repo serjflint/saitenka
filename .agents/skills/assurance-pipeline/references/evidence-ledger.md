@@ -77,13 +77,15 @@ Frozen reviewed-packet path and digest:
 
 ## Review returns
 
-| Reviewer invocation | Model / isolation | Reviewed packet digest | Verdict | Findings / resolution / human P2 owner |
+| Reviewer invocation | Model / isolation | Pre/post revision, digest, tree, index | Verdict | Findings / resolution / human P2 owner |
 | --- | --- | --- | --- | --- |
-| | | | | P0-P3 |
+| | read-only / disposable worktree | | | P0-P3 |
 
 List every launched reviewer, including timeouts or failures. If any frozen packet field changes, mark
 every earlier row invalid and launch fresh review. Appending returned verdicts to this separate git-ignored
 table does not change the packet. Only the human owner may accept a P2; record that decision.
+
+Publication-worktree verification after all reviewers (HEAD + packet/diff digests + tracked tree + index):
 
 ## Final re-enfolding
 

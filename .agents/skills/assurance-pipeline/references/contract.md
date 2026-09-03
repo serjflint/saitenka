@@ -111,6 +111,7 @@ An **artifact result** is complete only when:
 - all temporary perturbations restored exact bytes;
 - repository-required deterministic and free-threaded gates passed on the final head;
 - two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or accepted by the human owner, and P3 recorded;
+- reviewers remained read-only and their pre/post HEAD, packet/diff digests, tracked-tree, and index checks match;
 - every approval names the same reviewed-packet digest, and the worktree is clean.
 
 The reviewed packet binds the base, head, diff, supported scenario, invariant, accepted dossier and human
@@ -118,4 +119,5 @@ decision, affected owners, discriminator, scope guard, final scenario trace, mec
 validation evidence, residual uncertainty, and follow-ups. Any change to one of those fields invalidates
 all approvals. Appending returned verdicts to a separate git-ignored review table does not change the
 packet. A reviewer timeout or abandoned invocation is unfinished, not an implicit pass. Only the human
-owner may accept a P2.
+owner may accept a P2. Prefer a disposable worktree per reviewer; regardless, repeat the same HEAD, digest,
+tracked-tree, and index checks in the publication worktree after every reviewer has returned.

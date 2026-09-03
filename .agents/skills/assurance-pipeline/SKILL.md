@@ -108,6 +108,10 @@ human decision, affected owners, discriminator, scope guard, final scenario trac
 validation, residual uncertainty, and follow-ups; hash it. Give two isolated adversarial reviewers that
 packet and withhold author rationale. Also include `.agents/rules/searching.md`, the shell-search ban,
 permitted navigation surfaces, and `uv run` for Python—the safety envelope is not design rationale.
+Reviewers are read-only: forbid file edits and `checkout`/`switch`/`stash`/`reset`/`commit`. Prefer a
+separate disposable worktree per reviewer. Before and after each review, verify the current HEAD, packet
+and diff digests, tracked worktree, and index; after all reviews, repeat those checks in the publication
+worktree.
 
 Record P0-P3 findings and the reviewed-packet digest. **Every launched reviewer must finish.** Fix every
 P0/P1; resolve each P2 or obtain an explicit acceptance from the human owner; record P3. Any change to
