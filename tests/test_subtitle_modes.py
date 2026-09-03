@@ -632,7 +632,15 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch, make_sessio
 
 
 def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypatch):
-    fr = {"id": 2, "type": "sub", "lang": "fr"}
+    fr_source = tmp_path / "episode.fr.srt"
+    fr_source.write_text("Français", encoding="utf-8")
+    fr = {
+        "id": 2,
+        "type": "sub",
+        "lang": "fr",
+        "external": True,
+        "external-filename": str(fr_source),
+    }
     source = tmp_path / "episode.de.srt"
     source.write_text("Deutsch", encoding="utf-8")
     de = {
@@ -664,6 +672,7 @@ def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypat
     state = reader.graph.track_commands.current()
     assert (state.language, state.jp_sid, state.en_sid) == (SECOND_LANG, 2, 9)
     assert ("sub-add", str(retimed), "select", "", "de") in ipc.commands
+    assert ("sub-remove", 1) in ipc.commands and ("sub-remove", 2) not in ipc.commands
 
 
 def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypatch):

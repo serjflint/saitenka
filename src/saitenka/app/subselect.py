@@ -592,6 +592,8 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
 
     if not opts.jimaku:
         return "no Japanese subtitle track found (pass --jimaku to fetch, or --sub-file)"
+    if not jimaku_eligible:
+        return f"no {language_name(opts.language)} subtitle track found"
 
     _, status = fetch_jimaku(
         ipc,

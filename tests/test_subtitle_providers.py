@@ -81,6 +81,15 @@ def test_providers_for_language_filters_by_capability(monkeypatch):
     assert mod.providers_for_language("fr") == ("universal",)
 
 
+def test_provider_capabilities_match_language_aliases_and_regions(monkeypatch):
+    mod = _isolated_registry(monkeypatch)
+    register_provider(_stub_provider("jimaku", frozenset({"jp"})))
+    register_provider(_stub_provider("german", frozenset({"de"})))
+
+    assert mod.providers_for_language("JA-jp") == ("jimaku",)
+    assert mod.providers_for_language("de-CH") == ("german",)
+
+
 def test_providers_for_language_drops_unregistered_candidate(monkeypatch):
     _isolated_registry(monkeypatch)
     register_provider(_stub_provider("jimaku", frozenset({"jp"})))

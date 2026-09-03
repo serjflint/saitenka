@@ -648,8 +648,10 @@ def _replace_target_track(
     explicit picker choice). Drops the stale external track(s) first — mpv caches an already-loaded
     external's cues in memory, and ``discover_tracks`` would pick the older duplicate JP — then re-adds
     + selects the fresh one and rebuilds the lookahead index, so the corrected timing shows immediately."""
+    state = ports.tracks()
+    replaced_sid = state.jp_sid if target_role == MAIN_LANG else state.en_sid
     for track in sub_tracks(ports.ipc):
-        if track.get("external") and track.get("id") is not None:
+        if track.get("external") and track.get("id") == replaced_sid:
             _send(ports.ipc, "remove-external", "sub-remove", track["id"])
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
@@ -666,7 +668,7 @@ def _replace_target_track(
     # The just-selected track, not discover_tracks' first JP. mpv answers `sid` with a track id or
     # None; the string form ("no") only ever goes the other way, on a write.
     selected = ports.get("sid")
-    found = discover_tracks(ports.ipc, ports.tracks().slang, ports.tracks().second_slang)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
     selected_sid = selected if isinstance(selected, int) else None
     ports.declare(
         SubtitleTracksDiscovered(

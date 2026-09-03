@@ -9,7 +9,6 @@ written with.
 from __future__ import annotations
 
 import util
-from saitenka_tokenize.languages import MAIN_LANG
 
 from saitenka.app import subselect
 
@@ -383,9 +382,8 @@ def test_jimaku_force_cannot_bypass_profile_language_eligibility(monkeypatch):
         "fetch_jimaku",
         lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("ineligible provider called")),
     )
-    fr = {"id": 6, "type": "sub", "lang": "fr"}
     de = {"id": 7, "type": "sub", "lang": "de"}
-    ipc = FakeIPC(tracks=[de, fr], path="/v/French - 01.mkv")
+    ipc = FakeIPC(tracks=[de], path="/v/French - 01.mkv")
 
     startup, _status, providers = subselect.prepare_attach_startup(
         ipc,
@@ -398,7 +396,7 @@ def test_jimaku_force_cannot_bypass_profile_language_eligibility(monkeypatch):
         ),
     )
 
-    assert (startup.active, startup.tracks.jp_sid) == (MAIN_LANG, 6)
+    assert (startup.active, startup.tracks.en_sid) == ("en", 7)
     assert providers == ()
 
 

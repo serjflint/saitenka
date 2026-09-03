@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka.app.subtitle_selection import wanted_languages
+
 if TYPE_CHECKING:
     from saitenka.app.subselect import SubtitleCandidate
 
@@ -70,10 +72,12 @@ def providers_for_language(
     """Registered provider names available for ``language``, preserving ``candidates`` order (default:
     registry order). A provider not yet registered is silently dropped."""
     names = candidates if candidates is not None else tuple(_REGISTRY)
+    accepted = set(wanted_languages(language))
     return tuple(
         name
         for name in names
-        if (p := _REGISTRY.get(name)) is not None and (not p.languages or language in p.languages)
+        if (p := _REGISTRY.get(name)) is not None
+        and (not p.languages or accepted.intersection(code.lower() for code in p.languages))
     )
 
 
