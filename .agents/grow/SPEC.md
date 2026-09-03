@@ -238,8 +238,8 @@ claimed, so no target symbol or dimension is invented.
 
 The loop's own thesis applied to itself: a green run proves nothing about whether the LOOP is any good. Both
 dogfood runs found real loop-design bugs the design docs missed (run 1 → 8 flaws under adversarial review;
-run 2 → the arm-1/arm-3 composition bug). So the final phase of *every* run — bounced, dropped, or
-no-candidate included, those are the richest lessons — is a **`Reflect`** step:
+run 2 → the arm-1/arm-3 composition bug). So every completed outcome — bounced, dropped, or no-candidate
+included, those are the richest lessons — passes a **`Reflect`** step before its Grow receipt:
 
 - **Isolated + evidence-based.** A fresh agent (it did not run the loop) receives only the factual **run
   trace** — which arms ran / bounced / were n-a, retries, review verdicts, outcome, notes — and reasons
@@ -248,6 +248,9 @@ no-candidate included, those are the richest lessons — is a **`Reflect`** step
   stage, a CLI that couldn't express what was needed, a fidelity gap), and **improves** (the smallest
   concrete change to a loop TOOL/SPEC/harness). If the run was clean it files NOTHING (anti-Goodhart — no
   manufactured findings).
+- **Durable lifecycle evidence.** `tools/grow_reflect.py append-run` writes a run receipt even when there
+  are no findings and returns its `reflection_id` plus `trace_sha`. `grow_ledger.py` refuses to append or
+  honor a record unless that exact receipt exists in `.reflection.grow.jsonl`.
 - **Advisory, never self-modifying.** It writes only `.reflection.grow.jsonl`; it MUST NOT edit any tool /
   spec / harness / product file. Self-modification is strictly more dangerous than the loop's test edits
   (which already never auto-merge) — a human triages every proposal. A proposal touching the reflection

@@ -119,6 +119,14 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
     test_path.write_text("def test_x():\n    assert True\n", encoding="utf-8")
     ledger_path = tmp_path / ".ledger.grow.jsonl"
     ledger_path.write_text('{"type":"manifest","toolset_version":3}\n', encoding="utf-8")
+    (tmp_path / ".reflection.grow.jsonl").write_text(
+        '{"type":"manifest","loop_version":1}\n'
+        '{"type":"run-reflection","reflection_id":"aaaaaaaaaaaaaaaa",'
+        '"trace_sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",'
+        '"trace":{"gap":{"module":"app/x.py"}},"introspection":"fixture",'
+        '"finding_ids":[],"escalations":[]}\n',
+        encoding="utf-8",
+    )
     ledger = gl.Ledger.load(ledger_path)
     ledger.append(
         gl.prepare_audit_record(
@@ -127,6 +135,8 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
                 "tests": tests,
                 "state": "no-gap",
                 "reflection": {
+                    "reflection_id": "a" * 16,
+                    "trace_sha": "b" * 64,
                     "introspection": "fixture",
                     "findings": [],
                     "appended": True,

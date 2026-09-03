@@ -15,7 +15,14 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
 import grow_ledger as gl
 
 MANIFEST = {"type": "manifest", "toolset_version": 1}
-REFLECTION = {"introspection": "audited", "findings": [], "appended": True, "escalations": []}
+REFLECTION = {
+    "reflection_id": "a" * 16,
+    "trace_sha": "b" * 64,
+    "introspection": "audited",
+    "findings": [],
+    "appended": True,
+    "escalations": [],
+}
 
 MODULE_V1 = "def helper(x):\n    return x + 1\n\n\ndef crisp(text, scale):\n    return (text.upper(), scale)\n"
 # unrelated edit ABOVE the target; crisp() is byte-identical
@@ -90,6 +97,24 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests/test_x.py").write_text(
         "def test_crisp():\n    assert True\n", encoding="utf-8"
+    )
+    (tmp_path / ".reflection.grow.jsonl").write_text(
+        json.dumps({"type": "manifest", "loop_version": 1})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "run-reflection",
+                "reflection_id": REFLECTION["reflection_id"],
+                "trace_sha": REFLECTION["trace_sha"],
+                "trace": {"gap": {"target_symbol": "app/x.py::crisp", "module": "app/x.py"}},
+                "introspection": REFLECTION["introspection"],
+                "finding_ids": [],
+                "escalations": [],
+                "loop_version": 1,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
     )
     return tmp_path
 
@@ -292,6 +317,36 @@ def test_prepare_record_rejects_missing_or_unwritten_reflection(tmp_path):
         gl.prepare_record(record, root, ledger, require_reflection=True)
     record["reflection"] = {**REFLECTION, "appended": False}
     with pytest.raises(ValueError, match="durably appended"):
+        gl.prepare_record(record, root, ledger, require_reflection=True)
+
+
+def test_prepare_record_rejects_unpersisted_reflection_claim(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "source": "invariant",
+        "target_symbol": "app/x.py::crisp",
+        "dimension": "x",
+        "reflection": {**REFLECTION, "reflection_id": "c" * 16},
+    }
+    with pytest.raises(ValueError, match="not present"):
+        gl.prepare_record(record, root, ledger, require_reflection=True)
+
+
+def test_prepare_record_rejects_a_receipt_from_another_gap(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "source": "invariant",
+        "target_symbol": "app/x.py::helper",
+        "dimension": "x",
+        "reflection": REFLECTION,
+    }
+    with pytest.raises(ValueError, match="different Grow gap"):
         gl.prepare_record(record, root, ledger, require_reflection=True)
 
 

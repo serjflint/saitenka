@@ -196,8 +196,10 @@
   "reflection": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["introspection", "findings", "appended", "escalations"],
+    "required": ["reflection_id", "trace_sha", "introspection", "findings", "appended", "escalations"],
     "properties": {
+      "reflection_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+      "trace_sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
       "introspection": {"type": "string", "description": "plainly what the loop did this run, from the trace"},
       "findings": {
         "type": "array",
@@ -215,7 +217,7 @@
           }
         }
       },
-      "appended": {"type": "boolean", "description": "findings written to .reflection.grow.jsonl"},
+      "appended": {"type": "boolean", "description": "the durable run-reflection receipt was written to .reflection.grow.jsonl"},
       "escalations": {"type": "array", "items": {"type": "string"}, "description": "subjects at recurrence >= 2 (human triages)"}
     }
   }

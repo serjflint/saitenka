@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "result": "artifact",
+  "entry_state": "accepted-dossier",
+  "supported_scenario": "A supported action crosses two owners",
+  "product_invariant": "Both owners observe one generation",
+  "accepted_dossier": "dossier-1",
+  "human_decision": {"decision_id": "decision-1", "decision": "implement", "accepted_at": "2026-09-03T10:00:00Z"},
+  "affected_owners": ["owner-a", "owner-b"],
+  "scope_guard": "Only the named scenario",
+  "discriminator": "Base fails and head passes the named observation",
+  "final_scenario_trace": "Both owners observe generation 2",
+  "mechanism_proofs": [{"mechanism": "generation handoff", "proof": "focused oracle"}],
+  "validation_evidence": [{"command": "uv run poe all", "result": "pass"}],
+  "residual_uncertainty": [],
+  "followups": [],
+  "falsified_hypotheses": []
+}

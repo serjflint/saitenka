@@ -56,7 +56,7 @@ const gate = {
   report: 'context bounced; growth passed',
 }
 const upheld = { verdict: 'UPHELD', grounds: [], redundant_with: null, better_fix: null }
-const reflection = { introspection: 'fixture', findings: [], appended: true, escalations: [] }
+const reflection = { reflection_id: 'a'.repeat(16), trace_sha: 'b'.repeat(64), introspection: 'fixture', findings: [], appended: true, escalations: [] }
 const receipt = {
   ledger_appended: true,
   recorded_source: gap.source,

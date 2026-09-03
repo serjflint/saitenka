@@ -296,8 +296,10 @@ const REFLECT_CATEGORIES = [
 
 const REFLECTION = {
   type: 'object', additionalProperties: false,
-  required: ['introspection', 'findings', 'appended', 'escalations'],
+  required: ['reflection_id', 'trace_sha', 'introspection', 'findings', 'appended', 'escalations'],
   properties: {
+    reflection_id: { type: 'string', pattern: '^[0-9a-f]{16}$' },
+    trace_sha: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     introspection: { type: 'string', description: 'plainly what the loop did this run, from the trace' },
     findings: {
       type: 'array',
@@ -314,7 +316,7 @@ const REFLECTION = {
         },
       },
     },
-    appended: { type: 'boolean', description: 'the findings were written to .reflection.grow.jsonl' },
+    appended: { type: 'boolean', description: 'the durable run-reflection receipt was written to .reflection.grow.jsonl' },
     escalations: { type: 'array', items: { type: 'string' }, description: 'subjects at recurrence ≥ 2 (human triages)' },
   },
 }
@@ -549,7 +551,6 @@ const review = {
 }
 trace.review = review
 
-phase('Record')
 if (verdict !== 'UPHELD') {
   const refuter = skeptic?.verdict === 'REFUTED' ? skeptic : judge
   await revert(proposal)
@@ -614,16 +615,15 @@ async function reflect() {
     `3. IMPROVE — for each real finding, the SMALLEST concrete change to a loop TOOL/SPEC/harness (never the ` +
     `product code). Mark self_referential=true if the proposal touches the reflection machinery itself ` +
     `(needs extra human scrutiny). category ∈ ${JSON.stringify(REFLECT_CATEGORIES)}; severity low|medium|high.\n\n` +
-    `Then APPEND each finding to the reflection ledger and report escalations. From the repository root:\n` +
-    `- the ledger is \`.reflection.grow.jsonl\`; if absent, create it ` +
-    `with a manifest line \`{"type":"manifest","loop_version":1}\` first.\n` +
+    `Then persist the whole run reflection and report escalations. From the repository root:\n` +
     `- FIRST read the existing findings. Recurrence keys on finding_id=hash(category,subject), so if this ` +
     `run's weakness is the SAME root cause as one already recorded, REUSE that record's exact category + ` +
     `subject verbatim (do NOT reword) — else its finding_id won't match and recurrence can't accumulate. ` +
     `Mint a new subject only for a genuinely new weakness.\n` +
-    `- for each finding compute finding_id + read recurrence with \`tools/grow_reflect.py\` (import it), and ` +
-    `append a record {finding_id, run_id:${JSON.stringify(trace.gap?.target_symbol ?? 'no-candidate')}, ` +
-    `category, subject, severity, evidence, proposal, self_referential, loop_version:(manifest)}.\n` +
+    `- MUST invoke \`uv run python tools/grow_reflect.py --ledger .reflection.grow.jsonl append-run --record-json '<record-json>'\`, ` +
+    `where the record is {trace:${JSON.stringify(trace)}, introspection, findings, escalations}. The CLI owns ` +
+    `finding_id, loop_version, trace_sha, reflection_id, and the durable run-reflection receipt. Return its ` +
+    `reflection_id and trace_sha exactly; do not claim appended=true without CLI success.\n` +
     `- ADVISORY ONLY: do NOT edit any tool/spec/harness/product file; the ledger is the only write.\n` +
     `- report any finding whose recurrence ≥ 2 at the current loop_version as an ESCALATION (the human ` +
     `triages / a bump to loop_version marks it addressed). Do NOT open issues or PRs.`,
@@ -654,6 +654,7 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
   const ledgerState = wantPr || wantIssue ? 'open' : state
   trace.outcome = ledgerState
   const reflectionReceipt = await reflect()
+  phase('Record')
   const recorded = await agent(
     `Append one Grow ledger record. ${REL} The ledger is \`.ledger.grow.jsonl\`. Touch ONLY the ledger; do not run git/gh or take any outward action.\n` +
     `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Build the record without gap_id, target_sha, or toolset_version, then MUST invoke \`uv run python tools/grow_ledger.py --ledger .ledger.grow.jsonl append --record-json '<record-json>'\`; that CLI owns those fields. Do not hash or append manually. Stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`.\n` +

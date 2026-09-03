@@ -59,7 +59,7 @@ Read `.agents/grow/GUIDE.md` only to explain the design or resolve ambiguity.
 11. **Mandatory pre-receipt phase — Reflect.** On every completed outcome, including `no-orphan`, `no-live`, baseline
     failure, gate bounce, refutation, dry-run, and ship paths, invoke a fresh isolated reflector with only
     the factual run trace. Validate its `reflection` response against `contracts.json`; it may append
-    findings only through `tools/grow_reflect.py` and must not edit code or open outward actions. Do not
+    findings and the mandatory run receipt only through `tools/grow_reflect.py append-run`; it must not edit code or open outward actions. Do not
     write no suppressive Grow receipt until this invocation returns a durably-appended receipt. Bind that
     receipt into the Grow ledger record; a thrown adapter/tool failure is an incomplete invocation, never
     a completed outcome.

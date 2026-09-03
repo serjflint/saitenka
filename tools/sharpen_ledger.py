@@ -22,6 +22,7 @@ SRC = "src/saitenka"  # module keys are relative to here
 TESTS = "tests"
 CONTRACT_VERSION = 5
 OUTER_REFLECTION_CADENCE = 3
+REQUIRED_AXES = {"efficacy", "conformance", "preservation", "brittleness", "redundancy"}
 
 # Status of a module against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never audited → prime candidate
@@ -35,13 +36,24 @@ STALE_CONTRACT = "stale-contract"
 
 def _has_axis_evidence(record: dict) -> bool:
     skipped = record.get("axes_not_applied")
-    return (
+    if not (
         isinstance(record.get("audited"), str)
         and bool(record["audited"].strip())
         and isinstance(record.get("axes"), dict)
         and isinstance(skipped, list)
         and all(isinstance(item, str) and bool(item) for item in skipped)
-    )
+    ):
+        return False
+    axes = record["axes"]
+    applied = {
+        axis
+        for axis in REQUIRED_AXES
+        if axis in axes or (axis == "efficacy" and "survival" in axes)
+    }
+    skipped_axes = {
+        axis for axis in REQUIRED_AXES if any(item.lower().startswith(axis) for item in skipped)
+    }
+    return applied | skipped_axes == REQUIRED_AXES
 
 
 def source_sha(root: Path, module_key: str, test_files: list[str]) -> str:
@@ -256,7 +268,14 @@ class Ledger:
     def grow_filed(self) -> dict[str, list[str]]:
         """`module_key -> [issue refs]` from each module's latest record (open-ness checked by triage)."""
         out: dict[str, list[str]] = {}
-        for r in self._module_records():
+        latest = {record["module"]: record for record in self._module_records()}
+        for r in latest.values():
+            if (
+                int(r.get("toolset_version", 1)) != self.toolset_version
+                or r.get("contract_version") != CONTRACT_VERSION
+                or not _has_axis_evidence(r)
+            ):
+                continue
             ids = r.get("grow-filed") or r.get("grow_filed") or []
             if ids:
                 out[r["module"]] = list(ids)
@@ -301,6 +320,8 @@ def _validate_test_files(root: Path, test_files: object) -> list[str]:
 
 
 def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
+    if ledger.outer_reflection_due():
+        raise ValueError("outer reflection is due; module records are blocked")
     module = record.get("module")
     if not isinstance(module, str) or not module:
         raise ValueError("record requires a non-empty module")
@@ -323,11 +344,8 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError("record has invalid state")
     if not isinstance(record.get("audited"), str) or not record["audited"].strip():
         raise ValueError("record requires audited timestamp")
-    if not isinstance(record.get("axes"), dict):
-        raise TypeError("record requires axes evidence")
-    skipped = record.get("axes_not_applied")
-    if not isinstance(skipped, list) or not all(isinstance(item, str) and item for item in skipped):
-        raise ValueError("record requires axes_not_applied string list")
+    if not _has_axis_evidence(record):
+        raise ValueError("record must account for every required axis")
     prepared = dict(record)
     prepared["tests"] = tests
     prepared["source_sha"] = source_sha(root, module, tests)
@@ -337,13 +355,27 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
 
 
 def prepare_outer_reflection(record: dict, ledger: Ledger) -> dict:
+    if not ledger.outer_reflection_due():
+        raise ValueError("outer reflection is not due")
     for key in ("findings", "next"):
         value = record.get(key)
-        if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
-            raise ValueError(f"outer reflection requires non-empty-string {key} list")
-    for key in ("date", "toolset_decision", "human_decision"):
+        if (
+            not isinstance(value, list)
+            or not value
+            or not all(isinstance(item, str) and item for item in value)
+        ):
+            raise ValueError(f"outer reflection requires a non-empty {key} string list")
+    for key in ("date", "toolset_decision"):
         if not isinstance(record.get(key), str) or not record[key].strip():
             raise ValueError(f"outer reflection requires {key}")
+    decision = record.get("human_decision")
+    if not isinstance(decision, dict):
+        raise TypeError("outer reflection requires human_decision provenance")
+    if decision.get("decision") != "accepted":
+        raise ValueError("outer reflection human decision must be accepted")
+    for key in ("identity", "decision_id", "accepted_at"):
+        if not isinstance(decision.get(key), str) or not decision[key].strip():
+            raise ValueError(f"outer reflection human decision requires {key}")
     prepared = dict(record)
     prepared["type"] = "outer-reflection"
     prepared["toolset_version"] = ledger.toolset_version

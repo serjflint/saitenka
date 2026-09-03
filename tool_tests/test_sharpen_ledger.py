@@ -13,7 +13,13 @@ import sharpen_ledger as sl
 
 MANIFEST = {"type": "manifest", "toolset_version": 1}
 TESTS = ["tests/test_foo.py"]
-AXES = {"conformance": "pass"}
+AXES = {
+    "efficacy": "pass",
+    "conformance": "pass",
+    "preservation": "pass",
+    "brittleness": "pass",
+    "redundancy": "advisory",
+}
 AUDITED = "2026-09-03T00:00:00Z"
 
 
@@ -130,9 +136,20 @@ def test_latest_returns_the_most_recent_record(tmp_path):
 
 def test_grow_filed_maps_module_to_open_issue_refs(tmp_path):
     root = _repo(tmp_path)
-    rec = {"module": "app/foo.py", "source_sha": "x", "state": "in-progress", "grow-filed": ["#43"]}
+    rec = {**_current_record("x"), "state": "in-progress", "grow-filed": ["#43"]}
     ledger = _ledger(root, [MANIFEST, rec])
     assert ledger.grow_filed() == {"app/foo.py": ["#43"]}
+
+
+def test_grow_filed_ignores_old_contract_records(tmp_path):
+    root = _repo(tmp_path)
+    rec = {
+        **_current_record("x"),
+        "contract_version": sl.CONTRACT_VERSION - 1,
+        "grow-filed": ["#43"],
+    }
+    ledger = _ledger(root, [MANIFEST, rec])
+    assert ledger.grow_filed() == {}
 
 
 def test_append_round_trips_a_record(tmp_path):
@@ -189,9 +206,21 @@ def test_prepare_record_owns_identity_and_requires_axis_reflection(tmp_path):
         "audited": "2026-09-03T00:00:00Z",
         "axes": {"conformance": "pass"},
     }
-    with pytest.raises(ValueError, match="axes_not_applied"):
+    with pytest.raises(ValueError, match="every required axis"):
         sl.prepare_record(record, root, ledger)
-    prepared = sl.prepare_record({**record, "axes_not_applied": ["efficacy: no DB"]}, root, ledger)
+    prepared = sl.prepare_record(
+        {
+            **record,
+            "axes_not_applied": [
+                "efficacy: no DB",
+                "preservation: no replacement",
+                "brittleness: probe unavailable",
+                "redundancy: advisory",
+            ],
+        },
+        root,
+        ledger,
+    )
     assert prepared["source_sha"] == sl.source_sha(root, "app/foo.py", TESTS)
     assert prepared["contract_version"] == sl.CONTRACT_VERSION
 
@@ -213,9 +242,71 @@ def test_outer_reflection_becomes_due_and_human_receipt_resets_it(tmp_path):
             "findings": ["f"],
             "next": ["n"],
             "toolset_decision": "keep v1",
-            "human_decision": "accepted",
+            "human_decision": {
+                "identity": "maintainer",
+                "decision_id": "decision-1",
+                "decision": "accepted",
+                "accepted_at": "2026-09-03T00:00:00Z",
+            },
         },
         ledger,
     )
     ledger.append(reflection)
     assert not ledger.outer_reflection_due()
+
+
+def test_outer_reflection_rejects_vacuous_or_unapproved_reset(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    records = [
+        MANIFEST,
+        *(
+            {"module": f"app/{index}.py", "source_sha": str(index), "state": "dry-run"}
+            for index in range(sl.OUTER_REFLECTION_CADENCE)
+        ),
+    ]
+    ledger = _ledger(root, records)
+    base = {
+        "date": "2026-09-03",
+        "findings": ["f"],
+        "next": ["n"],
+        "toolset_decision": "keep v3",
+        "human_decision": {
+            "identity": "maintainer",
+            "decision_id": "d1",
+            "decision": "accepted",
+            "accepted_at": "2026-09-03T00:00:00Z",
+        },
+    }
+    with pytest.raises(ValueError, match="non-empty findings"):
+        sl.prepare_outer_reflection({**base, "findings": []}, ledger)
+    with pytest.raises(ValueError, match="must be accepted"):
+        sl.prepare_outer_reflection(
+            {**base, "human_decision": {**base["human_decision"], "decision": "rejected"}},
+            ledger,
+        )
+
+
+def test_module_append_is_blocked_while_outer_reflection_is_due(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    records = [
+        MANIFEST,
+        *(
+            {"module": f"app/{index}.py", "source_sha": str(index), "state": "dry-run"}
+            for index in range(sl.OUTER_REFLECTION_CADENCE)
+        ),
+    ]
+    ledger = _ledger(root, records)
+    record = {
+        "module": "app/foo.py",
+        "tests": TESTS,
+        "state": "dry-run",
+        "audited": AUDITED,
+        "axes": AXES,
+        "axes_not_applied": [],
+    }
+    with pytest.raises(ValueError, match="outer reflection is due"):
+        sl.prepare_record(record, root, ledger)

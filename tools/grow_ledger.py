@@ -21,9 +21,12 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+import grow_reflect as gr
 
 SRC = "src/saitenka"  # module keys are relative to here (matching the sharpen ledger)
 CONTRACT_VERSION = 9
@@ -41,7 +44,7 @@ STALE_AUDIT = "stale-audit"  # module or test tree changed → re-audit
 STALE_CONTRACT = "stale-contract"  # audit predates the current lifecycle contract → re-audit
 
 
-def _validate_reflection(record: dict) -> None:
+def _validate_reflection(record: dict, root: Path) -> None:
     reflection = record.get("reflection")
     if not isinstance(reflection, dict):
         raise TypeError("record requires a reflection receipt")
@@ -56,12 +59,39 @@ def _validate_reflection(record: dict) -> None:
         reflection.get("escalations"), list
     ):
         raise TypeError("reflection findings and escalations must be lists")
+    reflection_id = reflection.get("reflection_id")
+    trace_sha = reflection.get("trace_sha")
+    if not isinstance(reflection_id, str) or not re.fullmatch(r"[0-9a-f]{16}", reflection_id):
+        raise ValueError("reflection requires a valid reflection_id")
+    if not isinstance(trace_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", trace_sha):
+        raise ValueError("reflection requires a valid trace_sha")
+    ledger = gr.ReflectionLedger.load(root / ".reflection.grow.jsonl")
+    persisted = ledger.run_receipt(reflection_id)
+    if persisted is None or persisted.get("trace_sha") != trace_sha:
+        raise ValueError("reflection receipt is not present in .reflection.grow.jsonl")
+    expected_findings = [
+        gr.finding_id(finding.get("category", ""), finding.get("subject", ""))
+        for finding in reflection["findings"]
+    ]
+    if (
+        persisted.get("introspection") != reflection["introspection"]
+        or persisted.get("finding_ids") != expected_findings
+        or persisted.get("escalations") != reflection["escalations"]
+    ):
+        raise ValueError("reflection payload differs from its durable receipt")
+    trace_gap = persisted.get("trace", {}).get("gap", {})
+    expected_target = record.get("target_symbol")
+    if expected_target and trace_gap.get("target_symbol") != expected_target:
+        raise ValueError("reflection receipt belongs to a different Grow gap")
+    expected_module = record.get("audit_module")
+    if expected_module and trace_gap.get("module") != expected_module:
+        raise ValueError("reflection receipt belongs to a different module audit")
 
 
-def _has_valid_reflection(record: dict) -> bool:
+def _has_valid_reflection(record: dict, root: Path) -> bool:
     try:
-        _validate_reflection(record)
-    except (TypeError, ValueError):
+        _validate_reflection(record, root)
+    except (OSError, TypeError, ValueError):
         return False
     return True
 
@@ -171,7 +201,7 @@ class Ledger:
             return STALE_TOOLSET
         if record.get("contract_version") != CONTRACT_VERSION:
             return STALE_CONTRACT
-        if not _has_valid_reflection(record):
+        if not _has_valid_reflection(record, root):
             return STALE_CONTRACT
         try:
             current = audit_sha(root, module_key)
@@ -191,7 +221,7 @@ class Ledger:
             return STALE_TOOLSET
         if rec.get("contract_version") != CONTRACT_VERSION:
             return STALE_CONTRACT
-        if not _has_valid_reflection(rec):
+        if not _has_valid_reflection(rec, root):
             return STALE_CONTRACT
         module_key, _, symbol = rec.get("target_symbol", "").partition("::")
         try:
@@ -234,7 +264,7 @@ def prepare_record(
     if not all(isinstance(value, str) and value for value in (source, target_symbol, dimension)):
         raise ValueError("record requires non-empty source, target_symbol, and dimension")
     if require_reflection:
-        _validate_reflection(record)
+        _validate_reflection(record, root)
     module_key, separator, symbol = target_symbol.partition("::")
     if not separator or not module_key or not symbol:
         raise ValueError("target_symbol must be module_key::dotted.symbol")
@@ -268,7 +298,7 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError("audit record requires a non-empty tests list")
     if record.get("state") != "no-gap":
         raise ValueError("audit record state must be no-gap")
-    _validate_reflection(record)
+    _validate_reflection(record, root)
     source_root = (root / SRC).resolve()
     module_path = (source_root / module_key).resolve()
     try:

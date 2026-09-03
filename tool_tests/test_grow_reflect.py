@@ -88,3 +88,35 @@ def test_append_round_trips(tmp_path):
     led.append(rec)
     reloaded = gr.ReflectionLedger.load(tmp_path / ".reflection.grow.jsonl")
     assert reloaded.recurrence(rec["finding_id"]) == 1
+
+
+def test_append_run_persists_a_receipt_even_without_findings(tmp_path):
+    led = _ledger(tmp_path, [MANIFEST])
+    result = gr.append_run(
+        {
+            "trace": {"outcome": "no-live"},
+            "introspection": "nothing selected",
+            "findings": [],
+            "escalations": [],
+        },
+        led,
+    )
+
+    persisted = gr.ReflectionLedger.load(led.path).run_receipt(result["reflection_id"])
+    assert result["appended"] is True
+    assert persisted is not None
+    assert persisted["trace_sha"] == result["trace_sha"]
+
+
+def test_append_run_is_idempotent_for_the_same_trace_and_reflection(tmp_path):
+    led = _ledger(tmp_path, [MANIFEST])
+    record = {
+        "trace": {"outcome": "dry-run"},
+        "introspection": "bounced",
+        "findings": [],
+        "escalations": [],
+    }
+    first = gr.append_run(record, led)
+    second = gr.append_run(record, led)
+    assert first == second
+    assert sum(line.get("type") == "run-reflection" for line in led.lines) == 1

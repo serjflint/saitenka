@@ -5,6 +5,24 @@
     "outer_reflection_cadence": 3,
     "description": "Every ledger append carries axis evidence; after three audits the next audit is blocked until a human-approved outer reflection is recorded."
   },
+  "select": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["found", "module", "tests", "status", "survival", "score", "conformance", "actionable", "pr_exclusion_checked", "outer_reflection_due", "reason"],
+    "properties": {
+      "found": {"type": "boolean"},
+      "module": {"type": "string"},
+      "tests": {"type": "array", "items": {"type": "string"}},
+      "status": {"type": "string"},
+      "survival": {"type": ["number", "null"]},
+      "score": {"type": "number"},
+      "conformance": {"type": "integer"},
+      "actionable": {"type": "integer"},
+      "pr_exclusion_checked": {"type": "boolean"},
+      "outer_reflection_due": {"type": "boolean"},
+      "reason": {"type": "string"}
+    }
+  },
   "record": {
     "type": "object",
     "additionalProperties": false,
