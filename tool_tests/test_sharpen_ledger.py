@@ -14,11 +14,19 @@ import sharpen_ledger as sl
 MANIFEST = {"type": "manifest", "toolset_version": 1}
 TESTS = ["tests/test_foo.py"]
 AXES = {
-    "efficacy": "pass",
-    "conformance": "pass",
-    "preservation": "pass",
-    "brittleness": "pass",
-    "redundancy": "advisory",
+    "efficacy": {"status": "pass", "evidence": "no survivors"},
+    "conformance": {"status": "pass", "evidence": "no violations"},
+    "preservation": {"status": "pass", "evidence": "negative control"},
+    "brittleness": {"status": "pass", "evidence": "no witnesses"},
+    "redundancy": {"status": "advisory", "evidence": "one focused test"},
+}
+REVIEW = {
+    "author": "author-1",
+    "skeptic": "skeptic-1",
+    "judge": "judge-1",
+    "skeptic_verdict": "UPHELD",
+    "judge_verdict": "UPHELD",
+    "verdict": "UPHELD",
 }
 AUDITED = "2026-09-03T00:00:00Z"
 
@@ -33,6 +41,7 @@ def _current_record(sha: str) -> dict:
         "audited": AUDITED,
         "axes": AXES,
         "axes_not_applied": [],
+        "review": REVIEW,
     }
 
 
@@ -126,6 +135,30 @@ def test_current_contract_without_axis_evidence_cannot_suppress_a_module(tmp_pat
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
 
 
+def test_sharpened_record_requires_meaningful_axes_and_review(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    base = {
+        "module": "app/foo.py",
+        "tests": TESTS,
+        "state": "sharpened",
+        "audited": AUDITED,
+        "axes": AXES,
+        "axes_not_applied": [],
+        "review": REVIEW,
+    }
+    for mutation in (
+        {"axes": dict.fromkeys(sl.REQUIRED_AXES)},
+        {"axes": {}, "axes_not_applied": sorted(sl.REQUIRED_AXES)},
+        {"review": None},
+        {"review": {**REVIEW, "judge": " skeptic-1 "}},
+    ):
+        with pytest.raises(ValueError):
+            sl.prepare_record({**base, **mutation}, root, ledger)
+
+
 def test_latest_returns_the_most_recent_record(tmp_path):
     root = _repo(tmp_path)
     old = {"module": "app/foo.py", "source_sha": "aaa", "state": "in-progress"}
@@ -204,7 +237,7 @@ def test_prepare_record_owns_identity_and_requires_axis_reflection(tmp_path):
         "tests": TESTS,
         "state": "dry-run",
         "audited": "2026-09-03T00:00:00Z",
-        "axes": {"conformance": "pass"},
+        "axes": {"conformance": {"status": "pass", "evidence": "no violations"}},
     }
     with pytest.raises(ValueError, match="every required axis"):
         sl.prepare_record(record, root, ledger)
@@ -230,7 +263,11 @@ def test_outer_reflection_becomes_due_and_human_receipt_resets_it(tmp_path):
     records = [
         MANIFEST,
         *(
-            {"module": f"app/{index}.py", "source_sha": str(index), "state": "dry-run"}
+            {
+                **_current_record(str(index)),
+                "module": f"app/{index}.py",
+                "state": "dry-run",
+            }
             for index in range(sl.OUTER_REFLECTION_CADENCE)
         ),
     ]
@@ -247,6 +284,7 @@ def test_outer_reflection_becomes_due_and_human_receipt_resets_it(tmp_path):
                 "decision_id": "decision-1",
                 "decision": "accepted",
                 "accepted_at": "2026-09-03T00:00:00Z",
+                "source": "human-provided",
             },
         },
         ledger,
@@ -262,7 +300,11 @@ def test_outer_reflection_rejects_vacuous_or_unapproved_reset(tmp_path):
     records = [
         MANIFEST,
         *(
-            {"module": f"app/{index}.py", "source_sha": str(index), "state": "dry-run"}
+            {
+                **_current_record(str(index)),
+                "module": f"app/{index}.py",
+                "state": "dry-run",
+            }
             for index in range(sl.OUTER_REFLECTION_CADENCE)
         ),
     ]
@@ -277,6 +319,7 @@ def test_outer_reflection_rejects_vacuous_or_unapproved_reset(tmp_path):
             "decision_id": "d1",
             "decision": "accepted",
             "accepted_at": "2026-09-03T00:00:00Z",
+            "source": "human-provided",
         },
     }
     with pytest.raises(ValueError, match="non-empty findings"):
@@ -288,6 +331,29 @@ def test_outer_reflection_rejects_vacuous_or_unapproved_reset(tmp_path):
         )
 
 
+def test_unvalidated_outer_reflection_does_not_reset_cadence(tmp_path):
+    root = _repo(tmp_path)
+    audits = [
+        {**_current_record(str(index)), "module": f"app/{index}.py", "state": "dry-run"}
+        for index in range(sl.OUTER_REFLECTION_CADENCE)
+    ]
+    fake = {
+        "type": "outer-reflection",
+        "toolset_version": 1,
+        "contract_version": sl.CONTRACT_VERSION,
+        "findings": ["f"],
+        "next": ["n"],
+        "human_decision": {
+            "identity": "maintainer",
+            "decision_id": "invented",
+            "decision": "accepted",
+            "accepted_at": "x",
+        },
+    }
+
+    assert _ledger(root, [MANIFEST, fake, *audits]).outer_reflection_due()
+
+
 def test_module_append_is_blocked_while_outer_reflection_is_due(tmp_path):
     import pytest
 
@@ -295,7 +361,11 @@ def test_module_append_is_blocked_while_outer_reflection_is_due(tmp_path):
     records = [
         MANIFEST,
         *(
-            {"module": f"app/{index}.py", "source_sha": str(index), "state": "dry-run"}
+            {
+                **_current_record(str(index)),
+                "module": f"app/{index}.py",
+                "state": "dry-run",
+            }
             for index in range(sl.OUTER_REFLECTION_CADENCE)
         ),
     ]

@@ -24,9 +24,9 @@ harness = (root / ".agents/sharpen/harness.js").read_text()
 contracts = json.loads((root / ".agents/sharpen/contracts.json").read_text())
 assert "TODO" not in skill and "[TODO" not in skill
 assert 'fork_turns="none"' in skill
-assert contracts["version"] == 5 and {"select", "ship_gate", "record"} <= contracts.keys()
+assert contracts["version"] == 6 and {"select", "ship_gate", "record"} <= contracts.keys()
 assert contracts["lifecycle"]["outer_reflection_cadence"] == 3
-assert "CONTRACT_VERSION = 5" in harness
+assert "CONTRACT_VERSION = 6" in harness
 assert "reflection-status" in harness and "recorded_axes_not_applied" in harness
 for token in ("better_fix", "Better fix hand-off", "skeptic_verdict", "judge_verdict", "uv run poe all"):
     assert token in harness

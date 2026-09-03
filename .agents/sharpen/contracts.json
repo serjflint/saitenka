@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "lifecycle": {
     "inner_reflection_receipt": "axes_not_applied",
     "outer_reflection_cadence": 3,

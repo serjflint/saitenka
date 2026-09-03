@@ -41,7 +41,7 @@ const receipt = (state) => ({
   recorded_module: pick.module,
   recorded_source_sha: 'a'.repeat(64),
   recorded_toolset_version: 1,
-  recorded_contract_version: 5,
+  recorded_contract_version: 6,
   recorded_axes_not_applied: true,
 })
 
