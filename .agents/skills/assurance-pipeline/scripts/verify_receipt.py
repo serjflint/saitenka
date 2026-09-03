@@ -98,12 +98,7 @@ def _validate_review_findings(findings: object) -> None:
         _text(finding.get("summary"), "finding summary")
 
 
-def validate(receipt: dict, packet: dict) -> None:
-    _require(receipt.get("version") == 2, "receipt version must be 2")
-    result = receipt.get("result")
-    _require(result in {"artifact", "no-change"}, "result must be artifact or no-change")
-    assert isinstance(result, str)
-    _validate_packet(packet, result)
+def _validate_identity(receipt: dict) -> None:
     for key in ("base", "head", "tree_digest"):
         _require(bool(OID.fullmatch(str(receipt.get(key, "")))), f"invalid {key}")
     for key in ("diff_digest", "packet_digest", "index_digest"):
@@ -120,39 +115,33 @@ def validate(receipt: dict, packet: dict) -> None:
         "scratch exclusions must stay under vibe",
     )
 
-    if result == "no-change":
-        _validate_events(receipt, NO_CHANGE_STAGES)
-        _require(receipt.get("disposition") == "no-change", "invalid no-change disposition")
-        _require(receipt["base"] == receipt["head"], "no-change base and head differ")
-        _require(
-            receipt.get("baseline_index_digest") == receipt["index_digest"],
-            "no-change index differs from baseline",
-        )
-        manifest = receipt.get("candidate_manifest")
-        _require(
-            isinstance(manifest, list) and manifest, "no-change candidate manifest is required"
-        )
-        assert isinstance(manifest, list)
-        for item in manifest:
-            _require(isinstance(item, dict), "candidate manifest item must be an object")
-            _text(item.get("path"), "candidate path")
-            _require(
-                isinstance(item.get("existed_before"), bool), "candidate existed_before is required"
-            )
-            digest = item.get("sha256")
-            _require(
-                (item["existed_before"] and bool(HEX.fullmatch(str(digest))))
-                or (not item["existed_before"] and digest is None),
-                "invalid candidate digest",
-            )
-        return
 
-    disposition = receipt.get("disposition")
+def _validate_no_change(receipt: dict) -> None:
+    _validate_events(receipt, NO_CHANGE_STAGES)
+    _require(receipt.get("disposition") == "no-change", "invalid no-change disposition")
+    _require(receipt["base"] == receipt["head"], "no-change base and head differ")
     _require(
-        disposition in {"local-proof", "ready-pr", "published"}, "invalid artifact disposition"
+        receipt.get("baseline_index_digest") == receipt["index_digest"],
+        "no-change index differs from baseline",
     )
-    expected_stages = [*ARTIFACT_STAGES, *(["publish"] if disposition == "published" else [])]
-    _validate_events(receipt, expected_stages)
+    manifest = receipt.get("candidate_manifest")
+    _require(isinstance(manifest, list) and manifest, "no-change candidate manifest is required")
+    assert isinstance(manifest, list)
+    for item in manifest:
+        _require(isinstance(item, dict), "candidate manifest item must be an object")
+        _text(item.get("path"), "candidate path")
+        _require(
+            isinstance(item.get("existed_before"), bool), "candidate existed_before is required"
+        )
+        digest = item.get("sha256")
+        _require(
+            (item["existed_before"] and bool(HEX.fullmatch(str(digest))))
+            or (not item["existed_before"] and digest is None),
+            "invalid candidate digest",
+        )
+
+
+def _validate_contribution(receipt: dict, disposition: str) -> int | None:
     contribution = receipt.get("contribution")
     _require(isinstance(contribution, dict), "contribution evidence is required")
     assert isinstance(contribution, dict)
@@ -177,6 +166,10 @@ def validate(receipt: dict, packet: dict) -> None:
         _require(receipt.get("publication_verified") is True, "publication was not verified")
     else:
         _require(publish is None, "unpublished receipt cannot claim publish-only completion")
+    return publish_generation
+
+
+def _validate_gates(receipt: dict) -> None:
     gates = receipt.get("gates")
     _require(
         isinstance(gates, list)
@@ -191,6 +184,9 @@ def validate(receipt: dict, packet: dict) -> None:
             "gate is not passing on head",
         )
         _text(gate.get("command"), "gate command")
+
+
+def _validate_reviews(receipt: dict, publish_generation: int | None) -> None:
     reviews = receipt.get("reviews")
     if not isinstance(reviews, list) or len(reviews) != 2:
         raise ValueError("exactly two reviews are required")
@@ -231,6 +227,29 @@ def validate(receipt: dict, packet: dict) -> None:
             review.get("pre") == expected and review.get("post") == expected,
             "review did not verify the exact packet before and after",
         )
+
+
+def validate(receipt: dict, packet: dict) -> None:
+    _require(receipt.get("version") == 2, "receipt version must be 2")
+    result = receipt.get("result")
+    _require(result in {"artifact", "no-change"}, "result must be artifact or no-change")
+    assert isinstance(result, str)
+    _validate_packet(packet, result)
+    _validate_identity(receipt)
+    if result == "no-change":
+        _validate_no_change(receipt)
+        return
+    disposition = receipt.get("disposition")
+    _require(
+        disposition in {"local-proof", "ready-pr", "published"}, "invalid artifact disposition"
+    )
+    assert isinstance(disposition, str)
+    _validate_events(
+        receipt, [*ARTIFACT_STAGES, *(["publish"] if disposition == "published" else [])]
+    )
+    publish_generation = _validate_contribution(receipt, disposition)
+    _validate_gates(receipt)
+    _validate_reviews(receipt, publish_generation)
 
 
 def _git(repo: Path, *args: str) -> bytes:
