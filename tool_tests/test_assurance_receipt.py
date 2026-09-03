@@ -87,12 +87,13 @@ def test_live_verification_rejects_untracked_non_scratch_path(tmp_path, monkeypa
         (lambda r, _p: r["reviews"][0].update(read_only=False), "read-only"),
         (lambda r, _p: r["reviews"][1]["post"].update(head="0" * 40), "exact packet"),
         (lambda r, _p: r["contribution"].update(prepare_only=None), "prepare-only"),
+        (lambda r, _p: r["gates"][0].update(command="x"), "canonical"),
         (lambda _r, p: p.update(human_decision={}), "decision_id"),
         (lambda _r, p: p.update(mechanism_proofs=[]), "mechanism_proofs"),
         (lambda _r, p: p.update(mechanism_proofs=[None]), "object"),
         (lambda r, p: p.update(head=r["base"]), "packet head differs"),
         (lambda r, _p: r["reviews"][1].update(identity=" reviewer-a "), "distinct"),
-        (lambda r, _p: r["reviews"].append({"generation": 2, "status": "running"}), "unfinished"),
+        (lambda r, _p: r["reviews"].append({"generation": 2, "status": "running"}), "identity"),
     ],
 )
 def test_counterexamples_fail_closed(mutate, message):
@@ -125,6 +126,9 @@ def test_no_change_requires_falsification_manifest_and_restored_index():
         ],
         no_change_baseline=baseline,
     )
+    baseline_digest = verify._canonical_digest(baseline)
+    receipt["baseline_digest"] = baseline_digest
+    receipt["events"][0]["evidence"] = f"baseline:{baseline_digest}"
     packet.update(
         result="no-change",
         head=receipt["head"],
@@ -133,11 +137,16 @@ def test_no_change_requires_falsification_manifest_and_restored_index():
         validation_evidence=[{**packet["validation_evidence"][0], "head": receipt["head"]}],
         falsified_hypotheses=["ordering premise was false"],
         no_change_baseline=baseline,
+        baseline_digest=baseline_digest,
     )
     verify.validate(receipt, packet)
     empty_baseline = {**baseline, "candidate_manifest": []}
     receipt["no_change_baseline"] = empty_baseline
     packet["no_change_baseline"] = empty_baseline
+    empty_digest = verify._canonical_digest(empty_baseline)
+    receipt["baseline_digest"] = empty_digest
+    packet["baseline_digest"] = empty_digest
+    receipt["events"][0]["evidence"] = f"baseline:{empty_digest}"
     with pytest.raises(ValueError, match="manifest"):
         verify.validate(receipt, packet)
 
@@ -160,15 +169,61 @@ def test_terminal_failed_older_review_generation_is_recorded_but_does_not_count(
         review["generation"] = 2
     receipt["reviews"].insert(
         0,
-        {"identity": "old", "invocation": "old-review", "generation": 1, "status": "failed"},
+        {
+            "identity": "old",
+            "invocation": "old-review",
+            "generation": 1,
+            "status": "failed",
+            "terminal_reason": "timeout",
+        },
     )
+    receipt["review_completed_at"]["old-review"] = "2026-09-03T10:05:15Z"
     verify.validate(receipt, packet)
 
 
 def test_failed_attempt_in_latest_review_generation_invalidates_it():
     receipt, packet = copy.deepcopy(_examples())
     receipt["reviews"].append(
-        {"identity": "third", "invocation": "third-review", "generation": 1, "status": "failed"}
+        {
+            "identity": "third",
+            "invocation": "third-review",
+            "generation": 1,
+            "status": "failed",
+            "terminal_reason": "crash",
+        }
     )
+    receipt["review_completed_at"]["third-review"] = "2026-09-03T10:05:50Z"
     with pytest.raises(ValueError, match="latest review generation"):
+        verify.validate(receipt, packet)
+
+
+def test_artifact_requires_a_nonempty_revision_diff():
+    receipt, packet = copy.deepcopy(_examples())
+    receipt["base"] = receipt["head"]
+    receipt["diff_digest"] = verify.EMPTY_DIFF_DIGEST
+    packet["base"] = receipt["head"]
+    packet["diff_digest"] = verify.EMPTY_DIFF_DIGEST
+    packet["accepted_dossier"]["base"] = receipt["head"]
+    for review in receipt["reviews"]:
+        for snapshot in (review["pre"], review["post"]):
+            snapshot["diff_digest"] = verify.EMPTY_DIFF_DIGEST
+    with pytest.raises(ValueError, match="must differ"):
+        verify.validate(receipt, packet)
+
+
+def test_latest_p1_invalidates_review_generation():
+    receipt, packet = copy.deepcopy(_examples())
+    receipt["reviews"][0]["findings"] = [
+        {"severity": "P1", "disposition": "fixed", "summary": "artifact is wrong"}
+    ]
+    with pytest.raises(ValueError, match="invalidates"):
+        verify.validate(receipt, packet)
+
+
+def test_human_accepted_p2_requires_decision_provenance():
+    receipt, packet = copy.deepcopy(_examples())
+    receipt["reviews"][0]["findings"] = [
+        {"severity": "P2", "disposition": "human-accepted", "summary": "risk"}
+    ]
+    with pytest.raises(ValueError, match="acceptance"):
         verify.validate(receipt, packet)

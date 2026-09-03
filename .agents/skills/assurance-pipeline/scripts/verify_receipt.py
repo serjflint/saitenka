@@ -15,6 +15,11 @@ HEX = re.compile(r"^[0-9a-f]{64}$")
 OID = re.compile(r"^[0-9a-f]{40,64}$")
 ARTIFACT_STAGES = ["freeze", "inquire", "route", "re-enfold", "gate", "freeze-packet", "review"]
 NO_CHANGE_STAGES = ["freeze", "inquire", "route", "re-enfold", "restore"]
+EMPTY_DIFF_DIGEST = hashlib.sha256(b"").hexdigest()
+GATE_COMMANDS = {
+    "deterministic": "uv run poe all",
+    "free-threaded": "uv run poe test-ft",
+}
 
 
 def _require(condition: object, message: str) -> None:
@@ -26,6 +31,11 @@ def _text(value: object, name: str) -> str:
     _require(isinstance(value, str) and bool(value.strip()), f"{name} is required")
     assert isinstance(value, str)
     return value.strip()
+
+
+def _canonical_digest(value: object) -> str:
+    raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _validate_proof_rows(packet: dict, receipt: dict) -> None:
@@ -99,6 +109,10 @@ def _validate_packet(packet: dict, receipt: dict, result: str) -> datetime:
             packet.get("no_change_baseline") == receipt.get("no_change_baseline"),
             "no-change baseline differs",
         )
+        _require(
+            packet.get("baseline_digest") == receipt.get("baseline_digest"),
+            "no-change baseline digest differs",
+        )
     return accepted_at
 
 
@@ -122,18 +136,21 @@ def _validate_events(receipt: dict, expected_stages: list[str]) -> dict[str, dat
 def _validate_review_findings(findings: object) -> None:
     _require(isinstance(findings, list), "review findings must be a list")
     assert isinstance(findings, list)
-    allowed = {
-        "P0": {"fixed"},
-        "P1": {"fixed"},
-        "P2": {"fixed", "human-accepted"},
-        "P3": {"recorded"},
-    }
+    allowed = {"P2": {"fixed", "human-accepted"}, "P3": {"recorded"}}
     for finding in findings:
         _require(isinstance(finding, dict), "review finding must be an object")
         severity = finding.get("severity")
+        _require(severity not in {"P0", "P1"}, "P0/P1 invalidates the review generation")
         _require(isinstance(severity, str) and severity in allowed, "invalid finding severity")
         _require(finding.get("disposition") in allowed[severity], "unresolved review finding")
         _text(finding.get("summary"), "finding summary")
+        if severity == "P2" and finding.get("disposition") == "human-accepted":
+            acceptance = finding.get("acceptance")
+            _require(isinstance(acceptance, dict), "P2 human acceptance is required")
+            assert isinstance(acceptance, dict)
+            for key in ("identity", "decision_id", "accepted_at", "evidence"):
+                _text(acceptance.get(key), f"P2 acceptance {key}")
+            datetime.fromisoformat(acceptance["accepted_at"])
 
 
 def _validate_identity(receipt: dict) -> None:
@@ -161,6 +178,16 @@ def _validate_no_change(receipt: dict) -> dict[str, datetime]:
     baseline = receipt.get("no_change_baseline")
     _require(isinstance(baseline, dict), "no-change baseline is required")
     assert isinstance(baseline, dict)
+    baseline_digest = receipt.get("baseline_digest")
+    _require(
+        bool(HEX.fullmatch(str(baseline_digest)))
+        and baseline_digest == _canonical_digest(baseline),
+        "no-change baseline digest is invalid",
+    )
+    _require(
+        receipt["events"][0].get("evidence") == f"baseline:{baseline_digest}",
+        "freeze event does not bind the no-change baseline",
+    )
     for key in ("base", "head", "tree_digest", "index_digest"):
         _require(baseline.get(key) == receipt[key], f"no-change baseline {key} differs")
     _require(
@@ -254,7 +281,13 @@ def _validate_gates(receipt: dict, events: dict[str, datetime]) -> None:
             gate.get("status") == "pass" and gate.get("head") == receipt["head"],
             "gate is not passing on head",
         )
-        _text(gate.get("command"), "gate command")
+        _require(
+            gate.get("command") == GATE_COMMANDS[gate["name"]], "gate command is not canonical"
+        )
+        _require(
+            bool(HEX.fullmatch(str(gate.get("evidence_digest", "")))),
+            "gate evidence digest is required",
+        )
         completed_at = _timestamp(gate, "gate")
         _require(
             events["re-enfold"] <= completed_at <= events["gate"],
@@ -262,15 +295,33 @@ def _validate_gates(receipt: dict, events: dict[str, datetime]) -> None:
         )
 
 
-def _latest_review_pair(reviews: object, publish_generation: int | None) -> list[dict]:
+def _validate_review_attempts(receipt: dict) -> list[dict]:
+    reviews = receipt.get("reviews")
     _require(isinstance(reviews, list) and reviews, "review attempts are required")
     assert isinstance(reviews, list)
     _require(all(isinstance(review, dict) for review in reviews), "review must be an object")
-    generations = {review.get("generation") for review in reviews}
+    review_times = receipt.get("review_completed_at")
+    _require(isinstance(review_times, dict), "review completion times are required")
+    assert isinstance(review_times, dict)
+    invocations: set[str] = set()
+    for review in reviews:
+        _text(review.get("identity"), "review identity")
+        invocation = _text(review.get("invocation"), "review invocation")
+        _text(review_times.get(invocation), "review completed_at")
+        _require(invocation.casefold() not in invocations, "review invocations must be unique")
+        invocations.add(invocation.casefold())
+        if review.get("status") in {"failed", "canceled"}:
+            _text(review.get("terminal_reason"), "review terminal reason")
+    return reviews
+
+
+def _latest_review_pair(reviews: list[dict], publish_generation: int | None) -> list[dict]:
+    raw_generations = {review.get("generation") for review in reviews}
     _require(
-        all(isinstance(generation, int) and generation >= 1 for generation in generations),
+        all(isinstance(generation, int) and generation >= 1 for generation in raw_generations),
         "invalid review generation",
     )
+    generations = {generation for generation in raw_generations if isinstance(generation, int)}
     _require(
         all(review.get("status") in {"completed", "failed", "canceled"} for review in reviews),
         "review attempt is unfinished",
@@ -330,7 +381,7 @@ def _validate_completed_review(
 def _validate_reviews(
     receipt: dict, publish_generation: int | None, events: dict[str, datetime]
 ) -> None:
-    completed_latest = _latest_review_pair(receipt.get("reviews"), publish_generation)
+    completed_latest = _latest_review_pair(_validate_review_attempts(receipt), publish_generation)
     identities: set[str] = set()
     invocations: set[str] = set()
     for review in completed_latest:
@@ -362,6 +413,8 @@ def validate(receipt: dict, packet: dict) -> None:
         disposition in {"local-proof", "ready-pr", "published"}, "invalid artifact disposition"
     )
     assert isinstance(disposition, str)
+    _require(receipt["base"] != receipt["head"], "artifact base and head must differ")
+    _require(receipt["diff_digest"] != EMPTY_DIFF_DIGEST, "artifact diff must be non-empty")
     events = _validate_events(
         receipt, [*ARTIFACT_STAGES, *(["publish"] if disposition == "published" else [])]
     )

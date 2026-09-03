@@ -145,7 +145,9 @@ complete unless this validator exits zero. It fail-closes stage order, the human
 prepare-only/publish-only separation, both completed read-only reviewers, and their pre/post binding to
 the same head, diff, packet, tree, and index. It parses the packet contract and recomputes the current HEAD,
 tree, index, canonical diff, frozen-packet digest, and full status including untracked files. The
-`--self-test` mode accepts no caller receipt and validates only the checked-in smoke fixture.
+`--self-test` mode accepts no caller receipt and validates only the checked-in smoke fixture. Local receipt
+validation is tamper-evidence, not an external attestation that a human or command existed; host-issued
+identity and execution evidence remain host responsibilities.
 
 ## Verify
 

@@ -104,7 +104,9 @@ re-enfolded into the final whole, residual uncertainty is explicit, and no track
 also uses a pre-implementation candidate manifest covering every pipeline-touched tracked or untracked path:
 restore paths that existed to their exact digest, and remove only paths recorded as absent. The final full
 status (`--untracked-files=all`) and index must match the baseline except explicitly enumerated scratch
-ledgers. Child-loop ledger-only results stay in their dedicated worktrees under the child contract, with
+ledgers. The canonical baseline digest is named by the initial freeze event and frozen packet. This is
+tamper-evident local evidence, not proof of wall-clock provenance; the host owns creating it before inquiry.
+Child-loop ledger-only results stay in their dedicated worktrees under the child contract, with
 their location/disposition recorded. No-change does not create an empty commit, run artifact-only
 gates/reviews, or open a PR.
 
@@ -113,7 +115,7 @@ An **artifact result** is complete only when:
 - the final scenario trace has no contradictory generation, identity, policy, or ordering among its owners;
 - every mechanism claimed necessary has direct proof or a recorded non-applicability reason;
 - all temporary perturbations restored exact bytes;
-- repository-required deterministic and free-threaded gates passed on the final head;
+- repository-required deterministic and free-threaded commands passed on the final head, with output digests;
 - two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or accepted by the human owner, and P3 recorded;
 - reviewers remained read-only and their pre/post HEAD, packet/diff digests, tracked-tree, and index checks match;
 - every approval names the same reviewed-packet digest, and the worktree is clean.
@@ -125,8 +127,10 @@ The reviewed packet binds base, head, tree, index, canonical diff, supported sce
 dossier and human decision, affected owners, discriminator, scope guard, final scenario trace, typed
 mechanism proofs, validation evidence, residual uncertainty, and follow-ups. A no-change packet also binds
 the frozen baseline, touched-path manifest, and scratch exclusions. Any change to one of those fields
-invalidates all approvals. Every launched review attempt is recorded with a terminal state; only the two
-completed reviewers in the latest generation count. Only the human owner may accept a P2.
+invalidates all approvals. Every launched review attempt is recorded with identity, invocation, terminal
+time, and failure reason when applicable; only the two completed reviewers in the latest generation count.
+A P0/P1 returned by that generation invalidates it rather than being marked fixed in place. Human-accepted
+P2 findings carry the owner's identity, decision id, timestamp, and evidence.
 
 Canonical diff bytes are `git diff --no-ext-diff --no-textconv --binary BASE...HEAD`; record the SHA-256
 tool used. If a reviewer cannot return, terminate it through the host, record the terminal failure, invalidate
