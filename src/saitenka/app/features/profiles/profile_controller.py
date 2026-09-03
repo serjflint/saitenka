@@ -230,7 +230,7 @@ class ProfileController:
             return _TrackSwitch.MISSING
         if self._subtitles.select_subtitle_languages is not None:
             self._subtitles.select_subtitle_languages(slang, second_slang)
-            return _TrackSwitch.SWITCHED
+            return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED
         self._subtitles.select_subtitle_track(slang)
         return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED
 

@@ -164,9 +164,17 @@ def discover(tracks: list[dict], slang: str, second_slang: str = "en") -> Subtit
     )
 
 
-def initial(tracks: list[dict], slang: str, second_slang: str = "en") -> SubtitleStartup:
-    """Prefer the target language, then its configured translation language."""
+def initial(
+    tracks: list[dict],
+    slang: str,
+    second_slang: str = "en",
+    *,
+    preferred_role: Language | None = None,
+) -> SubtitleStartup:
+    """Keep a requested live role when available, else prefer target then translation."""
     discovered = discover(tracks, slang, second_slang)
+    if preferred_role == SECOND_LANG and discovered.en_sid is not None:
+        return SubtitleStartup(discovered, SECOND_LANG)
     if discovered.jp_sid is not None:
         return SubtitleStartup(discovered, MAIN_LANG)
     if discovered.en_sid is not None:

@@ -92,7 +92,14 @@ class ProfileIntegration:
         return subtitle_modes.has_track_for_slang(self.ipc, slang)
 
     def select_subtitle_track(self, new_slang: str, second_slang: str) -> None:
-        startup = subtitle_modes.select_initial(self.ipc, new_slang, second_slang)
+        current = self.tracks.current
+        preferred_role = current.language if current.slang == new_slang else None
+        startup = subtitle_modes.select_initial(
+            self.ipc,
+            new_slang,
+            second_slang,
+            preferred_role=preferred_role,
+        )
         self.configure_subtitle_mode(startup, new_slang, second_slang)
         ports = self.track_ports()
         if ports.translation_visible():

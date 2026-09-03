@@ -74,6 +74,11 @@ def test_add_proposal_rejects_empty_name():
         add_proposal("", {"language": "fr"})
 
 
+def test_add_proposal_rejects_the_reserved_default_name():
+    with pytest.raises(ValueError, match="reserved"):
+        add_proposal("default", {"language": "fr"})
+
+
 def test_use_proposal_default_clears_the_selector():
     assert use_proposal("french") == {"active_profile": "french"}
     assert use_proposal(None) == {"active_profile": ""}

@@ -577,7 +577,7 @@ def test_cycle_selects_the_profiles_configured_translation_language(request):
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_cycle_reconfigures_translation_when_only_the_second_language_changes(request):
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    register_tokenizer("latin", lambda: _TaggedTokenizer("new"))
     reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])
     reader.graph.ipc.props["track-list"] = [
         {"type": "sub", "id": 6, "lang": "fr"},
@@ -585,6 +585,8 @@ def test_cycle_reconfigures_translation_when_only_the_second_language_changes(re
         {"type": "sub", "id": 8, "lang": "de"},
     ]
     reader.graph.profile_integration.select_subtitle_track("fr", "en")
+    reader.graph.profile.profile.use_tokenizer(_TaggedTokenizer("old"))
+    reader.graph.cue.set_subtitle("bonjour")
 
     reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
@@ -594,7 +596,36 @@ def test_cycle_reconfigures_translation_when_only_the_second_language_changes(re
         tracks.slang,
         tracks.second_slang,
         tracks.translation_sid,
-    ) == ("de", "fr", "de", 8)
+        reader.graph.subtitle_presentation.cue.current.tokens[0].lemma,
+    ) == ("de", "fr", "de", 8, "new")
+
+
+@pytest.mark.usefixtures("_restore_tokenizer_registry")
+def test_second_only_cycle_preserves_the_active_secondary_role(request):
+    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])
+    reader.graph.ipc.props["track-list"] = [
+        {"type": "sub", "id": 6, "lang": "fr"},
+        {"type": "sub", "id": 7, "lang": "eng"},
+        {"type": "sub", "id": 8, "lang": "deu"},
+    ]
+    reader.graph.profile_integration.select_subtitle_track("fr", "en")
+    reader.graph.ipc.props["sid"] = 6
+    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
+    reader.graph.ipc.props["sid"] = 7
+    reader.graph.ipc.commands.clear()
+
+    outcome = reader.graph.profile.profile.switch_to(1)
+
+    tracks = reader.graph.track_commands.current()
+    assert (outcome.status, tracks.language, tracks.primary_sid, tracks.second_slang) == (
+        ProfileSwitchStatus.COMMITTED,
+        "en",
+        8,
+        "de",
+    )
+    assert ("set_property", "sid", 8) in reader.graph.ipc.commands
+    assert ("set_property", "sid", 6) not in reader.graph.ipc.commands
 
 
 def test_second_only_cycle_keeps_an_untagged_primary(request):

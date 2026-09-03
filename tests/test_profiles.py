@@ -116,6 +116,21 @@ def test_named_profile_selects_language_tokenizer_and_second():
     assert profile.tokenizer == "latin"
 
 
+def test_named_profile_cannot_shadow_the_builtin_default():
+    cfg = {
+        "profiles": {
+            "default": {
+                "language": "fr",
+                "tokenizer": "latin",
+                "dicts": ["FR"],
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_profile(cfg)
+
+
 def test_profile_second_language_is_configurable():
     cfg = {
         "active_profile": "fr",

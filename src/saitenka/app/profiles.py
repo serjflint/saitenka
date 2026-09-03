@@ -119,10 +119,26 @@ def _table(cfg: dict, key: str) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def validate_profile_name(name: str) -> str:
+    """Reject names that collide with the built-in profile identity."""
+    if not name:
+        raise ValueError("profile name must be non-empty")
+    if name == "default":
+        raise ValueError("profile name 'default' is reserved for the built-in profile")
+    return name
+
+
+def _named_profiles(cfg: dict) -> dict:
+    profiles = _table(cfg, "profiles")
+    for name in profiles:
+        validate_profile_name(str(name))
+    return profiles
+
+
 def profile_names(cfg: dict) -> list[str]:
     """Named ``[profiles.*]`` in sorted order (the switcher's cycle order after the base default). Lives
     on this leaf module so both the CLI and doctor read it without importing the CLI (cycle-free)."""
-    return sorted(_table(cfg, "profiles"))
+    return sorted(_named_profiles(cfg))
 
 
 def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str | None, dict]:
@@ -133,8 +149,9 @@ def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str |
     (dict/mine scoping) so the profile table is parsed once per concern."""
     name = override or cfg.get("active_profile")
     raw = dict(_table(cfg, "profile"))  # singular default-profile table
+    profiles = _named_profiles(cfg)
     if name:
-        named = _table(cfg, "profiles").get(name)
+        named = profiles.get(name)
         if isinstance(named, dict):
             raw.update(named)  # named overlay on top of the default table
     return name, raw
@@ -219,7 +236,7 @@ def configured_profiles(cfg: dict) -> list[Profile]:
     whichever named profile is currently active."""
     base = resolve_profile({k: v for k, v in cfg.items() if k != "active_profile"})
     profiles = [base]
-    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_table(cfg, "profiles")))
+    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_named_profiles(cfg)))
     return profiles
 
 

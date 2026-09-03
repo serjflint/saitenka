@@ -25,6 +25,7 @@ from saitenka.app.profiles import (
     resolve_profile,
     scope_config,
     validate_language_code,
+    validate_profile_name,
 )
 
 if TYPE_CHECKING:
@@ -61,8 +62,7 @@ def build_profile_table(
 def add_proposal(name: str, table: dict) -> dict:
     """A ``write_config`` proposal that creates/updates ``[profiles.<name>]`` (deep-merged, so a
     re-``add`` of the same name overlays only the given keys)."""
-    if not name:
-        raise ValueError("profile name must be non-empty")
+    validate_profile_name(name)
     return {"profiles": {name: table}}
 
 

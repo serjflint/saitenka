@@ -173,9 +173,15 @@ def selected_sid(startup: SubtitleStartup) -> int | str | None:
     return startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
 
 
-def select_initial(ipc, slang: str = "ja,jpn,jp", second_slang: str = "en") -> SubtitleStartup:
-    """Prefer Japanese, fall back to tagged English, and leave a missing-both file untouched."""
-    startup = _initial(sub_tracks(ipc), slang, second_slang)
+def select_initial(
+    ipc,
+    slang: str = "ja,jpn,jp",
+    second_slang: str = "en",
+    *,
+    preferred_role: Language | None = None,
+) -> SubtitleStartup:
+    """Select the preferred available role, otherwise target then translation."""
+    startup = _initial(sub_tracks(ipc), slang, second_slang, preferred_role=preferred_role)
     sid = selected_sid(startup)
     if sid is not None:
         _send(ipc, "select-primary", "set_property", "sid", sid)
