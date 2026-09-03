@@ -159,6 +159,28 @@ def test_reopened_picker_publishes_current_listing_before_stale_worker_finishes(
         gateway.close()
 
 
+def test_reconfiguring_listing_retires_the_open_provider_generation(make_session):
+    reader = make_session(FakeIPC())
+    replacement = _lister([_candidate("new.ass", provider="universal")])
+    reader.graph.picker.configure_listing(_lister([_candidate("old.ass")]))
+    _open(reader)
+    _adopt(reader, candidates=[_candidate("old.ass")])
+    old_generation = reader.graph.picker.state.generation
+
+    reader.graph.picker.configure_listing(replacement)
+    sub_picker.apply_listing(
+        reader.graph.picker.store,
+        reader.graph.picker.redraw,
+        old_generation,
+        sub_picker.ListingResult((_candidate("late-old.ass"),), ()),
+    )
+
+    assert reader.graph.picker.state.open is False
+    assert reader.graph.picker.state.generation == old_generation + 1
+    assert _listed(reader).candidates == ()
+    assert reader.graph.picker.lister is replacement
+
+
 def test_subtitle_picker_lane_rejects_work_beyond_its_bound(make_session):
     ipc = RuntimeFakeIPC()
     gateway = session_gateway(ipc)

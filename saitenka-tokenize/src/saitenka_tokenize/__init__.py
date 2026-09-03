@@ -14,7 +14,14 @@ from saitenka_tokenize.japanese import (
     strip_inline_furigana,
     tokenize,
 )
-from saitenka_tokenize.languages import DEFAULT_LANGUAGES, ReaderLanguages, looks_japanese
+from saitenka_tokenize.languages import (
+    DEFAULT_LANGUAGES,
+    ReaderLanguages,
+    canonical_language_tag,
+    equivalent_language_bases,
+    language_base,
+    looks_japanese,
+)
 from saitenka_tokenize.latin import LatinTokenizer
 from saitenka_tokenize.registry import (
     DEFAULT_TOKENIZER,
@@ -35,11 +42,14 @@ __all__ = [
     "Token",
     "Tokenizer",
     "UnidicTokenizer",
+    "canonical_language_tag",
+    "equivalent_language_bases",
     "get_tokenizer",
     "has_kanji",
     "inflected_in",
     "is_kana",
     "kata_to_hira",
+    "language_base",
     "looks_japanese",
     "merge_dict_compounds",
     "merge_inflected",

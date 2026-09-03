@@ -46,8 +46,9 @@ class ProfileIntegration:
     apply_annotation: Callable[[AnnotationTransition], None]
     teardown_tooltip: Callable[[], None]
     retire_cue: Callable[[str], None]
-    configure_subtitle_mode: Callable[[SubtitleStartup, str], None]
+    configure_subtitle_mode: Callable[[SubtitleStartup, str, str], None]
     rebuild_index: Callable[[], None]
+    track_ports: Callable[[], subtitle_modes.TrackPorts]
 
     def enable_async_annotation(self) -> None:
         self.annotation.enable_async()
@@ -90,11 +91,27 @@ class ProfileIntegration:
     def has_subtitle_track(self, slang: str) -> bool:
         return subtitle_modes.has_track_for_slang(self.ipc, slang)
 
-    def select_subtitle_track(self, new_slang: str) -> None:
-        startup = subtitle_modes.select_initial(self.ipc, new_slang)
-        self.configure_subtitle_mode(startup, new_slang)
+    def select_subtitle_track(self, new_slang: str, second_slang: str) -> bool:
+        current = self.tracks.current
+        discovered = subtitle_modes.discover_tracks(self.ipc, new_slang, second_slang)
+        same_target = discovered.jp_sid is not None and discovered.jp_sid == current.jp_sid
+        preferred_role = current.language if same_target else None
+        startup = subtitle_modes.select_initial(
+            self.ipc,
+            new_slang,
+            second_slang,
+            preferred_role=preferred_role,
+        )
+        self.configure_subtitle_mode(startup, new_slang, second_slang)
+        ports = self.track_ports()
+        if ports.translation_visible():
+            subtitle_modes.setup_secondary(ports)
         self.navigation.current.sub_index = None
         self.rebuild_index()
+        return subtitle_modes.selected_sid(startup) != current.primary_sid
+
+    def select_translation_track(self, slang: str, second_slang: str) -> None:
+        subtitle_modes.select_translation(self.track_ports(), slang, second_slang)
 
     def retokenize_current_cue(self) -> None:
         text = self.cue_text()

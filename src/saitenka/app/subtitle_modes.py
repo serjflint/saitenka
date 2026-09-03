@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from saitenka_tokenize.languages import MAIN_LANG, Language
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, Language
 
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
@@ -21,7 +21,7 @@ from saitenka.app.subtitle_selection import (
 )
 from saitenka.app.subtitle_selection import discover as _discover
 from saitenka.app.subtitle_selection import initial as _initial
-from saitenka.app.subtitle_selection import matching_track as _matching_track
+from saitenka.app.subtitle_selection import matching_tagged_track as _matching_tagged_track
 from saitenka.app.subtitle_selection import primary_role as _primary_role_for
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.events import (
@@ -31,6 +31,7 @@ from saitenka.runtime.events import (
     SubtitleStartupConfigured,
     SubtitleTrackAnnounced,
     SubtitleTracksDiscovered,
+    SubtitleTranslationConfigured,
 )
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
@@ -67,11 +68,13 @@ class SubtitleFetchResult:
     #: it still equals the current one — mpv answers `sid` with an int or a string.
     initial_sid: object
     replace: bool = (
-        False  # a user retry: swap the on-screen (mistimed) JP for the fresh re-synced one
+        False  # a user retry: swap the on-screen target track for the fresh re-synced one
     )
     force_select: bool = (
-        False  # an explicit picker choice: select the fetched track NOW, even from English
+        False  # an explicit picker choice: select the fetched track now from either role
     )
+    target_language: str = MAIN_LANG
+    target_role: Language = MAIN_LANG
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +84,18 @@ class SubtitleFetchRequest:
     initial_sid: object
     replace: bool
     force_select: bool
+    target_language: str = MAIN_LANG
+    target_role: Language = MAIN_LANG
+
+
+@dataclass(frozen=True, slots=True)
+class FetchSource:
+    name: str = "sub-provider"
+    target_language: str = MAIN_LANG
+    target_role: Language = MAIN_LANG
+
+
+DEFAULT_FETCH_SOURCE = FetchSource()
 
 
 if TYPE_CHECKING:
@@ -92,6 +107,7 @@ class SubtitleRetryState(Protocol):
     retry_factory: ProviderFetchFactory | None
     retry_active: bool
     retry_lock: threading.Lock
+    target_language: str
 
 
 class FetchSubmitter(Protocol):
@@ -113,7 +129,10 @@ def run_fetch(request: object, cancelled: threading.Event) -> object:
         path, status = request.fetch()
     except Exception as exc:  # provider failures are soft and user-visible
         log.warning("background subtitle fetch failed", exc_info=True)
-        path, status = None, f"Japanese subtitle fetch failed: {exc}"
+        path, status = (
+            None,
+            f"{language_name(request.target_language)} subtitle fetch failed: {exc}",
+        )
     return SubtitleFetchResult(
         path,
         status,
@@ -121,6 +140,8 @@ def run_fetch(request: object, cancelled: threading.Event) -> object:
         request.initial_sid,
         request.replace,
         request.force_select,
+        request.target_language,
+        request.target_role,
     )
 
 
@@ -143,11 +164,13 @@ def finish_fetch(request: SubtitleFetchRequest, completion: EffectFinished) -> S
 def unavailable_fetch(request: SubtitleFetchRequest) -> SubtitleFetchResult:
     return SubtitleFetchResult(
         None,
-        "Japanese subtitle fetch unavailable",
+        f"{language_name(request.target_language)} subtitle fetch unavailable",
         request.select_if_unchanged,
         request.initial_sid,
         request.replace,
         request.force_select,
+        request.target_language,
+        request.target_role,
     )
 
 
@@ -156,11 +179,11 @@ def has_track_for_slang(ipc, slang: str) -> bool:
     (unlike :func:`discover_tracks`, which grabs the first track when nothing matches). The live profile
     switcher gates on this: cycling to a language the file has no track for keeps the current track and
     warns, instead of silently grabbing an unrelated one."""
-    return _matching_track(sub_tracks(ipc), wanted_languages(slang)) is not None
+    return _matching_tagged_track(sub_tracks(ipc), wanted_languages(slang)) is not None
 
 
-def discover_tracks(ipc, slang: str = "ja,jpn,jp") -> SubtitleTracks:
-    return _discover(sub_tracks(ipc), slang)
+def discover_tracks(ipc, slang: str = "ja,jpn,jp", second_slang: str = "en") -> SubtitleTracks:
+    return _discover(sub_tracks(ipc), slang, second_slang)
 
 
 def selected_sid(startup: SubtitleStartup) -> int | str | None:
@@ -172,9 +195,15 @@ def selected_sid(startup: SubtitleStartup) -> int | str | None:
     return startup.tracks.jp_sid if startup.active == MAIN_LANG else startup.tracks.en_sid
 
 
-def select_initial(ipc, slang: str = "ja,jpn,jp") -> SubtitleStartup:
-    """Prefer Japanese, fall back to tagged English, and leave a missing-both file untouched."""
-    startup = _initial(sub_tracks(ipc), slang)
+def select_initial(
+    ipc,
+    slang: str = "ja,jpn,jp",
+    second_slang: str = "en",
+    *,
+    preferred_role: Language | None = None,
+) -> SubtitleStartup:
+    """Select the preferred available role, otherwise target then translation."""
+    startup = _initial(sub_tracks(ipc), slang, second_slang, preferred_role=preferred_role)
     sid = selected_sid(startup)
     if sid is not None:
         _send(ipc, "select-primary", "set_property", "sid", sid)
@@ -185,6 +214,7 @@ def configure(
     startup: SubtitleStartup,
     *,
     slang: str = "ja,jpn,jp",
+    second_slang: str = "en",
     declare: Callable[[SubtitleEvent], object],
     activate: Callable[[SelectedSid], None],
     secondary_sid: object,
@@ -200,7 +230,11 @@ def configure(
     """
     declare(
         SubtitleStartupConfigured(
-            startup.tracks.jp_sid, startup.tracks.en_sid, startup.active or MAIN_LANG, slang
+            startup.tracks.jp_sid,
+            startup.tracks.en_sid,
+            startup.active or MAIN_LANG,
+            slang,
+            second_slang,
         )
     )
     # Declare the track rather than let the renderer read it back. `select_initial` wrote `sid`
@@ -242,7 +276,7 @@ class TrackPorts:
 def setup_secondary(ports: TrackPorts) -> int | None:
     state = ports.tracks()
     if state.jp_sid is None and state.en_sid is None:
-        found = discover_tracks(ports.ipc, state.slang)
+        found = discover_tracks(ports.ipc, state.slang, state.second_slang)
         state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     sid = state.translation_sid
     if sid is None or sid == ports.get("sid"):
@@ -268,6 +302,33 @@ def clear_secondary(ipc) -> None:
     _send(ipc, "clear-secondary", "set_property", "secondary-sid", "no")
 
 
+def select_translation(ports: TrackPorts, slang: str, second_slang: str) -> None:
+    """Publish a degraded profile's criteria and keep the active role coherent."""
+    state = ports.tracks()
+    found = discover_tracks(ports.ipc, slang, second_slang)
+    translation_sid = found.en_sid
+    if state.language == MAIN_LANG:
+        jp_sid = state.primary_sid
+        if translation_sid == jp_sid:
+            translation_sid = None
+    else:
+        jp_sid = None
+        if translation_sid is None:
+            translation_sid = state.primary_sid
+    ports.declare(SubtitleTranslationConfigured(jp_sid, translation_sid, slang, second_slang))
+    if (
+        state.language == SECOND_LANG
+        and found.en_sid is not None
+        and found.en_sid != state.primary_sid
+    ):
+        select_track(ports, found.en_sid, SECOND_LANG)
+        return
+    if ports.translation_visible():
+        setup_secondary(ports)
+    else:
+        release_secondary(ports)
+
+
 def on_primary_changed(ports: TrackPorts, sid) -> None:
     state = ports.tracks()
     if sid == state.secondary_sid:
@@ -282,7 +343,12 @@ def on_primary_changed(ports: TrackPorts, sid) -> None:
         ports.drop_index()
         ports.rebuild_index()
     language = _primary_role(
-        ports.ipc, sid, SubtitleTracks(state.jp_sid, state.en_sid), ports.sample_cue()
+        ports.ipc,
+        sid,
+        SubtitleTracks(state.jp_sid, state.en_sid),
+        ports.sample_cue(),
+        state.slang,
+        state.second_slang,
     )
     changed = language != state.language
     if not known:
@@ -300,14 +366,23 @@ def on_primary_changed(ports: TrackPorts, sid) -> None:
         release_secondary(ports)
 
 
-def _primary_role(ipc, sid, tracks: SubtitleTracks, sample: str) -> Language:
+def _primary_role(
+    ipc, sid, tracks: SubtitleTracks, sample: str, primary_slang: str, second_slang: str
+) -> Language:
     """Which role a newly-primary track plays, from its tag or its content.
 
     Takes the facts, like `_sample_cue_text` beside it. `ipc` stays because the track list is a
     query, not a fact the caller holds — it is the mpv-read contract, not the host.
     """
     lang = next((t.get("lang") for t in sub_tracks(ipc) if t.get("id") == sid), None)
-    return _primary_role_for(sid, tracks, track_lang=lang, sample=sample)
+    return _primary_role_for(
+        sid,
+        tracks,
+        track_lang=lang,
+        sample=sample,
+        primary_slang=primary_slang,
+        second_slang=second_slang,
+    )
 
 
 def _sample_cue_text(sub_index, sub_text: str, limit: int = 20) -> str:
@@ -335,7 +410,8 @@ def announce_track(ports: TrackPorts, sid) -> None:
 
 def select_track(ports: TrackPorts, sid: int, target: Language) -> None:
     """Carry out a decided language switch: make ``sid`` primary and adopt ``target`` as the role."""
-    tracks = discover_tracks(ports.ipc, ports.tracks().slang)
+    state = ports.tracks()
+    tracks = discover_tracks(ports.ipc, state.slang, state.second_slang)
     ports.declare(SubtitleTracksDiscovered(tracks.jp_sid, tracks.en_sid))
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
@@ -374,25 +450,35 @@ def start_fetch(
     get: PropertyGet,
     fetch: ProviderFetch,
     *,
-    name: str = "sub-provider",
+    source: FetchSource = DEFAULT_FETCH_SOURCE,
     select_if_unchanged: bool = False,
     replace: bool = False,
     force_select: bool = False,
     on_done: Callable[[], None] | None = None,
 ) -> None:
-    """Run provider I/O off-thread; mpv IPC stays on the reader thread. ``replace`` (a user retry)
-    swaps the current on-screen JP track for the freshly fetched/re-synced one; the background path
-    leaves ``replace`` false so it never disrupts what you're watching. ``force_select`` (the picker's
-    explicit choice) selects the fetched track NOW even from English, overriding the keep-current
-    background contract."""
+    """Run provider I/O off-thread; mpv IPC stays on the reader thread."""
     initial_sid = get("sid") if select_if_unchanged else None
 
-    request = SubtitleFetchRequest(fetch, select_if_unchanged, initial_sid, replace, force_select)
-    submit(request, name=name, on_done=on_done)
+    request = SubtitleFetchRequest(
+        fetch,
+        select_if_unchanged,
+        initial_sid,
+        replace,
+        force_select,
+        source.target_language,
+        source.target_role,
+    )
+    submit(request, name=source.name, on_done=on_done)
 
 
-def configure_retry(source: SubtitleRetryState, factory: ProviderFetchFactory | None) -> None:
+def configure_retry(
+    source: SubtitleRetryState,
+    factory: ProviderFetchFactory | None,
+    *,
+    target_language: str = MAIN_LANG,
+) -> None:
     source.retry_factory = factory
+    source.target_language = target_language
 
 
 def _finish_retry(source: SubtitleRetryState) -> None:
@@ -428,6 +514,8 @@ def _start_resync_window(
     retry: SubtitleRetryState,
     video_path: str,
     sub: Path,
+    *,
+    source: FetchSource,
 ) -> None:
     """Re-time the subs you already have from the CURRENT playhead onward (no provider query) — the
     user's "sync from here" shortcut. A drifting source (right after the OP, early before it) can't be
@@ -454,7 +542,7 @@ def _start_resync_window(
         submit,
         get,
         do,
-        name="subtitle-resync",
+        source=source,
         replace=True,
         on_done=lambda: _finish_retry(retry),
     )
@@ -470,21 +558,21 @@ def _start_provider_fetch(
     factory = retry.retry_factory
     if factory is None:
         _finish_retry(retry)
-        toast("No Japanese subtitle providers enabled", "warn")
+        toast(f"No {language_name(retry.target_language)} subtitle providers enabled", "warn")
         return
     try:
         fetch = factory(video_path)
     except Exception as exc:
         _finish_retry(retry)
         log.warning("subtitle retry setup failed", exc_info=True)
-        toast(f"Japanese subtitle search failed: {exc}", "warn")
+        toast(f"{language_name(retry.target_language)} subtitle search failed: {exc}", "warn")
         return
-    toast("Searching Japanese subtitle providers…")
+    toast(f"Searching {language_name(retry.target_language)} subtitle providers…")
     start_fetch(
         submit,
         get,
         fetch,
-        name="subtitle-retry",
+        source=FetchSource("subtitle-retry", retry.target_language),
         replace=True,
         on_done=lambda: _finish_retry(retry),
     )
@@ -508,6 +596,8 @@ def begin_acquisition(
     ipc,
     video_path: str,
     source,
+    *,
+    fetch_source: FetchSource = DEFAULT_FETCH_SOURCE,
 ) -> None:
     """Carry out a decided subtitle acquisition. Re-timing needs the external file that was on
     screen when the decision was made; if it went away, fall back to querying providers."""
@@ -518,7 +608,15 @@ def begin_acquisition(
         toast("Subtitle sync already running", "warn")
         return
     if current is not None:
-        _start_resync_window(submit, get, toast, retry, video_path, current)
+        _start_resync_window(
+            submit,
+            get,
+            toast,
+            retry,
+            video_path,
+            current,
+            source=fetch_source,
+        )
     else:
         _start_provider_fetch(submit, get, toast, retry, video_path)
 
@@ -533,49 +631,77 @@ def _reset_sub_delay(ipc) -> None:
     _send(ipc, "reset-sub-delay", "set_property", "sub-delay", 0.0)
 
 
-def _replace_japanese_track(
-    ports: TrackPorts, path, status: str, *, toast: str = "Japanese subtitles re-synced"
+def _mpv_language_tag(language: str) -> str:
+    return "jpn" if language == MAIN_LANG else language
+
+
+def _replace_target_track(
+    ports: TrackPorts,
+    path,
+    status: str,
+    *,
+    target_language: str = MAIN_LANG,
+    target_role: Language = MAIN_LANG,
+    toast: str | None = None,
 ) -> None:
     """Swap the on-screen subtitle for a freshly fetched/re-synced file (the user's retry, or an
     explicit picker choice). Drops the stale external track(s) first — mpv caches an already-loaded
     external's cues in memory, and ``discover_tracks`` would pick the older duplicate JP — then re-adds
     + selects the fresh one and rebuilds the lookahead index, so the corrected timing shows immediately."""
+    state = ports.tracks()
+    replaced_sid = state.jp_sid if target_role == MAIN_LANG else state.en_sid
     for track in sub_tracks(ports.ipc):
-        if track.get("external") and track.get("id") is not None:
+        if track.get("external") and track.get("id") == replaced_sid:
             _send(ports.ipc, "remove-external", "sub-remove", track["id"])
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
     _send(
-        ports.ipc, "add-japanese", "sub-add", str(path), "select", "", "jpn"
+        ports.ipc,
+        "add-target",
+        "sub-add",
+        str(path),
+        "select",
+        "",
+        _mpv_language_tag(target_language),
     )  # mpv selects it now
     _reset_sub_delay(ports.ipc)  # our file is the timing truth; drop any persisted/stale offset
     # The just-selected track, not discover_tracks' first JP. mpv answers `sid` with a track id or
     # None; the string form ("no") only ever goes the other way, on a write.
     selected = ports.get("sid")
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
+    selected_sid = selected if isinstance(selected, int) else None
     ports.declare(
         SubtitleTracksDiscovered(
-            selected if isinstance(selected, int) else None,
-            discover_tracks(ports.ipc, ports.tracks().slang).en_sid,
+            selected_sid if target_role == MAIN_LANG else found.jp_sid,
+            selected_sid if target_role == SECOND_LANG else found.en_sid,
         )
     )
-    ports.declare(SubtitleLanguageChanged(MAIN_LANG))
+    ports.declare(SubtitleLanguageChanged(target_role))
     ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
     ports.rebuild_index()  # replaces the index on success; retains it if the just-added track
     # can't resolve yet (rebuild is fail-soft) rather than blanking the cues
-    ports.toast(toast)
+    ports.toast(toast or f"{language_name(target_language)} subtitles re-synced")
     log.info("%s", status)
 
 
-def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> None:
-    """Non-disruptive arrival: add the fetched JP track but keep the current selection unless the user
-    hasn't touched it and had no JP yet (then auto-select). Leaves English on screen for an explicit
-    Alt+t otherwise — the background-fetch contract."""
+def _add_background_target(ports: TrackPorts, result: SubtitleFetchResult) -> None:
+    """Add a fetched target track without replacing a user-changed selection."""
     path, status = result.path, result.status
     current_sid = ports.get("sid")
     state = ports.tracks()
     had_japanese = state.jp_sid is not None
-    _send(ports.ipc, "add-japanese-background", "sub-add", str(path), "auto", "", "jpn")
-    found = discover_tracks(ports.ipc, state.slang)
+    _send(
+        ports.ipc,
+        "add-target-background",
+        "sub-add",
+        str(path),
+        "auto",
+        "",
+        _mpv_language_tag(result.target_language),
+    )
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
     state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     select_japanese = selects_background_japanese(
         select_if_unchanged=result.select_if_unchanged,
@@ -592,7 +718,7 @@ def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> 
             "sid",
             current_sid if current_sid is not None else "no",
         )
-        ports.toast("Japanese subtitles ready — Alt+t to switch")
+        ports.toast(f"{language_name(result.target_language)} subtitles ready — Alt+t to switch")
         log.info("%s", status)
         return
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
@@ -604,7 +730,7 @@ def _add_background_japanese(ports: TrackPorts, result: SubtitleFetchResult) -> 
     if ports.translation_visible():
         setup_secondary(ports)
     ports.rebuild_index()  # replaces on success; retains prior cues if unresolved
-    ports.toast("Japanese subtitles ready")
+    ports.toast(f"{language_name(result.target_language)} subtitles ready")
     log.info("%s", status)
 
 
@@ -614,17 +740,24 @@ def apply_fetch_result(ports: TrackPorts, result: SubtitleFetchResult) -> None:
         force_select=result.force_select,
         replace=result.replace,
         language=ports.tracks().language,
+        target_role=result.target_role,
     )
     if action is FetchAction.REPORT_FAILURE:
         log.warning("%s", result.status)
         ports.toast(result.status, "warn")
     elif action is FetchAction.REPLACE:
-        toast = "Japanese subtitles selected" if result.force_select else None
-        _replace_japanese_track(
+        toast = (
+            f"{language_name(result.target_language)} subtitles selected"
+            if result.force_select
+            else None
+        )
+        _replace_target_track(
             ports,
             result.path,
             result.status,
-            **({"toast": toast} if toast else {}),
+            target_language=result.target_language,
+            target_role=result.target_role,
+            toast=toast,
         )
     else:
-        _add_background_japanese(ports, result)
+        _add_background_target(ports, result)

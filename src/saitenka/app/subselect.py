@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
     has_track_for_slang,
+    language_name,
     select_initial,
 )
 from saitenka.app.subtitle_modes import (
@@ -482,6 +484,7 @@ class ProviderConfig:
     #: Active profile's main language. Carried here so the re-slot gates provider eligibility the
     #: same way startup does; defaulting it per call site is how the two came to disagree.
     language: str = MAIN_LANG
+    second_language: str = "en"
 
 
 def provider_fetch_factory(
@@ -514,18 +517,21 @@ def configure_providers(configure_retry, configure_picker, cfg: ProviderConfig) 
     configure_retry(
         provider_fetch_factory(cfg.enabled_providers, cfg, force=True)
         if cfg.enabled_providers
+        else None,
+        target_language=cfg.language,
+    )
+    picker = (
+        partial(
+            list_candidates,
+            providers=cfg.enabled_providers,
+            jimaku_key=cfg.jimaku_key,
+            title_override=cfg.jimaku_title,
+            tsukihime_config=cfg.tsukihime_config,
+        )
+        if cfg.enabled_providers
         else None
     )
-    if cfg.enabled_providers:
-        configure_picker(
-            lambda video: list_candidates(
-                video,
-                cfg.enabled_providers,
-                jimaku_key=cfg.jimaku_key,
-                title_override=cfg.jimaku_title,
-                tsukihime_config=cfg.tsukihime_config,
-            )
-        )
+    configure_picker(picker)
 
 
 def fetch_jimaku(
@@ -567,7 +573,8 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
         _add_and_select(ipc, Path(opts.sub_file).expanduser())
         return f"using sub file {Path(opts.sub_file).name}"
 
-    if opts.jimaku and opts.jimaku_force:
+    jimaku_eligible = bool(enabled_providers_for(opts.language, (("jimaku", True),)))
+    if opts.jimaku and opts.jimaku_force and jimaku_eligible:
         ok, status = fetch_jimaku(
             ipc,
             jimaku_key=opts.jimaku_key,
@@ -581,10 +588,12 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
 
     sid = select_sub_track(ipc, opts.slang)
     if sid is not None:
-        return f"selected JP subtitle track sid={sid}"
+        return f"selected {language_name(opts.language)} subtitle track sid={sid}"
 
     if not opts.jimaku:
         return "no Japanese subtitle track found (pass --jimaku to fetch, or --sub-file)"
+    if not jimaku_eligible:
+        return f"no {language_name(opts.language)} subtitle track found"
 
     _, status = fetch_jimaku(
         ipc,
@@ -636,6 +645,7 @@ class AttachSubtitleOptions:
     episode: int | None = None
     resync: bool = True
     language: str = MAIN_LANG  # active profile's main language — gates provider eligibility
+    second_language: str = "en"
 
 
 def _adopt_cached_subtitle(ipc, opts: AttachSubtitleOptions) -> str:
@@ -673,14 +683,16 @@ def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
     elif not has_track_for_slang(ipc, opts.slang):
         status = _adopt_cached_subtitle(ipc, opts)
 
-    startup = select_initial(ipc, opts.slang)
+    startup = select_initial(ipc, opts.slang, opts.second_language)
+    target_name = language_name(opts.language)
+    second_name = language_name(opts.second_language)
     if not status:
         if startup.active == MAIN_LANG:
-            status = f"selected JP subtitle track sid={startup.tracks.jp_sid}"
+            status = f"selected {target_name} subtitle track sid={startup.tracks.jp_sid}"
         elif startup.active == SECOND_LANG:
-            status = f"selected English fallback sid={startup.tracks.en_sid}"
+            status = f"selected {second_name} fallback sid={startup.tracks.en_sid}"
         else:
-            status = "no Japanese or English subtitle track found"
+            status = f"no {target_name} or {second_name} subtitle track found"
     # Same registry/language gate as the retry+picker enablement (cli.py) — one source of truth for
     # "which providers are on", so a non-jp profile can't leave this initial fetch chasing jimaku while
     # the picker excludes it. ``jimaku_force`` already fetched ahead in ensure_jp_subs, so it's excluded

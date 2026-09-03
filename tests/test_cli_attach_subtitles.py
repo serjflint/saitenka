@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import util
 
 from saitenka.app import subselect
@@ -25,8 +26,9 @@ class SessionController:
     def fetch_japanese_subs_async(self, fetch):
         self.fetch = fetch
 
-    def configure_subtitle_retry(self, factory):
+    def configure_subtitle_retry(self, factory, *, target_language="jp"):
         self.retry_factory = factory
+        self.target_language = target_language
 
     def configure_sub_picker(self, lister):
         self.picker_lister = lister
@@ -50,6 +52,27 @@ class SessionController:
             start_prefetch=lambda: None,
             toast=lambda *_a, **_kw: None,
         )
+
+
+def test_attach_retires_provider_generations_before_fallible_index_rebuild():
+    reader, ipc = SessionController(), IPC()
+    reader.retry_factory = object()
+    reader.picker_lister = object()
+    ports = replace(
+        reader.reslot_ports,
+        rebuild_index=lambda: (_ for _ in ()).throw(RuntimeError("index unavailable")),
+    )
+
+    with pytest.raises(RuntimeError, match="index unavailable"):
+        attach_commands._finish_attach_subtitle_startup(
+            ports,
+            ipc,
+            None,
+            subselect.ProviderConfig(),
+            fetch_in_background=(),
+        )
+
+    assert reader.retry_factory is None and reader.picker_lister is None
 
 
 def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypatch):
@@ -100,6 +123,31 @@ def test_attach_configures_retry_even_when_startup_fetch_is_unneeded():
     assert reader.fetch is None
     assert reader.retry_factory is not None
     assert ipc.commands == []
+
+
+def test_attach_reslot_hook_samples_current_profile_config(monkeypatch, make_session):
+    ipc = IPC()
+    reader = make_session(ipc)
+    current = [subselect.ProviderConfig(slang="fr", second_language="en")]
+    seen = []
+    monkeypatch.setattr(
+        attach_commands,
+        "_attach_reslot",
+        lambda _ports, _ipc, path, cfg: seen.append((path.name, cfg.slang, cfg.second_language)),
+    )
+    attach_commands._install_attach_reslot_hook(
+        reader.graph.reslot,
+        reader.graph.watch,
+        ipc,
+        current[0],
+        current_config=lambda: current[-1],
+    )
+    current.append(subselect.ProviderConfig(slang="fr", second_language="de"))
+    ipc.props["path"] = "/videos/Show - 02.mkv"
+
+    reader.graph.episode_watch.file_loaded()
+
+    assert seen == [("Show - 02.mkv", "fr", "de")]
 
 
 class _TrackIPC(util.FakeIPC):

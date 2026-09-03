@@ -94,15 +94,22 @@ class ProfileSession:
         mining_spec_for,
         dict_scoper=None,
         base_slang: str = "ja,jpn,jp",
+        environment_select: Callable[[Profile], None] | None = None,
     ) -> None:
         from saitenka.app.features.profiles.profile_controller import ProfileEnvironment
 
         self._dependencies.configure(dependency_builder_for, mining_spec_for)
+
+        def select_environment(profile: Profile) -> None:
+            self._dependencies.select(profile)
+            if environment_select is not None:
+                environment_select(profile)
+
         self.profile.configure_cycle(
             profiles,
             dict_scoper,
             base_slang=base_slang,
-            environment=ProfileEnvironment(self._dependencies.select),
+            environment=ProfileEnvironment(select_environment),
         )
 
     def load(self, cfg: dict, build=None, *, prebuilt: Future | None = None) -> None:

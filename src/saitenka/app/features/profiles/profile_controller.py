@@ -24,6 +24,14 @@ if TYPE_CHECKING:
     from saitenka.app.dictionary import DictionarySet
 
 
+def _default_second_slang() -> str:
+    return "en"
+
+
+def _ignore_second_slang(_second_slang: str) -> None:
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileInvalidation:
     """Cache and warm-state invalidation applied after profile preflight."""
@@ -39,8 +47,12 @@ class ProfileSubtitles:
 
     current_subtitle_slang: Callable[[], str]
     has_subtitle_track: Callable[[str], bool]
-    select_subtitle_track: Callable[[str], None]
+    select_subtitle_track: Callable[[str], object]
     retokenize_current_cue: Callable[[], None]
+    current_second_slang: Callable[[], str] = _default_second_slang
+    select_subtitle_languages: Callable[[str, str], bool | None] | None = None
+    select_translation_track: Callable[[str], None] = _ignore_second_slang
+    select_degraded_subtitle_languages: Callable[[str, str], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,15 +215,24 @@ class ProfileController:
         return ProfileSwitchOutcome(status, target, index)
 
     def _switch_subtitle_track(self, slang: str) -> _TrackSwitch:
-        if slang == self._subtitles.current_subtitle_slang():
+        second_slang = self._profile.langs.second
+        primary_unchanged = slang == self._subtitles.current_subtitle_slang()
+        if primary_unchanged and second_slang == self._subtitles.current_second_slang():
             return _TrackSwitch.UNCHANGED
-        if not self._subtitles.has_subtitle_track(slang):
+        if not primary_unchanged and not self._subtitles.has_subtitle_track(slang):
+            if self._subtitles.select_degraded_subtitle_languages is not None:
+                self._subtitles.select_degraded_subtitle_languages(slang, second_slang)
+            else:
+                self._subtitles.select_translation_track(second_slang)
             self._aftermath.notify(
                 f"profile {self._profile.name!r}: no {slang!r} subtitle track", "warn"
             )
             return _TrackSwitch.MISSING
+        if self._subtitles.select_subtitle_languages is not None:
+            changed = self._subtitles.select_subtitle_languages(slang, second_slang)
+            return _classify_track_switch(changed=changed, primary_unchanged=primary_unchanged)
         self._subtitles.select_subtitle_track(slang)
-        return _TrackSwitch.SWITCHED
+        return _TrackSwitch.UNCHANGED if primary_unchanged else _TrackSwitch.SWITCHED
 
     @staticmethod
     def _apply_font_mode(profile: Profile) -> None:
@@ -222,3 +243,8 @@ class _TrackSwitch(StrEnum):
     UNCHANGED = "unchanged"
     SWITCHED = "switched"
     MISSING = "missing"
+
+
+def _classify_track_switch(*, changed: bool | None, primary_unchanged: bool) -> _TrackSwitch:
+    selected_another_track = not primary_unchanged if changed is None else changed
+    return _TrackSwitch.SWITCHED if selected_another_track else _TrackSwitch.UNCHANGED

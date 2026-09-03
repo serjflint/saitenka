@@ -105,6 +105,22 @@ def test_attach_does_not_fetch_when_japanese_is_already_present():
     assert ipc.sets("sid") == [2]
 
 
+def test_attach_classifies_the_configured_second_language_track():
+    tracks = [
+        {"id": 6, "type": "sub", "lang": "fra"},
+        {"id": 7, "type": "sub", "lang": "eng"},
+        {"id": 8, "type": "sub", "lang": "deu"},
+    ]
+    ipc = FakeIPC(tracks=tracks, path="/v/Multilingual - 01.mkv")
+
+    startup, _status, _providers = subselect.prepare_attach_startup(
+        ipc,
+        subselect.AttachSubtitleOptions(slang="fr", language="fr", second_language="de"),
+    )
+
+    assert (startup.tracks.jp_sid, startup.tracks.en_sid, ipc.sets("sid")) == (6, 8, [6])
+
+
 def test_attach_orders_enabled_jimaku_before_tsukihime():
     ipc = FakeIPC(tracks=[EN], path="/v/English Only - 01.mkv")
 
@@ -360,6 +376,52 @@ def test_jimaku_force_falls_back_to_embedded_on_fetch_failure(tmp_path, monkeypa
     assert ipc.sets("sid") == [2]
 
 
+def test_jimaku_force_cannot_bypass_profile_language_eligibility(monkeypatch):
+    monkeypatch.setattr(
+        subselect,
+        "fetch_jimaku",
+        lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("ineligible provider called")),
+    )
+    de = {"id": 7, "type": "sub", "lang": "de"}
+    ipc = FakeIPC(tracks=[de], path="/v/French - 01.mkv")
+
+    startup, _status, providers = subselect.prepare_attach_startup(
+        ipc,
+        subselect.AttachSubtitleOptions(
+            slang="fr",
+            jimaku=True,
+            jimaku_force=True,
+            language="fr",
+            second_language="de",
+        ),
+    )
+
+    assert (startup.active, startup.tracks.en_sid) == ("en", 7)
+    assert providers == ()
+
+
+def test_ineligible_jimaku_force_names_the_selected_profile_language(monkeypatch):
+    monkeypatch.setattr(
+        subselect,
+        "fetch_jimaku",
+        lambda *_a, **_kw: (_ for _ in ()).throw(AssertionError("ineligible provider called")),
+    )
+    fr = {"id": 2, "type": "sub", "lang": "fr"}
+    ipc = FakeIPC(tracks=[EN, fr], path="/v/French - 01.mkv")
+
+    status = subselect.ensure_jp_subs(
+        ipc,
+        subselect.AttachSubtitleOptions(
+            slang="fr",
+            jimaku=True,
+            jimaku_force=True,
+            language="fr",
+        ),
+    )
+
+    assert status == "selected fr subtitle track sid=2"
+
+
 def test_provider_path_runs_configured_order_and_returns_first_success(tmp_path, monkeypatch):
     calls = []
     hit = tmp_path / "th.srt"
@@ -473,9 +535,11 @@ class _FakeReader:
     def __init__(self):
         self.retry_factory = "unset"
         self.picker_lister = "unset"
+        self.target_language = "unset"
 
-    def configure_subtitle_retry(self, factory):
+    def configure_subtitle_retry(self, factory, *, target_language="jp"):
         self.retry_factory = factory
+        self.target_language = target_language
 
     def configure_sub_picker(self, lister):
         self.picker_lister = lister
@@ -521,19 +585,31 @@ def test_configure_providers_wires_retry_and_picker():
     subselect.configure_providers(
         reader.configure_subtitle_retry,
         reader.configure_sub_picker,
-        subselect.ProviderConfig(enabled_providers=("jimaku", "tsukihime"), tsukihime_config={}),
+        subselect.ProviderConfig(
+            enabled_providers=("jimaku", "tsukihime"),
+            tsukihime_config={},
+            language="fr",
+        ),
     )
     assert callable(reader.retry_factory)  # a force-refetch retry factory
     assert callable(reader.picker_lister)  # the Ctrl+J source picker
+    assert reader.target_language == "fr"
 
 
-def test_configure_providers_clears_retry_when_no_provider():
+def test_configure_providers_clears_runtime_callbacks_when_no_provider():
     reader = _FakeReader()
+    subselect.configure_providers(
+        reader.configure_subtitle_retry,
+        reader.configure_sub_picker,
+        subselect.ProviderConfig(enabled_providers=("jimaku",)),
+    )
+
     subselect.configure_providers(
         reader.configure_subtitle_retry, reader.configure_sub_picker, subselect.ProviderConfig()
     )
-    assert reader.retry_factory is None  # cleared, not left stale after a provider-off re-slot
-    assert reader.picker_lister == "unset"  # picker never configured without a provider
+
+    assert reader.retry_factory is None
+    assert reader.picker_lister is None
 
 
 def test_configure_providers_retry_forces_a_refetch(monkeypatch):

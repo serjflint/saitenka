@@ -392,9 +392,21 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 slang
             ),
             select_subtitle_track=lambda slang: profile_integration_ref.get().select_subtitle_track(
-                slang
+                slang, "en"
+            ),
+            select_subtitle_languages=lambda slang, second_slang: (
+                profile_integration_ref.get().select_subtitle_track(slang, second_slang)
+            ),
+            select_translation_track=lambda second_slang: (
+                profile_integration_ref.get().select_translation_track(
+                    subtitle_tracks.current.slang, second_slang
+                )
+            ),
+            select_degraded_subtitle_languages=lambda slang, second_slang: (
+                profile_integration_ref.get().select_translation_track(slang, second_slang)
             ),
             retokenize_current_cue=lambda: profile_integration_ref.get().retokenize_current_cue(),
+            current_second_slang=lambda: subtitle_tracks.current.second_slang,
         ),
         ProfileAftermath(
             warm_episode=lambda: profile_integration_ref.get().warm_episode(),
@@ -623,10 +635,13 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             ),
             teardown_tooltip=tooltip_controller.teardown,
             retire_cue=lambda reason: cue_ref.get().retire(reason),
-            configure_subtitle_mode=lambda startup, slang: cue_ref.get().configure_subtitle_mode(
-                startup, slang=slang
+            configure_subtitle_mode=lambda startup, slang, second_slang: (
+                cue_ref.get().configure_subtitle_mode(
+                    startup, slang=slang, second_slang=second_slang
+                )
             ),
             rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
+            track_ports=track_commands.ports,
         )
     )
 
@@ -724,6 +739,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             subtitle_acquisition.submit,
             playback_observation.query,
             lifecycle_surfaces,
+            lambda: profile_session.profile.langs.main,
         )
 
     interaction = InteractionCoordinator(

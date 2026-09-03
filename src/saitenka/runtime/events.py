@@ -231,12 +231,13 @@ class EpisodeRetired:
 
 @dataclass(frozen=True, slots=True)
 class SubtitleStartupConfigured:
-    """The startup selection: both role tracks, the active role, and the search language list."""
+    """The startup selection: both role tracks, the active role, and their language searches."""
 
     jp_sid: int | None
     en_sid: int | None
     language: str
     slang: str
+    second_slang: str = "en"
 
 
 @dataclass(frozen=True, slots=True)
@@ -245,6 +246,16 @@ class SubtitleTracksDiscovered:
 
     jp_sid: int | None
     en_sid: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleTranslationConfigured:
+    """A degraded switch published its retained or replacement subtitle roles."""
+
+    jp_sid: int | None
+    en_sid: int | None
+    slang: str
+    second_slang: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +290,7 @@ class SubtitleTrackAnnounced:
 type SubtitleEvent = (
     SubtitleStartupConfigured
     | SubtitleTracksDiscovered
+    | SubtitleTranslationConfigured
     | SubtitlePrimaryAdopted
     | SubtitleLanguageChanged
     | SubtitleSecondaryLeased
@@ -288,6 +300,7 @@ type SubtitleEvent = (
 SUBTITLE_EVENTS = (
     SubtitleStartupConfigured,
     SubtitleTracksDiscovered,
+    SubtitleTranslationConfigured,
     SubtitlePrimaryAdopted,
     SubtitleLanguageChanged,
     SubtitleSecondaryLeased,

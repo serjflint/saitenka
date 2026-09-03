@@ -34,6 +34,24 @@ def test_japanese_default_does_not_deinflect_a_french_surface():
     assert ds.entry_for(_token("parlons", "parler")).inflection_chain == []
 
 
+def test_regional_japanese_profile_keeps_japanese_dictionary_behavior():
+    entry = DictionarySet(dicts=[], language="jp-JP").entry_for(_token("食べた", "食べる"))
+
+    assert (entry.inflection_chain, entry.defs[0].content[0]) == (
+        ["-た"],
+        "（辞書に見つかりませんでした）",
+    )
+
+
+def test_profile_without_deinflection_rules_degrades_to_raw_lookup():
+    entry = DictionarySet(dicts=[], language="de-CH").entry_for(_token("Häuser", "Häuser"))
+
+    assert (entry.inflection_chain, entry.defs[0].content[0]) == (
+        [],
+        "(not found in dictionary)",
+    )
+
+
 def test_second_language_lookup_folds_in_the_deinflected_dictionary_form():
     # The Latin tokenizer has no lemmatizer, so its lemma is the inflected surface. The dictionary form
     # to actually look up (parapluies → parapluie) MUST come from the deinflector, or an inflected word

@@ -4,6 +4,8 @@ AND our own eof loadfile through one setup path; auto-advance only decides wheth
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import util
 
 from saitenka.app import session_stats, subselect
@@ -114,6 +116,35 @@ def test_reslot_to_current_rebinds_the_episode_without_reloading(
         reader.graph.track_commands.current().jp_sid is None
     )  # …so prior-episode state cannot leak
     assert started == [str(cur)]  # a new stats row started against the current file
+
+
+def test_reslot_preserves_the_configured_translation_language(tmp_path, make_session):
+    ipc = FakeIPC()
+    reader = make_session(ipc)
+    cur = tmp_path / "Show 04.mkv"
+    ipc.props["path"] = str(cur)
+    ipc.props["track-list"] = [
+        {"id": 6, "type": "sub", "lang": "fra"},
+        {"id": 7, "type": "sub", "lang": "eng"},
+        {"id": 8, "type": "sub", "lang": "deu"},
+    ]
+
+    cli_run.reslot_to_current(
+        reader.graph.reslot,
+        {},
+        cur,
+        tmp_path,
+        0,
+        cli_run.RunSubtitleOptions(slang="fr", second_slang="de"),
+    )
+
+    tracks = reader.graph.track_commands.current()
+    assert (tracks.slang, tracks.second_slang, tracks.primary_sid, tracks.translation_sid) == (
+        "fr",
+        "de",
+        6,
+        8,
+    )
 
 
 def test_reslot_drops_a_carried_over_external_and_tags_the_current_srt_japanese(
@@ -344,6 +375,41 @@ def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path, make_
     )
     assert reader.graph.episode_watch.reslot_hook is not None  # follows file-loaded / playlists
     assert reader.graph.episode_watch.advance_hook is None  # but never drives its own advance
+
+
+def test_watch_hook_samples_the_current_profile_context_on_file_load(
+    tmp_path, monkeypatch, make_session
+):
+    ipc = FakeIPC()
+    reader = make_session(ipc)
+    initial = cli_run.RunSubtitleOptions(slang="fr", second_slang="en")
+    current = [({}, initial)]
+    seen = []
+    monkeypatch.setattr(
+        cli_run,
+        "reslot_to_current",
+        lambda _ports, cfg, path, _tmp, _dur, subs: seen.append(
+            (cfg, path.name, subs.slang, subs.second_slang)
+        ),
+    )
+    cli_run._install_watch_hooks(
+        reader.graph.reslot,
+        reader.graph.watch,
+        {},
+        tmp_path / "Show 01.mkv",
+        tmp_path,
+        0,
+        initial,
+        interactive=True,
+        auto_advance=False,
+        current_context=lambda: current[-1],
+    )
+    current.append(({"profile": "fr-de"}, replace(initial, second_slang="de")))
+    ipc.props["path"] = str(tmp_path / "Show 02.mkv")
+
+    reader.graph.episode_watch.file_loaded()
+
+    assert seen == [({"profile": "fr-de"}, "Show 02.mkv", "fr", "de")]
 
 
 def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path, make_session):

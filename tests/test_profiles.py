@@ -15,6 +15,7 @@ from saitenka.app.profiles import (
     resolve_launch_identity,
     resolve_profile,
     scope_config,
+    scope_profile_config,
     validate_language_code,
 )
 from saitenka.app.session.factory import SessionIdentity
@@ -113,6 +114,21 @@ def test_named_profile_selects_language_tokenizer_and_second():
     assert profile.langs.main == "fr"
     assert profile.langs.second == "en"  # per-profile second defaults to English (D7)
     assert profile.tokenizer == "latin"
+
+
+def test_named_profile_cannot_shadow_the_builtin_default():
+    cfg = {
+        "profiles": {
+            "default": {
+                "language": "fr",
+                "tokenizer": "latin",
+                "dicts": ["FR"],
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="reserved"):
+        resolve_profile(cfg)
 
 
 def test_profile_second_language_is_configurable():
@@ -355,6 +371,19 @@ def test_profile_override_selects_scoping_like_resolve_profile():
     assert scope_config(cfg, override="fr")["dicts"] == ["Le Grand Robert"]
 
 
+def test_profile_scoped_config_keeps_resolution_on_the_same_profile():
+    raw = {
+        "profiles": {
+            "fr": {"language": "fr", "second": "de", "tokenizer": "latin"},
+        }
+    }
+    selected = resolve_profile(raw, override="fr")
+
+    resolved = resolve_profile(scope_profile_config(raw, selected))
+
+    assert resolved.langs == ReaderLanguages(main="fr", second="de")
+
+
 def test_scoped_dicts_are_what_the_run_path_resolves():
     """Observable through the actual run-path seam: with no --dict flag, ``_resolve_names`` reads the
     profile-scoped dict list (which dictionaries load)."""
@@ -523,6 +552,24 @@ def test_non_jp_profile_derives_slang_from_its_language():
 def test_profile_region_subtag_is_folded_off_for_slang():
     cfg = {"active_profile": "ch", "profiles": {"ch": {"language": "de-CH", "tokenizer": "latin"}}}
     assert resolve_profile(cfg).slang == "de"
+
+
+def test_regional_japanese_alias_keeps_one_profile_identity() -> None:
+    profile = resolve_profile({"profile": {"language": "ja-JP"}})
+
+    assert (profile.langs.main, profile.tokenizer, profile.slang) == ("jp-JP", "unidic", "jp")
+
+
+@pytest.mark.parametrize(
+    ("configured", "canonical"),
+    [("eng-GB", "en-GB"), ("fra-CA", "fr-CA"), ("deu-CH", "de-CH")],
+)
+def test_regional_latin_aliases_share_the_latin_profile_identity(
+    configured: str, canonical: str
+) -> None:
+    profile = resolve_profile({"profile": {"language": configured}})
+
+    assert (profile.langs.main, profile.tokenizer) == (canonical, "latin")
 
 
 def test_explicit_profile_slang_wins_over_the_derived_one():

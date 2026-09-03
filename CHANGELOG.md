@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- A profile's configured translation language now selects that subtitle track at startup and after a
+  live profile cycle instead of silently retaining English.
 - **The first hover after the pointer enters the video showed no tooltip.** The word's dictionary
   lookup is stamped with the prefetch queue's epoch, and moving the pointer onto the video is
   itself what re-keys that queue — so the lookup came back stamped one epoch stale and was thrown

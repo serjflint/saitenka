@@ -38,14 +38,18 @@ def test_an_untagged_selected_track_becomes_the_target() -> None:
     assert discover(tracks, "ja,jpn,jp") == SubtitleTracks(jp_sid=2, en_sid=1)
 
 
-def test_a_lone_untagged_track_fills_both_roles() -> None:
-    """A missing tag wildcard-matches every want list, so one untagged track answers both
-    queries. `primary_role` is what actually decides such a track's role, by content."""
-    assert discover([track(7)], "ja,jpn,jp") == SubtitleTracks(jp_sid=7, en_sid=7)
+def test_a_lone_untagged_track_fills_only_the_target_role() -> None:
+    assert discover([track(7)], "ja,jpn,jp") == SubtitleTracks(jp_sid=7, en_sid=None)
 
 
 def test_no_tracks_selects_nothing() -> None:
     assert initial([], "ja,jpn,jp") == SubtitleStartup(SubtitleTracks(None, None), None)
+
+
+def test_an_unrelated_tagged_track_does_not_claim_either_configured_role() -> None:
+    tracks = [track(7, "eng", selected=True)]
+
+    assert initial(tracks, "fr", "de") == SubtitleStartup(SubtitleTracks(None, None), None)
 
 
 def test_startup_prefers_the_target_language_then_tagged_english() -> None:
@@ -102,6 +106,21 @@ def test_an_unknown_tagged_track_is_classified_by_its_tag() -> None:
     assert primary_role(9, tracks, track_lang="eng", sample="猫を見る") == SECOND_LANG
 
 
+def test_an_unknown_track_uses_the_configured_profile_languages() -> None:
+    tracks = SubtitleTracks(jp_sid=6, en_sid=8)
+
+    role = primary_role(
+        9,
+        tracks,
+        track_lang="fra",
+        sample="Bonjour",
+        primary_slang="fr",
+        second_slang="de",
+    )
+
+    assert role == MAIN_LANG
+
+
 def test_an_untagged_track_is_classified_by_its_content() -> None:
     """A missing tag wildcard-matches English, so only the cue text can decide."""
     tracks = SubtitleTracks(jp_sid=None, en_sid=None)
@@ -118,6 +137,7 @@ def test_an_untagged_track_with_no_sample_defaults_to_the_target() -> None:
 
 def test_language_name_falls_back_to_the_raw_tag() -> None:
     assert language_name("jpn") == "Japanese"
+    assert language_name("jp-JP") == "Japanese"
     assert language_name("eng") == "English"
     assert language_name("kor") == "kor"
     assert language_name(None) == "unknown language"

@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -22,9 +22,10 @@ from saitenka.app.jimaku import parse_filename
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.paths import cache_dir
 from saitenka.app.profiles import (
+    effective_slang,
     resolve_launch_identity,
     resolve_profile,
-    scope_config,
+    scope_profile_config,
 )
 from saitenka.app.session.factory import (
     SessionIdentity,
@@ -56,14 +57,15 @@ def _dict_scoper_for(cfg: dict, profile_cycle):
 @dataclass(frozen=True)
 class RunSubtitleOptions:
     """A ``run``'s subtitle-sourcing choices, resolved once from CLI + config and threaded through the
-    resolve → re-slot → watch-hook chain (was a recurring sub_file/jimaku/jimaku_key/slang/resync clump).
-    Per-episode identity (title, episode number) stays a separate arg — the re-slot recomputes it."""
+    resolve → re-slot → watch-hook chain (was a recurring sourcing-options clump). Per-episode identity
+    (title, episode number) stays a separate arg — the re-slot recomputes it."""
 
     slang: str
     sub_file: str | None = None
     jimaku: bool = False
     jimaku_key: str | None = None
     resync: bool = False
+    second_slang: str = "en"
 
 
 @dataclass(frozen=True)
@@ -384,7 +386,7 @@ def _resolve_subtitles(
     fetch_in_background: tuple[str, ...] = ()
     if subs.sub_file:
         sub_path = Path(subs.sub_file).expanduser()
-    elif jimaku_on and subs.jimaku:
+    elif jimaku_on and subs.jimaku and "jimaku" in enabled_providers:
         sub_path = _resolve_jimaku_subs(
             video_path, jimaku_title, episode, subs.jimaku_key, jimaku_cfg, resync=subs.resync
         )
@@ -568,8 +570,6 @@ def _start_run_provider_fetch(
     jimaku_title: str | None,
     episode: int | None,
 ) -> None:
-    if not providers and not enabled_providers:
-        return
     from saitenka.app.subselect import ProviderConfig, configure_providers, provider_fetch_factory
 
     raw_tsukihime = cfg.get("tsukihime")
@@ -581,6 +581,8 @@ def _start_run_provider_fetch(
         episode=episode,
         resync=subs.resync,
         tsukihime_config=tsukihime_cfg,
+        language=resolve_profile(cfg).langs.main,
+        second_language=subs.second_slang,
     )
     configure_providers(
         ports.configure_retry, ports.configure_picker, pcfg
@@ -687,6 +689,7 @@ def _install_watch_hooks(  # noqa: PLR0913 -- the session's ports plus the run's
     *,
     interactive: bool,
     auto_advance: bool,
+    current_context: Callable[[], tuple[dict, RunSubtitleOptions]] | None = None,
 ) -> None:
     """Wire the #100 watch hooks (run mode only — attach/SyncPlay never reaches here, which IS the
     SyncPlay gate, #62 precedent). ``reslot_hook`` fires on EVERY mpv ``file-loaded`` so the overlay
@@ -698,7 +701,10 @@ def _install_watch_hooks(  # noqa: PLR0913 -- the session's ports plus the run's
         return
 
     def _reslot(path: Path) -> None:
-        reslot_to_current(ports, cfg, path, tmp, dur, subs)
+        current_cfg, current_subs = (
+            current_context() if current_context is not None else (cfg, subs)
+        )
+        reslot_to_current(ports, current_cfg, path, tmp, dur, current_subs)
 
     watch.install_reslot_hook(_reslot, initial=video_path)
     if auto_advance:
@@ -732,6 +738,7 @@ def reslot_to_current(
     from saitenka.app.subtitle_modes import select_initial
 
     ipc = ports.ipc
+    primary_slang, second_slang = subs.slang, subs.second_slang
     title, parsed_episode = parse_filename(video_path)
     # One span over the whole re-slot: it's a discrete, non-trivial cost on the reader thread (a cold
     # re-slot resolves+ffsubsync-resyncs subs, ~1.3s live), and its attributes make a wrong-track
@@ -756,7 +763,7 @@ def reslot_to_current(
         # Tag the JP srt with the caller's own slang token so select_initial's _matching_track picks OUR
         # srt, not an untagged leftover the auto-selection latched onto (the ep2-on-ep03 bug). "auto"
         # flag → selection stays select_initial's. First slang token matches whatever slang is set.
-        jp_lang = next((part.strip() for part in subs.slang.split(",") if part.strip()), "jpn")
+        jp_lang = next((part.strip() for part in primary_slang.split(",") if part.strip()), "jpn")
         for path, lang in ((sub_path, jp_lang), (en_sub_path, "eng")):
             if path is not None:
                 send_correlated(
@@ -769,7 +776,7 @@ def reslot_to_current(
                     lang,
                     owner=Owner.SUBTITLE,
                 )
-        startup = select_initial(ipc, subs.slang)
+        startup = select_initial(ipc, primary_slang, second_slang)
         span.set(
             "active", startup.active or "none"
         )  # the selection outcome, queryable in the trace
@@ -782,7 +789,7 @@ def reslot_to_current(
             startup.tracks.en_sid,
         )
         ports.rebuild_index()
-        ports.configure_mode(startup, slang=subs.slang)
+        ports.configure_mode(startup, slang=primary_slang, second_slang=second_slang)
         ports.start_stats()  # fresh row; identity read from mpv's now-current path
         if startup.tracks.jp_sid is None and fetch_background:
             # background fetch below; tell the user to wait
@@ -1048,8 +1055,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         return 2
 
     def _scoped_for(selected):
-        override = None if selected.name == "default" else selected.name
-        return scope_config(raw_cfg, override=override)
+        return scope_profile_config(raw_cfg, selected)
 
     def _request_for(selected):
         selected_cfg = _scoped_for(selected)
@@ -1108,7 +1114,12 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
 
     tmp, video_path, dur = _prepare_video(video, width, height, seconds)
     subs = RunSubtitleOptions(
-        slang=slang, sub_file=sub_file, jimaku=jimaku, jimaku_key=jimaku_key, resync=resync
+        slang=slang,
+        second_slang=active_profile.langs.second,
+        sub_file=sub_file,
+        jimaku=jimaku,
+        jimaku_key=jimaku_key,
+        resync=resync,
     )
     sub_path, en_sub_path, fetch_jimaku_in_background, enabled_providers = _resolve_subtitles(
         cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
@@ -1136,7 +1147,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     from saitenka.app.subtitle_modes import select_initial
 
     with otel_metrics.traced("startup.subtitle_selection"):
-        subtitle_startup = select_initial(ipc, slang)
+        subtitle_startup = select_initial(ipc, slang, active_profile.langs.second)
 
     opts = _build_run_options(
         cfg,
@@ -1201,6 +1212,37 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             request = _request_for(selected)
             return _scoped_for(selected), lambda: _build_run_deps(request)
 
+        def reslot_context_for(selected) -> tuple[dict, RunSubtitleOptions]:
+            return _scoped_for(selected), replace(
+                subs,
+                slang=effective_slang(selected, ident.base_slang),
+                second_slang=selected.langs.second,
+            )
+
+        def refresh_profile_sources(selected) -> None:
+            selected_cfg, selected_subs = reslot_context_for(selected)
+            raw_jimaku = selected_cfg.get("jimaku")
+            selected_jimaku = raw_jimaku if isinstance(raw_jimaku, dict) else {}
+            raw_tsukihime = selected_cfg.get("tsukihime")
+            selected_tsukihime = raw_tsukihime if isinstance(raw_tsukihime, dict) else {}
+            enabled = _enabled_provider_names(
+                video,
+                jimaku=selected_subs.jimaku,
+                jimaku_cfg=selected_jimaku,
+                tsukihime_cfg=selected_tsukihime,
+                language=selected.langs.main,
+            )
+            _start_run_provider_fetch(
+                prepared.reslot,
+                selected_cfg,
+                video_path,
+                selected_subs,
+                providers=(),
+                enabled_providers=enabled,
+                jimaku_title=jimaku_title,
+                episode=episode,
+            )
+
         prepared.profile.configure(
             profile_cycle,
             dependency_builder_for=dependency_builder_for,
@@ -1209,6 +1251,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             ),
             dict_scoper=_dict_scoper_for(raw_cfg, profile_cycle),
             base_slang=ident.base_slang,
+            environment_select=refresh_profile_sources,
         )
     if not (demo_word or screenshot):
         # index whatever track mpv ends up with (external/jimaku path, or an embedded track
@@ -1220,7 +1263,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         )  # the build has been running since pre-launch
 
     with otel_metrics.traced("startup.subtitle_mode_configure"):
-        prepared.configure_subtitle_mode(subtitle_startup, slang=slang)
+        prepared.configure_subtitle_mode(
+            subtitle_startup, slang=slang, second_slang=active_profile.langs.second
+        )
     _start_run_provider_fetch(
         prepared.reslot,
         cfg,
@@ -1232,6 +1277,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         episode=episode,
     )
 
+    def _current_reslot_context() -> tuple[dict, RunSubtitleOptions]:
+        return reslot_context_for(prepared.profile.profile.profile)
+
     _install_watch_hooks(
         prepared.reslot,
         prepared.watch,
@@ -1242,6 +1290,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         subs,
         interactive=not (demo_word or screenshot),
         auto_advance=auto_advance,
+        current_context=_current_reslot_context,
     )
 
     try:

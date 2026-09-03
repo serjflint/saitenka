@@ -455,6 +455,24 @@ def test_unavailable_language_keeps_current_mode(monkeypatch, make_session):
     assert messages == [("EN subtitles unavailable", "warn")]
 
 
+def test_unavailable_configured_translation_language_names_it(monkeypatch, make_session):
+    ipc = FakeIPC([JP.copy(), EN.copy()])
+    reader = make_session(ipc)
+    reader.graph.cue.configure_subtitle_mode(
+        subtitle_modes.select_initial(ipc, second_slang="de"),
+        second_slang="de",
+    )
+    messages = []
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, kind="ok": messages.append((text, kind))
+    )
+
+    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
+
+    assert reader.graph.track_commands.current().language == "jp"
+    assert messages == [("DE subtitles unavailable", "warn")]
+
+
 def test_english_primary_is_plain_and_noninteractive(monkeypatch, make_session):
     ipc = FakeIPC([EN.copy()])
     reader = make_session(ipc)
@@ -505,6 +523,35 @@ def test_startup_japanese_arrival_replaces_untouched_english_fallback(tmp_path, 
     assert ("set_property", "sid", 9) in ipc.commands
     assert rebuilt == ["rebuilt"]
     assert messages == ["Japanese subtitles ready"]
+
+
+def test_provider_arrival_uses_the_configured_target_language(tmp_path, monkeypatch):
+    ipc = FakeIPC()
+    reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
+    reader.graph.cue.configure_subtitle_mode(
+        subtitle_modes.select_initial(ipc, "fr", "de"),
+        slang="fr",
+        second_slang="de",
+    )
+    messages = []
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, *_args: messages.append(text)
+    )
+    monkeypatch.setattr(
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
+    )
+    path = tmp_path / "episode.fr.srt"
+    path.write_text("Français", encoding="utf-8")
+    reader.graph.subtitle_acquisition.configure_retry(None, target_language="fr")
+    ipc.commands.clear()
+
+    reader.graph.subtitle_acquisition.fetch_background(lambda: (path, "universal: ready"))
+    jobs.finish()
+
+    tracks = reader.graph.track_commands.current()
+    assert (tracks.slang, tracks.jp_sid, tracks.language) == ("fr", 9, MAIN_LANG)
+    assert ("sub-add", str(path), "auto", "", "fr") in ipc.commands
+    assert messages == ["fr subtitles ready"]
 
 
 def test_startup_japanese_arrival_preserves_track_changed_during_fetch(tmp_path, monkeypatch):
@@ -579,9 +626,59 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch, make_sessio
     path = Path(tmp_path / "episode.synced.srt")
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader.graph.track_commands.ports(), path, "resynced")
+    subtitle_modes._replace_target_track(reader.graph.track_commands.ports(), path, "resynced")
 
     assert ("set_property", "sub-delay", 0.0) in ipc.commands
+
+
+def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypatch):
+    fr_source = tmp_path / "episode.fr.srt"
+    fr_source.write_text("Français", encoding="utf-8")
+    fr = {
+        "id": 2,
+        "type": "sub",
+        "lang": "fr",
+        "external": True,
+        "external-filename": str(fr_source),
+    }
+    source = tmp_path / "episode.de.srt"
+    source.write_text("Deutsch", encoding="utf-8")
+    de = {
+        "id": 1,
+        "type": "sub",
+        "lang": "de",
+        "external": True,
+        "external-filename": str(source),
+    }
+    ipc = FakeIPC([fr, de])
+    ipc.props["path"] = "/videos/episode.mkv"
+    reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
+    startup = subtitle_modes.select_initial(ipc, "fr", "de", preferred_role=SECOND_LANG)
+    reader.graph.cue.configure_subtitle_mode(startup, slang="fr", second_slang="de")
+    hold_translation(reader)
+    reader.graph.subtitle_acquisition.configure_retry(None, target_language="fr")
+    retimed = tmp_path / "episode.retimed.de.srt"
+    retimed.write_text("Deutsch", encoding="utf-8")
+    monkeypatch.setattr("saitenka.app.resync.resync_window", lambda *_a, **_kw: retimed)
+    monkeypatch.setattr(subtitle_modes, "_published", lambda _source, result: result)
+    monkeypatch.setattr(
+        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
+    )
+    monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a, **_kw: None)
+    ipc.commands.clear()
+
+    reader.command(app_bindings.SUBTITLE_RETRY_MSG)
+    jobs.finish()
+
+    state = reader.graph.track_commands.current()
+    assert (state.language, state.jp_sid, state.en_sid, state.secondary_sid) == (
+        SECOND_LANG,
+        2,
+        9,
+        2,
+    )
+    assert ("sub-add", str(retimed), "select", "", "de") in ipc.commands
+    assert ("sub-remove", 1) in ipc.commands and ("sub-remove", 2) not in ipc.commands
 
 
 def test_runtime_retry_uses_current_media_and_coalesces_active_request(monkeypatch):
@@ -768,13 +865,14 @@ def test_runtime_retry_keeps_current_subs_when_window_retiming_fails(tmp_path, m
         ("JA", ["ja"], True),  # case-insensitive
         ("Japanese", ["ja"], True),  # full language name
         ("ger", ["ja", "jpn", "jp"], False),  # unrelated tag never matches
+        ("frp", ["fr"], False),  # a longer ISO code is not a regional fr tag
         (None, ["ja"], True),  # untagged track is a wildcard — load-bearing for foreign-only files
         ("", ["ja"], True),  # empty tag likewise matches
         ("ja", [""], False),  # empty want is ignored, not a wildcard
         ("ja", [], False),  # no wants → no match
     ],
 )
-def test_lang_matches_prefix_rule_and_wildcard_edges(lang, wants, expected):
+def test_lang_matches_alias_and_wildcard_edges(lang, wants, expected):
     assert subtitle_selection.lang_matches(lang, wants) is expected
 
 
@@ -785,6 +883,7 @@ def test_foreign_only_tracks_use_the_selected_one_as_primary():
             {"id": 3, "type": "sub", "lang": "ger", "selected": True, "main-selection": 0},
         ]
     )
+
     assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(jp_sid=3, en_sid=4)
 
 
@@ -799,6 +898,128 @@ def test_single_foreign_track_has_no_secondary():
     ipc = FakeIPC([{"id": 7, "type": "sub", "lang": "ger"}])
     assert subtitle_modes.discover_tracks(ipc) == subtitle_modes.SubtitleTracks(
         jp_sid=7, en_sid=None
+    )
+
+
+def test_discovery_uses_the_configured_second_language():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 7, "type": "sub", "lang": "eng"},
+            {"id": 8, "type": "sub", "lang": "deu"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_falls_back_from_a_region_tag_to_the_base_track_language():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 8, "type": "sub", "lang": "deu"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de-CH") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_prefers_an_exact_region_before_its_base_language():
+    ipc = FakeIPC(
+        [
+            {"id": 1, "type": "sub", "lang": "pt-PT"},
+            {"id": 2, "type": "sub", "lang": "pt-BR"},
+            {"id": 6, "type": "sub", "lang": "fra"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "pt-BR") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=2
+    )
+
+
+def test_discovery_prefers_a_regional_iso_alias_before_the_alias_base():
+    ipc = FakeIPC(
+        [
+            {"id": 1, "type": "sub", "lang": "por-PT"},
+            {"id": 2, "type": "sub", "lang": "por-BR"},
+            {"id": 6, "type": "sub", "lang": "fra"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "pt-BR") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=2
+    )
+
+
+def test_discovery_prefers_the_exact_english_region_through_its_iso_alias():
+    ipc = FakeIPC(
+        [
+            {"id": 1, "type": "sub", "lang": "eng-US"},
+            {"id": 2, "type": "sub", "lang": "eng-GB"},
+            {"id": 6, "type": "sub", "lang": "fra"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "en-GB") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=2
+    )
+
+
+def test_discovery_matches_iso_639_two_and_three_letter_aliases():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 8, "type": "sub", "lang": "spa"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "es-MX") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_matches_a_regional_three_letter_preference_to_a_two_letter_tag():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 8, "type": "sub", "lang": "de-CH"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "deu-CH") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_checks_configured_tracks_before_untagged_fallback():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 9, "type": "sub"},
+            {"id": 8, "type": "sub", "lang": "deu"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=8
+    )
+
+
+def test_discovery_does_not_substitute_a_tagged_unconfigured_translation_language():
+    ipc = FakeIPC(
+        [
+            {"id": 6, "type": "sub", "lang": "fra"},
+            {"id": 7, "type": "sub", "lang": "eng"},
+        ]
+    )
+
+    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
+        jp_sid=6, en_sid=None
     )
 
 
@@ -998,7 +1219,7 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
-    subtitle_modes._replace_japanese_track(reader.graph.track_commands.ports(), path, "resynced")
+    subtitle_modes._replace_target_track(reader.graph.track_commands.ports(), path, "resynced")
 
     assert (
         reader.graph.track_commands.navigation.current.sub_index is old
@@ -1030,7 +1251,7 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(
     reader.graph.track_commands.declare(SubtitleLanguageChanged(SECOND_LANG))  # English on screen
     replaced: list = []
     monkeypatch.setattr(
-        subtitle_modes, "_replace_japanese_track", lambda *a, **_k: replaced.append(a)
+        subtitle_modes, "_replace_target_track", lambda *a, **_k: replaced.append(a)
     )
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
     monkeypatch.setattr(

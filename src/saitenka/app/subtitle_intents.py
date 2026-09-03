@@ -61,6 +61,8 @@ class SubtitleInputs:
     #: The projection's cue revision when these facts were read. Navigation is relative to a cue,
     #: so an effect decided here has to say which one — see `SeekCue`.
     cue_revision: int = 0
+    second_language: str = "en"
+    main_language: str = "jp"
 
 
 # --- effects ------------------------------------------------------------------------------------
@@ -92,6 +94,8 @@ class AcquisitionSource(StrEnum):
 class AcquireSubtitles:
     media_path: str
     source: AcquisitionSource
+    target_role: Language = "jp"
+    target_language: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,7 +148,11 @@ type SubtitleEffect = (
 def _toggle_language(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
     decision = toggle_target(inputs.tracks, active_sid=inputs.active_sid, language=inputs.language)
     if decision.sid is None:
-        return (Announce(f"{decision.target.upper()} subtitles unavailable", "warn"),)
+        configured = inputs.second_language if decision.target != "jp" else inputs.main_language
+        unavailable = configured.split(",", 1)[0].upper()
+        if unavailable in {"JA", "JPN", "JAPANESE"}:
+            unavailable = "JP"
+        return (Announce(f"{unavailable} subtitles unavailable", "warn"),)
     return (SelectTrack(decision.sid, decision.target),)
 
 
@@ -167,7 +175,11 @@ def _retry(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:
     source = (
         AcquisitionSource.RESYNC_CURRENT if inputs.has_external_sub else AcquisitionSource.PROVIDERS
     )
-    return (AcquireSubtitles(inputs.media_path, source),)
+    role = inputs.language if source is AcquisitionSource.RESYNC_CURRENT else "jp"
+    language = None
+    if source is AcquisitionSource.RESYNC_CURRENT and role != "jp":
+        language = inputs.second_language.split(",", 1)[0]
+    return (AcquireSubtitles(inputs.media_path, source, role, language),)
 
 
 def _toggle_annotation_mode(inputs: SubtitleInputs) -> tuple[SubtitleEffect, ...]:

@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import language_base
+
 from saitenka import otel_metrics
 
 try:
@@ -193,7 +195,10 @@ class DictionarySet:
         return self._adapter
 
     def _source_inflection_chain(self, surface: str, targets: tuple[str, ...]) -> list[str]:
-        return inflection_chain(surface, *targets, language=self.language)
+        try:
+            return inflection_chain(surface, *targets, language=language_base(self.language))
+        except ValueError:
+            return []
 
     @classmethod
     def from_rows(
@@ -343,11 +348,14 @@ class DictionarySet:
         whose MeCab lemma is already the dict form, so every JP lookup stays byte-identical. Bounded:
         the French suffix ruleset over-generates (harmless — a spurious form just misses in the DB —
         but it needn't bloat the IN-list)."""
-        if self.language in _JP_LANGS or not lemma:
+        language = language_base(self.language)
+        if language in _JP_LANGS or not lemma:
             return ()
-        out = [
-            d.text for d in _deinflect(lemma, language=self.language) if d.text and d.text != lemma
-        ]
+        try:
+            candidates = _deinflect(lemma, language=language)
+        except ValueError:
+            return ()
+        out = [d.text for d in candidates if d.text and d.text != lemma]
         return tuple(dict.fromkeys(out))[:_DEINFLECT_FORM_CAP]
 
     def entry_for(

@@ -8,6 +8,12 @@ from saitenka.app.episode_reslot import ReslotPorts
 from saitenka.app.launch import run as cli_run
 
 
+def test_run_subtitle_options_preserves_the_positional_sub_file_argument():
+    options = cli_run.RunSubtitleOptions("ja,jpn,jp", "episode.srt")
+
+    assert options.sub_file == "episode.srt" and options.second_slang == "en"
+
+
 def _resolve(tmp_path, *, jimaku: bool):
     return cli_run._resolve_subtitles(
         {"jimaku": {"fetch": True}},
@@ -104,6 +110,34 @@ def test_explicit_run_jimaku_retains_synchronous_override(tmp_path, monkeypatch)
     assert enabled == ("jimaku",)
 
 
+def test_explicit_jimaku_cannot_bypass_profile_language_eligibility(tmp_path, monkeypatch):
+    fetched = []
+    monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["explicit_flag"])
+    monkeypatch.setattr(
+        cli_run,
+        "_resolve_jimaku_subs",
+        lambda *_args, **_kwargs: fetched.append(True),
+    )
+
+    sub_path, _en_path, background, enabled = cli_run._resolve_subtitles(
+        {
+            "active_profile": "fr",
+            "profiles": {"fr": {"language": "fr", "second": "de"}},
+            "jimaku": {"fetch": True},
+        },
+        "episode.mkv",
+        tmp_path / "episode.mkv",
+        30,
+        tmp_path,
+        cli_run.RunSubtitleOptions(slang="fr", jimaku=True),
+        jimaku_title=None,
+        episode=None,
+    )
+
+    assert sub_path is None and background == () and enabled == ()
+    assert fetched == []
+
+
 def test_tsukihime_is_background_only_and_follows_jimaku(tmp_path, monkeypatch):
     monkeypatch.setattr(cli_run, "jimaku_should_fetch", lambda **kwargs: kwargs["cfg_fetch"])
 
@@ -166,8 +200,9 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
         startup_fetch = None
         picker_lister = None
 
-        def configure_subtitle_retry(self, factory):
+        def configure_subtitle_retry(self, factory, *, target_language="jp"):
             self.retry_factory = factory
+            self.target_language = target_language
 
         def fetch_japanese_subs_async(self, fetch):
             self.startup_fetch = fetch
@@ -216,3 +251,34 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
     assert path == Path(tmp_path / "episode.ja.srt")
     assert status == "tsukihime: added episode.ja.srt"
     assert calls == [("/videos/current.mkv", ("jimaku", "tsukihime"))]
+
+
+def test_run_with_no_current_provider_clears_runtime_callbacks(tmp_path):
+    retry = [object()]
+    picker = [object()]
+    ports = ReslotPorts(
+        ipc=None,
+        finish_stats=lambda: None,
+        start_stats=lambda: None,
+        rebind_episode=lambda: None,
+        rebuild_index=lambda: None,
+        configure_mode=lambda *_a, **_kw: None,
+        configure_retry=lambda factory, **_kwargs: retry.append(factory),
+        configure_picker=picker.append,
+        fetch_japanese=lambda _fetch: None,
+        start_prefetch=lambda: None,
+        toast=lambda *_a, **_kw: None,
+    )
+
+    cli_run._start_run_provider_fetch(
+        ports,
+        {},
+        tmp_path / "episode.mkv",
+        cli_run.RunSubtitleOptions(slang="ja,jpn,jp"),
+        providers=(),
+        enabled_providers=(),
+        jimaku_title=None,
+        episode=None,
+    )
+
+    assert retry[-1] is None and picker[-1] is None

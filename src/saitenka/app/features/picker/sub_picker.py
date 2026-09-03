@@ -307,6 +307,7 @@ class DownloadPorts:
     submit_fetch: FetchSubmitter
     get_property: Callable[[str], object]
     surfaces: object
+    target_language: Callable[[], str]
 
 
 def download_candidate(
@@ -325,7 +326,7 @@ def download_candidate(
     if not (0 <= index < len(candidates)):
         return
     candidate = candidates[index]
-    from saitenka.app.subtitle_modes import start_fetch
+    from saitenka.app.subtitle_modes import FetchSource, start_fetch
 
     ports.toast(f"Downloading {candidate.name}…")
     # force_select: the user explicitly chose this source in the picker, so select it NOW even if the
@@ -334,7 +335,7 @@ def download_candidate(
         ports.submit_fetch,
         ports.get_property,
         candidate.download,
-        name="sub-picker-download",
+        source=FetchSource("sub-picker-download", ports.target_language()),
         force_select=True,
     )
     # panel closes; the swap lands from the broker completion when the file arrives

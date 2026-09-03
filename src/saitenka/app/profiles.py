@@ -20,7 +20,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
+from saitenka_tokenize.languages import (
+    MAIN_LANG,
+    ReaderLanguages,
+    canonical_language_tag,
+    language_base,
+)
 
 from saitenka.app.config import ProfileOptions
 
@@ -29,26 +34,10 @@ from saitenka.app.config import ProfileOptions
 # accepted while obvious garbage ("", "!!", "1") is rejected loudly at config-load time.
 _LANG_CODE = re.compile(r"^[A-Za-z]{2,}(?:-[A-Za-z0-9]+)*$")
 
-# Alias → the canonical internal code the rest of the app already keys on (``MAIN_LANG``/``SECOND_LANG``
-# and each provider's ``languages`` set — ``subtitle_providers.py``). Canonicalising ONCE at resolution
-# is the SSOT that keeps tokenizer selection and provider gating in agreement: without it a profile
-# written ``language = "ja"`` (valid ISO-639-1) tokenizes as unidic yet silently fails the provider gate,
-# since providers key on the exact literal ``"jp"``.
-_CANONICAL = {
-    "ja": "jp",
-    "jp": "jp",
-    "jpn": "jp",
-    "japanese": "jp",
-    "en": "en",
-    "eng": "en",
-    "english": "en",
-}
-
 
 def canonical_language(code: str) -> str:
-    """Fold a language alias onto the canonical internal code (``ja``/``jpn`` → ``jp``); pass any other
-    code through unchanged. Applied to both main and second so every downstream literal agrees."""
-    return _CANONICAL.get(code.lower(), code)
+    """Fold an aliased primary subtag while retaining any region/script preference."""
+    return canonical_language_tag(code)
 
 
 @dataclass(frozen=True)
@@ -78,7 +67,24 @@ def validate_language_code(code: str) -> str:
 # the deinflector ships rules for every one (only fr does today); an unlisted language must name its
 # tokenizer explicitly. Onboarding a writing system = extend one set (Cyrillic/Greek already work).
 _LATIN_SCRIPT = frozenset(
-    {"fr", "es", "de", "it", "pt", "nl", "ca", "ro", "sv", "da", "no", "nb", "nn", "fi", "pl"}
+    {
+        "en",
+        "fr",
+        "es",
+        "de",
+        "it",
+        "pt",
+        "nl",
+        "ca",
+        "ro",
+        "sv",
+        "da",
+        "no",
+        "nb",
+        "nn",
+        "fi",
+        "pl",
+    }
 )
 _CYRILLIC_SCRIPT = frozenset({"ru", "uk", "be", "bg", "sr", "mk"})
 _GREEK_SCRIPT = frozenset({"el"})
@@ -88,7 +94,7 @@ _EUROPEAN_SCRIPTS = _LATIN_SCRIPT | _CYRILLIC_SCRIPT | _GREEK_SCRIPT
 
 def _base_code(language: str) -> str:
     """The primary subtag, lowercased (``de-CH`` → ``de``)."""
-    return language.split("-", 1)[0].lower()
+    return language_base(language)
 
 
 def primary_font_for(language: str) -> str | None:
@@ -104,7 +110,7 @@ def default_tokenizer_for(language: str) -> str:
     Japanese → ``unidic``; a whitespace-segmented European script (Latin/Cyrillic/Greek) → ``latin``. Any
     other language must name its tokenizer explicitly — there is no safe guess, and silently falling back
     would mis-segment an unknown script with no signal. Fail fast instead."""
-    if language == "jp":
+    if _base_code(language) == "jp":
         return "unidic"
     if _base_code(language) in _EUROPEAN_SCRIPTS:
         return "latin"
@@ -119,10 +125,26 @@ def _table(cfg: dict, key: str) -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
+def validate_profile_name(name: str) -> str:
+    """Reject names that collide with the built-in profile identity."""
+    if not name:
+        raise ValueError("profile name must be non-empty")
+    if name == "default":
+        raise ValueError("profile name 'default' is reserved for the built-in profile")
+    return name
+
+
+def _named_profiles(cfg: dict) -> dict:
+    profiles = _table(cfg, "profiles")
+    for name in profiles:
+        validate_profile_name(str(name))
+    return profiles
+
+
 def profile_names(cfg: dict) -> list[str]:
     """Named ``[profiles.*]`` in sorted order (the switcher's cycle order after the base default). Lives
     on this leaf module so both the CLI and doctor read it without importing the CLI (cycle-free)."""
-    return sorted(_table(cfg, "profiles"))
+    return sorted(_named_profiles(cfg))
 
 
 def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str | None, dict]:
@@ -133,8 +155,9 @@ def _active_profile_table(cfg: dict, override: str | None = None) -> tuple[str |
     (dict/mine scoping) so the profile table is parsed once per concern."""
     name = override or cfg.get("active_profile")
     raw = dict(_table(cfg, "profile"))  # singular default-profile table
+    profiles = _named_profiles(cfg)
     if name:
-        named = _table(cfg, "profiles").get(name)
+        named = profiles.get(name)
         if isinstance(named, dict):
             raw.update(named)  # named overlay on top of the default table
     return name, raw
@@ -163,6 +186,16 @@ def scope_config(cfg: dict, override: str | None = None) -> dict:
         base = cfg.get("mine")
         out["mine"] = {**(base if isinstance(base, dict) else {}), **mine}
     return out
+
+
+def scope_profile_config(cfg: dict, profile: Profile) -> dict:
+    """Return config whose scoped values and active identity both name ``profile``."""
+    selected = dict(cfg)
+    if profile.name == "default":
+        selected.pop("active_profile", None)
+    else:
+        selected["active_profile"] = profile.name
+    return scope_config(selected)
 
 
 def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
@@ -209,7 +242,7 @@ def configured_profiles(cfg: dict) -> list[Profile]:
     whichever named profile is currently active."""
     base = resolve_profile({k: v for k, v in cfg.items() if k != "active_profile"})
     profiles = [base]
-    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_table(cfg, "profiles")))
+    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_named_profiles(cfg)))
     return profiles
 
 

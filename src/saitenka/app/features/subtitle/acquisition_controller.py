@@ -5,6 +5,8 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import MAIN_LANG
+
 from saitenka.app import subtitle_modes
 from saitenka.runtime import EffectFinished, Owner
 
@@ -28,10 +30,11 @@ class _RetryState:
         self.retry_factory: ProviderFetchFactory | None = None
         self.retry_active = False
         self.retry_lock = threading.Lock()
+        self.target_language = MAIN_LANG
 
 
 class SubtitleAcquisitionController:
-    """Own provider retries, fetch identity, and episode-safe result application."""
+    """Own provider retries, fetch identity, and source-safe result application."""
 
     def __init__(
         self,
@@ -50,7 +53,7 @@ class SubtitleAcquisitionController:
         self._track_ports = track_ports
         self._submitter = submitter
         self._sequence = 0
-        self._episode_generation = 0
+        self._source_generation = 0
         self._force_select_revision = 0
         self._retry = _RetryState()
 
@@ -58,8 +61,14 @@ class SubtitleAcquisitionController:
     def retry_in_flight(self) -> bool:
         return self._retry.retry_active
 
-    def configure_retry(self, factory: ProviderFetchFactory | None) -> None:
-        subtitle_modes.configure_retry(self._retry, factory)
+    def configure_retry(
+        self,
+        factory: ProviderFetchFactory | None,
+        *,
+        target_language: str = MAIN_LANG,
+    ) -> None:
+        self._retire_source_generation()
+        subtitle_modes.configure_retry(self._retry, factory, target_language=target_language)
 
     def start(
         self,
@@ -69,20 +78,31 @@ class SubtitleAcquisitionController:
         select_if_unchanged: bool = False,
         replace: bool = False,
         force_select: bool = False,
+        target_language: str | None = None,
         on_done: Callable[[], None] | None = None,
     ) -> None:
         subtitle_modes.start_fetch(
             self.submit,
             self._get,
             fetch,
-            name=name,
+            source=subtitle_modes.FetchSource(
+                name,
+                target_language or self._retry.target_language,
+            ),
             select_if_unchanged=select_if_unchanged,
             replace=replace,
             force_select=force_select,
             on_done=on_done,
         )
 
-    def begin(self, media_path: str, source: AcquisitionSource) -> None:
+    def begin(
+        self,
+        media_path: str,
+        source: AcquisitionSource,
+        *,
+        target_role: str = MAIN_LANG,
+        target_language: str | None = None,
+    ) -> None:
         subtitle_modes.begin_acquisition(
             self.submit,
             self._get,
@@ -91,10 +111,19 @@ class SubtitleAcquisitionController:
             self._ipc,
             media_path,
             source,
+            fetch_source=subtitle_modes.FetchSource(
+                "subtitle-resync",
+                target_language or self._retry.target_language,
+                target_role,
+            ),
         )
 
     def fetch_background(self, fetch: ProviderFetch) -> None:
-        self.start(fetch, select_if_unchanged=True)
+        self.start(
+            fetch,
+            select_if_unchanged=True,
+            target_language=self._retry.target_language,
+        )
 
     def submit(
         self,
@@ -103,7 +132,7 @@ class SubtitleAcquisitionController:
         name: str,
         on_done: Callable[[], None] | None = None,
     ) -> None:
-        episode_generation = self._episode_generation
+        source_generation = self._source_generation
         self._sequence += 1
         identity = (self._sequence, name)
         force_select_revision = None
@@ -113,7 +142,7 @@ class SubtitleAcquisitionController:
 
         def finish(completion: EffectFinished) -> None:
             if (
-                episode_generation != self._episode_generation
+                source_generation != self._source_generation
                 or self._stop.is_set()
                 or (
                     force_select_revision is not None
@@ -146,6 +175,9 @@ class SubtitleAcquisitionController:
 
     def retire_episode(self) -> None:
         """Retire acquisition identity and retry state with the episode."""
-        self._episode_generation += 1
+        self._retire_source_generation()
+
+    def _retire_source_generation(self) -> None:
+        self._source_generation += 1
         self._force_select_revision += 1
         self._retry = _RetryState()
