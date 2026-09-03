@@ -313,7 +313,9 @@ recently-changed modules first.
 
 - **Inner** (every audit): record `axes-not-applied` with the reason. This is the guard against the
   real failure it's named for — *the loop never ran crosshair/fuzz/arch until explicitly asked.* If an
-  axis was skippable, the ledger says so out loud.
+  axis was skippable, the ledger says so out loud. Records are accepted only through
+  `tools/sharpen_ledger.py append`, which owns the tree hash and contract version and rejects missing
+  axis evidence. Older contract records are stale and cannot suppress a new audit.
 - **Outer** (periodic "grill the loop"): re-derive the technique list from scratch against current
   tooling and the `poe` stack. A **meaningful** extension **bumps `toolset_version`** and invalidates
   the whole ledger — this includes **adding or removing an axis** (a new measurement dimension is a
@@ -321,6 +323,10 @@ recently-changed modules first.
   **No axis, instrument, or context source is added on plausibility** — only after a **frozen-baseline
   A/B** (pin a revision, run with and without, keep it only if it moves a signal). The `toolset_version`
   bump follows a *proven* change, never a hoped-for one.
+  The cadence is three completed module audits after the last current-toolset outer reflection.
+  `tools/sharpen_ledger.py reflection-status` is checked before triage and blocks a new audit when due.
+  Resume only after a human decision is appended with `append-reflection`; the CLI requires the findings,
+  next actions, toolset decision, and human decision.
 
 ## Cadence & cost
 

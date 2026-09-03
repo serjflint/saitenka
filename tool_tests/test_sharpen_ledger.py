@@ -13,6 +13,21 @@ import sharpen_ledger as sl
 
 MANIFEST = {"type": "manifest", "toolset_version": 1}
 TESTS = ["tests/test_foo.py"]
+AXES = {"conformance": "pass"}
+AUDITED = "2026-09-03T00:00:00Z"
+
+
+def _current_record(sha: str) -> dict:
+    return {
+        "module": "app/foo.py",
+        "source_sha": sha,
+        "toolset_version": 1,
+        "contract_version": sl.CONTRACT_VERSION,
+        "state": "sharpened",
+        "audited": AUDITED,
+        "axes": AXES,
+        "axes_not_applied": [],
+    }
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -60,7 +75,7 @@ def test_status_is_unseen_without_a_record(tmp_path):
 def test_status_is_sharpened_current_when_sharpened_and_unchanged(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
+    rec = _current_record(sha)
     ledger = _ledger(root, [MANIFEST, rec])
     assert ledger.status("app/foo.py", root, TESTS) == sl.SHARPENED_CURRENT
 
@@ -68,7 +83,7 @@ def test_status_is_sharpened_current_when_sharpened_and_unchanged(tmp_path):
 def test_status_goes_stale_when_the_source_is_edited(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
+    rec = _current_record(sha)
     ledger = _ledger(root, [MANIFEST, rec])
     (root / "src/saitenka/app/foo.py").write_text("X = 99\n", encoding="utf-8")
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_SHA
@@ -80,6 +95,29 @@ def test_status_goes_stale_when_the_toolset_version_bumps(tmp_path):
     rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
     ledger = _ledger(root, [{"type": "manifest", "toolset_version": 2}, rec])
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_TOOLSET
+
+
+def test_status_goes_stale_when_the_contract_changes(tmp_path):
+    root = _repo(tmp_path)
+    sha = sl.source_sha(root, "app/foo.py", TESTS)
+    rec = {
+        "module": "app/foo.py",
+        "source_sha": sha,
+        "toolset_version": 1,
+        "contract_version": sl.CONTRACT_VERSION - 1,
+        "state": "sharpened",
+    }
+    ledger = _ledger(root, [MANIFEST, rec])
+    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
+
+
+def test_current_contract_without_axis_evidence_cannot_suppress_a_module(tmp_path):
+    root = _repo(tmp_path)
+    sha = sl.source_sha(root, "app/foo.py", TESTS)
+    rec = _current_record(sha)
+    rec.pop("axes_not_applied")
+    ledger = _ledger(root, [MANIFEST, rec])
+    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
 
 
 def test_latest_returns_the_most_recent_record(tmp_path):
@@ -133,7 +171,51 @@ def test_attribution_is_function_level_and_evidence_bearing(tmp_path):
 def test_status_is_stale_when_the_module_moved_instead_of_raising(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
+    rec = _current_record(sha)
     ledger = _ledger(root, [MANIFEST, rec])
     (root / "src/saitenka/app/foo.py").unlink()  # module moved/deleted
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_SHA  # re-audit, never crash
+
+
+def test_prepare_record_owns_identity_and_requires_axis_reflection(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "module": "app/foo.py",
+        "tests": TESTS,
+        "state": "dry-run",
+        "audited": "2026-09-03T00:00:00Z",
+        "axes": {"conformance": "pass"},
+    }
+    with pytest.raises(ValueError, match="axes_not_applied"):
+        sl.prepare_record(record, root, ledger)
+    prepared = sl.prepare_record({**record, "axes_not_applied": ["efficacy: no DB"]}, root, ledger)
+    assert prepared["source_sha"] == sl.source_sha(root, "app/foo.py", TESTS)
+    assert prepared["contract_version"] == sl.CONTRACT_VERSION
+
+
+def test_outer_reflection_becomes_due_and_human_receipt_resets_it(tmp_path):
+    root = _repo(tmp_path)
+    records = [
+        MANIFEST,
+        *(
+            {"module": f"app/{index}.py", "source_sha": str(index), "state": "dry-run"}
+            for index in range(sl.OUTER_REFLECTION_CADENCE)
+        ),
+    ]
+    ledger = _ledger(root, records)
+    assert ledger.outer_reflection_due()
+    reflection = sl.prepare_outer_reflection(
+        {
+            "date": "2026-09-03",
+            "findings": ["f"],
+            "next": ["n"],
+            "toolset_decision": "keep v1",
+            "human_decision": "accepted",
+        },
+        ledger,
+    )
+    ledger.append(reflection)
+    assert not ledger.outer_reflection_due()

@@ -21,7 +21,8 @@ data = json.load(open(sys.argv[1], encoding="utf-8"))
 need = {"version", "lifecycle", "gap", "test_design", "proposal", "gate", "ship_gate", "review", "review_provenance", "record", "audit_record", "reflection"}
 missing = need - set(data)
 assert not missing, f"contracts.json missing keys: {missing}"
-assert data["lifecycle"]["terminal_phase"] == "Reflect"
+assert data["lifecycle"]["required_before_receipt"] == "Reflect"
+assert data["lifecycle"]["receipt_requires_reflection"] is True
 PY
 
 # 3. harness.js is syntactically valid (if node is available) and its CONTRACT_VERSION matches contracts.json.
@@ -63,13 +64,13 @@ assert "GUIDE.md" in spec, "SPEC.md must point to GUIDE.md"
 assert "SPEC.md" in guide, "GUIDE.md must point to SPEC.md"
 PY
 
-# 6. The Codex adapter carries the machine-declared mandatory terminal phase.
+# 6. The Codex adapter carries the machine-declared pre-receipt phase.
 uv run python - "$here/contracts.json" "$root/.agents/skills/grow-loop/SKILL.md" <<'PY'
 import json, sys
 contract = json.load(open(sys.argv[1], encoding="utf-8"))
 skill = open(sys.argv[2], encoding="utf-8").read()
-phase = contract["lifecycle"]["terminal_phase"]
-marker = f"Mandatory terminal phase — {phase}."
+phase = contract["lifecycle"]["required_before_receipt"]
+marker = f"Mandatory pre-receipt phase — {phase}."
 assert marker in skill, f"Codex grow-loop skill missing terminal phase marker: {marker}"
 PY
 

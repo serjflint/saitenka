@@ -13,7 +13,8 @@ An adapter must provide these semantics:
 | `exec(command, cwd)` | Run a deterministic command and return exit code plus complete output. |
 | `invoke(role, prompt, schema, isolation)` | Start a fresh agent context, validate its result against `contracts.json`, and return both result and host invocation id. |
 | `phase(name, detail)` | Report progress without changing repository state. |
-| `record(record)` | Append one JSONL object using `sharpen_ledger.py` hashing and the ledger manifest version. |
+| `record(record)` | Append through `sharpen_ledger.py`; it validates axis evidence and owns the hash and contract/toolset versions. |
+| `reflection_status()` | Return the CLI-owned outer-reflection due state; a due state blocks triage. |
 | `open_pr(body)` | Optional; available only after explicit `openPr=true` and every ship guard passes. Never merge. |
 
 The adapter, not an agent response, assigns invocation identity. Use the opaque id returned by the host.

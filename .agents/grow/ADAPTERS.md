@@ -26,10 +26,11 @@ context; otherwise fidelity is unproven and the run is `dry-run`.
   does not run tests or gates; the root executor owns the authoritative environment.
 - **Skeptic:** independent adversarial verifier; read-only except inspection commands.
 - **Judge:** second independent adversarial verifier; verification-capable, may use a cheaper model.
-- **Reflector:** independent introspector of the LOOP (not the test), runs at every terminal exit. Gets only
+- **Reflector:** independent introspector of the LOOP (not the test), runs before every completed receipt. Gets only
   the factual run trace; writes ONLY `.reflection.grow.jsonl`. **Advisory — MUST NOT edit any tool / spec /
   harness / product file** (self-modification guard). A proposal touching the reflection machinery itself
-  carries `self_referential=true` for extra human scrutiny.
+  carries `self_referential=true` for extra human scrutiny. The adapter validates and binds its durable
+  receipt before writing a suppressive Grow record; a failed invocation is incomplete, not an exit receipt.
 
 Semantic capability tiers, not provider model names. Run sequentially in one dedicated worktree; author,
 skeptic, and judge must be distinct invocations; a reviewer must not inherit the orchestrator conversation

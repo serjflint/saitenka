@@ -19,8 +19,8 @@ uv run python - "$repo_dir/.agents/grow/contracts.json" "$skill_dir/SKILL.md" <<
 import json, sys
 contract = json.load(open(sys.argv[1], encoding="utf-8"))
 skill = open(sys.argv[2], encoding="utf-8").read()
-phase = contract["lifecycle"]["terminal_phase"]
-marker = f"Mandatory terminal phase — {phase}."
+phase = contract["lifecycle"]["required_before_receipt"]
+marker = f"Mandatory pre-receipt phase — {phase}."
 assert marker in skill, f"grow-loop skill missing terminal phase marker: {marker}"
 PY
 

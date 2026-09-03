@@ -236,9 +236,12 @@ stand-in for centrality/risk (a repowise integration is a documented, still-unwi
 The loop's durable memory: one JSONL record per module audit — what was measured, what was decided, what
 was left undone, and a `source_sha`. That hash is a **SHA-256 over the module's bytes concatenated with
 its mapped test files' bytes** — *content*, not mtime, so a "sharpened" verdict survives clones and CI.
-A module is skipped until its `source_sha` changes (someone edited it) or the toolset version bumps (the
+A module is skipped until its `source_sha` changes (someone edited it), the lifecycle contract changes,
+or the toolset version bumps (the
 instruments themselves changed → the whole ledger re-audits). This is what lets the loop run forever
 without redoing settled work — and what makes *filed-and-skip* possible.
+Every record is accepted through the ledger CLI with explicit axes and `axes_not_applied`. After three
+audits, `reflection-status` blocks another selection until a human-approved outer reflection is appended.
 
 
 ## Example — the `sub_index` heal (a full iteration)

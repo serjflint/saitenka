@@ -41,6 +41,31 @@ STALE_AUDIT = "stale-audit"  # module or test tree changed → re-audit
 STALE_CONTRACT = "stale-contract"  # audit predates the current lifecycle contract → re-audit
 
 
+def _validate_reflection(record: dict) -> None:
+    reflection = record.get("reflection")
+    if not isinstance(reflection, dict):
+        raise TypeError("record requires a reflection receipt")
+    if (
+        not isinstance(reflection.get("introspection"), str)
+        or not reflection["introspection"].strip()
+    ):
+        raise ValueError("reflection requires non-empty introspection")
+    if reflection.get("appended") is not True:
+        raise ValueError("reflection must be durably appended before the record")
+    if not isinstance(reflection.get("findings"), list) or not isinstance(
+        reflection.get("escalations"), list
+    ):
+        raise TypeError("reflection findings and escalations must be lists")
+
+
+def _has_valid_reflection(record: dict) -> bool:
+    try:
+        _validate_reflection(record)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
 def gap_id(source: str, target_symbol: str, dimension: str) -> str:
     """Semantic, position-free identity — same gap, same id, wherever the symbol sits in the file."""
     return hashlib.sha256(f"{source}\x00{target_symbol}\x00{dimension}".encode()).hexdigest()[:16]
@@ -146,6 +171,8 @@ class Ledger:
             return STALE_TOOLSET
         if record.get("contract_version") != CONTRACT_VERSION:
             return STALE_CONTRACT
+        if not _has_valid_reflection(record):
+            return STALE_CONTRACT
         try:
             current = audit_sha(root, module_key)
         except FileNotFoundError:
@@ -162,6 +189,10 @@ class Ledger:
             return UNSEEN
         if int(rec.get("toolset_version", 1)) != self.toolset_version:
             return STALE_TOOLSET
+        if rec.get("contract_version") != CONTRACT_VERSION:
+            return STALE_CONTRACT
+        if not _has_valid_reflection(rec):
+            return STALE_CONTRACT
         module_key, _, symbol = rec.get("target_symbol", "").partition("::")
         try:
             src = (root / SRC / module_key).read_text(encoding="utf-8")
@@ -193,13 +224,17 @@ class Ledger:
         self.lines.append(record)
 
 
-def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
+def prepare_record(
+    record: dict, root: Path, ledger: Ledger, *, require_reflection: bool = False
+) -> dict:
     """Fill the semantic identity fields a loop record must not hand-calculate."""
     source = record.get("source")
     target_symbol = record.get("target_symbol")
     dimension = record.get("dimension")
     if not all(isinstance(value, str) and value for value in (source, target_symbol, dimension)):
         raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    if require_reflection:
+        _validate_reflection(record)
     module_key, separator, symbol = target_symbol.partition("::")
     if not separator or not module_key or not symbol:
         raise ValueError("target_symbol must be module_key::dotted.symbol")
@@ -214,6 +249,8 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
     prepared["gap_id"] = gap_id(source, target_symbol, dimension)
     prepared["target_sha"] = target_sha(module_src, symbol)
     prepared["toolset_version"] = ledger.toolset_version
+    if require_reflection:
+        prepared["contract_version"] = CONTRACT_VERSION
     return prepared
 
 
@@ -231,6 +268,7 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError("audit record requires a non-empty tests list")
     if record.get("state") != "no-gap":
         raise ValueError("audit record state must be no-gap")
+    _validate_reflection(record)
     source_root = (root / SRC).resolve()
     module_path = (source_root / module_key).resolve()
     try:
@@ -301,7 +339,7 @@ def _main() -> int:
     prepared = (
         prepare_audit_record(record, root, ledger)
         if "audit_module" in record
-        else prepare_record(record, root, ledger)
+        else prepare_record(record, root, ledger, require_reflection=True)
     )
     ledger.append(prepared)
     print(json.dumps(prepared, ensure_ascii=False))

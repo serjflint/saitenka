@@ -10,8 +10,8 @@ export const meta = {
     { title: 'Skeptic' },
     { title: 'Judge' },
     { title: 'Ship gate' },
-    { title: 'Record' },
     { title: 'Reflect' },
+    { title: 'Record' },
   ],
 }
 
@@ -33,8 +33,9 @@ const CWD = '.' // poe tasks + tools run from the launch worktree root
 
 // The run TRACE — a factual record of what the loop actually did this run, fed to the Reflect phase so it
 // introspects on evidence, not vibes. Populated as the run proceeds; every terminal exit flows through
-// finish() so a bounced / dropped / no-candidate run reflects too (those are the richest lessons).
+// finish() or recordOutcome() so a bounced / dropped / no-candidate run reflects too.
 const trace = { gap: null, retries: 0, gate: null, review: null, ship_gate: null, outcome: null, notes: [] }
+let reflection = null
 
 // Worktree-safe: launch from a dedicated git worktree so executor edits can't touch the live tree. Every
 // executor operates on paths RELATIVE to its inherited cwd — an absolute path would escape the worktree.
@@ -150,7 +151,7 @@ function validAuditReceipt(receipt, gap) {
     receipt.recorded_audit_module === gap.module &&
     /^[0-9a-f]{64}$/.test(receipt.recorded_audit_sha) &&
     Number.isInteger(receipt.recorded_toolset_version) && receipt.recorded_toolset_version >= 1 &&
-    receipt.recorded_contract_version === CONTRACT_VERSION
+    receipt.recorded_contract_version === CONTRACT_VERSION && receipt.recorded_reflection === true
 }
 
 function proposalTargetsGap(gap, proposal) {
@@ -245,7 +246,7 @@ const BUG_VERDICT = {
 
 const RECORD = {
   type: 'object', additionalProperties: false,
-  required: ['state', 'outcome', 'ledger_appended', 'recorded_source', 'recorded_target_symbol', 'recorded_dimension', 'recorded_gap_id', 'recorded_target_sha', 'recorded_toolset_version', 'recorded_contract_version', 'filing_blocker'],
+  required: ['state', 'outcome', 'ledger_appended', 'recorded_source', 'recorded_target_symbol', 'recorded_dimension', 'recorded_gap_id', 'recorded_target_sha', 'recorded_toolset_version', 'recorded_contract_version', 'recorded_reflection', 'filing_blocker'],
   properties: {
     state: { type: 'string', enum: ['closed', 'open', 'unclosable', 'filed', 'dry-run'] },
     outcome: { type: ['string', 'null'], enum: ['coverage-only', 'bug', 'robustness', 'design', null] },
@@ -257,6 +258,7 @@ const RECORD = {
     recorded_target_sha: { type: 'string', pattern: '^[0-9a-f]{16}$' },
     recorded_toolset_version: { type: 'integer', minimum: 1 },
     recorded_contract_version: { type: 'integer' },
+    recorded_reflection: { type: 'boolean' },
     pr_url: { type: ['string', 'null'] },
     filed_issues: { type: 'array', items: { type: 'string' } },
     filing_blocker: { type: ['string', 'null'] },
@@ -266,7 +268,7 @@ const RECORD = {
 
 const AUDIT_RECORD = {
   type: 'object', additionalProperties: false,
-  required: ['state', 'ledger_appended', 'recorded_audit_module', 'recorded_audit_sha', 'recorded_toolset_version', 'recorded_contract_version'],
+  required: ['state', 'ledger_appended', 'recorded_audit_module', 'recorded_audit_sha', 'recorded_toolset_version', 'recorded_contract_version', 'recorded_reflection'],
   properties: {
     state: { type: 'string', enum: ['no-gap'] },
     ledger_appended: { type: 'boolean' },
@@ -274,6 +276,7 @@ const AUDIT_RECORD = {
     recorded_audit_sha: { type: 'string', pattern: '^[0-9a-f]{64}$' },
     recorded_toolset_version: { type: 'integer', minimum: 1 },
     recorded_contract_version: { type: 'integer' },
+    recorded_reflection: { type: 'boolean' },
   },
 }
 
@@ -327,18 +330,25 @@ const gap = await agent(
   { phase: 'Select', schema: GAP, label: 'triage' },
 )
 
+trace.gap = gap ? {
+  target_symbol: gap.target_symbol || null, kind: gap.kind, dimension: gap.dimension,
+  module: gap.module, status: gap.status, selection_outcome: gap.selection_outcome,
+} : null
+
 if (!gap || !gap.found) {
   log(`No live gap to grow — ${gap ? gap.reason : 'triage failed'}`)
   trace.notes.push(`no live candidate: ${gap ? gap.reason : 'triage failed'}`)
   let audit = null
   if (gap?.selection_outcome === 'no-orphan' && gap.pr_exclusion_checked === true &&
       validModuleKey(gap.module) && Array.isArray(gap.tests) && gap.tests.length > 0) {
+    trace.outcome = 'no-gap'
+    const reflectionReceipt = await reflect()
     phase('Record')
     audit = await agent(
       `The scenario map for module ${gap.module} found no orphan gap. ${REL} ` +
       `Append a no-gap module audit through \`uv run python tools/grow_ledger.py --ledger .ledger.grow.jsonl append --record-json '<record-json>'\`. ` +
-      `The record is {audit_module:${JSON.stringify(gap.module)}, tests:${JSON.stringify(gap.tests)}, state:"no-gap", examined:<UTC ISO timestamp>, contract_version:${CONTRACT_VERSION}, scenario_map_summary:${JSON.stringify(gap.reason)}}. ` +
-      `Do not supply audit_sha or toolset_version; the CLI owns them. Touch only the ledger. Return state="no-gap", ledger_appended=true only after the append succeeds, and the CLI values as recorded_audit_module, recorded_audit_sha, recorded_toolset_version, and recorded_contract_version.`,
+      `The record is {audit_module:${JSON.stringify(gap.module)}, tests:${JSON.stringify(gap.tests)}, state:"no-gap", examined:<UTC ISO timestamp>, scenario_map_summary:${JSON.stringify(gap.reason)}, reflection:${JSON.stringify(reflectionReceipt)}}. ` +
+      `Do not supply audit_sha, toolset_version, or contract_version; the CLI owns them. Touch only the ledger. Return state="no-gap", ledger_appended=true only after the append succeeds, recorded_reflection=true only when the CLI-emitted reflection equals the supplied receipt, and the CLI values as recorded_audit_module, recorded_audit_sha, recorded_toolset_version, and recorded_contract_version.`,
       { phase: 'Record', schema: AUDIT_RECORD, label: 'record-no-gap', effort: 'low' },
     )
     if (!validAuditReceipt(audit, gap)) {
@@ -349,7 +359,6 @@ if (!gap || !gap.found) {
   return await finish({ done: false, reason: gap ? gap.reason : 'triage failed', audit, openPr: OPEN_PR })
 }
 log(`gap: ${gap.target_symbol} [${gap.kind}] "${gap.dimension}" (${gap.status}) — ${gap.reason}`)
-trace.gap = { target_symbol: gap.target_symbol, kind: gap.kind, dimension: gap.dimension, module: gap.module, status: gap.status }
 
 // Fail-closed: only open a PR if the open-PR exclusion actually ran (SPEC → never grow a module with an
 // open feature branch). If triage couldn't check it, force a dry-run.
@@ -587,9 +596,10 @@ return await finish({ done: true, target: gap.target_symbol, state: rec?.state ?
 // NEVER edits the loop's tools (self-modification is more dangerous than the loop's test edits, which
 // already never auto-merge). It runs at EVERY terminal exit (a bounced / dropped / no-candidate run is the
 // richest lesson). See SPEC → Self-reflection.
-async function finish(result) {
+async function reflect() {
+  if (reflection) return reflection
   phase('Reflect')
-  await agent(
+  const receipt = await agent(
     `You are the Grow loop's SELF-REFLECTION agent — an INDEPENDENT introspector of the LOOP, not of the ` +
     `grown test. You did not run the loop; reason ONLY from the factual run trace below. ${REL}\n\n` +
     `RUN TRACE:\n${JSON.stringify(trace, null, 2)}\n\n` +
@@ -619,7 +629,15 @@ async function finish(result) {
     `triages / a bump to loop_version marks it addressed). Do NOT open issues or PRs.`,
     { phase: 'Reflect', schema: REFLECTION, label: 'reflect', effort: 'low' },
   )
-  return result
+  if (receipt?.appended !== true || typeof receipt.introspection !== 'string' || !receipt.introspection.trim()) {
+    throw new Error('Grow reflection was not durably appended; refusing a terminal receipt')
+  }
+  reflection = receipt
+  return reflection
+}
+
+async function finish(result) {
+  return { ...result, reflection: await reflect() }
 }
 
 async function revert(prop) {
@@ -634,13 +652,15 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
   const wantPr = canOpenPr && state === 'closed' && prop
   const wantIssue = canOpenPr && state === 'filed' && outcome === 'bug'
   const ledgerState = wantPr || wantIssue ? 'open' : state
+  trace.outcome = ledgerState
+  const reflectionReceipt = await reflect()
   const recorded = await agent(
     `Append one Grow ledger record. ${REL} The ledger is \`.ledger.grow.jsonl\`. Touch ONLY the ledger; do not run git/gh or take any outward action.\n` +
     `Gap: source=${gap.source ?? 'invariant'}, target_symbol=${gap.target_symbol}, dimension="${gap.dimension}". Build the record without gap_id, target_sha, or toolset_version, then MUST invoke \`uv run python tools/grow_ledger.py --ledger .ledger.grow.jsonl append --record-json '<record-json>'\`; that CLI owns those fields. Do not hash or append manually. Stamp \`examined\` from \`date -u +%Y-%m-%dT%H:%M:%SZ\`.\n` +
-    `state: "${ledgerState}", outcome: ${JSON.stringify(outcome ?? null)}. review block: ${reviewBlock}. contract_version: ${CONTRACT_VERSION}. A pending outward action MUST remain open until finalized.\n` +
+    `state: "${ledgerState}", outcome: ${JSON.stringify(outcome ?? null)}. review block: ${reviewBlock}. reflection: ${JSON.stringify(reflectionReceipt)}. A pending outward action MUST remain open until finalized.\n` +
     (prop ? `test: ${JSON.stringify(prop.test_name)}. decisions: ${JSON.stringify(prop.proposals.map(p => p.change))}. Captured diff: ${JSON.stringify(prop.diff)}.\n` : '') +
     `axes_not_applied: list every gate arm that was n/a for this ${gap.kind} gap and WHY (the silent-no-run guard — SPEC/ADAPTERS).\n` +
-    `Return the CLI-emitted source, target_symbol, dimension, gap_id, target_sha, toolset_version, and contract_version as the corresponding recorded_* fields. Set filing_blocker to null unless this is a dry-run latent bug, where it must name the outward-authorization blocker. Return pr_url=null and filed_issues=[]; outward action is structurally withheld until this receipt is validated.\n` +
+    `Return the CLI-emitted source, target_symbol, dimension, gap_id, target_sha, toolset_version, and contract_version as the corresponding recorded_* fields. Set recorded_reflection=true only when the CLI-emitted reflection equals the supplied receipt. Set filing_blocker to null unless this is a dry-run latent bug, where it must name the outward-authorization blocker. Return pr_url=null and filed_issues=[]; outward action is structurally withheld until this receipt is validated.\n` +
     (extraNote ? `note: ${extraNote}\n` : '') +
     `Leave the ledger append as the only change.\n`,
     { phase: 'Record', schema: RECORD, label: 'record' },
@@ -655,6 +675,7 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
     /^[0-9a-f]{16}$/.test(candidate.recorded_target_sha) &&
     Number.isInteger(candidate.recorded_toolset_version) && candidate.recorded_toolset_version >= 1 &&
     candidate.recorded_contract_version === CONTRACT_VERSION &&
+    candidate.recorded_reflection === true &&
     (expectedOutward?.pr_url
       ? candidate.pr_url === expectedOutward.pr_url
       : candidate.pr_url === null) &&
@@ -681,7 +702,7 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
     }
     const finalState = wantPr ? 'open' : state
     const finalized = await agent(
-      `The outward action for ${gap.target_symbol} succeeded with evidence ${JSON.stringify(outward)}. Append a FINAL Grow ledger record through tools/grow_ledger.py with the same source/target_symbol/dimension, outcome ${JSON.stringify(outcome ?? null)}, contract_version ${CONTRACT_VERSION}, and state "${finalState}". Persist a PR URL as pr_url, or issue references under the ledger key filed; copy the review/test/gate context from the preceding open record. Take no further outward action. Return the exact CLI receipt fields, mapping persisted filed to filed_issues.`,
+      `The outward action for ${gap.target_symbol} succeeded with evidence ${JSON.stringify(outward)}. Append a FINAL Grow ledger record through tools/grow_ledger.py with the same source/target_symbol/dimension, outcome ${JSON.stringify(outcome ?? null)}, reflection ${JSON.stringify(reflectionReceipt)}, and state "${finalState}". Persist a PR URL as pr_url, or issue references under the ledger key filed; copy the review/test/gate context from the preceding open record. Take no further outward action. Return the exact CLI receipt fields, recorded_reflection=true, mapping persisted filed to filed_issues.`,
       { phase: 'Record', schema: RECORD, label: 'finalize' },
     )
     const sameIdentity = finalized?.recorded_gap_id === recorded.recorded_gap_id &&
@@ -690,7 +711,7 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
     if (!validReceipt(finalized, finalState, outward) || !sameIdentity) {
       trace.notes.push('outward evidence finalization failed; attempting an open recovery record')
       const recovered = await agent(
-        `Append a recovery Grow ledger record through tools/grow_ledger.py for the same source/target_symbol/dimension and identity, state "open", outcome ${JSON.stringify(outcome ?? null)}, contract_version ${CONTRACT_VERSION}, and persist this already-created outward evidence: ${JSON.stringify(outward)}. Take no outward action. Return the exact receipt, mapping filed to filed_issues.`,
+        `Append a recovery Grow ledger record through tools/grow_ledger.py for the same source/target_symbol/dimension and identity, state "open", outcome ${JSON.stringify(outcome ?? null)}, reflection ${JSON.stringify(reflectionReceipt)}, and persist this already-created outward evidence: ${JSON.stringify(outward)}. Take no outward action. Return the exact receipt with recorded_reflection=true, mapping filed to filed_issues.`,
         { phase: 'Record', schema: RECORD, label: 'recover' },
       )
       const recoveredIdentity = recovered?.recorded_gap_id === recorded.recorded_gap_id &&

@@ -111,13 +111,15 @@ repowise steers SELECTION only
 4. **Subjective gate** (see *Review architecture*) — is the added power real and plainly explainable, or
    redundant / over-fit / a change-detector in disguise?
 5. **Product-bug branch** (see *Product bugs*) if the executor and both reviewers prove a real defect.
-6. **Record, act, finalize** — append an `open` receipt before any authorized PR/issue action. Only after
+6. **Reflect, record, act, finalize** — first obtain a durably appended isolated reflection receipt, then
+   bind it into the ledger record. A missing/failed reflection makes the run incomplete and cannot suppress
+   the coordinate. Append an `open` receipt before any authorized PR/issue action. Only after
    validating that receipt may the adapter act outward. Persist a non-empty PR result as `open` until its
    merge is verified; persist a created issue as `filed`. Failed/no-op outward action leaves the gap `open`.
    Dry runs and unclosable gaps record directly. A shippable change must still clear the **"worth a human's
    attention" bar**. Human merges.
-8. **Reflect** on the LOOP (every run — see *Self-reflection*): an isolated agent introspects the run
-   trace, files loop-improvement proposals, and escalates recurring ones. Advisory; never self-modifies.
+8. **Complete** only after reflection is recorded. The reflection's proposals remain advisory and never
+   self-modify the loop; its durable receipt is mandatory lifecycle evidence.
 
 ### Product bugs (green-trunk policy)
 

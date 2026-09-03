@@ -118,6 +118,9 @@ An **artifact result** is complete only when:
 - reviewers remained read-only and their pre/post HEAD, packet/diff digests, tracked-tree, and index checks match;
 - every approval names the same reviewed-packet digest, and the worktree is clean.
 
+These claims must be materialized in a versioned JSON completion receipt and accepted by
+`scripts/verify_receipt.py`; prose or an agent's aggregate success claim is not a completion signal.
+
 The reviewed packet binds the base, head, diff, supported scenario, invariant, accepted dossier and human
 decision, affected owners, discriminator, scope guard, final scenario trace, mechanism-proof matrix,
 validation evidence, residual uncertainty, and follow-ups. Any change to one of those fields invalidates

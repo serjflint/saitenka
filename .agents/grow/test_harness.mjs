@@ -66,6 +66,7 @@ const receipt = {
   recorded_target_sha: 'fedcba9876543210',
   recorded_toolset_version: 1,
   recorded_contract_version: 9,
+  recorded_reflection: true,
 }
 const pristinePass = { status: 'pass', report: 'requested nodes passed' }
 const additivePass = { pass: true, report: 'additive only' }
@@ -82,8 +83,9 @@ async function scenario(responses, args = { openPr: true }) {
     return responses[label]
   }
   const result = await runHarness(args, (name) => phases.push(name), agent, () => {})
-  assert.equal(phases.at(-1), 'Reflect', 'every terminal path must end in Reflect')
-  assert.equal(calls.at(-1)?.label, 'reflect', 'Reflect must be the final agent invocation')
+  assert.ok(calls.some(({ label }) => label === 'reflect'), 'every completed path must reflect')
+  const recordIndex = calls.findIndex(({ label }) => label === 'record' || label === 'record-no-gap')
+  if (recordIndex >= 0) assert.ok(calls.findIndex(({ label }) => label === 'reflect') < recordIndex)
   return { calls, phases, result }
 }
 
@@ -103,10 +105,12 @@ async function scenario(responses, args = { openPr: true }) {
     recorded_audit_sha: 'a'.repeat(64),
     recorded_toolset_version: 3,
     recorded_contract_version: 9,
+    recorded_reflection: true,
   }
   const result = await scenario({ triage: noGap, 'record-no-gap': audit, reflect: reflection }, { openPr: false })
   assert.equal(result.result.audit.recorded_audit_module, noGap.module)
   assert.match(result.calls.find(({ label }) => label === 'record-no-gap').prompt, /state:"no-gap"/)
+  assert.ok(result.calls.findIndex(({ label }) => label === 'reflect') < result.calls.findIndex(({ label }) => label === 'record-no-gap'))
 }
 
 {

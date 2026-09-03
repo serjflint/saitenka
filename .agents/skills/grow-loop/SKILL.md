@@ -56,11 +56,13 @@ Read `.agents/grow/GUIDE.md` only to explain the design or resolve ambiguity.
    completed live-module scenario map finds no orphan, append a no-gap module audit so unchanged evidence
    is not inspected again; a no-live selection records nothing.
 10. Revert the test edit in dry-run mode so only the ledger append remains.
-11. **Mandatory terminal phase — Reflect.** On every exit, including `no-orphan`, `no-live`, baseline
+11. **Mandatory pre-receipt phase — Reflect.** On every completed outcome, including `no-orphan`, `no-live`, baseline
     failure, gate bounce, refutation, dry-run, and ship paths, invoke a fresh isolated reflector with only
     the factual run trace. Validate its `reflection` response against `contracts.json`; it may append
     findings only through `tools/grow_reflect.py` and must not edit code or open outward actions. Do not
-    report a completed Grow loop until this invocation returns successfully.
+    write no suppressive Grow receipt until this invocation returns a durably-appended receipt. Bind that
+    receipt into the Grow ledger record; a thrown adapter/tool failure is an incomplete invocation, never
+    a completed outcome.
 
 Use `spawn_agent` with `fork_turns="none"` when available. Run author, skeptic, and judge sequentially
 because they share a worktree. Optional LSP navigation may locate symbols/callers; never invoke or depend
@@ -79,7 +81,7 @@ on the infrastructure-only `pyrefly-lsp` skill.
 
 Before success, confirm the mapped baseline was green, the edit is additive, every applicable arm passed,
 temporary bytes restored, reviewer identities are distinct, `poe all` passed on a ship path, and a dry-run
-left no test edit or outward action. Confirm the final phase was `Reflect`; a missing or failed reflector
-means the procedure did not complete.
+left no test edit or outward action. Confirm `Reflect` completed before any suppressive receipt; a missing
+or failed reflector means the procedure did not complete.
 
 Run `bash scripts/smoke.sh` from this skill directory or the repository-root equivalent.

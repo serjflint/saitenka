@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
 import grow_ledger as gl
 
 MANIFEST = {"type": "manifest", "toolset_version": 1}
+REFLECTION = {"introspection": "audited", "findings": [], "appended": True, "escalations": []}
 
 MODULE_V1 = "def helper(x):\n    return x + 1\n\n\ndef crisp(text, scale):\n    return (text.upper(), scale)\n"
 # unrelated edit ABOVE the target; crisp() is byte-identical
@@ -107,6 +108,8 @@ def _rec(*, state: str, module_src: str = MODULE_V1, **extra) -> dict:
         "dimension": "scale=2.0",
         "target_sha": gl.target_sha(module_src, "crisp"),
         "toolset_version": 1,
+        "contract_version": gl.CONTRACT_VERSION,
+        "reflection": REFLECTION,
         "state": state,
         **extra,
     }
@@ -195,6 +198,7 @@ def test_no_gap_audit_is_current_until_the_module_or_mapped_tests_change(tmp_pat
             "audit_module": "app/x.py",
             "tests": ["tests/test_x.py"],
             "state": "no-gap",
+            "reflection": REFLECTION,
         },
         root,
         ledger,
@@ -240,6 +244,23 @@ def test_no_gap_audit_reopens_when_the_lifecycle_contract_changes(tmp_path):
     assert ledger.audit_status("app/x.py", root) == gl.STALE_CONTRACT
 
 
+def test_closed_gap_reopens_when_the_lifecycle_contract_changes(tmp_path):
+    root = _repo(tmp_path)
+    record = _rec(state="closed", contract_version=gl.CONTRACT_VERSION - 1)
+    ledger = _ledger(root, [MANIFEST, record])
+
+    assert ledger.status(record["gap_id"], root) == gl.STALE_CONTRACT
+
+
+def test_current_contract_without_reflection_cannot_suppress_a_gap(tmp_path):
+    root = _repo(tmp_path)
+    record = _rec(state="closed")
+    record.pop("reflection")
+    ledger = _ledger(root, [MANIFEST, record])
+
+    assert ledger.status(record["gap_id"], root) == gl.STALE_CONTRACT
+
+
 def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
@@ -249,6 +270,7 @@ def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
             "audit_module": "app/x.py",
             "tests": ["tests/test_x.py"],
             "state": "no-gap",
+            "reflection": REFLECTION,
         },
         root,
         ledger,
@@ -257,6 +279,20 @@ def test_prepare_audit_record_owns_hash_and_manifest_version(tmp_path):
     assert prepared["audit_sha"] == gl.audit_sha(root, "app/x.py")
     assert prepared["toolset_version"] == 7
     assert prepared["contract_version"] == gl.CONTRACT_VERSION
+    assert prepared["reflection"] == REFLECTION
+
+
+def test_prepare_record_rejects_missing_or_unwritten_reflection(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {"source": "invariant", "target_symbol": "app/x.py::crisp", "dimension": "x"}
+    with pytest.raises(TypeError, match="reflection receipt"):
+        gl.prepare_record(record, root, ledger, require_reflection=True)
+    record["reflection"] = {**REFLECTION, "appended": False}
+    with pytest.raises(ValueError, match="durably appended"):
+        gl.prepare_record(record, root, ledger, require_reflection=True)
 
 
 def test_prepare_audit_record_requires_evidence_and_no_gap_state(tmp_path):
@@ -284,7 +320,12 @@ def test_prepare_audit_record_rejects_missing_or_directory_test_paths(tmp_path):
     for test_path in ["tests/does-not-exist.py", "tests"]:
         with pytest.raises(ValueError, match=r"existing test_\*\.py"):
             gl.prepare_audit_record(
-                {"audit_module": "app/x.py", "tests": [test_path], "state": "no-gap"},
+                {
+                    "audit_module": "app/x.py",
+                    "tests": [test_path],
+                    "state": "no-gap",
+                    "reflection": REFLECTION,
+                },
                 root,
                 ledger,
             )
@@ -318,6 +359,7 @@ def test_append_cli_fills_identity_fields(monkeypatch, tmp_path, capsys):
         "target_symbol": "app/x.py::crisp",
         "dimension": "scale=2.0",
         "state": "dry-run",
+        "reflection": REFLECTION,
     }
     monkeypatch.setattr(
         sys,
@@ -347,6 +389,7 @@ def test_append_cli_fills_no_gap_audit_identity(monkeypatch, tmp_path, capsys):
         "audit_module": "app/x.py",
         "tests": ["tests/test_x.py"],
         "state": "no-gap",
+        "reflection": REFLECTION,
     }
     monkeypatch.setattr(
         sys,

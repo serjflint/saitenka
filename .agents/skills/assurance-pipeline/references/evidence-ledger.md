@@ -110,3 +110,4 @@ Publication-worktree verification after all reviewers (HEAD + packet/diff digest
 - No-change restoration / full-status / index result:
 - Child dry-run ledger paths and disposition:
 - Final disposition: no change / local proof / ready PR / blocked
+- Completion receipt path and `scripts/verify_receipt.py` result:

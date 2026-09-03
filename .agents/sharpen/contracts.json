@@ -1,5 +1,27 @@
 {
-  "version": 4,
+  "version": 5,
+  "lifecycle": {
+    "inner_reflection_receipt": "axes_not_applied",
+    "outer_reflection_cadence": 3,
+    "description": "Every ledger append carries axis evidence; after three audits the next audit is blocked until a human-approved outer reflection is recorded."
+  },
+  "record": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["state", "ledger_appended", "recorded_module", "recorded_source_sha", "recorded_toolset_version", "recorded_contract_version", "recorded_axes_not_applied"],
+    "properties": {
+      "state": {"type": "string", "enum": ["sharpened", "in-progress", "blocked-on-bug", "dry-run", "left-undone"]},
+      "ledger_appended": {"type": "boolean"},
+      "recorded_module": {"type": "string"},
+      "recorded_source_sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+      "recorded_toolset_version": {"type": "integer", "minimum": 1},
+      "recorded_contract_version": {"type": "integer"},
+      "recorded_axes_not_applied": {"type": "boolean"},
+      "pr_url": {"type": ["string", "null"]},
+      "grow_issues": {"type": "array", "items": {"type": "string"}},
+      "note": {"type": "string"}
+    }
+  },
   "proposal": {
     "type": "object",
     "additionalProperties": false,

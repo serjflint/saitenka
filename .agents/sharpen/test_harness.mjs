@@ -15,6 +15,7 @@ const pick = {
   conformance: 1,
   actionable: 1,
   pr_exclusion_checked: true,
+  outer_reflection_due: false,
   reason: 'fixture',
 }
 
@@ -34,6 +35,15 @@ const proposal = {
 }
 
 const gate = { pass: true, anticheat_clean: true, efficacy_pass: true, report: 'clean' }
+const receipt = (state) => ({
+  state,
+  ledger_appended: true,
+  recorded_module: pick.module,
+  recorded_source_sha: 'a'.repeat(64),
+  recorded_toolset_version: 1,
+  recorded_contract_version: 5,
+  recorded_axes_not_applied: true,
+})
 
 async function scenario(responses, args = {}) {
   const calls = []
@@ -57,11 +67,13 @@ async function scenario(responses, args = {}) {
     skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
     judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
     'ship-gate': { pass: true, report: 'poe all: green' },
-    record: { state: 'in-progress', ledger_appended: true, pr_url: 'https://example.invalid/pr/1' },
+    record: receipt('in-progress'),
+    outward: { pr_url: 'https://example.invalid/pr/1' },
   }, { openPr: true })
   const labels = result.calls.map(({ label }) => label)
   assert.ok(labels.indexOf('judge') < labels.indexOf('ship-gate'))
   assert.ok(labels.indexOf('ship-gate') < labels.indexOf('record'))
+  assert.ok(labels.indexOf('record') < labels.indexOf('outward'))
   assert.match(result.calls.find(({ label }) => label === 'ship-gate').prompt, /uv run poe all/)
   assert.equal(result.result.pr, 'https://example.invalid/pr/1')
 }
@@ -76,7 +88,7 @@ async function scenario(responses, args = {}) {
     judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
     'ship-gate': { pass: false, report: 'docs-refs failed' },
     'revert-ship-gate': undefined,
-    record: { state: 'dry-run', ledger_appended: true },
+    record: receipt('dry-run'),
   }, { openPr: true })
   const labels = result.calls.map(({ label }) => label)
   assert.ok(labels.includes('revert-ship-gate'))
@@ -87,7 +99,7 @@ async function scenario(responses, args = {}) {
 
 {
   const red = { green: false, quarantined: ['test_example'], before: green.before }
-  const result = await scenario({ triage: pick, baseline: red, record: { state: 'dry-run', ledger_appended: true } })
+  const result = await scenario({ triage: pick, baseline: red, record: receipt('dry-run') })
   assert.deepEqual(result.phases, ['Select', 'Measure'])
   assert.match(result.calls.at(-1).prompt, /Known-green baseline unavailable/)
   assert.equal(result.result.state, 'dry-run')
@@ -111,7 +123,7 @@ async function scenario(responses, args = {}) {
       },
     },
     'revert-dropped': undefined,
-    record: { state: 'dry-run', ledger_appended: true },
+    record: receipt('dry-run'),
   })
   const record = result.calls.at(-1).prompt
   assert.match(record, /"skeptic_verdict":"UPHELD"/)
@@ -131,12 +143,19 @@ async function scenario(responses, args = {}) {
     skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
     judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
     'revert-dryrun': undefined,
-    record: { state: 'dry-run', ledger_appended: true },
+    record: receipt('dry-run'),
   })
   const labels = result.calls.map(({ label }) => label)
   assert.ok(labels.indexOf('revert-dryrun') < labels.indexOf('record'))
-  assert.match(result.calls.at(-1).prompt, /Captured diff: "fixture diff"/)
+  assert.match(result.calls.at(-1).prompt, /"diff":"fixture diff"/)
   assert.match(result.calls.at(-1).prompt, /"verdict":"UPHELD"/)
+}
+
+{
+  const result = await scenario({ triage: { ...pick, outer_reflection_due: true } })
+  assert.deepEqual(result.phases, ['Select', 'Reflect'])
+  assert.equal(result.result.reason, 'outer-reflection-due')
+  assert.ok(!result.calls.some(({ label }) => label === 'baseline' || label === 'record'))
 }
 
 console.log('sharpen harness smoke: ok')

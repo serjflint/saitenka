@@ -122,7 +122,19 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
     ledger = gl.Ledger.load(ledger_path)
     ledger.append(
         gl.prepare_audit_record(
-            {"audit_module": module, "tests": tests, "state": "no-gap"}, tmp_path, ledger
+            {
+                "audit_module": module,
+                "tests": tests,
+                "state": "no-gap",
+                "reflection": {
+                    "introspection": "fixture",
+                    "findings": [],
+                    "appended": True,
+                    "escalations": [],
+                },
+            },
+            tmp_path,
+            ledger,
         )
     )
     monkeypatch.setattr(gt.sl, "map_tests_to_modules", lambda _root: {module: tests})
