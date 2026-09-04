@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import copy
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
 import sharpen_policy as sp
@@ -39,6 +43,55 @@ def test_gate_modes_accept_only_their_active_primary_axis():
     assert not sp.gate_passes("conformance", _gate(efficacy_pass=True))
     assert sp.gate_passes("efficacy", _gate(efficacy_pass=True, conformance_pass=None))
     assert not sp.gate_passes("efficacy", _gate(efficacy_pass=False, conformance_pass=None))
+    missing_preservation = {
+        key: value for key, value in _gate().items() if key != "preservation_pass"
+    }
+    assert not sp.gate_passes("conformance", missing_preservation)
+    assert not sp.gate_passes("conformance", _gate(preservation_pass=False))
+    assert not sp.gate_passes("conformance", _gate(preservation_pass=1))
+
+
+def test_policy_schema_rejects_vacuous_or_incoherent_rules():
+    valid = sp.load_policy()
+    mutations = []
+    for path, value in (
+        (("axes",), []),
+        (("primary_axes",), ["efficacy"]),
+        (("optional_passing_axes",), []),
+        (("gate_not_false",), []),
+        (("modes", "efficacy", "gate_true"), []),
+        (("modes", "efficacy", "gate_null"), []),
+        (("modes", "efficacy", "primary_axis"), "conformance"),
+        (("modes", "efficacy"), []),
+    ):
+        changed = copy.deepcopy(valid)
+        owner = changed
+        for key in path[:-1]:
+            owner = owner[key]
+        owner[path[-1]] = value
+        mutations.append(changed)
+    for malformed in mutations:
+        with pytest.raises((TypeError, ValueError)):
+            sp.validate_policy(malformed)
+
+
+def test_gate_cli_reads_host_validated_json_file(tmp_path, monkeypatch, capsys):
+    gate_path = tmp_path / "gate.json"
+    gate_path.write_text(json.dumps(_gate()), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "sharpen_policy.py",
+            "gate",
+            "--mode",
+            "conformance",
+            "--gate-file",
+            str(gate_path),
+        ],
+    )
+    assert sp.main() == 0
+    assert capsys.readouterr().out == '{"pass": true, "mode": "conformance"}\n'
 
 
 def test_shippable_axes_require_an_exact_partition_and_one_primary():
@@ -59,8 +112,9 @@ def test_generated_workflow_policy_is_current():
     harness = sp.HARNESS_PATH.read_text(encoding="utf-8")
     assert sp.synced_harness(harness) == harness
     generated = harness.split(sp.BEGIN, 1)[1].split(sp.END, 1)[0]
-    assert harness.count("function objectiveGatePassed") == 1
-    assert "function objectiveGatePassed" in generated
+    assert harness.count("const objectiveGatePassed =") == 1
+    assert "const objectiveGatePassed =" in generated
+    assert harness.count("objectiveGatePassed(") == 2
 
 
 def test_ledger_delegates_policy_instead_of_reimplementing_it():

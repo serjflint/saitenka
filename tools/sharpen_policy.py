@@ -11,27 +11,71 @@ POLICY_PATH = ROOT / ".agents/sharpen/policy.json"
 HARNESS_PATH = ROOT / ".agents/sharpen/harness.js"
 BEGIN = "// BEGIN GENERATED SHARPEN POLICY — tools/sharpen_policy.py sync"
 END = "// END GENERATED SHARPEN POLICY"
+EXPECTED_AXES = {"efficacy", "conformance", "preservation", "brittleness", "redundancy"}
+BASE_GATE_TRUE = {"pass", "anticheat_clean", "restoration_verified"}
 
 
-def load_policy(path: Path = POLICY_PATH) -> dict:
-    policy = json.loads(path.read_text(encoding="utf-8"))
+def _unique_strings(value: object) -> bool:
+    return bool(
+        isinstance(value, list)
+        and value
+        and all(isinstance(item, str) and item for item in value)
+        and len(value) == len(set(value))
+    )
+
+
+def validate_policy(policy: dict) -> None:
     if policy.get("version") != 1 or set(policy.get("modes", {})) != {
         "efficacy",
         "conformance",
     }:
         raise ValueError("unsupported Sharpen policy")
+    for field in ("axes", "primary_axes", "optional_passing_axes", "gate_not_false"):
+        if not _unique_strings(policy.get(field)):
+            raise ValueError(f"Sharpen policy requires unique non-empty {field}")
+    axes = set(policy["axes"])
+    primaries = set(policy["primary_axes"])
+    optional = set(policy["optional_passing_axes"])
+    if axes != EXPECTED_AXES or primaries != set(policy["modes"]):
+        raise ValueError("Sharpen policy axes do not match its modes")
+    if optional != {"preservation", "brittleness"} or optional & primaries:
+        raise ValueError("Sharpen policy optional axes are invalid")
+    if policy["gate_not_false"] != ["preservation_pass"]:
+        raise ValueError("Sharpen policy must fail closed on preservation")
+    for name, mode in policy["modes"].items():
+        if not isinstance(mode, dict):
+            raise TypeError(f"Sharpen policy mode {name} must be an object")
+        other = (primaries - {name}).pop()
+        if (
+            mode.get("primary_axis") != name
+            or not _unique_strings(mode.get("gate_true"))
+            or mode.get("gate_null") != [f"{other}_pass"]
+            or set(mode["gate_true"]) != BASE_GATE_TRUE | {f"{name}_pass"}
+        ):
+            raise ValueError(f"Sharpen policy mode {name} is incoherent")
+
+
+def load_policy(path: Path = POLICY_PATH) -> dict:
+    policy = json.loads(path.read_text(encoding="utf-8"))
+    validate_policy(policy)
     return policy
 
 
 def gate_passes(mode: str, gate: dict, policy: dict | None = None) -> bool:
     current = policy or load_policy()
+    validate_policy(current)
     active = current["modes"].get(mode)
     if not isinstance(active, dict):
         return False
+    required = [*active["gate_true"], *active["gate_null"], *current["gate_not_false"]]
     return bool(
-        all(gate.get(field) is True for field in active["gate_true"])
+        all(field in gate for field in required)
+        and all(gate.get(field) is True for field in active["gate_true"])
         and all(gate.get(field) is None for field in active["gate_null"])
-        and all(gate.get(field) is not False for field in current["gate_not_false"])
+        and all(
+            gate.get(field) is True or gate.get(field) is None
+            for field in current["gate_not_false"]
+        )
     )
 
 
@@ -63,6 +107,7 @@ def _axis_sets(record: dict, policy: dict) -> tuple[set[str], set[str]] | None:
 
 def axis_evidence_valid(record: dict, policy: dict | None = None) -> bool:
     active = policy or load_policy()
+    validate_policy(active)
     sets = _axis_sets(record, active)
     if sets is None:
         return False
@@ -73,6 +118,7 @@ def axis_evidence_valid(record: dict, policy: dict | None = None) -> bool:
 
 def shippable_axes_valid(record: dict, policy: dict | None = None) -> bool:
     active = policy or load_policy()
+    validate_policy(active)
     if not axis_evidence_valid(record, active):
         return False
     axes = record["axes"]
@@ -86,15 +132,19 @@ def shippable_axes_valid(record: dict, policy: dict | None = None) -> bool:
 
 
 def render_workflow(policy: dict | None = None) -> str:
-    encoded = json.dumps(policy or load_policy(), sort_keys=True, separators=(",", ":"))
+    current = policy or load_policy()
+    validate_policy(current)
+    encoded = json.dumps(current, sort_keys=True, separators=(",", ":"))
     return f"""{BEGIN}
 const SHARPEN_POLICY = {encoded}
 
-function objectiveGatePassed(candidate, efficacyMode) {{
+const objectiveGatePassed = (candidate, efficacyMode) => {{
   const mode = SHARPEN_POLICY.modes[efficacyMode ? 'efficacy' : 'conformance']
-  return mode.gate_true.every((field) => candidate?.[field] === true) &&
+  const required = [...mode.gate_true, ...mode.gate_null, ...SHARPEN_POLICY.gate_not_false]
+  return required.every((field) => Object.hasOwn(candidate ?? {{}}, field)) &&
+    mode.gate_true.every((field) => candidate[field] === true) &&
     mode.gate_null.every((field) => candidate?.[field] === null) &&
-    SHARPEN_POLICY.gate_not_false.every((field) => candidate?.[field] !== false)
+    SHARPEN_POLICY.gate_not_false.every((field) => candidate[field] === true || candidate[field] === null)
 }}
 {END}"""
 
@@ -113,12 +163,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("check", "sync", "gate"))
     parser.add_argument("--mode", choices=("efficacy", "conformance"))
-    parser.add_argument("--gate-json")
+    parser.add_argument("--gate-file", type=Path)
     args = parser.parse_args()
     if args.command == "gate":
-        if args.mode is None or args.gate_json is None:
-            parser.error("gate requires --mode and --gate-json")
-        passed = gate_passes(args.mode, json.loads(args.gate_json))
+        if args.mode is None or args.gate_file is None:
+            parser.error("gate requires --mode and --gate-file")
+        passed = gate_passes(args.mode, json.loads(args.gate_file.read_text(encoding="utf-8")))
         print(json.dumps({"pass": passed, "mode": args.mode}))
         return 0 if passed else 1
     current = HARNESS_PATH.read_text(encoding="utf-8")
