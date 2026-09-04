@@ -37,11 +37,18 @@ DRY_RUN = "dry-run"  # recorded as a dry-run (no valid review) → re-selectable
 STALE_CONTRACT = "stale-contract"
 
 
+def _policy_record(record: dict) -> dict:
+    axes = record.get("axes")
+    if not isinstance(axes, dict) or "efficacy" in axes or "survival" not in axes:
+        return record
+    return {**record, "axes": {"efficacy": axes["survival"], **axes}}
+
+
 def _has_axis_evidence(record: dict) -> bool:
     return bool(
         isinstance(record.get("audited"), str)
         and record["audited"].strip()
-        and policy.axis_evidence_valid(record)
+        and policy.axis_evidence_valid(_policy_record(record))
     )
 
 
@@ -59,7 +66,7 @@ def _has_valid_review(record: dict) -> bool:
 
 
 def _has_passing_shippable_axes(record: dict) -> bool:
-    return policy.shippable_axes_valid(record)
+    return policy.shippable_axes_valid(_policy_record(record))
 
 
 def _record_contract_valid(record: dict, toolset_version: int) -> bool:

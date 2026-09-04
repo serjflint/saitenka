@@ -129,6 +129,6 @@ def test_generated_workflow_policy_is_current():
 
 def test_ledger_delegates_policy_instead_of_reimplementing_it():
     ledger = (sp.ROOT / "tools/sharpen_ledger.py").read_text(encoding="utf-8")
-    assert "policy.axis_evidence_valid(record)" in ledger
-    assert "return policy.shippable_axes_valid(record)" in ledger
+    assert "policy.axis_evidence_valid(_policy_record(record))" in ledger
+    assert "return policy.shippable_axes_valid(_policy_record(record))" in ledger
     assert 'REQUIRED_AXES = set(policy.load_policy()["axes"])' in ledger
