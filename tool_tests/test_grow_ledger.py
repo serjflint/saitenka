@@ -303,6 +303,14 @@ def test_filed_ignores_open_records_with_issue_refs(tmp_path):
     assert ledger.filed() == {}
 
 
+def test_filed_uses_only_the_latest_record_for_a_gap(tmp_path):
+    root = _repo(tmp_path)
+    filed = _rec(state="filed", filed=["#201"])
+    reopened = {**_rec(state="open"), "reflection": {"reflection_id": "b" * 16}}
+    ledger = _ledger(root, [MANIFEST, filed, reopened])
+    assert ledger.filed() == {}
+
+
 def test_append_round_trips_a_record(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [MANIFEST])

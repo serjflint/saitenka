@@ -25,6 +25,11 @@ const green = {
   before: { survival: null, conformance: 1, actionable: 1, db: null, survivor_func: null },
 }
 
+const efficacyGreen = {
+  ...green,
+  before: { ...green.before, survival: 0.4, db: '.mutation-cache/example.sqlite', survivor_func: 'score' },
+}
+
 const proposal = {
   applied: true,
   test_file: 'tests/test_example.py',
@@ -32,6 +37,12 @@ const proposal = {
   touched_func: '',
   diff: 'fixture diff',
   proposals: [{ target_test: 'test_example', axis: 'Conformance', change: 'assert output', rationale: 'fixture' }],
+}
+
+const efficacyProposal = {
+  ...proposal,
+  touched_func: 'score',
+  proposals: [{ target_test: 'test_example', axis: 'Efficacy', change: 'pin boundary', rationale: 'fixture' }],
 }
 
 const gate = {
@@ -42,6 +53,11 @@ const gate = {
   preservation_pass: null,
   restoration_verified: true,
   report: 'clean',
+}
+const efficacyGate = {
+  ...gate,
+  efficacy_pass: true,
+  conformance_pass: null,
 }
 const receipt = (state) => ({
   state,
@@ -112,6 +128,25 @@ async function scenario(responses, args = {}) {
   assert.ok(labels.includes('revert#1'))
   assert.ok(!labels.includes('skeptic') && !labels.includes('outward'))
   assert.equal(result.result.state, 'left-undone')
+}
+
+{
+  const result = await scenario({
+    triage: pick,
+    baseline: efficacyGreen,
+    'author#1': efficacyProposal,
+    'gate#1': efficacyGate,
+    skeptic: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    judge: { verdict: 'UPHELD', grounds: [], constructed_bug: null, better_fix: null },
+    'ship-gate': { pass: true, report: 'poe all: green' },
+    record: receipt('in-progress'),
+    outward: { pr_url: 'https://example.invalid/pr/efficacy' },
+  }, { openPr: true })
+  const gatePrompt = result.calls.find(({ label }) => label === 'gate#1').prompt
+  const recordPrompt = result.calls.find(({ label }) => label === 'record').prompt
+  assert.match(gatePrompt, /sharpen_gate\.py efficacy/)
+  assert.match(recordPrompt, /conformance: efficacy was the active primary axis/)
+  assert.equal(result.result.pr, 'https://example.invalid/pr/efficacy')
 }
 
 {

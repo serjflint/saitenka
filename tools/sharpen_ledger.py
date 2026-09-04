@@ -65,7 +65,7 @@ def _has_axis_evidence(record: dict) -> bool:
             for item in skipped
         )
     }
-    return applied | skipped_axes == REQUIRED_AXES
+    return applied.isdisjoint(skipped_axes) and applied | skipped_axes == REQUIRED_AXES
 
 
 def _has_valid_review(record: dict) -> bool:
@@ -88,7 +88,9 @@ def _has_passing_shippable_axes(record: dict) -> bool:
     normalized = {"efficacy": axes.get("efficacy", axes.get("survival")), **axes}
     primary = [normalized.get(axis) for axis in ("efficacy", "conformance")]
     applied_primary = [evidence for evidence in primary if isinstance(evidence, dict)]
-    if not applied_primary or any(evidence.get("status") != "pass" for evidence in applied_primary):
+    if len(applied_primary) != 1 or any(
+        evidence.get("status") != "pass" for evidence in applied_primary
+    ):
         return False
     return all(
         not isinstance(normalized.get(axis), dict) or normalized[axis].get("status") == "pass"

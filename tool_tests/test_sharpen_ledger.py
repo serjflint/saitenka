@@ -39,8 +39,8 @@ def _current_record(sha: str) -> dict:
         "contract_version": sl.CONTRACT_VERSION,
         "state": "sharpened",
         "audited": AUDITED,
-        "axes": AXES,
-        "axes_not_applied": [],
+        "axes": {axis: evidence for axis, evidence in AXES.items() if axis != "conformance"},
+        "axes_not_applied": ["conformance: efficacy was the active primary axis"],
         "review": REVIEW,
     }
 
@@ -229,6 +229,64 @@ def test_in_progress_record_accepts_efficacy_with_conformance_unavailable(tmp_pa
         ledger,
     )
     assert prepared["state"] == "in-progress"
+
+
+def test_shippable_record_rejects_contradictory_primary_axis_accounting(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="every required axis"):
+        sl.prepare_record(
+            {
+                "module": "app/foo.py",
+                "tests": TESTS,
+                "state": "in-progress",
+                "audited": AUDITED,
+                "axes": {
+                    "efficacy": AXES["efficacy"],
+                    "conformance": AXES["conformance"],
+                },
+                "axes_not_applied": [
+                    "efficacy: contradictory",
+                    "conformance: contradictory",
+                    "preservation: no existing assertion changed",
+                    "brittleness: certified probe is not implemented",
+                    "redundancy: advisory analysis not run",
+                ],
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+        )
+
+
+def test_shippable_record_rejects_two_applied_primary_axes(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="passing applied objective-axis"):
+        sl.prepare_record(
+            {
+                "module": "app/foo.py",
+                "tests": TESTS,
+                "state": "in-progress",
+                "audited": AUDITED,
+                "axes": {
+                    "efficacy": AXES["efficacy"],
+                    "conformance": AXES["conformance"],
+                },
+                "axes_not_applied": [
+                    "preservation: no existing assertion changed",
+                    "brittleness: certified probe is not implemented",
+                    "redundancy: advisory analysis not run",
+                ],
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+        )
 
 
 def test_in_progress_record_rejects_failed_optional_axis(tmp_path):

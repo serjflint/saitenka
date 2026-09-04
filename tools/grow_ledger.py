@@ -363,7 +363,8 @@ class Ledger:
         """`gap_id -> [product issue refs]` from each gap's latest record (open-ness checked by triage).
         The reverse of Sharpen's grow-filed handshake — gaps Grow found that need a product fix."""
         out: dict[str, list[str]] = {}
-        for r in self._gap_records():
+        latest = {record["gap_id"]: record for record in self._gap_records()}
+        for r in latest.values():
             ids = r.get("filed") or r.get("grow-filed") or []
             if ids and r.get("state") == "filed":
                 out[r["gap_id"]] = list(ids)

@@ -28,7 +28,7 @@ assert contracts["version"] == 6 and {"select", "ship_gate", "record"} <= contra
 assert contracts["lifecycle"]["outer_reflection_cadence"] == 3
 assert "CONTRACT_VERSION = 6" in harness
 assert "reflection-status" in harness and "recorded_axes_not_applied" in harness
-assert "efficacy: { status:" in harness and "conformance: {" in harness
+assert "gate?.efficacy_pass" in harness and "gate?.conformance_pass" in harness
 for token in ("better_fix", "Better fix hand-off", "skeptic_verdict", "judge_verdict", "uv run poe all"):
     assert token in harness
 assert re.search(r"verdict = judge\?\.verdict === 'UPHELD' \? 'UPHELD' : 'REFUTED'", harness)
