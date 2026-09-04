@@ -1,8 +1,9 @@
 # Sharpen host-adapter contract
 
 `SPEC.md` owns behavior. This file owns the transport boundary between that behavior and an agent host.
-The deterministic instruments under `tools/` are the shared core; a host adapter supplies shell
-execution, isolated agent invocations, phase reporting, and optional PR transport.
+The deterministic instruments under `tools/` are the shared core; `policy.json` owns disposition and
+axis applicability through `sharpen_policy.py`. A host adapter supplies shell execution, isolated agent
+invocations, phase reporting, and optional PR transport.
 
 ## Host operations
 
@@ -92,7 +93,8 @@ symbols/callers; never invoke or depend on the infrastructure-only `pyrefly-lsp`
 
 ## Adapters
 
-`harness.js` is the Claude Workflow adapter. Its inline schemas mirror `contracts.json` because that
-runtime has no filesystem access. The repo-local `.agents/skills/sharpen-loop/SKILL.md` is the Codex
-adapter: Codex runs deterministic commands directly and uses context-free subagents only for the three
-judgment roles.
+`harness.js` is the Claude Workflow adapter. Its policy evaluator is generated from `policy.json` because
+that runtime has no filesystem access; `uv run python tools/sharpen_policy.py check` rejects drift. Its
+inline schemas mirror `contracts.json`. The repo-local `.agents/skills/sharpen-loop/SKILL.md` is the Codex
+adapter: Codex asks `sharpen_policy.py gate` for disposition, runs deterministic commands directly, and
+uses context-free subagents only for the three judgment roles.
