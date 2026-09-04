@@ -11,8 +11,6 @@ POLICY_PATH = ROOT / ".agents/sharpen/policy.json"
 HARNESS_PATH = ROOT / ".agents/sharpen/harness.js"
 BEGIN = "// BEGIN GENERATED SHARPEN POLICY — tools/sharpen_policy.py sync"
 END = "// END GENERATED SHARPEN POLICY"
-EXPECTED_AXES = {"efficacy", "conformance", "preservation", "brittleness", "redundancy"}
-BASE_GATE_TRUE = {"pass", "anticheat_clean", "restoration_verified"}
 
 
 def _unique_strings(value: object) -> bool:
@@ -25,10 +23,12 @@ def _unique_strings(value: object) -> bool:
 
 
 def validate_policy(policy: dict) -> None:
-    if policy.get("version") != 1 or set(policy.get("modes", {})) != {
-        "efficacy",
-        "conformance",
-    }:
+    modes = policy.get("modes")
+    if (
+        policy.get("version") != 1
+        or not isinstance(modes, dict)
+        or set(modes) != {"efficacy", "conformance"}
+    ):
         raise ValueError("unsupported Sharpen policy")
     for field in ("axes", "primary_axes", "optional_passing_axes", "gate_not_false"):
         if not _unique_strings(policy.get(field)):
@@ -36,23 +36,38 @@ def validate_policy(policy: dict) -> None:
     axes = set(policy["axes"])
     primaries = set(policy["primary_axes"])
     optional = set(policy["optional_passing_axes"])
-    if axes != EXPECTED_AXES or primaries != set(policy["modes"]):
+    if set(modes) != primaries or not primaries <= axes:
         raise ValueError("Sharpen policy axes do not match its modes")
-    if optional != {"preservation", "brittleness"} or optional & primaries:
+    if not optional <= axes or optional & primaries:
         raise ValueError("Sharpen policy optional axes are invalid")
-    if policy["gate_not_false"] != ["preservation_pass"]:
-        raise ValueError("Sharpen policy must fail closed on preservation")
-    for name, mode in policy["modes"].items():
+    common_gate_fields: set[str] | None = None
+    for name, mode in modes.items():
         if not isinstance(mode, dict):
             raise TypeError(f"Sharpen policy mode {name} must be an object")
-        other = (primaries - {name}).pop()
+        active_field = f"{name}_pass"
+        inactive_fields = {f"{other}_pass" for other in primaries - {name}}
         if (
             mode.get("primary_axis") != name
             or not _unique_strings(mode.get("gate_true"))
-            or mode.get("gate_null") != [f"{other}_pass"]
-            or set(mode["gate_true"]) != BASE_GATE_TRUE | {f"{name}_pass"}
+            or not _unique_strings(mode.get("gate_null"))
         ):
             raise ValueError(f"Sharpen policy mode {name} is incoherent")
+        true_fields = set(mode["gate_true"])
+        null_fields = set(mode["gate_null"])
+        not_false_fields = set(policy["gate_not_false"])
+        common = true_fields - {active_field}
+        if (
+            active_field not in true_fields
+            or null_fields != inactive_fields
+            or not common
+            or true_fields & null_fields
+            or (true_fields | null_fields) & not_false_fields
+        ):
+            raise ValueError(f"Sharpen policy mode {name} has unsafe gate requirements")
+        if common_gate_fields is None:
+            common_gate_fields = common
+        elif common != common_gate_fields:
+            raise ValueError("Sharpen policy modes require different common gates")
 
 
 def load_policy(path: Path = POLICY_PATH) -> dict:

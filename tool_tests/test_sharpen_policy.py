@@ -75,6 +75,16 @@ def test_policy_schema_rejects_vacuous_or_incoherent_rules():
             sp.validate_policy(malformed)
 
 
+def test_policy_file_owns_gate_names_within_safe_structure():
+    policy = copy.deepcopy(sp.load_policy())
+    for mode in policy["modes"].values():
+        mode["gate_true"][mode["gate_true"].index("anticheat_clean")] = "custom_guard"
+    sp.validate_policy(policy)
+    gate = _gate(custom_guard=True)
+    del gate["anticheat_clean"]
+    assert sp.gate_passes("conformance", gate, policy)
+
+
 def test_gate_cli_reads_host_validated_json_file(tmp_path, monkeypatch, capsys):
     gate_path = tmp_path / "gate.json"
     gate_path.write_text(json.dumps(_gate()), encoding="utf-8")
