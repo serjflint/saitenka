@@ -38,8 +38,11 @@ Read `.agents/sharpen/GUIDE.md` only when explaining the design or adjudicating 
    unavailable, or reviewer fidelity cannot be proven.
 4. Invoke the author in a fresh isolated context. Give it only the selected module, mapped test file, applicable axis evidence, rubric, scope guard, and prior gate bounce on retry. Capture the host-returned invocation id.
 5. Validate the author's response against `.agents/sharpen/contracts.json`, then run the objective gate
-   directly. Off the mutation allowlist, an assertion replacement/removal must pass the exact-text
-   preservation witness. Retry at most three times, reverting only the patch created by the failed attempt.
+   directly. Write its host-validated structured result to a temporary JSON file outside the repository,
+   then run `uv run python tools/sharpen_policy.py gate --mode <efficacy|conformance> --gate-file <path>`;
+   this shared result owns disposition. Remove the temporary file afterward. Off the mutation allowlist, an
+   assertion replacement/removal must pass the exact-text preservation witness. Retry at most three times,
+   reverting only the patch created by the failed attempt.
 6. Invoke the skeptic in a second fresh isolated context with only factual WHAT plus DIFF. Do not include the author's rationale or claimed kills. Capture its invocation id.
 7. If the skeptic says `UPHELD`, invoke the judge in a third fresh isolated context with the same WHAT plus DIFF. Do not include the first review or its grounds. Capture its invocation id.
 8. Ship only when both independent reviewers say `UPHELD`. Prefer cross-family reviewers when the host

@@ -35,6 +35,7 @@ assert re.search(r"verdict = judge\?\.verdict === 'UPHELD' \? 'UPHELD' : 'REFUTE
 assert "model:" not in harness
 PY
 
+uv run python "$repo_dir/tools/sharpen_policy.py" check
 node "$repo_dir/.agents/sharpen/test_harness.mjs"
 
 echo "sharpen-loop skill smoke: ok"

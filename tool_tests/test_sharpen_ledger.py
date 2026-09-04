@@ -95,6 +95,12 @@ def test_status_is_sharpened_current_when_sharpened_and_unchanged(tmp_path):
     assert ledger.status("app/foo.py", root, TESTS) == sl.SHARPENED_CURRENT
 
 
+def test_current_contract_preserves_the_survival_axis_alias():
+    record = _current_record("sha")
+    record["axes"]["survival"] = record["axes"].pop("efficacy")
+    assert sl._record_contract_valid(record, 1)
+
+
 def test_status_goes_stale_when_the_source_is_edited(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)

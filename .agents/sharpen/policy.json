@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "axes": ["efficacy", "conformance", "preservation", "brittleness", "redundancy"],
+  "primary_axes": ["efficacy", "conformance"],
+  "optional_passing_axes": ["preservation", "brittleness"],
+  "gate_not_false": ["preservation_pass"],
+  "modes": {
+    "efficacy": {
+      "primary_axis": "efficacy",
+      "gate_true": ["pass", "anticheat_clean", "efficacy_pass", "restoration_verified"],
+      "gate_null": ["conformance_pass"]
+    },
+    "conformance": {
+      "primary_axis": "conformance",
+      "gate_true": ["pass", "anticheat_clean", "conformance_pass", "restoration_verified"],
+      "gate_null": ["efficacy_pass"]
+    }
+  }
+}

@@ -140,6 +140,8 @@ to a dry-run rather than risk sharpening a module under active work.
    witness: the old test must kill the supplied source mutant and the proposal must keep killing it.
    A run applies one primary axis: Efficacy when a complete campaign exists, otherwise Conformance;
    the unavailable primary axis is recorded as not applied, never relabelled as passing.
+   `.agents/sharpen/policy.json` is the executable source of truth for applicability and disposition;
+   Python consumes it directly and the Workflow evaluator is generated from it.
 5. **Subjective gate** (see *Review architecture*) — is the benefit real and plainly explainable, or
    over-fitting in disguise?
 6. **Source-bug branch** (see *Source bugs*) if a sharpened test went red on a real defect.

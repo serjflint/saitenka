@@ -19,11 +19,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import sharpen_policy as policy
+
 SRC = "src/saitenka"  # module keys are relative to here
 TESTS = "tests"
 CONTRACT_VERSION = 6
 OUTER_REFLECTION_CADENCE = 3
-REQUIRED_AXES = {"efficacy", "conformance", "preservation", "brittleness", "redundancy"}
+REQUIRED_AXES = set(policy.load_policy()["axes"])
 
 # Status of a module against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never audited → prime candidate
@@ -35,37 +37,19 @@ DRY_RUN = "dry-run"  # recorded as a dry-run (no valid review) → re-selectable
 STALE_CONTRACT = "stale-contract"
 
 
+def _policy_record(record: dict) -> dict:
+    axes = record.get("axes")
+    if not isinstance(axes, dict) or "efficacy" in axes or "survival" not in axes:
+        return record
+    return {**record, "axes": {"efficacy": axes["survival"], **axes}}
+
+
 def _has_axis_evidence(record: dict) -> bool:
-    skipped = record.get("axes_not_applied")
-    if not (
+    return bool(
         isinstance(record.get("audited"), str)
-        and bool(record["audited"].strip())
-        and isinstance(record.get("axes"), dict)
-        and isinstance(skipped, list)
-        and all(isinstance(item, str) and bool(item.strip()) for item in skipped)
-    ):
-        return False
-    axes = record["axes"]
-    normalized = {"efficacy": axes.get("efficacy", axes.get("survival")), **axes}
-    applied = set()
-    for axis in REQUIRED_AXES:
-        evidence = normalized.get(axis)
-        if not isinstance(evidence, dict):
-            continue
-        if evidence.get("status") not in {"pass", "fail", "advisory"}:
-            continue
-        if not isinstance(evidence.get("evidence"), str) or not evidence["evidence"].strip():
-            continue
-        applied.add(axis)
-    skipped_axes = {
-        axis
-        for axis in REQUIRED_AXES
-        if any(
-            item.lower().startswith(f"{axis}:") and item.split(":", 1)[1].strip()
-            for item in skipped
-        )
-    }
-    return applied.isdisjoint(skipped_axes) and applied | skipped_axes == REQUIRED_AXES
+        and record["audited"].strip()
+        and policy.axis_evidence_valid(_policy_record(record))
+    )
 
 
 def _has_valid_review(record: dict) -> bool:
@@ -82,20 +66,7 @@ def _has_valid_review(record: dict) -> bool:
 
 
 def _has_passing_shippable_axes(record: dict) -> bool:
-    axes = record.get("axes")
-    if not isinstance(axes, dict):
-        return False
-    normalized = {"efficacy": axes.get("efficacy", axes.get("survival")), **axes}
-    primary = [normalized.get(axis) for axis in ("efficacy", "conformance")]
-    applied_primary = [evidence for evidence in primary if isinstance(evidence, dict)]
-    if len(applied_primary) != 1 or any(
-        evidence.get("status") != "pass" for evidence in applied_primary
-    ):
-        return False
-    return all(
-        not isinstance(normalized.get(axis), dict) or normalized[axis].get("status") == "pass"
-        for axis in ("preservation", "brittleness")
-    )
+    return policy.shippable_axes_valid(_policy_record(record))
 
 
 def _record_contract_valid(record: dict, toolset_version: int) -> bool:

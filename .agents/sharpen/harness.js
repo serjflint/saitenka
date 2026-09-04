@@ -31,14 +31,18 @@ const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = '.' // poe tasks + tools run from the launch worktree root
 
-function objectiveGatePassed(candidate, efficacyMode) {
-  const primaryPassed = efficacyMode
-    ? candidate?.efficacy_pass === true && candidate.conformance_pass === null
-    : candidate?.efficacy_pass === null && candidate.conformance_pass === true
-  return candidate?.pass === true && candidate.anticheat_clean === true &&
-    primaryPassed && candidate.restoration_verified === true &&
-    candidate.preservation_pass !== false
+// BEGIN GENERATED SHARPEN POLICY — tools/sharpen_policy.py sync
+const SHARPEN_POLICY = {"axes":["efficacy","conformance","preservation","brittleness","redundancy"],"gate_not_false":["preservation_pass"],"modes":{"conformance":{"gate_null":["efficacy_pass"],"gate_true":["pass","anticheat_clean","conformance_pass","restoration_verified"],"primary_axis":"conformance"},"efficacy":{"gate_null":["conformance_pass"],"gate_true":["pass","anticheat_clean","efficacy_pass","restoration_verified"],"primary_axis":"efficacy"}},"optional_passing_axes":["preservation","brittleness"],"primary_axes":["efficacy","conformance"],"version":1}
+
+const objectiveGatePassed = (candidate, efficacyMode) => {
+  const mode = SHARPEN_POLICY.modes[efficacyMode ? 'efficacy' : 'conformance']
+  const required = [...mode.gate_true, ...mode.gate_null, ...SHARPEN_POLICY.gate_not_false]
+  return required.every((field) => Object.hasOwn(candidate ?? {}, field)) &&
+    mode.gate_true.every((field) => candidate[field] === true) &&
+    mode.gate_null.every((field) => candidate?.[field] === null) &&
+    SHARPEN_POLICY.gate_not_false.every((field) => candidate[field] === true || candidate[field] === null)
 }
+// END GENERATED SHARPEN POLICY
 
 // Worktree-safe: launch this run from a dedicated git worktree (EnterWorktree → Workflow → ExitWorktree)
 // so executor edits can't touch the maintainer's live tree. Every executor therefore operates on paths
