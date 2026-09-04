@@ -106,6 +106,7 @@ def test_append_run_persists_a_receipt_even_without_findings(tmp_path):
     assert result["appended"] is True
     assert persisted is not None
     assert persisted["trace_sha"] == result["trace_sha"]
+    assert persisted["reflection_id"] == gr.reflection_id(persisted)
 
 
 def test_append_run_mints_a_fresh_receipt_for_each_invocation(tmp_path):
@@ -120,3 +121,18 @@ def test_append_run_mints_a_fresh_receipt_for_each_invocation(tmp_path):
     second = gr.append_run(record, led)
     assert first["reflection_id"] != second["reflection_id"]
     assert sum(line.get("type") == "run-reflection" for line in led.lines) == 2
+    assert led.run_receipt_sequence_valid()
+
+
+def test_run_receipt_sequence_rejects_a_duplicate(tmp_path):
+    led = _ledger(tmp_path, [MANIFEST])
+    record = {
+        "trace": {"outcome": "dry-run"},
+        "introspection": "bounced",
+        "findings": [],
+        "escalations": [],
+    }
+    gr.append_run(record, led)
+    duplicate = {**led.lines[-1], "reflection_id": "f" * 16}
+    led.append(duplicate)
+    assert not led.run_receipt_sequence_valid()

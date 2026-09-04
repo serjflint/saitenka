@@ -38,19 +38,33 @@ AUDIT_TRACE = {
     },
     "outcome": "no-gap",
 }
-REFLECTION = {
-    "reflection_id": "a" * 16,
-    "trace_sha": gl.gr._canonical_sha(GAP_TRACE),
-    "introspection": "audited",
-    "findings": [],
-    "appended": True,
-    "escalations": [],
-}
-AUDIT_REFLECTION = {
-    **REFLECTION,
-    "reflection_id": "c" * 16,
-    "trace_sha": gl.gr._canonical_sha(AUDIT_TRACE),
-}
+
+
+def _durable_reflection(trace: dict, sequence: int) -> tuple[dict, dict]:
+    receipt = {
+        "type": "run-reflection",
+        "sequence": sequence,
+        "trace_sha": gl.gr._canonical_sha(trace),
+        "trace": trace,
+        "introspection": "audited",
+        "finding_ids": [],
+        "escalations": [],
+        "loop_version": 1,
+    }
+    receipt["reflection_id"] = gl.gr.reflection_id(receipt)
+    outward = {
+        "reflection_id": receipt["reflection_id"],
+        "trace_sha": receipt["trace_sha"],
+        "introspection": receipt["introspection"],
+        "findings": [],
+        "appended": True,
+        "escalations": [],
+    }
+    return receipt, outward
+
+
+GAP_RECEIPT, REFLECTION = _durable_reflection(GAP_TRACE, 1)
+AUDIT_RECEIPT, AUDIT_REFLECTION = _durable_reflection(AUDIT_TRACE, 2)
 REVIEW = {
     "author": "author-1",
     "skeptic": "skeptic-1",
@@ -137,33 +151,9 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
     (tmp_path / ".reflection.grow.jsonl").write_text(
         json.dumps({"type": "manifest", "loop_version": 1})
         + "\n"
-        + json.dumps(
-            {
-                "type": "run-reflection",
-                "sequence": 1,
-                "reflection_id": REFLECTION["reflection_id"],
-                "trace_sha": REFLECTION["trace_sha"],
-                "trace": GAP_TRACE,
-                "introspection": REFLECTION["introspection"],
-                "finding_ids": [],
-                "escalations": [],
-                "loop_version": 1,
-            }
-        )
+        + json.dumps(GAP_RECEIPT)
         + "\n"
-        + json.dumps(
-            {
-                "type": "run-reflection",
-                "sequence": 2,
-                "reflection_id": AUDIT_REFLECTION["reflection_id"],
-                "trace_sha": AUDIT_REFLECTION["trace_sha"],
-                "trace": AUDIT_TRACE,
-                "introspection": AUDIT_REFLECTION["introspection"],
-                "finding_ids": [],
-                "escalations": [],
-                "loop_version": 1,
-            }
-        )
+        + json.dumps(AUDIT_RECEIPT)
         + "\n",
         encoding="utf-8",
     )
@@ -189,8 +179,13 @@ def _ledger(root: Path, records: list[dict]) -> gl.Ledger:
         }
         trace_sha = gl.gr._canonical_sha(reflection_lines[1]["trace"])
         reflection_lines[1]["trace_sha"] = trace_sha
+        reflection_lines[1]["reflection_id"] = gl.gr.reflection_id(reflection_lines[1])
         if "reflection" in gap_record:
-            gap_record["reflection"] = {**gap_record["reflection"], "trace_sha": trace_sha}
+            gap_record["reflection"] = {
+                **gap_record["reflection"],
+                "reflection_id": reflection_lines[1]["reflection_id"],
+                "trace_sha": trace_sha,
+            }
         reflection_path.write_text(
             "".join(json.dumps(record) + "\n" for record in reflection_lines), encoding="utf-8"
         )
@@ -205,10 +200,15 @@ def _reflection_for_state(root: Path, state: str) -> dict:
     lines[1]["trace"] = {**GAP_TRACE, "outcome": state}
     trace_sha = gl.gr._canonical_sha(lines[1]["trace"])
     lines[1]["trace_sha"] = trace_sha
+    lines[1]["reflection_id"] = gl.gr.reflection_id(lines[1])
     reflection_path.write_text(
         "".join(json.dumps(record) + "\n" for record in lines), encoding="utf-8"
     )
-    return {**REFLECTION, "trace_sha": trace_sha}
+    return {
+        **REFLECTION,
+        "reflection_id": lines[1]["reflection_id"],
+        "trace_sha": trace_sha,
+    }
 
 
 def _rec(*, state: str, module_src: str = MODULE_V1, **extra) -> dict:
@@ -290,9 +290,16 @@ def test_latest_returns_the_most_recent_record(tmp_path):
 
 def test_filed_maps_gap_to_issue_refs(tmp_path):
     root = _repo(tmp_path)
-    rec = _rec(state="open", filed=["#201"])
+    rec = _rec(state="filed", filed=["#201"])
     ledger = _ledger(root, [MANIFEST, rec])
     assert ledger.filed() == {rec["gap_id"]: ["#201"]}
+
+
+def test_filed_ignores_open_records_with_issue_refs(tmp_path):
+    root = _repo(tmp_path)
+    rec = _rec(state="open", filed=["#201"])
+    ledger = _ledger(root, [MANIFEST, rec])
+    assert ledger.filed() == {}
 
 
 def test_append_round_trips_a_record(tmp_path):
@@ -520,6 +527,56 @@ def test_prepare_record_rejects_a_consumed_reflection(tmp_path):
                 "dimension": "scale=2.0",
                 "state": "closed",
                 "reflection": REFLECTION,
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+            require_reflection=True,
+        )
+
+
+def test_open_reflection_cannot_persist_filed_issue_evidence(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    open_reflection = _reflection_for_state(root, "open")
+    with pytest.raises(ValueError, match="already consumed"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "app/x.py::crisp",
+                "dimension": "scale=2.0",
+                "state": "open",
+                "filed": ["#123"],
+                "reflection": open_reflection,
+            },
+            root,
+            ledger,
+            require_reflection=True,
+        )
+
+
+def test_renamed_durable_reflection_receipt_is_rejected(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    reflection_path = root / ".reflection.grow.jsonl"
+    lines = [json.loads(line) for line in reflection_path.read_text().splitlines()]
+    lines[1]["reflection_id"] = "f" * 16
+    reflection_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in lines), encoding="utf-8"
+    )
+    renamed = {**REFLECTION, "reflection_id": "f" * 16}
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="identity differs"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "app/x.py::crisp",
+                "dimension": "scale=2.0",
+                "state": "closed",
+                "reflection": renamed,
                 "review": REVIEW,
             },
             root,

@@ -132,21 +132,21 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
         "outcome": "no-gap",
     }
     trace_sha = gl.gr._canonical_sha(trace)
+    durable_reflection = {
+        "type": "run-reflection",
+        "sequence": 1,
+        "trace_sha": trace_sha,
+        "trace": trace,
+        "introspection": "fixture",
+        "finding_ids": [],
+        "escalations": [],
+        "loop_version": 1,
+    }
+    durable_reflection["reflection_id"] = gl.gr.reflection_id(durable_reflection)
     (tmp_path / ".reflection.grow.jsonl").write_text(
         json.dumps({"type": "manifest", "loop_version": 1})
         + "\n"
-        + json.dumps(
-            {
-                "type": "run-reflection",
-                "sequence": 1,
-                "reflection_id": "a" * 16,
-                "trace_sha": trace_sha,
-                "trace": trace,
-                "introspection": "fixture",
-                "finding_ids": [],
-                "escalations": [],
-            }
-        )
+        + json.dumps(durable_reflection)
         + "\n",
         encoding="utf-8",
     )
@@ -158,7 +158,7 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
                 "tests": tests,
                 "state": "no-gap",
                 "reflection": {
-                    "reflection_id": "a" * 16,
+                    "reflection_id": durable_reflection["reflection_id"],
                     "trace_sha": trace_sha,
                     "introspection": "fixture",
                     "findings": [],

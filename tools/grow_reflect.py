@@ -78,6 +78,10 @@ class ReflectionLedger:
                 return record
         return None
 
+    def run_receipt_sequence_valid(self) -> bool:
+        receipts = [record for record in self.lines if record.get("type") == "run-reflection"]
+        return [record.get("sequence") for record in receipts] == list(range(1, len(receipts) + 1))
+
     def recurrence(self, fid: str) -> int:
         """How many times this finding has been filed AT THE CURRENT loop_version (a version bump — a
         landed loop-improvement — resets the count, so only findings that outlive the fix keep climbing)."""
@@ -104,6 +108,21 @@ class ReflectionLedger:
 def _canonical_sha(value: object) -> str:
     raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def reflection_id(record: dict) -> str:
+    core = {
+        key: record.get(key)
+        for key in (
+            "sequence",
+            "trace_sha",
+            "introspection",
+            "finding_ids",
+            "escalations",
+            "loop_version",
+        )
+    }
+    return _canonical_sha(core)[:16]
 
 
 def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dict]:
@@ -143,17 +162,9 @@ def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dic
         raise ValueError("reflection escalations must be non-empty strings")
     trace_sha = _canonical_sha(trace)
     sequence = sum(line.get("type") == "run-reflection" for line in ledger.lines) + 1
-    core = {
-        "sequence": sequence,
-        "trace_sha": trace_sha,
-        "introspection": introspection,
-        "findings": findings,
-        "escalations": escalations,
-    }
     receipt = {
         "type": "run-reflection",
         "sequence": sequence,
-        "reflection_id": _canonical_sha(core)[:16],
         "trace_sha": trace_sha,
         "trace": trace,
         "introspection": introspection,
@@ -161,6 +172,7 @@ def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dic
         "escalations": escalations,
         "loop_version": ledger.loop_version,
     }
+    receipt["reflection_id"] = reflection_id(receipt)
     return prepared_findings, receipt
 
 

@@ -718,6 +718,10 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
       finalized?.recorded_target_sha === recorded.recorded_target_sha &&
       finalized?.recorded_toolset_version === recorded.recorded_toolset_version
     if (!validReceipt(finalized, finalState, outward) || !sameIdentity) {
+      if (wantIssue) {
+        trace.notes.push('filed-bound finalization failed; issue exists but ledger remains open for manual reconciliation')
+        return { ...recorded, state: 'open', ...outward }
+      }
       trace.notes.push('outward evidence finalization failed; attempting an open recovery record')
       const recovered = await agent(
         `Append a recovery Grow ledger record through tools/grow_ledger.py for the same source/target_symbol/dimension and identity, state "open", outcome ${JSON.stringify(outcome ?? null)}, reflection ${JSON.stringify(reflectionReceipt)}, and persist this already-created outward evidence: ${JSON.stringify(outward)}. Take no outward action. Return the exact receipt with recorded_reflection=true, mapping filed to filed_issues.`,

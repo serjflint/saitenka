@@ -82,6 +82,10 @@ async function scenario(responses, args = {}) {
   assert.ok(labels.indexOf('ship-gate') < labels.indexOf('record'))
   assert.ok(labels.indexOf('record') < labels.indexOf('outward'))
   assert.match(result.calls.find(({ label }) => label === 'ship-gate').prompt, /uv run poe all/)
+  assert.match(result.calls.find(({ label }) => label === 'record').prompt,
+    /preservation: no existing assertion changed/)
+  assert.match(result.calls.find(({ label }) => label === 'record').prompt,
+    /brittleness: certified probe is not implemented/)
   assert.equal(result.result.pr, 'https://example.invalid/pr/1')
 }
 

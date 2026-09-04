@@ -81,6 +81,22 @@ def _has_valid_review(record: dict) -> bool:
     )
 
 
+def _has_passing_shippable_axes(record: dict) -> bool:
+    axes = record.get("axes")
+    if not isinstance(axes, dict):
+        return False
+    normalized = {"efficacy": axes.get("efficacy", axes.get("survival")), **axes}
+    if any(
+        not isinstance(normalized.get(axis), dict) or normalized[axis].get("status") != "pass"
+        for axis in ("efficacy", "conformance")
+    ):
+        return False
+    return all(
+        not isinstance(normalized.get(axis), dict) or normalized[axis].get("status") == "pass"
+        for axis in ("preservation", "brittleness")
+    )
+
+
 def _record_contract_valid(record: dict, toolset_version: int) -> bool:
     if (
         record.get("toolset_version") != toolset_version
@@ -88,7 +104,9 @@ def _record_contract_valid(record: dict, toolset_version: int) -> bool:
         or not _has_axis_evidence(record)
     ):
         return False
-    return record.get("state") not in {"sharpened", "in-progress"} or _has_valid_review(record)
+    return record.get("state") not in {"sharpened", "in-progress"} or (
+        _has_valid_review(record) and _has_passing_shippable_axes(record)
+    )
 
 
 def _valid_outer_reflection(record: dict, toolset_version: int) -> bool:
@@ -408,17 +426,8 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError(
             "shippable record requires three distinct review identities and UPHELD votes"
         )
-    if record["state"] in {"sharpened", "in-progress"}:
-        normalized = {
-            "efficacy": record["axes"].get("efficacy", record["axes"].get("survival")),
-            **record["axes"],
-        }
-        for axis in ("efficacy", "conformance", "preservation", "brittleness"):
-            if (
-                not isinstance(normalized.get(axis), dict)
-                or normalized[axis].get("status") != "pass"
-            ):
-                raise ValueError(f"shippable record requires passing {axis} evidence")
+    if record["state"] in {"sharpened", "in-progress"} and not _has_passing_shippable_axes(record):
+        raise ValueError("shippable record requires passing applied objective-axis evidence")
     prepared = dict(record)
     prepared["tests"] = tests
     prepared["source_sha"] = source_sha(root, module, tests)

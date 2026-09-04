@@ -69,6 +69,10 @@ def _validate_reflection(record: dict, root: Path) -> None:
     persisted = ledger.run_receipt(reflection_id)
     if persisted is None or persisted.get("trace_sha") != trace_sha:
         raise ValueError("reflection receipt is not present in .reflection.grow.jsonl")
+    if not ledger.run_receipt_sequence_valid():
+        raise ValueError("reflection receipt sequence is not unique and monotonic")
+    if gr.reflection_id(persisted) != reflection_id:
+        raise ValueError("reflection receipt identity differs from its durable content")
     if not isinstance(persisted.get("sequence"), int) or persisted["sequence"] < 1:
         raise ValueError("reflection receipt predates unique invocation sequencing")
     if gr._canonical_sha(persisted.get("trace")) != trace_sha:
@@ -143,6 +147,9 @@ def _has_outward_evidence(record: dict) -> bool:
 
 
 def _reflection_use_allowed(record: dict, prior: list[dict], *, audit: bool) -> bool:
+    filed = bool(record.get("filed") or record.get("grow-filed"))
+    if filed != (record.get("state") == "filed"):
+        return False
     if not prior:
         return True
     if audit or len(prior) != 1:
@@ -332,7 +339,7 @@ class Ledger:
         out: dict[str, list[str]] = {}
         for r in self._gap_records():
             ids = r.get("filed") or r.get("grow-filed") or []
-            if ids:
+            if ids and r.get("state") == "filed":
                 out[r["gap_id"]] = list(ids)
         return out
 

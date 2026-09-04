@@ -489,11 +489,10 @@ async function scenario(responses, args = { openPr: true }) {
     record: { state: 'open', outcome: 'bug', ...receipt, pr_url: null, filed_issues: [], filing_blocker: null, note: '' },
     outward: { pr_url: null, filed_issues: ['#123'] },
     finalize: { state: 'filed', outcome: 'bug', ...receipt, recorded_gap_id: '2222222222222222', pr_url: null, filed_issues: ['#123'], filing_blocker: null, note: '' },
-    recover: { state: 'open', outcome: 'bug', ...receipt, pr_url: null, filed_issues: ['#123'], filing_blocker: null, note: '' },
     reflect: reflection,
   })
   assert.equal(result.result.state, 'open')
-  assert.ok(result.calls.some(({ label }) => label === 'recover'))
+  assert.ok(!result.calls.some(({ label }) => label === 'recover'))
   const outwardPrompt = result.calls.find(({ label }) => label === 'outward').prompt
   assert.match(outwardPrompt, /production raised ValueError/)
   assert.match(outwardPrompt, /fixture diff/)

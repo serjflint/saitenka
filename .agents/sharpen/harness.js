@@ -421,10 +421,23 @@ async function recordOutcome(state, prop, reviewResult, extraNote) {
       preservation: { status: gate.preservation_pass ? 'pass' : 'fail', evidence: gate.report },
     }),
   } : {}
+  const axesNotApplied = prop ? [
+    ...(gate?.preservation_pass == null
+      ? ['preservation: no existing assertion changed']
+      : []),
+    'brittleness: certified probe is not implemented',
+    'redundancy: advisory analysis not run',
+  ] : [
+    'efficacy: no candidate edit reached the objective gate',
+    'conformance: no candidate edit reached review',
+    'preservation: no candidate edit to preserve',
+    'brittleness: certified probe is not implemented',
+    'redundancy: advisory analysis not run',
+  ]
   const recorded = await agent(
     `Append one Sharpen ledger record and stop before outward action. ${REL} The ledger is \`.ledger.sharpen.jsonl\`. Touch ONLY the ledger.\n` +
     `Module ${pick.module}, tests ${JSON.stringify(pick.tests)}. Build the record with state "${state}", audited from \`date -u +%Y-%m-%dT%H:%M:%SZ\`, review ${reviewBlock}, and axes ${JSON.stringify(axes)}.\n` +
-    `axes_not_applied: list every skipped axis and WHY, each starting with its exact name. Together the axes object and this list MUST account for efficacy, conformance, preservation, brittleness, and redundancy (SPEC Self-reflection).\n` +
+    `Set axes_not_applied exactly to ${JSON.stringify(axesNotApplied)}. Together the axes object and this list account for efficacy, conformance, preservation, brittleness, and redundancy (SPEC Self-reflection).\n` +
     `MUST append through \`uv run python tools/sharpen_ledger.py --ledger .ledger.sharpen.jsonl append --record-json '<record-json>'\`; the CLI owns source_sha, toolset_version, and contract_version. Return those CLI values as recorded_source_sha, recorded_toolset_version, recorded_contract_version, plus recorded_module and recorded_axes_not_applied=true only when the persisted list matches.\n` +
     (extraNote ? `note: ${extraNote}\n` : '') +
     `Do NOT open a PR, push, or file any issue. Leave the ledger append as the only change.\n`,

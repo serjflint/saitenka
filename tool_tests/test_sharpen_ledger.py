@@ -165,7 +165,7 @@ def test_in_progress_record_requires_passing_objective_axes(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [MANIFEST])
     axes = {**AXES, "efficacy": {"status": "fail", "evidence": "survivor remained"}}
-    with pytest.raises(ValueError, match="passing efficacy"):
+    with pytest.raises(ValueError, match="passing applied objective-axis"):
         sl.prepare_record(
             {
                 "module": "app/foo.py",
@@ -179,6 +179,64 @@ def test_in_progress_record_requires_passing_objective_axes(tmp_path):
             root,
             ledger,
         )
+
+
+def test_in_progress_record_accepts_explicitly_unavailable_optional_axes(tmp_path):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    prepared = sl.prepare_record(
+        {
+            "module": "app/foo.py",
+            "tests": TESTS,
+            "state": "in-progress",
+            "audited": AUDITED,
+            "axes": {
+                "efficacy": AXES["efficacy"],
+                "conformance": AXES["conformance"],
+            },
+            "axes_not_applied": [
+                "preservation: no existing assertion changed",
+                "brittleness: certified probe is not implemented",
+                "redundancy: advisory analysis not run",
+            ],
+            "review": REVIEW,
+        },
+        root,
+        ledger,
+    )
+    assert prepared["state"] == "in-progress"
+
+
+def test_in_progress_record_rejects_failed_optional_axis(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    axes = {**AXES, "preservation": {"status": "fail", "evidence": "witness regressed"}}
+    with pytest.raises(ValueError, match="passing applied objective-axis"):
+        sl.prepare_record(
+            {
+                "module": "app/foo.py",
+                "tests": TESTS,
+                "state": "in-progress",
+                "audited": AUDITED,
+                "axes": axes,
+                "axes_not_applied": [],
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+        )
+
+
+def test_failed_objective_axis_cannot_suppress_triage(tmp_path):
+    root = _repo(tmp_path)
+    sha = sl.source_sha(root, "app/foo.py", TESTS)
+    rec = _current_record(sha)
+    rec["state"] = "in-progress"
+    rec["axes"] = {**AXES, "efficacy": {"status": "fail", "evidence": "survivor remained"}}
+    ledger = _ledger(root, [MANIFEST, rec])
+    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
 
 
 def test_latest_returns_the_most_recent_record(tmp_path):

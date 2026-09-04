@@ -250,7 +250,7 @@ included, those are the richest lessons — passes a **`Reflect`** step before i
   manufactured findings).
 - **Durable lifecycle evidence.** `tools/grow_reflect.py append-run` writes a run receipt even when there
   are no findings and returns its `reflection_id` plus `trace_sha`. Every invocation gets a monotonically
-  sequenced receipt; `grow_ledger.py` refuses stale reuse except the single `open` → outward-evidence
+  sequenced, content-bound receipt; `grow_ledger.py` verifies strict sequence uniqueness and refuses stale reuse except the single `open` → outward-evidence
   finalization for the same gap. A filed issue gets a fresh reflection bound to the `filed` outcome.
 - **Advisory, never self-modifying.** It writes only `.reflection.grow.jsonl`; it MUST NOT edit any tool /
   spec / harness / product file. Self-modification is strictly more dangerous than the loop's test edits
