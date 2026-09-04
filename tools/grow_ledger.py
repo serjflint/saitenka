@@ -84,6 +84,7 @@ def _validate_reflection(record: dict, root: Path) -> None:
     if (
         persisted.get("introspection") != reflection["introspection"]
         or persisted.get("finding_ids") != expected_findings
+        or persisted.get("findings_sha") != gr._canonical_sha(reflection["findings"])
         or persisted.get("escalations") != reflection["escalations"]
     ):
         raise ValueError("reflection payload differs from its durable receipt")
@@ -250,7 +251,28 @@ class Ledger:
     def _audit_records(self) -> list[dict]:
         return [r for r in self.lines if "audit_module" in r and "audit_sha" in r]
 
-    def reflection_use_valid(self, record: dict, *, audit: bool) -> bool:
+    def _prior_gap_record_valid(self, record: dict, root: Path) -> bool:
+        if (
+            record.get("contract_version") != CONTRACT_VERSION
+            or record.get("toolset_version") != self.toolset_version
+            or not _has_valid_reflection(record, root)
+        ):
+            return False
+        source = record.get("source")
+        target = record.get("target_symbol")
+        dimension = record.get("dimension")
+        if not all(isinstance(value, str) and value for value in (source, target, dimension)):
+            return False
+        module_key, separator, symbol = target.partition("::")
+        if not separator or record.get("gap_id") != gap_id(source, target, dimension):
+            return False
+        try:
+            module_src = (root / SRC / module_key).read_text(encoding="utf-8")
+            return record.get("target_sha") == target_sha(module_src, symbol)
+        except (FileNotFoundError, KeyError, SyntaxError):
+            return False
+
+    def reflection_use_valid(self, record: dict, root: Path, *, audit: bool) -> bool:
         index = next(i for i, candidate in enumerate(self.lines) if candidate is record)
         reflection_id = _reflection_id(record)
         prior = [
@@ -258,14 +280,18 @@ class Ledger:
             for candidate in self.lines[:index]
             if _reflection_id(candidate) == reflection_id
         ]
-        return _reflection_use_allowed(record, prior, audit=audit)
+        return _reflection_use_allowed(record, prior, audit=audit) and (
+            not prior or self._prior_gap_record_valid(prior[0], root)
+        )
 
-    def validate_new_reflection_use(self, record: dict, *, audit: bool) -> None:
+    def validate_new_reflection_use(self, record: dict, root: Path, *, audit: bool) -> None:
         reflection_id = _reflection_id(record)
         prior = [
             candidate for candidate in self.lines if _reflection_id(candidate) == reflection_id
         ]
-        if not _reflection_use_allowed(record, prior, audit=audit):
+        if not _reflection_use_allowed(record, prior, audit=audit) or (
+            prior and not self._prior_gap_record_valid(prior[0], root)
+        ):
             raise ValueError("reflection receipt was already consumed by another Grow outcome")
 
     def latest(self, gap: str) -> dict | None:
@@ -292,7 +318,7 @@ class Ledger:
             return STALE_CONTRACT
         if not _has_valid_reflection(record, root):
             return STALE_CONTRACT
-        if not self.reflection_use_valid(record, audit=True):
+        if not self.reflection_use_valid(record, root, audit=True):
             return STALE_CONTRACT
         try:
             current = audit_sha(root, module_key)
@@ -314,7 +340,7 @@ class Ledger:
             return STALE_CONTRACT
         if not _has_valid_reflection(rec, root):
             return STALE_CONTRACT
-        if not self.reflection_use_valid(rec, audit=False):
+        if not self.reflection_use_valid(rec, root, audit=False):
             return STALE_CONTRACT
         if rec.get("state") == "closed" and not _has_valid_review(rec):
             return STALE_CONTRACT
@@ -364,7 +390,7 @@ def prepare_record(
         raise ValueError("record requires non-empty source, target_symbol, and dimension")
     if require_reflection:
         _validate_reflection(record, root)
-        ledger.validate_new_reflection_use(record, audit=False)
+        ledger.validate_new_reflection_use(record, root, audit=False)
     if record.get("state") == "closed" and not _has_valid_review(record):
         raise ValueError("closed record requires three distinct review identities and UPHELD votes")
     module_key, separator, symbol = target_symbol.partition("::")
@@ -420,7 +446,7 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
         ):
             raise ValueError("audit tests must be existing test_*.py files")
     _validate_reflection(record, root)
-    ledger.validate_new_reflection_use(record, audit=True)
+    ledger.validate_new_reflection_use(record, root, audit=True)
     prepared = dict(record)
     prepared["tests"] = sorted(test_files)
     prepared["audit_sha"] = audit_sha(root, module_key)

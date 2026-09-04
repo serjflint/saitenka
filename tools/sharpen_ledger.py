@@ -86,10 +86,9 @@ def _has_passing_shippable_axes(record: dict) -> bool:
     if not isinstance(axes, dict):
         return False
     normalized = {"efficacy": axes.get("efficacy", axes.get("survival")), **axes}
-    if any(
-        not isinstance(normalized.get(axis), dict) or normalized[axis].get("status") != "pass"
-        for axis in ("efficacy", "conformance")
-    ):
+    primary = [normalized.get(axis) for axis in ("efficacy", "conformance")]
+    applied_primary = [evidence for evidence in primary if isinstance(evidence, dict)]
+    if not applied_primary or any(evidence.get("status") != "pass" for evidence in applied_primary):
         return False
     return all(
         not isinstance(normalized.get(axis), dict) or normalized[axis].get("status") == "pass"

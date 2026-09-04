@@ -48,6 +48,7 @@ def _durable_reflection(trace: dict, sequence: int) -> tuple[dict, dict]:
         "trace": trace,
         "introspection": "audited",
         "finding_ids": [],
+        "findings_sha": gl.gr._canonical_sha([]),
         "escalations": [],
         "loop_version": 1,
     }
@@ -585,6 +586,47 @@ def test_renamed_durable_reflection_receipt_is_rejected(tmp_path):
         )
 
 
+def test_reflection_receipt_binds_full_finding_content(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    reflection_ledger = gl.gr.ReflectionLedger.load(root / ".reflection.grow.jsonl")
+    reflection = gl.gr.append_run(
+        {
+            "trace": GAP_TRACE,
+            "introspection": "audited",
+            "findings": [
+                {
+                    "category": "false-pass",
+                    "subject": "weak oracle",
+                    "severity": "high",
+                    "evidence": "the mutation survived",
+                    "proposal": "strengthen the oracle",
+                    "self_referential": False,
+                }
+            ],
+            "escalations": [],
+        },
+        reflection_ledger,
+    )
+    reflection["findings"][0]["evidence"] = "forged evidence"
+    ledger = _ledger(root, [MANIFEST])
+    with pytest.raises(ValueError, match="payload differs"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "app/x.py::crisp",
+                "dimension": "scale=2.0",
+                "state": "closed",
+                "reflection": reflection,
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+            require_reflection=True,
+        )
+
+
 def test_open_receipt_allows_one_outward_evidence_finalization(tmp_path):
     root = _repo(tmp_path)
     ledger = _ledger(root, [MANIFEST])
@@ -619,6 +661,36 @@ def test_open_receipt_allows_one_outward_evidence_finalization(tmp_path):
     ledger.append(final)
 
     assert ledger.status(final["gap_id"], root) == gl.OPEN
+
+
+def test_open_finalization_rejects_an_unvalidated_prior_consumer(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    open_reflection = _reflection_for_state(root, "open")
+    malformed_prior = {
+        "gap_id": gl.gap_id("invariant", "app/x.py::crisp", "scale=2.0"),
+        "source": "invariant",
+        "target_symbol": "app/x.py::crisp",
+        "dimension": "scale=2.0",
+        "state": "open",
+        "reflection": open_reflection,
+    }
+    ledger = gl.Ledger(root / ".ledger.grow.jsonl", [MANIFEST, malformed_prior])
+    with pytest.raises(ValueError, match="already consumed"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "app/x.py::crisp",
+                "dimension": "scale=2.0",
+                "state": "open",
+                "pr_url": "https://example.invalid/pr/1",
+                "reflection": open_reflection,
+            },
+            root,
+            ledger,
+            require_reflection=True,
+        )
 
 
 def test_no_gap_audit_rejects_a_consumed_reflection(tmp_path):

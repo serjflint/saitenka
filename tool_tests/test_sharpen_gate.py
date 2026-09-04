@@ -32,6 +32,12 @@ def test_strengthening_a_weak_assert_is_allowed():
     assert _kinds(before, after) == set()
 
 
+def test_conformance_requires_an_actionable_reduction():
+    assert sg.conformance_improved(3, 2)
+    assert not sg.conformance_improved(3, 3)
+    assert not sg.conformance_improved(0, 0)
+
+
 # --- Arm B: weakening is bounced (the eval's cross-tier bypass) ----------------------------------
 
 

@@ -9,6 +9,14 @@ import sharpen_ledger as sl
 import sharpen_triage as st
 
 
+class _LatestLedger:
+    def __init__(self, record: dict):
+        self.record = record
+
+    def latest(self, _module: str) -> dict:
+        return self.record
+
+
 def _repo(tmp_path: Path) -> Path:
     (tmp_path / "src/saitenka/app/session").mkdir(parents=True)
     (tmp_path / "tests").mkdir()
@@ -116,3 +124,17 @@ def test_candidate_readiness_requires_grounded_work():
     assert st.candidate_ready(0, True, 1)
     assert not st.candidate_ready(0, False, 0)
     assert not st.candidate_ready(0, True, 0)
+
+
+def test_survival_reads_new_efficacy_detail_and_preserves_unknown_after():
+    ledger = _LatestLedger(
+        {
+            "axes": {
+                "efficacy": {
+                    "status": "pass",
+                    "detail": {"before": 0.4, "after": None},
+                }
+            }
+        }
+    )
+    assert st.survival_from_ledger(ledger, "app/x.py") == 0.4

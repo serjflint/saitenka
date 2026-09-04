@@ -31,9 +31,12 @@ const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = '.' // poe tasks + tools run from the launch worktree root
 
-function objectiveGatePassed(candidate) {
+function objectiveGatePassed(candidate, efficacyMode) {
+  const primaryPassed = efficacyMode
+    ? candidate?.efficacy_pass === true && candidate.conformance_pass === null
+    : candidate?.efficacy_pass === null && candidate.conformance_pass === true
   return candidate?.pass === true && candidate.anticheat_clean === true &&
-    candidate.efficacy_pass === true && candidate.restoration_verified === true &&
+    primaryPassed && candidate.restoration_verified === true &&
     candidate.preservation_pass !== false
 }
 
@@ -119,11 +122,12 @@ const PROPOSAL = {
 
 const GATE = {
   type: 'object', additionalProperties: false,
-  required: ['pass', 'anticheat_clean', 'efficacy_pass', 'preservation_pass', 'restoration_verified', 'report'],
+  required: ['pass', 'anticheat_clean', 'efficacy_pass', 'conformance_pass', 'preservation_pass', 'restoration_verified', 'report'],
   properties: {
     pass: { type: 'boolean', description: 'both arms clean' },
     anticheat_clean: { type: 'boolean' },
-    efficacy_pass: { type: 'boolean' },
+    efficacy_pass: { type: ['boolean', 'null'] },
+    conformance_pass: { type: ['boolean', 'null'] },
     preservation_pass: { type: ['boolean', 'null'] },
     restoration_verified: { type: 'boolean' },
     report: { type: 'string', description: 'the exact bounce lines / earned+regressed counts, verbatim from the tool' },
@@ -283,14 +287,17 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `Run the deterministic Sharpen objective gate on the author's edit. ${REL} Report the tool output VERBATIM — do not interpret. (This step runs read-only tools; it must not edit any file.)\n` +
     `Arm B (anti-cheat, fast): \`uv run python tools/sharpen_gate.py anticheat ${proposal.test_file.replace('overlay/', '')} --cut ${proposal.cut_module} --repo .\` (bounces removed/weakened/trivial/cut-derived asserts vs HEAD).\n` +
     (base.before.db
-      ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/saitenka/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression).\n`
+      ? `Arm A (efficacy replay, minutes): \`uv run --extra full --with cosmic-ray python tools/sharpen_gate.py efficacy --db ${base.before.db} --module src/saitenka/${pick.module} --func ${proposal.touched_func} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\` (earned kills + full-control no-regression). Set efficacy_pass from its verdict and conformance_pass=null (n/a).\n`
       : proposal.preservation_required
-        ? `Arm A substitute (preservation witness): \`uv run python tools/sharpen_gate.py preserve --module src/saitenka/${pick.module} --find ${JSON.stringify(proposal.witness_find)} --replace ${JSON.stringify(proposal.witness_replace)} --test-file ${proposal.test_file.replace('overlay/', '')} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\`. Set preservation_pass from its verdict and efficacy_pass=true (n/a).\n`
-        : `Arm A/preservation: N/A — no campaign and no existing assertion changed. Set efficacy_pass=true and preservation_pass=null.\n`) +
-    `Verify source and test bytes were restored exactly and set restoration_verified. pass = anticheat_clean AND efficacy_pass AND restoration_verified AND (preservation_pass !== false). Quote every BOUNCE/REGRESSED line.`,
+        ? `Arm A substitute (preservation witness): \`uv run python tools/sharpen_gate.py preserve --module src/saitenka/${pick.module} --find ${JSON.stringify(proposal.witness_find)} --replace ${JSON.stringify(proposal.witness_replace)} --test-file ${proposal.test_file.replace('overlay/', '')} --tests ${pick.tests.map(t => t.replace('overlay/', '')).join(' ')} --repo .\`. Set preservation_pass from its verdict.\n`
+        : `Arm A/preservation: N/A — no campaign and no existing assertion changed. Set preservation_pass=null.\n`) +
+    (!base.before.db
+      ? `Conformance: \`uv run python tools/sharpen_gate.py conformance --module ${pick.module} --before-actionable ${base.before.actionable} --repo .\`. Set conformance_pass from its verdict and efficacy_pass=null (n/a).\n`
+      : '') +
+    `Verify source and test bytes were restored exactly and set restoration_verified. pass = anticheat_clean AND the active primary-axis verdict AND restoration_verified AND (preservation_pass !== false). Quote every BOUNCE/REGRESSED line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
-  if (objectiveGatePassed(gate)) break
+  if (objectiveGatePassed(gate, efficacyMode)) break
   carry = gate ? gate.report : 'gate execution failed'
   log(`attempt ${attempt} bounced: ${carry.split('\n')[0]}`)
   // revert the failed edit so the next author starts from a known-green tree
@@ -301,7 +308,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   proposal = null
 }
 
-if (!proposal || !objectiveGatePassed(gate)) {
+if (!proposal || !objectiveGatePassed(gate, efficacyMode)) {
   // Terminal: un-sharpenable within the retry cap. Not a spin — record and stop (SPEC step 3).
   const rec = await recordOutcome('left-undone', null, null,
     `No proposal cleared the objective gate in ${MAX_RETRIES} attempts. Last bounce: ${carry}`)
@@ -412,16 +419,25 @@ async function recordOutcome(state, prop, reviewResult, extraNote) {
     : 'null (terminal outcome, no review reached)'
   const wantPr = canOpenPr && state === 'in-progress' && prop
   const axes = prop ? {
-    efficacy: { status: gate?.efficacy_pass ? 'pass' : 'fail', evidence: gate?.report ?? 'gate missing' },
-    conformance: {
-      status: 'pass', evidence: 'baseline reviewed against proposed assertions',
-      detail: { before: base.before, decisions: prop.proposals.map(p => p.change), diff: prop.diff },
-    },
+    ...(gate?.efficacy_pass == null ? {} : {
+      efficacy: {
+        status: gate.efficacy_pass ? 'pass' : 'fail', evidence: gate.report,
+        detail: { before: base.before.survival, after: null },
+      },
+    }),
+    ...(gate?.conformance_pass == null ? {} : {
+      conformance: {
+        status: gate.conformance_pass ? 'pass' : 'fail', evidence: gate.report,
+        detail: { before: base.before, decisions: prop.proposals.map(p => p.change), diff: prop.diff },
+      },
+    }),
     ...(gate?.preservation_pass == null ? {} : {
       preservation: { status: gate.preservation_pass ? 'pass' : 'fail', evidence: gate.report },
     }),
   } : {}
   const axesNotApplied = prop ? [
+    ...(gate?.efficacy_pass == null ? ['efficacy: no complete campaign DB'] : []),
+    ...(gate?.conformance_pass == null ? ['conformance: efficacy was the active primary axis'] : []),
     ...(gate?.preservation_pass == null
       ? ['preservation: no existing assertion changed']
       : []),

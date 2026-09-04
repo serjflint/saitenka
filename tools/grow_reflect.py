@@ -118,6 +118,7 @@ def reflection_id(record: dict) -> str:
             "trace_sha",
             "introspection",
             "finding_ids",
+            "findings_sha",
             "escalations",
             "loop_version",
         )
@@ -169,6 +170,7 @@ def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dic
         "trace": trace,
         "introspection": introspection,
         "finding_ids": [finding["finding_id"] for finding in prepared_findings],
+        "findings_sha": _canonical_sha(findings),
         "escalations": escalations,
         "loop_version": ledger.loop_version,
     }

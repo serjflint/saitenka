@@ -37,7 +37,8 @@ const proposal = {
 const gate = {
   pass: true,
   anticheat_clean: true,
-  efficacy_pass: true,
+  efficacy_pass: null,
+  conformance_pass: true,
   preservation_pass: null,
   restoration_verified: true,
   report: 'clean',
@@ -94,6 +95,7 @@ async function scenario(responses, args = {}) {
     pass: true,
     anticheat_clean: false,
     efficacy_pass: false,
+    conformance_pass: false,
     preservation_pass: false,
     restoration_verified: false,
     report: 'all arms failed',

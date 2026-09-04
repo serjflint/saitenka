@@ -420,6 +420,24 @@ def _run_preservation(args: argparse.Namespace) -> int:
     return 0 if rep.ok else 1
 
 
+def conformance_improved(before_actionable: int, after_actionable: int) -> bool:
+    return before_actionable > 0 and after_actionable < before_actionable
+
+
+def _run_conformance(args: argparse.Namespace) -> int:
+    import sharpen_ledger as sl
+    import sharpen_triage as st
+
+    test_map = sl.map_tests_to_modules(args.repo)
+    after = st.conformance_by_module(args.repo, test_map).get(args.module, (0, 0, 0))[1]
+    improved = conformance_improved(args.before_actionable, after)
+    print(
+        f"conformance: {'PASS' if improved else 'BOUNCE'} "
+        f"(actionable={args.before_actionable}->{after})"
+    )
+    return 0 if improved else 1
+
+
 def _main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -456,12 +474,21 @@ def _main() -> int:
     h.add_argument("--tests", nargs="+", required=True)
     h.add_argument("--repo", type=Path, default=Path.cwd())
 
+    c = sub.add_parser(
+        "conformance", help="require target-grounded actionable findings to decrease"
+    )
+    c.add_argument("--module", required=True, help="module key relative to src/saitenka")
+    c.add_argument("--before-actionable", type=int, required=True)
+    c.add_argument("--repo", type=Path, default=Path.cwd())
+
     args = p.parse_args()
     if args.cmd == "anticheat":
         return _run_anticheat(args)
     if args.cmd == "efficacy":
         return _run_efficacy(args)
-    return _run_preservation(args)
+    if args.cmd == "preserve":
+        return _run_preservation(args)
+    return _run_conformance(args)
 
 
 if __name__ == "__main__":

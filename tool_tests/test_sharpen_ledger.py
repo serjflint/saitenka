@@ -191,10 +191,34 @@ def test_in_progress_record_accepts_explicitly_unavailable_optional_axes(tmp_pat
             "state": "in-progress",
             "audited": AUDITED,
             "axes": {
-                "efficacy": AXES["efficacy"],
                 "conformance": AXES["conformance"],
             },
             "axes_not_applied": [
+                "efficacy: no complete campaign DB",
+                "preservation: no existing assertion changed",
+                "brittleness: certified probe is not implemented",
+                "redundancy: advisory analysis not run",
+            ],
+            "review": REVIEW,
+        },
+        root,
+        ledger,
+    )
+    assert prepared["state"] == "in-progress"
+
+
+def test_in_progress_record_accepts_efficacy_with_conformance_unavailable(tmp_path):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    prepared = sl.prepare_record(
+        {
+            "module": "app/foo.py",
+            "tests": TESTS,
+            "state": "in-progress",
+            "audited": AUDITED,
+            "axes": {"efficacy": AXES["efficacy"]},
+            "axes_not_applied": [
+                "conformance: efficacy was the active primary axis",
                 "preservation: no existing assertion changed",
                 "brittleness: certified probe is not implemented",
                 "redundancy: advisory analysis not run",

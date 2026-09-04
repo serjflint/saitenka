@@ -139,6 +139,7 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
         "trace": trace,
         "introspection": "fixture",
         "finding_ids": [],
+        "findings_sha": gl.gr._canonical_sha([]),
         "escalations": [],
         "loop_version": 1,
     }
