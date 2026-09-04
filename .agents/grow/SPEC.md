@@ -111,13 +111,15 @@ repowise steers SELECTION only
 4. **Subjective gate** (see *Review architecture*) — is the added power real and plainly explainable, or
    redundant / over-fit / a change-detector in disguise?
 5. **Product-bug branch** (see *Product bugs*) if the executor and both reviewers prove a real defect.
-6. **Record, act, finalize** — append an `open` receipt before any authorized PR/issue action. Only after
+6. **Reflect, record, act, finalize** — first obtain a durably appended isolated reflection receipt, then
+   bind it into the ledger record. A missing/failed reflection makes the run incomplete and cannot suppress
+   the coordinate. Append an `open` receipt before any authorized PR/issue action. Only after
    validating that receipt may the adapter act outward. Persist a non-empty PR result as `open` until its
    merge is verified; persist a created issue as `filed`. Failed/no-op outward action leaves the gap `open`.
    Dry runs and unclosable gaps record directly. A shippable change must still clear the **"worth a human's
    attention" bar**. Human merges.
-8. **Reflect** on the LOOP (every run — see *Self-reflection*): an isolated agent introspects the run
-   trace, files loop-improvement proposals, and escalates recurring ones. Advisory; never self-modifies.
+8. **Complete** only after reflection is recorded. The reflection's proposals remain advisory and never
+   self-modify the loop; its durable receipt is mandatory lifecycle evidence.
 
 ### Product bugs (green-trunk policy)
 
@@ -198,7 +200,7 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
   "dimension": "warm==cold@entry_cache",           // the under-specified axis
   "target_sha": "<hash of the TARGET SYMBOL's AST source, not the whole module>",
   "toolset_version": 3,
-  "contract_version": 8,
+  "contract_version": 11,
   "state": "open | closed | unclosable | filed | dry-run",
   "test": "tests/test_cache_race.py::test_...",
   "outcome": "coverage-only | bug | robustness | design",
@@ -220,23 +222,24 @@ A completed scenario map that finds no orphan appends a separate module-audit re
 ```jsonc
 { "audit_module": "app/subnav.py", "examined": "<iso>",
   "tests": ["tests/test_subnav_policy.py"], "audit_sha": "<module plus test tree>",
-  "toolset_version": 3, "contract_version": 8, "state": "no-gap",
+  "toolset_version": 3, "contract_version": 11, "state": "no-gap",
   "scenario_map_summary": "source replacement, policy, settle windows, failure, navigation" }
 ```
 
-`audit_status` is **audit-unseen** / **audited-current** / **stale-audit** / **stale-toolset**. Current
+`audit_status` is **audit-unseen** / **audited-current** / **stale-audit** / **stale-contract** /
+**stale-toolset**. Current
 no-gap audits are module-level triage exclusions only when current survivor/context evidence remains zero.
-Any byte change to the module or test tree, a toolset bump, or newly positive adequacy evidence reopens the
-audit. The conservative whole-test-tree hash prevents an omitted indirect test from creating a false
-permanent exclusion. This is not an `unclosable` gap: no semantic gap was claimed, so no target symbol or
-dimension is invented.
+Any byte change to the module or test tree, a lifecycle-contract or toolset bump, or newly positive
+adequacy evidence reopens the audit. The conservative whole-test-tree hash prevents an omitted indirect
+test from creating a false permanent exclusion. This is not an `unclosable` gap: no semantic gap was
+claimed, so no target symbol or dimension is invented.
 
 ## Self-reflection — every run introspects the LOOP (`tools/grow_reflect.py`)
 
 The loop's own thesis applied to itself: a green run proves nothing about whether the LOOP is any good. Both
 dogfood runs found real loop-design bugs the design docs missed (run 1 → 8 flaws under adversarial review;
-run 2 → the arm-1/arm-3 composition bug). So the final phase of *every* run — bounced, dropped, or
-no-candidate included, those are the richest lessons — is a **`Reflect`** step:
+run 2 → the arm-1/arm-3 composition bug). So every completed outcome — bounced, dropped, or no-candidate
+included, those are the richest lessons — passes a **`Reflect`** step before its Grow receipt:
 
 - **Isolated + evidence-based.** A fresh agent (it did not run the loop) receives only the factual **run
   trace** — which arms ran / bounced / were n-a, retries, review verdicts, outcome, notes — and reasons
@@ -245,6 +248,10 @@ no-candidate included, those are the richest lessons — is a **`Reflect`** step
   stage, a CLI that couldn't express what was needed, a fidelity gap), and **improves** (the smallest
   concrete change to a loop TOOL/SPEC/harness). If the run was clean it files NOTHING (anti-Goodhart — no
   manufactured findings).
+- **Durable lifecycle evidence.** `tools/grow_reflect.py append-run` writes a run receipt even when there
+  are no findings and returns its `reflection_id` plus `trace_sha`. Every invocation gets a monotonically
+  sequenced, content-bound receipt; `grow_ledger.py` verifies strict sequence uniqueness and refuses stale reuse except the single `open` → outward-evidence
+  finalization for the same gap. A filed issue gets a fresh reflection bound to the `filed` outcome.
 - **Advisory, never self-modifying.** It writes only `.reflection.grow.jsonl`; it MUST NOT edit any tool /
   spec / harness / product file. Self-modification is strictly more dangerous than the loop's test edits
   (which already never auto-merge) — a human triages every proposal. A proposal touching the reflection

@@ -1,8 +1,11 @@
 """Read/write library for the reflection ledger (`.reflection.grow.jsonl`, repo top level).
 
-Every Grow run ends with a self-reflection step (SPEC → *Self-reflection*): an isolated agent introspects
+Every completed Grow outcome passes a self-reflection step before its Grow receipt (SPEC →
+*Self-reflection*): an isolated agent introspects
 the run's trace, reflects on what was inefficient / wrong / suboptimal about the LOOP ITSELF, and files
 concrete improvement proposals here. It is **advisory** — it never edits the loop's tools; a human triages.
+The ledger also carries one deterministic `run-reflection` receipt per trace, including clean runs with no
+findings, so the Grow ledger can verify that reflection actually persisted.
 Both live runs so far found real loop-design bugs (run 1 → 8 flaws; run 2 → the arm-1/arm-3 composition
 bug), so this turns those accidental discoveries into a standing mechanism.
 
@@ -16,13 +19,12 @@ the human (or drafted as an issue) rather than sitting in the ledger.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import sys
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path  # annotation-only — grow_reflect never constructs a Path
+from pathlib import Path
 
 CATEGORIES = (
     "gate-composition",  # arms combined wrongly (e.g. AND where OR was right)
@@ -67,6 +69,19 @@ class ReflectionLedger:
     def _findings(self) -> list[dict]:
         return [r for r in self.lines if "finding_id" in r]
 
+    def run_receipt(self, reflection_id: str) -> dict | None:
+        for record in reversed(self.lines):
+            if (
+                record.get("type") == "run-reflection"
+                and record.get("reflection_id") == reflection_id
+            ):
+                return record
+        return None
+
+    def run_receipt_sequence_valid(self) -> bool:
+        receipts = [record for record in self.lines if record.get("type") == "run-reflection"]
+        return [record.get("sequence") for record in receipts] == list(range(1, len(receipts) + 1))
+
     def recurrence(self, fid: str) -> int:
         """How many times this finding has been filed AT THE CURRENT loop_version (a version bump — a
         landed loop-improvement — resets the count, so only findings that outlive the fix keep climbing)."""
@@ -88,3 +103,122 @@ class ReflectionLedger:
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         self.lines.append(record)
+
+
+def _canonical_sha(value: object) -> str:
+    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def reflection_id(record: dict) -> str:
+    core = {
+        key: record.get(key)
+        for key in (
+            "sequence",
+            "trace_sha",
+            "introspection",
+            "finding_ids",
+            "findings_sha",
+            "escalations",
+            "loop_version",
+        )
+    }
+    return _canonical_sha(core)[:16]
+
+
+def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dict]:
+    trace = record.get("trace")
+    if not isinstance(trace, dict):
+        raise TypeError("reflection requires a trace object")
+    introspection = record.get("introspection")
+    if not isinstance(introspection, str) or not introspection.strip():
+        raise ValueError("reflection requires non-empty introspection")
+    findings = record.get("findings")
+    escalations = record.get("escalations")
+    if not isinstance(findings, list) or not isinstance(escalations, list):
+        raise TypeError("reflection findings and escalations must be lists")
+    prepared_findings: list[dict] = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            raise TypeError("reflection finding must be an object")
+        category = finding.get("category")
+        subject = finding.get("subject")
+        if category not in CATEGORIES or not isinstance(subject, str) or not subject.strip():
+            raise ValueError("reflection finding has invalid category or subject")
+        if finding.get("severity") not in SEVERITIES:
+            raise ValueError("reflection finding has invalid severity")
+        for key in ("evidence", "proposal"):
+            if not isinstance(finding.get(key), str) or not finding[key].strip():
+                raise ValueError(f"reflection finding requires {key}")
+        if not isinstance(finding.get("self_referential"), bool):
+            raise TypeError("reflection finding requires self_referential")
+        prepared_findings.append(
+            {
+                **finding,
+                "finding_id": finding_id(category, subject),
+                "loop_version": ledger.loop_version,
+            }
+        )
+    if not all(isinstance(item, str) and item for item in escalations):
+        raise ValueError("reflection escalations must be non-empty strings")
+    trace_sha = _canonical_sha(trace)
+    sequence = sum(line.get("type") == "run-reflection" for line in ledger.lines) + 1
+    receipt = {
+        "type": "run-reflection",
+        "sequence": sequence,
+        "trace_sha": trace_sha,
+        "trace": trace,
+        "introspection": introspection,
+        "finding_ids": [finding["finding_id"] for finding in prepared_findings],
+        "findings_sha": _canonical_sha(findings),
+        "escalations": escalations,
+        "loop_version": ledger.loop_version,
+    }
+    receipt["reflection_id"] = reflection_id(receipt)
+    return prepared_findings, receipt
+
+
+def append_run(record: dict, ledger: ReflectionLedger) -> dict:
+    findings, receipt = prepare_run(record, ledger)
+    for finding in findings:
+        ledger.append(finding)
+    ledger.append(receipt)
+    return {
+        "reflection_id": receipt["reflection_id"],
+        "trace_sha": receipt["trace_sha"],
+        "introspection": receipt["introspection"],
+        "findings": record["findings"],
+        "appended": True,
+        "escalations": receipt["escalations"],
+    }
+
+
+def _main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ledger", type=Path, default=Path(".reflection.grow.jsonl"))
+    parser.add_argument("command", choices=("append-run",))
+    records = parser.add_mutually_exclusive_group(required=True)
+    records.add_argument("--record-json")
+    records.add_argument("--record-file", type=Path)
+    args = parser.parse_args()
+    if not args.ledger.exists():
+        args.ledger.write_text('{"type":"manifest","loop_version":1}\n', encoding="utf-8")
+    ledger = ReflectionLedger.load(args.ledger)
+    raw = args.record_file.read_text(encoding="utf-8") if args.record_file else args.record_json
+    record = json.loads(raw)
+    if not isinstance(record, dict):
+        raise TypeError("record must be a JSON object")
+    print(json.dumps(append_run(record, ledger), ensure_ascii=False))
+    return 0
+
+
+def main() -> int:
+    try:
+        return _main()
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        print(f"grow-reflect: error: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

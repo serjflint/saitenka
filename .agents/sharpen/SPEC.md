@@ -138,6 +138,8 @@ to a dry-run rather than risk sharpening a module under active work.
      module under test — a change-detector in disguise; also a Conformance-lint candidate).
    Off the mutation allowlist, removing or changing an assertion requires an exact-text preservation
    witness: the old test must kill the supplied source mutant and the proposal must keep killing it.
+   A run applies one primary axis: Efficacy when a complete campaign exists, otherwise Conformance;
+   the unavailable primary axis is recorded as not applied, never relabelled as passing.
 5. **Subjective gate** (see *Review architecture*) — is the benefit real and plainly explainable, or
    over-fitting in disguise?
 6. **Source-bug branch** (see *Source bugs*) if a sharpened test went red on a real defect.
@@ -281,14 +283,20 @@ record carries a global `toolset_version`. One record per module audit:
 { "module": "app/scoring.py",
   "audited": "<iso>", "source_sha": "<hash of module + its tests>",
   "toolset_version": 3,
-  "axes": { "survival": 0.0, "conformance": 0, "brittleness": 0, "redundancy": "advisory:2" },
+  "axes": {
+    "efficacy": {"status": "pass", "evidence": "no non-equivalent survivors"},
+    "conformance": {"status": "pass", "evidence": "zero violations"},
+    "preservation": {"status": "pass", "evidence": "negative control passed"},
+    "brittleness": {"status": "pass", "evidence": "zero witnesses"},
+    "redundancy": {"status": "advisory", "evidence": "two equivalent assertions"}
+  },
   "state": "sharpened | in-progress | blocked-on-bug | dry-run",
   "review": { "author": "<agent-id>", "skeptic": "<agent-id>", "judge": "<agent-id>",
               "skeptic_verdict": "UPHELD", "judge_verdict": "UPHELD", "verdict": "UPHELD" },
   "decisions": ["tightened test_mine to assert the note payload, not _cache"],
   "left-undone": ["3 equivalent survivors (str|None under __future__) — unkillable"],
   "grow-filed": ["#43"],
-  "axes-not-applied": ["crosshair — z3 env not built this run; TODO"] }
+  "axes_not_applied": [] }
 ```
 
 `grow-filed` lists the Grow issue ids a run handed off; triage skips a module while its gap is open
@@ -313,7 +321,9 @@ recently-changed modules first.
 
 - **Inner** (every audit): record `axes-not-applied` with the reason. This is the guard against the
   real failure it's named for — *the loop never ran crosshair/fuzz/arch until explicitly asked.* If an
-  axis was skippable, the ledger says so out loud.
+  axis was skippable, the ledger says so out loud. Records are accepted only through
+  `tools/sharpen_ledger.py append`, which owns the tree hash and contract version and rejects missing
+  axis evidence. Older contract records are stale and cannot suppress a new audit.
 - **Outer** (periodic "grill the loop"): re-derive the technique list from scratch against current
   tooling and the `poe` stack. A **meaningful** extension **bumps `toolset_version`** and invalidates
   the whole ledger — this includes **adding or removing an axis** (a new measurement dimension is a
@@ -321,6 +331,12 @@ recently-changed modules first.
   **No axis, instrument, or context source is added on plausibility** — only after a **frozen-baseline
   A/B** (pin a revision, run with and without, keep it only if it moves a signal). The `toolset_version`
   bump follows a *proven* change, never a hoped-for one.
+  The cadence is three completed module audits after the last current-toolset outer reflection.
+  `tools/sharpen_ledger.py reflection-status` is checked before triage and blocks a new audit when due.
+  Resume only after a human-provided decision is appended with `append-reflection`; the CLI requires the
+  findings, next actions, toolset decision, and a `source: human-provided` attestation. JSON cannot prove
+  who typed that attestation, so the adapter must obtain it from the host/user message; the ledger enforces
+  completeness and cadence, not cryptographic human identity.
 
 ## Cadence & cost
 

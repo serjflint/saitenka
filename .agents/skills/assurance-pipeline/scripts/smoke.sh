@@ -6,6 +6,9 @@ skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 test -f "$skill_dir/SKILL.md"
 test -f "$skill_dir/references/contract.md"
 test -f "$skill_dir/references/evidence-ledger.md"
+test -f "$skill_dir/references/completion.example.json"
+test -f "$skill_dir/references/packet.example.json"
+test -f "$skill_dir/scripts/verify_receipt.py"
 cd "$skill_dir/../../.."   # -> repo root
 fail=0
 have() { test -e "$1" || { echo "MISSING: $1"; fail=1; }; }
@@ -22,4 +25,5 @@ have .agents/skills/dev-gate/SKILL.md
 have .github/PULL_REQUEST_TEMPLATE.md
 have .agents/rules/searching.md
 have tools/skill_check.py
+uv run python "$skill_dir/scripts/verify_receipt.py" --self-test
 if [ "$fail" -eq 0 ]; then echo "assurance-pipeline smoke OK"; else echo "assurance-pipeline smoke FAILED"; exit 1; fi

@@ -1,5 +1,10 @@
 {
-  "version": 8,
+  "version": 11,
+  "lifecycle": {
+    "required_before_receipt": "Reflect",
+    "receipt_requires_reflection": true,
+    "description": "Every completed terminal outcome passes an isolated, durably appended reflection before any suppressive receipt."
+  },
   "gap": {
     "type": "object",
     "additionalProperties": false,
@@ -146,7 +151,7 @@
   "record": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["state", "outcome", "ledger_appended", "recorded_source", "recorded_target_symbol", "recorded_dimension", "recorded_gap_id", "recorded_target_sha", "recorded_toolset_version", "recorded_contract_version", "filing_blocker"],
+    "required": ["state", "outcome", "ledger_appended", "recorded_source", "recorded_target_symbol", "recorded_dimension", "recorded_gap_id", "recorded_target_sha", "recorded_toolset_version", "recorded_contract_version", "recorded_reflection", "filing_blocker"],
     "properties": {
       "state": {"type": "string", "enum": ["closed", "open", "unclosable", "filed", "dry-run"]},
       "outcome": {"type": ["string", "null"], "enum": ["coverage-only", "bug", "robustness", "design", null]},
@@ -158,6 +163,7 @@
       "recorded_target_sha": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
       "recorded_toolset_version": {"type": "integer", "minimum": 1},
       "recorded_contract_version": {"type": "integer"},
+      "recorded_reflection": {"type": "boolean"},
       "pr_url": {"type": ["string", "null"]},
       "filed_issues": {"type": "array", "items": {"type": "string"}},
       "filing_blocker": {"type": ["string", "null"], "description": "why a red-on-pristine bug was not filed in a dry run"},
@@ -167,14 +173,15 @@
   "audit_record": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["state", "ledger_appended", "recorded_audit_module", "recorded_audit_sha", "recorded_toolset_version", "recorded_contract_version"],
+    "required": ["state", "ledger_appended", "recorded_audit_module", "recorded_audit_sha", "recorded_toolset_version", "recorded_contract_version", "recorded_reflection"],
     "properties": {
       "state": {"type": "string", "enum": ["no-gap"]},
       "ledger_appended": {"type": "boolean"},
       "recorded_audit_module": {"type": "string"},
       "recorded_audit_sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
       "recorded_toolset_version": {"type": "integer", "minimum": 1},
-      "recorded_contract_version": {"type": "integer"}
+      "recorded_contract_version": {"type": "integer"},
+      "recorded_reflection": {"type": "boolean"}
     }
   },
   "outward": {
@@ -189,8 +196,10 @@
   "reflection": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["introspection", "findings", "appended", "escalations"],
+    "required": ["reflection_id", "trace_sha", "introspection", "findings", "appended", "escalations"],
     "properties": {
+      "reflection_id": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+      "trace_sha": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
       "introspection": {"type": "string", "description": "plainly what the loop did this run, from the trace"},
       "findings": {
         "type": "array",
@@ -208,7 +217,7 @@
           }
         }
       },
-      "appended": {"type": "boolean", "description": "findings written to .reflection.grow.jsonl"},
+      "appended": {"type": "boolean", "description": "the durable run-reflection receipt was written to .reflection.grow.jsonl"},
       "escalations": {"type": "array", "items": {"type": "string"}, "description": "subjects at recurrence >= 2 (human triages)"}
     }
   }

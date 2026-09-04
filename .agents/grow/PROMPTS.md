@@ -116,8 +116,8 @@ failure reverts the test, records a dry-run, and opens no PR.
 When Select completes a scenario map but returns no orphan, append `{audit_module, tests, state: "no-gap",
 examined, contract_version, scenario_map_summary}` through the same CLI. The CLI computes `audit_sha` and
 `toolset_version`; do not manufacture a semantic gap identity. A current audit prevents immediate repeat
-selection and reopens when the module, test tree, or toolset changes. New positive survivor/context
-evidence overrides the receipt immediately.
+selection and reopens when the module, test tree, lifecycle contract, or toolset changes. New positive
+survivor/context evidence overrides the receipt immediately.
 
 ## Reflect (self-reflection on the LOOP — every run)
 
@@ -129,9 +129,10 @@ evidence overrides the receipt immediately.
 > needed, a fidelity gap)? Be adversarial toward the loop; cite trace signals as evidence. If the run was
 > clean, file NOTHING — never manufacture findings. (3) IMPROVE — the smallest concrete change to a loop
 > TOOL/SPEC/harness (never product code); `self_referential=true` if it touches the reflection machinery.
-> Then APPEND each finding to `.reflection.grow.jsonl` (via `tools/grow_reflect.py`). **First read the
+> Then persist the full run through `tools/grow_reflect.py append-run`; it writes a run receipt even when
+> no findings exist and returns the `reflection_id` and `trace_sha` that the Grow record must bind. **First read the
 > existing findings**: recurrence keys on `finding_id = hash(category, subject)`, so if this run's weakness
 > is the same root cause as one already recorded, REUSE that record's exact `category` + `subject` verbatim
 > (else the id won't match and recurrence can't accumulate); mint a new subject only for a genuinely new
 > weakness. Report subjects at recurrence ≥ 2 as escalations. ADVISORY ONLY — the ledger is the sole write;
-> edit no tool/spec/harness/product file; open no issue/PR.
+> edit no tool/spec/harness/product file; open no issue/PR. Never claim `appended=true` without the CLI receipt.

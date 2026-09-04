@@ -29,7 +29,10 @@ Read `.agents/sharpen/GUIDE.md` only when explaining the design or adjudicating 
 ## Execute with Codex
 
 1. Work in a clean, dedicated git worktree. Keep every command relative to that worktree.
-2. Run selection, baseline checks, lint, gates, hashing, and ledger operations directly with shell tools from the repository root. Do not delegate deterministic commands to an agent.
+2. Run `uv run python tools/sharpen_ledger.py reflection-status` before triage. If due, stop before a
+   module audit and obtain the outer reflection's explicit human decision; record it only through
+   `append-reflection`. Run selection, baseline checks, lint, gates, hashing, and ledger operations
+   directly with shell tools from the repository root. Do not delegate deterministic commands to an agent.
 3. Stop before authoring when triage has neither a target-grounded actionable finding nor a complete
    campaign survivor. Ledger a `dry-run` when the baseline is red/flaky, the open-PR exclusion is
    unavailable, or reviewer fidelity cannot be proven.
@@ -47,7 +50,10 @@ Read `.agents/sharpen/GUIDE.md` only when explaining the design or adjudicating 
    Never apply it in the same run; route `outside-sharpen` work for separate maintainer authorization.
 10. When `openPr=true`, run `uv run poe all` after the reviews and before opening the ready PR. A failure
     forces a dry-run/no-PR result.
-11. Record actual invocation ids, both individual verdicts, and the final verdict. If the host exposes no invocation identity or cannot create fresh contexts, record `state: dry-run` and no valid review block.
+11. Record actual invocation ids, both individual verdicts, final verdict, axis evidence, and every
+    `axes_not_applied` reason through `tools/sharpen_ledger.py append`. Validate the CLI-owned module hash,
+    toolset version, and contract version before any outward action. If the host exposes no invocation
+    identity or cannot create fresh contexts, record `state: dry-run` and no valid review block.
 12. In dry-run mode, revert the test edit after capturing its diff; leave only the ledger append.
 
 Use the host's equivalent of a context-free subagent invocation. In Codex environments that expose `spawn_agent`, use `fork_turns="none"`; run author, skeptic, and judge sequentially because they share the worktree.

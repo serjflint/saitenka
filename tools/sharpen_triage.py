@@ -156,8 +156,15 @@ def open_pr_paths(root: Path) -> set[str]:
 
 def survival_from_ledger(ledger: sl.Ledger, module: str) -> float | None:
     rec = ledger.latest(module)
-    if rec and isinstance(rec.get("axes", {}).get("survival"), dict):
-        return rec["axes"]["survival"].get("after")
+    if not rec:
+        return None
+    axes = rec.get("axes", {})
+    if isinstance(axes.get("survival"), dict):
+        return axes["survival"].get("after")
+    efficacy = axes.get("efficacy")
+    if isinstance(efficacy, dict) and isinstance(efficacy.get("detail"), dict):
+        detail = efficacy["detail"]
+        return detail.get("after") if detail.get("after") is not None else detail.get("before")
     return None
 
 

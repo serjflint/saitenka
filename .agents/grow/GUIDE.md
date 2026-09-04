@@ -124,7 +124,8 @@ a real change to the target reopens it. This is implemented in `tools/grow_ledge
 
 A completed scenario map with no orphan is also terminal evidence. It records a module audit hashed over
 the module and test tree, so triage skips the unchanged inspection without inventing a semantic gap;
-changing either side or the toolset reopens it, and newly positive adequacy evidence overrides it.
+changing either side, the lifecycle contract, or the toolset reopens it, and newly positive adequacy
+evidence overrides it.
 
 ## Anti-bloat — Grow's characteristic hazard
 
@@ -143,12 +144,13 @@ provenance block; no valid block ⇒ `dry-run`, never a PR. The maintainer appro
 ## The loop reflects on itself — every run
 
 A green run says nothing about whether the *loop* is any good — the same reframe the loop applies to tests,
-turned on itself. So every run ends with a **Reflect** phase: an isolated agent reads the run's factual
+turned on itself. So every completed run passes a **Reflect** phase before its receipt: an isolated agent reads the run's factual
 trace (which arms ran/bounced/were n-a, retries, review verdicts, outcome) and asks "what about the LOOP was
 wrong or inefficient here?" — filing concrete improvement proposals to `.reflection.grow.jsonl`. It is
 **advisory only**: it never edits the loop's own code (self-modification is more dangerous than the loop's
 test edits, which already never auto-merge — a human triages). Findings that recur across runs escalate; a
-landed loop-improvement bumps `loop_version` and resets the count. This is how the dogfooding that found the
+landed loop-improvement bumps `loop_version` and resets the count. A failed reflection leaves the run
+incomplete and writes no suppressive receipt. This is how the dogfooding that found the
 8 review flaws and the arm-1/arm-3 bug becomes a standing mechanism rather than a lucky accident.
 
 ## References

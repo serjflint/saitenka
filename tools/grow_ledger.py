@@ -21,11 +21,15 @@ import argparse
 import ast
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import grow_reflect as gr
+
 SRC = "src/saitenka"  # module keys are relative to here (matching the sharpen ledger)
+CONTRACT_VERSION = 11
 
 # Gap status against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never examined → a candidate
@@ -35,8 +39,133 @@ STALE_TARGET = "stale-target"  # the target symbol changed since → reopen
 STALE_TOOLSET = "stale-toolset"  # toolset_version bumped → whole ledger re-examines
 UNCLOSABLE = "unclosable"  # recorded infeasible (equivalent mutant / infeasible config) → SKIP
 AUDIT_UNSEEN = "audit-unseen"
-AUDITED_CURRENT = "audited-current"  # no orphan found, module/tests unchanged → SKIP
-STALE_AUDIT = "stale-audit"  # module or mapped tests changed → re-audit
+AUDITED_CURRENT = "audited-current"  # no orphan found, module/test tree unchanged → SKIP
+STALE_AUDIT = "stale-audit"  # module or test tree changed → re-audit
+STALE_CONTRACT = "stale-contract"  # audit predates the current lifecycle contract → re-audit
+
+
+def _validate_reflection(record: dict, root: Path) -> None:
+    reflection = record.get("reflection")
+    if not isinstance(reflection, dict):
+        raise TypeError("record requires a reflection receipt")
+    if (
+        not isinstance(reflection.get("introspection"), str)
+        or not reflection["introspection"].strip()
+    ):
+        raise ValueError("reflection requires non-empty introspection")
+    if reflection.get("appended") is not True:
+        raise ValueError("reflection must be durably appended before the record")
+    if not isinstance(reflection.get("findings"), list) or not isinstance(
+        reflection.get("escalations"), list
+    ):
+        raise TypeError("reflection findings and escalations must be lists")
+    reflection_id = reflection.get("reflection_id")
+    trace_sha = reflection.get("trace_sha")
+    if not isinstance(reflection_id, str) or not re.fullmatch(r"[0-9a-f]{16}", reflection_id):
+        raise ValueError("reflection requires a valid reflection_id")
+    if not isinstance(trace_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", trace_sha):
+        raise ValueError("reflection requires a valid trace_sha")
+    ledger = gr.ReflectionLedger.load(root / ".reflection.grow.jsonl")
+    persisted = ledger.run_receipt(reflection_id)
+    if persisted is None or persisted.get("trace_sha") != trace_sha:
+        raise ValueError("reflection receipt is not present in .reflection.grow.jsonl")
+    if not ledger.run_receipt_sequence_valid():
+        raise ValueError("reflection receipt sequence is not unique and monotonic")
+    if gr.reflection_id(persisted) != reflection_id:
+        raise ValueError("reflection receipt identity differs from its durable content")
+    if not isinstance(persisted.get("sequence"), int) or persisted["sequence"] < 1:
+        raise ValueError("reflection receipt predates unique invocation sequencing")
+    if gr._canonical_sha(persisted.get("trace")) != trace_sha:
+        raise ValueError("reflection trace differs from its durable digest")
+    expected_findings = [
+        gr.finding_id(finding.get("category", ""), finding.get("subject", ""))
+        for finding in reflection["findings"]
+    ]
+    if (
+        persisted.get("introspection") != reflection["introspection"]
+        or persisted.get("finding_ids") != expected_findings
+        or persisted.get("findings_sha") != gr._canonical_sha(reflection["findings"])
+        or persisted.get("escalations") != reflection["escalations"]
+    ):
+        raise ValueError("reflection payload differs from its durable receipt")
+    trace_gap = persisted.get("trace", {}).get("gap", {})
+    expected_target = record.get("target_symbol")
+    if expected_target:
+        expected_gap = {
+            "source": record.get("source"),
+            "target_symbol": expected_target,
+            "dimension": record.get("dimension"),
+        }
+        if any(trace_gap.get(key) != value for key, value in expected_gap.items()):
+            raise ValueError("reflection receipt belongs to a different Grow gap")
+        if persisted.get("trace", {}).get("outcome") != record.get("state"):
+            raise ValueError("reflection receipt belongs to a different Grow outcome")
+        if trace_gap.get("selection_outcome") != "gap" or trace_gap.get("found") is not True:
+            raise ValueError("reflection receipt did not select a Grow gap")
+    expected_module = record.get("audit_module")
+    if expected_module:
+        expected_tests = sorted(record.get("tests", []))
+        if (
+            trace_gap.get("module") != expected_module
+            or trace_gap.get("selection_outcome") != "no-orphan"
+            or trace_gap.get("found") is not False
+            or trace_gap.get("target_symbol") is not None
+            or trace_gap.get("dimension") is not None
+            or sorted(trace_gap.get("tests", [])) != expected_tests
+            or persisted.get("trace", {}).get("outcome") != "no-gap"
+        ):
+            raise ValueError("reflection receipt belongs to a different module audit")
+
+
+def _has_valid_review(record: dict) -> bool:
+    review = record.get("review")
+    if not isinstance(review, dict):
+        return False
+    identities = [review.get(key) for key in ("author", "skeptic", "judge")]
+    normalized = {
+        item.strip().casefold() for item in identities if isinstance(item, str) and item.strip()
+    }
+    return len(normalized) == 3 and all(
+        review.get(key) == "UPHELD" for key in ("skeptic_verdict", "judge_verdict", "verdict")
+    )
+
+
+def _has_valid_reflection(record: dict, root: Path) -> bool:
+    try:
+        _validate_reflection(record, root)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        return False
+    return True
+
+
+def _reflection_id(record: dict) -> object:
+    reflection = record.get("reflection")
+    return reflection.get("reflection_id") if isinstance(reflection, dict) else None
+
+
+def _has_outward_evidence(record: dict) -> bool:
+    return bool(record.get("pr_url") or record.get("filed") or record.get("grow-filed"))
+
+
+def _reflection_use_allowed(record: dict, prior: list[dict], *, audit: bool) -> bool:
+    filed = bool(record.get("filed") or record.get("grow-filed"))
+    if filed != (record.get("state") == "filed"):
+        return False
+    if not prior:
+        return True
+    if audit or len(prior) != 1:
+        return False
+    previous = prior[0]
+    same_gap = all(
+        previous.get(key) == record.get(key) for key in ("source", "target_symbol", "dimension")
+    )
+    return bool(
+        same_gap
+        and previous.get("state") == "open"
+        and not _has_outward_evidence(previous)
+        and record.get("state") in {"open", "filed"}
+        and _has_outward_evidence(record)
+    )
 
 
 def gap_id(source: str, target_symbol: str, dimension: str) -> str:
@@ -59,7 +188,7 @@ def _symbol_nodes(module_src: str, symbol: str) -> list[ast.AST]:
         if node is None:
             raise KeyError(symbol)
         body = node.body
-    nodes = [n for n in body if isinstance(n, _DEFS) and n.name == last]
+    nodes: list[ast.AST] = [n for n in body if isinstance(n, _DEFS) and n.name == last]
     if not nodes:
         raise KeyError(symbol)
     return nodes
@@ -122,6 +251,49 @@ class Ledger:
     def _audit_records(self) -> list[dict]:
         return [r for r in self.lines if "audit_module" in r and "audit_sha" in r]
 
+    def _prior_gap_record_valid(self, record: dict, root: Path) -> bool:
+        if (
+            record.get("contract_version") != CONTRACT_VERSION
+            or record.get("toolset_version") != self.toolset_version
+            or not _has_valid_reflection(record, root)
+        ):
+            return False
+        source = record.get("source")
+        target = record.get("target_symbol")
+        dimension = record.get("dimension")
+        if not all(isinstance(value, str) and value for value in (source, target, dimension)):
+            return False
+        module_key, separator, symbol = target.partition("::")
+        if not separator or record.get("gap_id") != gap_id(source, target, dimension):
+            return False
+        try:
+            module_src = (root / SRC / module_key).read_text(encoding="utf-8")
+            return record.get("target_sha") == target_sha(module_src, symbol)
+        except (FileNotFoundError, KeyError, SyntaxError):
+            return False
+
+    def reflection_use_valid(self, record: dict, root: Path, *, audit: bool) -> bool:
+        index = next(i for i, candidate in enumerate(self.lines) if candidate is record)
+        reflection_id = _reflection_id(record)
+        prior = [
+            candidate
+            for candidate in self.lines[:index]
+            if _reflection_id(candidate) == reflection_id
+        ]
+        return _reflection_use_allowed(record, prior, audit=audit) and (
+            not prior or self._prior_gap_record_valid(prior[0], root)
+        )
+
+    def validate_new_reflection_use(self, record: dict, root: Path, *, audit: bool) -> None:
+        reflection_id = _reflection_id(record)
+        prior = [
+            candidate for candidate in self.lines if _reflection_id(candidate) == reflection_id
+        ]
+        if not _reflection_use_allowed(record, prior, audit=audit) or (
+            prior and not self._prior_gap_record_valid(prior[0], root)
+        ):
+            raise ValueError("reflection receipt was already consumed by another Grow outcome")
+
     def latest(self, gap: str) -> dict | None:
         """The most recent record for a gap (records are chronological)."""
         for r in reversed(self._gap_records()):
@@ -142,6 +314,12 @@ class Ledger:
             return AUDIT_UNSEEN
         if int(record.get("toolset_version", 1)) != self.toolset_version:
             return STALE_TOOLSET
+        if record.get("contract_version") != CONTRACT_VERSION:
+            return STALE_CONTRACT
+        if not _has_valid_reflection(record, root):
+            return STALE_CONTRACT
+        if not self.reflection_use_valid(record, root, audit=True):
+            return STALE_CONTRACT
         try:
             current = audit_sha(root, module_key)
         except FileNotFoundError:
@@ -158,6 +336,14 @@ class Ledger:
             return UNSEEN
         if int(rec.get("toolset_version", 1)) != self.toolset_version:
             return STALE_TOOLSET
+        if rec.get("contract_version") != CONTRACT_VERSION:
+            return STALE_CONTRACT
+        if not _has_valid_reflection(rec, root):
+            return STALE_CONTRACT
+        if not self.reflection_use_valid(rec, root, audit=False):
+            return STALE_CONTRACT
+        if rec.get("state") == "closed" and not _has_valid_review(rec):
+            return STALE_CONTRACT
         module_key, _, symbol = rec.get("target_symbol", "").partition("::")
         try:
             src = (root / SRC / module_key).read_text(encoding="utf-8")
@@ -177,9 +363,10 @@ class Ledger:
         """`gap_id -> [product issue refs]` from each gap's latest record (open-ness checked by triage).
         The reverse of Sharpen's grow-filed handshake — gaps Grow found that need a product fix."""
         out: dict[str, list[str]] = {}
-        for r in self._gap_records():
+        latest = {record["gap_id"]: record for record in self._gap_records()}
+        for r in latest.values():
             ids = r.get("filed") or r.get("grow-filed") or []
-            if ids:
+            if ids and r.get("state") == "filed":
                 out[r["gap_id"]] = list(ids)
         return out
 
@@ -189,13 +376,24 @@ class Ledger:
         self.lines.append(record)
 
 
-def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
+def prepare_record(
+    record: dict, root: Path, ledger: Ledger, *, require_reflection: bool = False
+) -> dict:
     """Fill the semantic identity fields a loop record must not hand-calculate."""
     source = record.get("source")
     target_symbol = record.get("target_symbol")
     dimension = record.get("dimension")
-    if not all(isinstance(value, str) and value for value in (source, target_symbol, dimension)):
+    if not isinstance(source, str) or not source:
         raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    if not isinstance(target_symbol, str) or not target_symbol:
+        raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    if not isinstance(dimension, str) or not dimension:
+        raise ValueError("record requires non-empty source, target_symbol, and dimension")
+    if require_reflection:
+        _validate_reflection(record, root)
+        ledger.validate_new_reflection_use(record, root, audit=False)
+    if record.get("state") == "closed" and not _has_valid_review(record):
+        raise ValueError("closed record requires three distinct review identities and UPHELD votes")
     module_key, separator, symbol = target_symbol.partition("::")
     if not separator or not module_key or not symbol:
         raise ValueError("target_symbol must be module_key::dotted.symbol")
@@ -210,6 +408,8 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
     prepared["gap_id"] = gap_id(source, target_symbol, dimension)
     prepared["target_sha"] = target_sha(module_src, symbol)
     prepared["toolset_version"] = ledger.toolset_version
+    if require_reflection:
+        prepared["contract_version"] = CONTRACT_VERSION
     return prepared
 
 
@@ -246,10 +446,13 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
             or test_path.suffix != ".py"
         ):
             raise ValueError("audit tests must be existing test_*.py files")
+    _validate_reflection(record, root)
+    ledger.validate_new_reflection_use(record, root, audit=True)
     prepared = dict(record)
     prepared["tests"] = sorted(test_files)
     prepared["audit_sha"] = audit_sha(root, module_key)
     prepared["toolset_version"] = ledger.toolset_version
+    prepared["contract_version"] = CONTRACT_VERSION
     return prepared
 
 
@@ -296,7 +499,7 @@ def _main() -> int:
     prepared = (
         prepare_audit_record(record, root, ledger)
         if "audit_module" in record
-        else prepare_record(record, root, ledger)
+        else prepare_record(record, root, ledger, require_reflection=True)
     )
     ledger.append(prepared)
     print(json.dumps(prepared, ensure_ascii=False))

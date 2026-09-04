@@ -137,6 +137,18 @@ resume `contribute` publish-only to verify the unchanged head/packet/gates/revie
 it makes no artifact edit and launches no new review unless that validation fails. Preserve residual risks
 and follow-ups without smuggling them into the current scope.
 
+Materialize the frozen packet and completion receipt from
+[`references/packet.example.json`](references/packet.example.json) and
+[`references/completion.example.json`](references/completion.example.json), then run
+`uv run python .agents/skills/assurance-pipeline/scripts/verify_receipt.py <receipt.json>`. The pipeline is not
+complete unless this validator exits zero. It fail-closes stage order, the human checkpoint,
+prepare-only/publish-only separation, both completed read-only reviewers, and their pre/post binding to
+the same head, diff, packet, tree, and index. It parses the packet contract and recomputes the current HEAD,
+tree, index, canonical diff, frozen-packet digest, and full status including untracked files. The
+`--self-test` mode accepts no caller receipt and validates only the checked-in smoke fixture. Local receipt
+validation is tamper-evidence, not an external attestation that a human or command existed; host-issued
+identity and execution evidence remain host responsibilities.
+
 ## Verify
 
-`bash scripts/smoke.sh` (grep-free).
+`bash scripts/smoke.sh` (grep-free). Validate each real completion receipt with `scripts/verify_receipt.py`.

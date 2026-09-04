@@ -56,7 +56,7 @@ const gate = {
   report: 'context bounced; growth passed',
 }
 const upheld = { verdict: 'UPHELD', grounds: [], redundant_with: null, better_fix: null }
-const reflection = { introspection: 'fixture', findings: [], appended: true, escalations: [] }
+const reflection = { reflection_id: 'a'.repeat(16), trace_sha: 'b'.repeat(64), introspection: 'fixture', findings: [], appended: true, escalations: [] }
 const receipt = {
   ledger_appended: true,
   recorded_source: gap.source,
@@ -65,7 +65,8 @@ const receipt = {
   recorded_gap_id: '0123456789abcdef',
   recorded_target_sha: 'fedcba9876543210',
   recorded_toolset_version: 1,
-  recorded_contract_version: 8,
+  recorded_contract_version: 11,
+  recorded_reflection: true,
 }
 const pristinePass = { status: 'pass', report: 'requested nodes passed' }
 const additivePass = { pass: true, report: 'additive only' }
@@ -82,6 +83,9 @@ async function scenario(responses, args = { openPr: true }) {
     return responses[label]
   }
   const result = await runHarness(args, (name) => phases.push(name), agent, () => {})
+  assert.ok(calls.some(({ label }) => label === 'reflect'), 'every completed path must reflect')
+  const recordIndex = calls.findIndex(({ label }) => label === 'record' || label === 'record-no-gap')
+  if (recordIndex >= 0) assert.ok(calls.findIndex(({ label }) => label === 'reflect') < recordIndex)
   return { calls, phases, result }
 }
 
@@ -100,11 +104,13 @@ async function scenario(responses, args = { openPr: true }) {
     recorded_audit_module: noGap.module,
     recorded_audit_sha: 'a'.repeat(64),
     recorded_toolset_version: 3,
-    recorded_contract_version: 8,
+    recorded_contract_version: 11,
+    recorded_reflection: true,
   }
   const result = await scenario({ triage: noGap, 'record-no-gap': audit, reflect: reflection }, { openPr: false })
   assert.equal(result.result.audit.recorded_audit_module, noGap.module)
   assert.match(result.calls.find(({ label }) => label === 'record-no-gap').prompt, /state:"no-gap"/)
+  assert.ok(result.calls.findIndex(({ label }) => label === 'reflect') < result.calls.findIndex(({ label }) => label === 'record-no-gap'))
 }
 
 {
@@ -344,6 +350,26 @@ async function scenario(responses, args = { openPr: true }) {
     triage: gap,
     'test-design': design,
     'author#1': proposal,
+    'pristine#1': { status: 'test-failure', report: 'production raised ValueError' },
+    'bug-skeptic': { verdict: 'UPHELD', grounds: ['valid observable oracle'] },
+    'bug-judge': { verdict: 'UPHELD', grounds: ['unexpected CUT exception'] },
+    revert: undefined,
+    record: { state: 'open', outcome: 'bug', ...receipt, pr_url: null, filed_issues: [], filing_blocker: null, note: '' },
+    outward: { pr_url: null, filed_issues: ['#123'] },
+    finalize: { state: 'filed', outcome: 'bug', ...receipt, pr_url: null, filed_issues: ['#123'], filing_blocker: null, note: '' },
+    reflect: reflection,
+  })
+  const reflections = result.calls.filter(({ label }) => label === 'reflect')
+  assert.equal(reflections.length, 2)
+  assert.match(reflections[1].prompt, /"outcome": "filed"/)
+  assert.equal(result.result.state, 'filed')
+}
+
+{
+  const result = await scenario({
+    triage: gap,
+    'test-design': design,
+    'author#1': proposal,
     'gate#1': gate,
     skeptic: upheld,
     judge: upheld,
@@ -463,11 +489,10 @@ async function scenario(responses, args = { openPr: true }) {
     record: { state: 'open', outcome: 'bug', ...receipt, pr_url: null, filed_issues: [], filing_blocker: null, note: '' },
     outward: { pr_url: null, filed_issues: ['#123'] },
     finalize: { state: 'filed', outcome: 'bug', ...receipt, recorded_gap_id: '2222222222222222', pr_url: null, filed_issues: ['#123'], filing_blocker: null, note: '' },
-    recover: { state: 'open', outcome: 'bug', ...receipt, pr_url: null, filed_issues: ['#123'], filing_blocker: null, note: '' },
     reflect: reflection,
   })
   assert.equal(result.result.state, 'open')
-  assert.ok(result.calls.some(({ label }) => label === 'recover'))
+  assert.ok(!result.calls.some(({ label }) => label === 'recover'))
   const outwardPrompt = result.calls.find(({ label }) => label === 'outward').prompt
   assert.match(outwardPrompt, /production raised ValueError/)
   assert.match(outwardPrompt, /fixture diff/)
