@@ -140,6 +140,7 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
         + json.dumps(
             {
                 "type": "run-reflection",
+                "sequence": 1,
                 "reflection_id": REFLECTION["reflection_id"],
                 "trace_sha": REFLECTION["trace_sha"],
                 "trace": GAP_TRACE,
@@ -153,6 +154,7 @@ def _repo(tmp_path: Path, module_src: str = MODULE_V1) -> Path:
         + json.dumps(
             {
                 "type": "run-reflection",
+                "sequence": 2,
                 "reflection_id": AUDIT_REFLECTION["reflection_id"],
                 "trace_sha": AUDIT_REFLECTION["trace_sha"],
                 "trace": AUDIT_TRACE,
@@ -195,6 +197,18 @@ def _ledger(root: Path, records: list[dict]) -> gl.Ledger:
     p = root / ".ledger.grow.jsonl"
     p.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
     return gl.Ledger.load(p)
+
+
+def _reflection_for_state(root: Path, state: str) -> dict:
+    reflection_path = root / ".reflection.grow.jsonl"
+    lines = [json.loads(line) for line in reflection_path.read_text().splitlines()]
+    lines[1]["trace"] = {**GAP_TRACE, "outcome": state}
+    trace_sha = gl.gr._canonical_sha(lines[1]["trace"])
+    lines[1]["trace_sha"] = trace_sha
+    reflection_path.write_text(
+        "".join(json.dumps(record) + "\n" for record in lines), encoding="utf-8"
+    )
+    return {**REFLECTION, "trace_sha": trace_sha}
 
 
 def _rec(*, state: str, module_src: str = MODULE_V1, **extra) -> dict:
@@ -476,6 +490,95 @@ def test_prepare_record_rejects_a_tampered_durable_trace(tmp_path):
             ledger,
             require_reflection=True,
         )
+
+
+def test_prepare_record_rejects_a_consumed_reflection(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    first = gl.prepare_record(
+        {
+            "source": "invariant",
+            "target_symbol": "app/x.py::crisp",
+            "dimension": "scale=2.0",
+            "state": "closed",
+            "reflection": REFLECTION,
+            "review": REVIEW,
+        },
+        root,
+        ledger,
+        require_reflection=True,
+    )
+    ledger.append(first)
+
+    with pytest.raises(ValueError, match="already consumed"):
+        gl.prepare_record(
+            {
+                "source": "invariant",
+                "target_symbol": "app/x.py::crisp",
+                "dimension": "scale=2.0",
+                "state": "closed",
+                "reflection": REFLECTION,
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+            require_reflection=True,
+        )
+
+
+def test_open_receipt_allows_one_outward_evidence_finalization(tmp_path):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    open_reflection = _reflection_for_state(root, "open")
+    initial = gl.prepare_record(
+        {
+            "source": "invariant",
+            "target_symbol": "app/x.py::crisp",
+            "dimension": "scale=2.0",
+            "state": "open",
+            "reflection": open_reflection,
+        },
+        root,
+        ledger,
+        require_reflection=True,
+    )
+    ledger.append(initial)
+
+    final = gl.prepare_record(
+        {
+            "source": "invariant",
+            "target_symbol": "app/x.py::crisp",
+            "dimension": "scale=2.0",
+            "state": "open",
+            "pr_url": "https://example.invalid/pr/1",
+            "reflection": open_reflection,
+        },
+        root,
+        ledger,
+        require_reflection=True,
+    )
+    ledger.append(final)
+
+    assert ledger.status(final["gap_id"], root) == gl.OPEN
+
+
+def test_no_gap_audit_rejects_a_consumed_reflection(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    record = {
+        "audit_module": "app/x.py",
+        "tests": ["tests/test_x.py"],
+        "state": "no-gap",
+        "reflection": AUDIT_REFLECTION,
+    }
+    ledger.append(gl.prepare_audit_record(record, root, ledger))
+
+    with pytest.raises(ValueError, match="already consumed"):
+        gl.prepare_audit_record(record, root, ledger)
 
 
 def test_prepare_record_rejects_reflection_from_another_dimension(tmp_path):

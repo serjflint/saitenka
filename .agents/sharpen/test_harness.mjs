@@ -34,7 +34,14 @@ const proposal = {
   proposals: [{ target_test: 'test_example', axis: 'Conformance', change: 'assert output', rationale: 'fixture' }],
 }
 
-const gate = { pass: true, anticheat_clean: true, efficacy_pass: true, report: 'clean' }
+const gate = {
+  pass: true,
+  anticheat_clean: true,
+  efficacy_pass: true,
+  preservation_pass: null,
+  restoration_verified: true,
+  report: 'clean',
+}
 const receipt = (state) => ({
   state,
   ledger_appended: true,
@@ -76,6 +83,29 @@ async function scenario(responses, args = {}) {
   assert.ok(labels.indexOf('record') < labels.indexOf('outward'))
   assert.match(result.calls.find(({ label }) => label === 'ship-gate').prompt, /uv run poe all/)
   assert.equal(result.result.pr, 'https://example.invalid/pr/1')
+}
+
+{
+  const lyingGate = {
+    pass: true,
+    anticheat_clean: false,
+    efficacy_pass: false,
+    preservation_pass: false,
+    restoration_verified: false,
+    report: 'all arms failed',
+  }
+  const result = await scenario({
+    triage: pick,
+    baseline: green,
+    'author#1': proposal,
+    'gate#1': lyingGate,
+    'revert#1': undefined,
+    record: receipt('left-undone'),
+  }, { openPr: true, maxRetries: 1 })
+  const labels = result.calls.map(({ label }) => label)
+  assert.ok(labels.includes('revert#1'))
+  assert.ok(!labels.includes('skeptic') && !labels.includes('outward'))
+  assert.equal(result.result.state, 'left-undone')
 }
 
 {

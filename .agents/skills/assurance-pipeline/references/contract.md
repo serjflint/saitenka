@@ -114,6 +114,7 @@ An **artifact result** is complete only when:
 
 - the final scenario trace has no contradictory generation, identity, policy, or ordering among its owners;
 - every mechanism claimed necessary has direct proof or a recorded non-applicability reason;
+- an artifact has at least one proved mechanism; an all-not-applicable matrix is a no-change signal;
 - all temporary perturbations restored exact bytes;
 - repository-required deterministic and free-threaded commands passed on the final head, with output digests;
 - two isolated exact-head reviewers returned; P0/P1 are fixed, P2 resolved or accepted by the human owner, and P3 recorded;

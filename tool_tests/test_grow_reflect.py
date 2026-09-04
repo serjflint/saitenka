@@ -108,7 +108,7 @@ def test_append_run_persists_a_receipt_even_without_findings(tmp_path):
     assert persisted["trace_sha"] == result["trace_sha"]
 
 
-def test_append_run_is_idempotent_for_the_same_trace_and_reflection(tmp_path):
+def test_append_run_mints_a_fresh_receipt_for_each_invocation(tmp_path):
     led = _ledger(tmp_path, [MANIFEST])
     record = {
         "trace": {"outcome": "dry-run"},
@@ -118,5 +118,5 @@ def test_append_run_is_idempotent_for_the_same_trace_and_reflection(tmp_path):
     }
     first = gr.append_run(record, led)
     second = gr.append_run(record, led)
-    assert first == second
-    assert sum(line.get("type") == "run-reflection" for line in led.lines) == 1
+    assert first["reflection_id"] != second["reflection_id"]
+    assert sum(line.get("type") == "run-reflection" for line in led.lines) == 2

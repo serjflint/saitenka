@@ -50,6 +50,11 @@ def _validate_proof_rows(packet: dict, receipt: dict) -> None:
         _require(
             proof.get("disposition") in {"proved", "not-applicable"}, "invalid proof disposition"
         )
+    if packet.get("result") == "artifact":
+        _require(
+            any(proof.get("disposition") == "proved" for proof in proofs),
+            "artifact requires at least one proved mechanism",
+        )
     evidence = packet.get("validation_evidence")
     _require(isinstance(evidence, list) and evidence, "packet validation_evidence is required")
     assert isinstance(evidence, list)

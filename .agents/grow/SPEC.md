@@ -200,7 +200,7 @@ would spuriously reopen a closed gap and the loop would never terminate (proven 
   "dimension": "warm==cold@entry_cache",           // the under-specified axis
   "target_sha": "<hash of the TARGET SYMBOL's AST source, not the whole module>",
   "toolset_version": 3,
-  "contract_version": 10,
+  "contract_version": 11,
   "state": "open | closed | unclosable | filed | dry-run",
   "test": "tests/test_cache_race.py::test_...",
   "outcome": "coverage-only | bug | robustness | design",
@@ -222,7 +222,7 @@ A completed scenario map that finds no orphan appends a separate module-audit re
 ```jsonc
 { "audit_module": "app/subnav.py", "examined": "<iso>",
   "tests": ["tests/test_subnav_policy.py"], "audit_sha": "<module plus test tree>",
-  "toolset_version": 3, "contract_version": 10, "state": "no-gap",
+  "toolset_version": 3, "contract_version": 11, "state": "no-gap",
   "scenario_map_summary": "source replacement, policy, settle windows, failure, navigation" }
 ```
 
@@ -249,8 +249,9 @@ included, those are the richest lessons — passes a **`Reflect`** step before i
   concrete change to a loop TOOL/SPEC/harness). If the run was clean it files NOTHING (anti-Goodhart — no
   manufactured findings).
 - **Durable lifecycle evidence.** `tools/grow_reflect.py append-run` writes a run receipt even when there
-  are no findings and returns its `reflection_id` plus `trace_sha`. `grow_ledger.py` refuses to append or
-  honor a record unless that exact receipt exists in `.reflection.grow.jsonl`.
+  are no findings and returns its `reflection_id` plus `trace_sha`. Every invocation gets a monotonically
+  sequenced receipt; `grow_ledger.py` refuses stale reuse except the single `open` → outward-evidence
+  finalization for the same gap. A filed issue gets a fresh reflection bound to the `filed` outcome.
 - **Advisory, never self-modifying.** It writes only `.reflection.grow.jsonl`; it MUST NOT edit any tool /
   spec / harness / product file. Self-modification is strictly more dangerous than the loop's test edits
   (which already never auto-merge) — a human triages every proposal. A proposal touching the reflection

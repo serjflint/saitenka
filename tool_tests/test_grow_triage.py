@@ -138,6 +138,7 @@ def test_rank_skips_a_current_no_gap_audit_and_reopens_after_test_change(monkeyp
         + json.dumps(
             {
                 "type": "run-reflection",
+                "sequence": 1,
                 "reflection_id": "a" * 16,
                 "trace_sha": trace_sha,
                 "trace": trace,

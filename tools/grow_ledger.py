@@ -29,7 +29,7 @@ from pathlib import Path
 import grow_reflect as gr
 
 SRC = "src/saitenka"  # module keys are relative to here (matching the sharpen ledger)
-CONTRACT_VERSION = 10
+CONTRACT_VERSION = 11
 
 # Gap status against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never examined → a candidate
@@ -69,6 +69,8 @@ def _validate_reflection(record: dict, root: Path) -> None:
     persisted = ledger.run_receipt(reflection_id)
     if persisted is None or persisted.get("trace_sha") != trace_sha:
         raise ValueError("reflection receipt is not present in .reflection.grow.jsonl")
+    if not isinstance(persisted.get("sequence"), int) or persisted["sequence"] < 1:
+        raise ValueError("reflection receipt predates unique invocation sequencing")
     if gr._canonical_sha(persisted.get("trace")) != trace_sha:
         raise ValueError("reflection trace differs from its durable digest")
     expected_findings = [
@@ -129,6 +131,33 @@ def _has_valid_reflection(record: dict, root: Path) -> bool:
     except (AttributeError, KeyError, OSError, TypeError, ValueError):
         return False
     return True
+
+
+def _reflection_id(record: dict) -> object:
+    reflection = record.get("reflection")
+    return reflection.get("reflection_id") if isinstance(reflection, dict) else None
+
+
+def _has_outward_evidence(record: dict) -> bool:
+    return bool(record.get("pr_url") or record.get("filed") or record.get("grow-filed"))
+
+
+def _reflection_use_allowed(record: dict, prior: list[dict], *, audit: bool) -> bool:
+    if not prior:
+        return True
+    if audit or len(prior) != 1:
+        return False
+    previous = prior[0]
+    same_gap = all(
+        previous.get(key) == record.get(key) for key in ("source", "target_symbol", "dimension")
+    )
+    return bool(
+        same_gap
+        and previous.get("state") == "open"
+        and not _has_outward_evidence(previous)
+        and record.get("state") in {"open", "filed"}
+        and _has_outward_evidence(record)
+    )
 
 
 def gap_id(source: str, target_symbol: str, dimension: str) -> str:
@@ -214,6 +243,24 @@ class Ledger:
     def _audit_records(self) -> list[dict]:
         return [r for r in self.lines if "audit_module" in r and "audit_sha" in r]
 
+    def reflection_use_valid(self, record: dict, *, audit: bool) -> bool:
+        index = next(i for i, candidate in enumerate(self.lines) if candidate is record)
+        reflection_id = _reflection_id(record)
+        prior = [
+            candidate
+            for candidate in self.lines[:index]
+            if _reflection_id(candidate) == reflection_id
+        ]
+        return _reflection_use_allowed(record, prior, audit=audit)
+
+    def validate_new_reflection_use(self, record: dict, *, audit: bool) -> None:
+        reflection_id = _reflection_id(record)
+        prior = [
+            candidate for candidate in self.lines if _reflection_id(candidate) == reflection_id
+        ]
+        if not _reflection_use_allowed(record, prior, audit=audit):
+            raise ValueError("reflection receipt was already consumed by another Grow outcome")
+
     def latest(self, gap: str) -> dict | None:
         """The most recent record for a gap (records are chronological)."""
         for r in reversed(self._gap_records()):
@@ -238,6 +285,8 @@ class Ledger:
             return STALE_CONTRACT
         if not _has_valid_reflection(record, root):
             return STALE_CONTRACT
+        if not self.reflection_use_valid(record, audit=True):
+            return STALE_CONTRACT
         try:
             current = audit_sha(root, module_key)
         except FileNotFoundError:
@@ -257,6 +306,8 @@ class Ledger:
         if rec.get("contract_version") != CONTRACT_VERSION:
             return STALE_CONTRACT
         if not _has_valid_reflection(rec, root):
+            return STALE_CONTRACT
+        if not self.reflection_use_valid(rec, audit=False):
             return STALE_CONTRACT
         if rec.get("state") == "closed" and not _has_valid_review(rec):
             return STALE_CONTRACT
@@ -306,6 +357,7 @@ def prepare_record(
         raise ValueError("record requires non-empty source, target_symbol, and dimension")
     if require_reflection:
         _validate_reflection(record, root)
+        ledger.validate_new_reflection_use(record, audit=False)
     if record.get("state") == "closed" and not _has_valid_review(record):
         raise ValueError("closed record requires three distinct review identities and UPHELD votes")
     module_key, separator, symbol = target_symbol.partition("::")
@@ -361,6 +413,7 @@ def prepare_audit_record(record: dict, root: Path, ledger: Ledger) -> dict:
         ):
             raise ValueError("audit tests must be existing test_*.py files")
     _validate_reflection(record, root)
+    ledger.validate_new_reflection_use(record, audit=True)
     prepared = dict(record)
     prepared["tests"] = sorted(test_files)
     prepared["audit_sha"] = audit_sha(root, module_key)

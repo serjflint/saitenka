@@ -408,7 +408,7 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError(
             "shippable record requires three distinct review identities and UPHELD votes"
         )
-    if record["state"] == "sharpened":
+    if record["state"] in {"sharpened", "in-progress"}:
         normalized = {
             "efficacy": record["axes"].get("efficacy", record["axes"].get("survival")),
             **record["axes"],
@@ -418,7 +418,7 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
                 not isinstance(normalized.get(axis), dict)
                 or normalized[axis].get("status") != "pass"
             ):
-                raise ValueError(f"sharpened record requires passing {axis} evidence")
+                raise ValueError(f"shippable record requires passing {axis} evidence")
     prepared = dict(record)
     prepared["tests"] = tests
     prepared["source_sha"] = source_sha(root, module, tests)

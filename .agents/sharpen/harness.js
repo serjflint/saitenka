@@ -31,6 +31,12 @@ const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = '.' // poe tasks + tools run from the launch worktree root
 
+function objectiveGatePassed(candidate) {
+  return candidate?.pass === true && candidate.anticheat_clean === true &&
+    candidate.efficacy_pass === true && candidate.restoration_verified === true &&
+    candidate.preservation_pass !== false
+}
+
 // Worktree-safe: launch this run from a dedicated git worktree (EnterWorktree → Workflow → ExitWorktree)
 // so executor edits can't touch the maintainer's live tree. Every executor therefore operates on paths
 // RELATIVE to its inherited cwd — an absolute `cd /Users/.../saitenka` would escape the worktree.
@@ -284,7 +290,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     `Verify source and test bytes were restored exactly and set restoration_verified. pass = anticheat_clean AND efficacy_pass AND restoration_verified AND (preservation_pass !== false). Quote every BOUNCE/REGRESSED line.`,
     { phase: 'Objective gate', schema: GATE, label: `gate#${attempt}`, effort: 'low' },
   )
-  if (gate && gate.pass) break
+  if (objectiveGatePassed(gate)) break
   carry = gate ? gate.report : 'gate execution failed'
   log(`attempt ${attempt} bounced: ${carry.split('\n')[0]}`)
   // revert the failed edit so the next author starts from a known-green tree
@@ -295,7 +301,7 @@ for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
   proposal = null
 }
 
-if (!proposal || !gate || !gate.pass) {
+if (!proposal || !objectiveGatePassed(gate)) {
   // Terminal: un-sharpenable within the retry cap. Not a spin — record and stop (SPEC step 3).
   const rec = await recordOutcome('left-undone', null, null,
     `No proposal cleared the objective gate in ${MAX_RETRIES} attempts. Last bounce: ${carry}`)

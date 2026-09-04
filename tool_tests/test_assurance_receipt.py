@@ -227,3 +227,17 @@ def test_human_accepted_p2_requires_decision_provenance():
     ]
     with pytest.raises(ValueError, match="acceptance"):
         verify.validate(receipt, packet)
+
+
+def test_artifact_requires_at_least_one_proved_mechanism():
+    receipt, packet = copy.deepcopy(_examples())
+    packet["mechanism_proofs"] = [
+        {
+            "mechanism": "generation handoff",
+            "obligation": "one generation crosses both owners",
+            "evidence": "not checked",
+            "disposition": "not-applicable",
+        }
+    ]
+    with pytest.raises(ValueError, match="proved mechanism"):
+        verify.validate(receipt, packet)

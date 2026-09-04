@@ -26,7 +26,7 @@ export const meta = {
 // args: { module?: string, openPr?: boolean (default false → dry-run), maxRetries?: number (default 3) }
 
 const cfg = args || {}
-const CONTRACT_VERSION = 10 // mirrors contracts.json; the Workflow runtime cannot read local files
+const CONTRACT_VERSION = 11 // mirrors contracts.json; the Workflow runtime cannot read local files
 const OPEN_PR = cfg.openPr === true
 const MAX_RETRIES = Number.isInteger(cfg.maxRetries) ? cfg.maxRetries : 3
 const CWD = '.' // poe tasks + tools run from the launch worktree root
@@ -703,8 +703,15 @@ async function recordOutcome(state, prop, reviewResult, outcome, extraNote) {
       return { ...recorded, state: 'open', pr_url: null, filed_issues: [] }
     }
     const finalState = wantPr ? 'open' : state
+    let finalReflectionReceipt = reflectionReceipt
+    if (finalState !== ledgerState) {
+      trace.outcome = finalState
+      reflection = null
+      finalReflectionReceipt = await reflect()
+      phase('Record')
+    }
     const finalized = await agent(
-      `The outward action for ${gap.target_symbol} succeeded with evidence ${JSON.stringify(outward)}. Append a FINAL Grow ledger record through tools/grow_ledger.py with the same source/target_symbol/dimension, outcome ${JSON.stringify(outcome ?? null)}, reflection ${JSON.stringify(reflectionReceipt)}, and state "${finalState}". Persist a PR URL as pr_url, or issue references under the ledger key filed; copy the review/test/gate context from the preceding open record. Take no further outward action. Return the exact CLI receipt fields, recorded_reflection=true, mapping persisted filed to filed_issues.`,
+      `The outward action for ${gap.target_symbol} succeeded with evidence ${JSON.stringify(outward)}. Append a FINAL Grow ledger record through tools/grow_ledger.py with the same source/target_symbol/dimension, outcome ${JSON.stringify(outcome ?? null)}, reflection ${JSON.stringify(finalReflectionReceipt)}, and state "${finalState}". Persist a PR URL as pr_url, or issue references under the ledger key filed; copy the review/test/gate context from the preceding open record. Take no further outward action. Return the exact CLI receipt fields, recorded_reflection=true, mapping persisted filed to filed_issues.`,
       { phase: 'Record', schema: RECORD, label: 'finalize' },
     )
     const sameIdentity = finalized?.recorded_gap_id === recorded.recorded_gap_id &&

@@ -142,7 +142,9 @@ def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dic
     if not all(isinstance(item, str) and item for item in escalations):
         raise ValueError("reflection escalations must be non-empty strings")
     trace_sha = _canonical_sha(trace)
+    sequence = sum(line.get("type") == "run-reflection" for line in ledger.lines) + 1
     core = {
+        "sequence": sequence,
         "trace_sha": trace_sha,
         "introspection": introspection,
         "findings": findings,
@@ -150,6 +152,7 @@ def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dic
     }
     receipt = {
         "type": "run-reflection",
+        "sequence": sequence,
         "reflection_id": _canonical_sha(core)[:16],
         "trace_sha": trace_sha,
         "trace": trace,
@@ -163,11 +166,9 @@ def prepare_run(record: dict, ledger: ReflectionLedger) -> tuple[list[dict], dic
 
 def append_run(record: dict, ledger: ReflectionLedger) -> dict:
     findings, receipt = prepare_run(record, ledger)
-    existing = ledger.run_receipt(receipt["reflection_id"])
-    if existing is None:
-        for finding in findings:
-            ledger.append(finding)
-        ledger.append(receipt)
+    for finding in findings:
+        ledger.append(finding)
+    ledger.append(receipt)
     return {
         "reflection_id": receipt["reflection_id"],
         "trace_sha": receipt["trace_sha"],

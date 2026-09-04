@@ -159,6 +159,28 @@ def test_sharpened_record_requires_meaningful_axes_and_review(tmp_path):
             sl.prepare_record({**base, **mutation}, root, ledger)
 
 
+def test_in_progress_record_requires_passing_objective_axes(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+    axes = {**AXES, "efficacy": {"status": "fail", "evidence": "survivor remained"}}
+    with pytest.raises(ValueError, match="passing efficacy"):
+        sl.prepare_record(
+            {
+                "module": "app/foo.py",
+                "tests": TESTS,
+                "state": "in-progress",
+                "audited": AUDITED,
+                "axes": axes,
+                "axes_not_applied": [],
+                "review": REVIEW,
+            },
+            root,
+            ledger,
+        )
+
+
 def test_latest_returns_the_most_recent_record(tmp_path):
     root = _repo(tmp_path)
     old = {"module": "app/foo.py", "source_sha": "aaa", "state": "in-progress"}

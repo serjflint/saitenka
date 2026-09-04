@@ -65,7 +65,7 @@ const receipt = {
   recorded_gap_id: '0123456789abcdef',
   recorded_target_sha: 'fedcba9876543210',
   recorded_toolset_version: 1,
-  recorded_contract_version: 10,
+  recorded_contract_version: 11,
   recorded_reflection: true,
 }
 const pristinePass = { status: 'pass', report: 'requested nodes passed' }
@@ -104,7 +104,7 @@ async function scenario(responses, args = { openPr: true }) {
     recorded_audit_module: noGap.module,
     recorded_audit_sha: 'a'.repeat(64),
     recorded_toolset_version: 3,
-    recorded_contract_version: 10,
+    recorded_contract_version: 11,
     recorded_reflection: true,
   }
   const result = await scenario({ triage: noGap, 'record-no-gap': audit, reflect: reflection }, { openPr: false })
@@ -343,6 +343,26 @@ async function scenario(responses, args = { openPr: true }) {
     reflect: reflection,
   }, { openPr: false })
   assert.equal(result.result.state, 'dry-run')
+}
+
+{
+  const result = await scenario({
+    triage: gap,
+    'test-design': design,
+    'author#1': proposal,
+    'pristine#1': { status: 'test-failure', report: 'production raised ValueError' },
+    'bug-skeptic': { verdict: 'UPHELD', grounds: ['valid observable oracle'] },
+    'bug-judge': { verdict: 'UPHELD', grounds: ['unexpected CUT exception'] },
+    revert: undefined,
+    record: { state: 'open', outcome: 'bug', ...receipt, pr_url: null, filed_issues: [], filing_blocker: null, note: '' },
+    outward: { pr_url: null, filed_issues: ['#123'] },
+    finalize: { state: 'filed', outcome: 'bug', ...receipt, pr_url: null, filed_issues: ['#123'], filing_blocker: null, note: '' },
+    reflect: reflection,
+  })
+  const reflections = result.calls.filter(({ label }) => label === 'reflect')
+  assert.equal(reflections.length, 2)
+  assert.match(reflections[1].prompt, /"outcome": "filed"/)
+  assert.equal(result.result.state, 'filed')
 }
 
 {
