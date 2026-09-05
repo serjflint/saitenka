@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -184,6 +184,8 @@ class MiningController:
         self._operation_issued = 0
         self._operation_inflight: int | None = None
         self._operation_cancelled: threading.Event | None = None
+        self._operation_journal: mining_operation.MiningActionJournal | None = None
+        self._operation_apply: miner.MiningApply | None = None
         self._closed = False
         self._mined_index = MiningIndexState(spec.target_key, 0, SeedStatus.EMPTY, MinedSet())
 
@@ -537,8 +539,12 @@ class MiningController:
     ) -> None:
         self._operation_issued += 1
         identity = self._operation_issued
+        journal = mining_operation.MiningActionJournal()
+        request = replace(request, journal=journal)
         self._operation_inflight = identity
         self._operation_cancelled = request.cancelled
+        self._operation_journal = journal
+        self._operation_apply = external
 
         def finished(completion: EffectFinished) -> None:
             self._complete_operation_async(
@@ -599,6 +605,8 @@ class MiningController:
             self._finish_operation(identity)
             external.toast("mine failed unexpectedly", "err")
             return
+        if request.journal is not None:
+            outcome = replace(outcome, actions=request.journal.drain())
         mining_operation.apply_outcome(outcome, external)
         if stage is mining_operation.OperationStage.COMMIT or outcome.plan is None:
             self._finish_operation(identity)
@@ -611,6 +619,7 @@ class MiningController:
             request.cancelled,
             plan=outcome.plan,
             prepared=prepared,
+            journal=request.journal,
         )
         if not self._submit_operation_stage(submit, identity, commit, finished):
             self._finish_operation(identity)
@@ -634,6 +643,8 @@ class MiningController:
         if self._operation_inflight == identity:
             self._operation_inflight = None
             self._operation_cancelled = None
+            self._operation_journal = None
+            self._operation_apply = None
 
     def _operation(self) -> miner.MiningTransaction | None:
         if self._closed:
@@ -756,8 +767,15 @@ class MiningController:
         self._mined_seed.invalidate()
         if self._operation_cancelled is not None:
             self._operation_cancelled.set()
+        if self._operation_journal is not None and self._operation_apply is not None:
+            mining_operation.apply_outcome(
+                mining_operation.MiningOutcome(self._operation_journal.drain()),
+                self._operation_apply,
+            )
         self._operation_inflight = None
         self._operation_cancelled = None
+        self._operation_journal = None
+        self._operation_apply = None
 
     def close_store(self) -> None:
         if self._mined_store is not None:

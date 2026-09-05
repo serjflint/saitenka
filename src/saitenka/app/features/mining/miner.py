@@ -643,6 +643,7 @@ def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapt
                     return
                 note_id = p.anki.add_note(note)
                 _persist_mined(p, note_id, card, video)
+                p.apply.record_mined(1)
                 p.apply.mark_mined(card.expression)
                 mined += 1
             else:
@@ -650,8 +651,6 @@ def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapt
         p.apply.toast(f"mined {mined} · {dup} dup", "ok" if mined else "warn")
     except AnkiError as e:
         p.apply.toast(f"bulk failed: {e}", "err")
-    finally:
-        p.apply.record_mined(mined)
 
 
 def mined_expressions(anki, mine_cfg) -> set[str] | None:

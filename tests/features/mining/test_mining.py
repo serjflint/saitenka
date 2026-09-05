@@ -726,6 +726,57 @@ def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):
     assert anki.added == []
 
 
+def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make_session):
+    from util import FakeIPC, await_ready, drain_for
+
+    class BlockingSecondCheckAnki(_FakeAnki):
+        def __init__(self) -> None:
+            super().__init__()
+            self.checks = 0
+            self.second_check_started = threading.Event()
+            self.release_second_check = threading.Event()
+
+        def can_add(self, _note):
+            self.checks += 1
+            if self.checks == 2:
+                self.second_check_started.set()
+                assert self.release_second_check.wait(5), "test did not release Anki health check"
+            return True
+
+    class RecordingHistory:
+        def __init__(self) -> None:
+            self.counts = []
+
+        def record_mined(self, count):
+            self.counts.append(count)
+
+    ipc = FakeIPC()
+    ipc.props["path"] = "/x/Show - 01.mkv"
+    anki = BlockingSecondCheckAnki()
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.graph.cue.set_subtitle("本を読む")
+    monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
+    monkeypatch.setattr(r.graph.tooltip, "mark_mined", lambda *_args: None)
+    history = RecordingHistory()
+    r.graph.history.replace_recorder(history)
+
+    r.graph.mining.bulk_mine()
+    await_ready(
+        anki.second_check_started.is_set,
+        "second Anki health check did not start",
+        pump=r.pump,
+    )
+
+    r.graph.mining.invalidate()
+    anki.release_second_check.set()
+    drain_for(r.pump)
+    r.graph.history.replace_recorder(None)
+
+    assert history.counts == [1]
+    assert r.graph.mining.store.by_note_id(1) is not None
+    assert len(anki.added) == 1
+
+
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_session):
     """A per-entry ⊕ passes an explicit CardData, so the mined note is that chosen entry (しりぞく),
     not whatever the default dict-first pick would derive for the token."""

@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING
 
 from saitenka.app.features.mining import miner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
-
-if TYPE_CHECKING:
-    import threading
-
 
 LANE = "mining-operation"
 
@@ -38,6 +34,24 @@ class MiningOutcome:
     plan: object | None = None
 
 
+class MiningActionJournal:
+    """Transfer completed worker effects without waiting for the terminal."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._actions: list[MiningAction] = []
+
+    def record(self, name: str, args: tuple[object, ...]) -> None:
+        with self._lock:
+            self._actions.append(MiningAction(name, args))
+
+    def drain(self) -> tuple[MiningAction, ...]:
+        with self._lock:
+            actions = tuple(self._actions)
+            self._actions.clear()
+        return actions
+
+
 @dataclass(frozen=True, slots=True)
 class MiningOperationRequest:
     transaction: miner.MiningTransaction
@@ -49,6 +63,7 @@ class MiningOperationRequest:
     card: object | None = None
     plan: object | None = None
     prepared: miner.PreparedCapture | None = None
+    journal: MiningActionJournal | None = None
 
 
 _ACTION_NAMES = (
@@ -66,9 +81,9 @@ _ACTION_NAMES = (
 )
 
 
-def _recording_apply(actions: list[MiningAction]) -> miner.MiningApply:
+def _recording_apply(journal: MiningActionJournal) -> miner.MiningApply:
     def callback(name: str):
-        return lambda *args: actions.append(MiningAction(name, args))
+        return lambda *args: journal.record(name, args)
 
     return miner.MiningApply(*(callback(name) for name in _ACTION_NAMES))
 
@@ -78,14 +93,19 @@ def run_operation(request: object, cancelled: threading.Event) -> object:
         raise TypeError("invalid mining operation request")
     if cancelled.is_set() or request.cancelled.is_set():
         return MiningOutcome(())
-    actions: list[MiningAction] = []
+    shared_journal = request.journal is not None
+    journal = request.journal or MiningActionJournal()
+
+    def outcome(plan: object | None = None) -> MiningOutcome:
+        actions = () if shared_journal else journal.drain()
+        return MiningOutcome(actions, plan)
 
     def is_cancelled() -> bool:
         return cancelled.is_set() or request.cancelled.is_set()
 
     transaction = replace(
         request.transaction,
-        apply=_recording_apply(actions),
+        apply=_recording_apply(journal),
         cancelled=is_cancelled,
     )
     if request.stage is OperationStage.PREFLIGHT:
@@ -97,7 +117,7 @@ def run_operation(request: object, cancelled: threading.Event) -> object:
             plan = miner.preflight_token(
                 transaction, request.token, force=request.force, card=request.card
             )
-        return MiningOutcome(tuple(actions), plan)
+        return outcome(plan)
     assert request.prepared is not None and request.plan is not None
     if request.kind is OperationKind.BULK:
         assert isinstance(request.plan, miner.BulkMinePlan)
@@ -105,7 +125,7 @@ def run_operation(request: object, cancelled: threading.Event) -> object:
     else:
         assert isinstance(request.plan, miner.TokenMinePlan)
         miner.commit_token(transaction, request.plan, request.prepared)
-    return MiningOutcome(tuple(actions))
+    return outcome()
 
 
 def apply_outcome(outcome: MiningOutcome, apply: miner.MiningApply) -> None:
