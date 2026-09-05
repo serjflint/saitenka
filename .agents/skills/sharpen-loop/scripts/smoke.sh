@@ -1,41 +1,32 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-skill_dir="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
-repo_dir="$(CDPATH='' cd -- "$skill_dir/../../.." && pwd)"
+skill_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_dir=$(CDPATH= cd -- "$skill_dir/../../.." && pwd)
 
-test -f "$skill_dir/SKILL.md"
-test -f "$skill_dir/agents/openai.yaml"
-test -f "$repo_dir/.agents/sharpen/SPEC.md"
-test -f "$repo_dir/.agents/sharpen/ADAPTERS.md"
-test -f "$repo_dir/.agents/sharpen/PROMPTS.md"
-test -f "$repo_dir/.agents/sharpen/contracts.json"
-test -f "$repo_dir/.agents/skills/assurance-pipeline/SKILL.md"
+for path in \
+  "$repo_dir/.agents/sharpen/SPEC.md" \
+  "$skill_dir/SKILL.md" \
+  "$repo_dir/tools/sharpen_gate.py" \
+  "$repo_dir/tools/sharpen_ledger.py" \
+  "$repo_dir/tools/sharpen_triage.py" \
+  "$repo_dir/tool_tests/test_sharpen_gate.py" \
+  "$repo_dir/tool_tests/test_sharpen_ledger.py" \
+  "$repo_dir/tool_tests/test_sharpen_triage.py"
+do
+  test -f "$path"
+done
 
-uv run python - "$repo_dir" <<'PY'
-import json
-import pathlib
-import re
+uv run python - "$repo_dir/.agents/sharpen/SPEC.md" "$skill_dir/SKILL.md" <<'PY'
+from pathlib import Path
 import sys
 
-root = pathlib.Path(sys.argv[1])
-skill = (root / ".agents/skills/sharpen-loop/SKILL.md").read_text()
-harness = (root / ".agents/sharpen/harness.js").read_text()
-contracts = json.loads((root / ".agents/sharpen/contracts.json").read_text())
-assert "TODO" not in skill and "[TODO" not in skill
-assert 'fork_turns="none"' in skill
-assert contracts["version"] == 6 and {"select", "ship_gate", "record"} <= contracts.keys()
-assert contracts["lifecycle"]["outer_reflection_cadence"] == 3
-assert "CONTRACT_VERSION = 6" in harness
-assert "reflection-status" in harness and "recorded_axes_not_applied" in harness
-assert "gate?.efficacy_pass" in harness and "gate?.conformance_pass" in harness
-for token in ("better_fix", "Better fix hand-off", "skeptic_verdict", "judge_verdict", "uv run poe all"):
-    assert token in harness
-assert re.search(r"verdict = judge\?\.verdict === 'UPHELD' \? 'UPHELD' : 'REFUTED'", harness)
-assert "model:" not in harness
+spec, skill = (Path(path).read_text(encoding="utf-8") for path in sys.argv[1:])
+for token in ("existing test", "preservation witness", "two isolated", "contribution gates", "Reflection"):
+    assert token in spec or token in skill, token
+for retired in ("sharpen_policy.py", "policy.json", "harness.js", "contracts.json"):
+    assert retired not in spec
+    assert retired not in skill
 PY
 
-uv run python "$repo_dir/tools/sharpen_policy.py" check
-node "$repo_dir/.agents/sharpen/test_harness.mjs"
-
-echo "sharpen-loop skill smoke: ok"
+echo "sharpen skill smoke: ok"

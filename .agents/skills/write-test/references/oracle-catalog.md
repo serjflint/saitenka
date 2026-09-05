@@ -151,12 +151,12 @@ A green oracle test proves nothing on its own.
   and re-runs — every live oracle must flip the test red. A test that stays green when its own assert is
   negated is vacuous (a swallowed exception, an unreachable assert after an early return, a tautology).
 - **In the idle Grow loop (deep):** the four-arm gate (`tools/grow_gate.py`) additionally proves
-  *genuine growth* — a scenario-encoding mutant the pre-existing suite missed — and newly-exercised lines.
-  See `.agents/grow/{GUIDE,SPEC}.md`.
+  *genuine growth* with either a scenario mutant the pre-existing suite missed or a newly-exercised path.
+  See `.agents/grow/SPEC.md`.
 
 ## Provenance
 
-Grow loop (`.agents/grow/GUIDE.md`) and Sharpen loop (`.agents/sharpen/GUIDE.md`); the integration/e2e
+Grow loop (`.agents/grow/SPEC.md`) and Sharpen loop (`.agents/sharpen/SPEC.md`); the integration/e2e
 coverage research (render↔hit-test agreement, cache-equivalence, config matrix, "assert oracles not
 pixels"); pattern menus from Dwyer (specification patterns) and Segura et al. (metamorphic relations). The
 external-oracle families + the [`coverage-matrix.md`](coverage-matrix.md) audit fold in the conformance /

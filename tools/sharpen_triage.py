@@ -36,7 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import sharpen_ledger as sl
-from tool_json import InstrumentError, run_json
+from tool_json import InstrumentError, repository_path, repository_root, run_json
 
 # Actionable rules yield per-hit fixes. Metric/advisory rules rank or inform but never select work.
 METRIC_RULES = {"test-assert-private-attr", "test-monkeypatch-private-target"}
@@ -150,7 +150,7 @@ def churn_and_age(root: Path, module: str, tests: list[str]) -> tuple[int, int |
 
 def open_pr_paths(root: Path) -> set[str]:
     """Files any OPEN PR is editing — modules under active work are excluded from triage."""
-    prs = run_json(["gh", "pr", "list", "--state", "open", "--json", "files"], root.parent, list)
+    prs = run_json(["gh", "pr", "list", "--state", "open", "--json", "files"], root, list)
     return {f["path"] for pr in prs for f in pr.get("files", [])}
 
 
@@ -205,7 +205,7 @@ def open_issue(root: Path, ref: str) -> bool:
     num = ref.lstrip("#").split("#")[-1].split()[0].strip("#")
     if not num.isdigit():
         return False
-    out = run_json(["gh", "issue", "view", num, "--json", "state"], root.parent, dict)
+    out = run_json(["gh", "issue", "view", num, "--json", "state"], root, dict)
     return out.get("state") == "OPEN"
 
 
@@ -236,6 +236,10 @@ def rank(root: Path, ledger_path: Path, *, check_network: bool = True) -> list[C
             c.excluded = f"open-PR: {min(touched)}"
         elif c.status == sl.SHARPENED_CURRENT:
             c.excluded = "sharpened & unchanged"
+        elif c.status == sl.UNSHARPENABLE:
+            c.excluded = "unsharpenable & unchanged"
+        elif c.status == sl.FILED:
+            c.excluded = "filed & unchanged"
         elif module in grow and (
             not check_network or any(open_issue(root, i) for i in grow[module])
         ):
@@ -274,16 +278,17 @@ def main() -> None:
     ap.add_argument(
         "--no-network", action="store_true", help="skip gh (open-PR / grow-issue) checks"
     )
-    ap.add_argument("--ledger", default="../.ledger.sharpen.jsonl")
+    ap.add_argument("--ledger", type=Path)
     args = ap.parse_args()
-    root = Path.cwd()
+    root = repository_root(Path.cwd())
     if args.no_network:
         print(
             "WARNING: --no-network — open-PR exclusion is DISABLED; may pick a module under active "
             "work. Grow-filed exclusion stays on (fail-closed).",
             file=sys.stderr,
         )
-    cands = rank(root, (root / args.ledger).resolve(), check_network=not args.no_network)
+    ledger_path = repository_path(root, args.ledger, ".ledger.sharpen.jsonl")
+    cands = rank(root, ledger_path.resolve(), check_network=not args.no_network)
     live = [c for c in cands if not c.excluded]
     shown = live[: args.top] if args.top else cands
     for c in shown:

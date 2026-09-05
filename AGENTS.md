@@ -258,7 +258,7 @@ Consult it when adding or rewriting a test.
 - **The pure core is mutation-audited** (`poe mutate`, cosmic-ray, opt-in, **NOT in `poe all`**). A
   survivor is a coordinate to harden, **not a score to max** (equivalent mutants make 100% unreachable):
   kill the *class* with a Hypothesis property + a pinned `@example` (`tests/test_sub_index_properties.py`),
-  then re-run. The **Sharpen loop** consumes this as its Efficacy axis (`.agents/sharpen/GUIDE.md`).
+  then re-run. The **Sharpen loop** consumes this as its Efficacy input (`.agents/sharpen/SPEC.md`).
 - The allowlist (`TARGETS` in `tools/mutate/run.py`), what earns a target, glue exclusion, and the
   cosmic-ray/GIL detail → the **`test-adequacy` skill** (`.agents/skills/test-adequacy/`).
 
