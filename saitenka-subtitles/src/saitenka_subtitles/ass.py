@@ -21,7 +21,7 @@ from saitenka_subtitles.document import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-_DRAWING = re.compile(r"\\p(-?\d+)(?!\d)")
+_DRAWING = re.compile(r"\\p(?:(?P<scale>-?\d+)(?!\d)|bo(?:-?\d+)?(?=\\|$)|(?=\\|$))")
 _DYNAMIC = re.compile(r"\\(?:t|move|fad|fade)(?=[(\d\\}]|$)")
 _KARAOKE = re.compile(r"\\(?:kt|k|K|kf|ko)(?=[\d\\}]|$)")
 _COLOR_STATE = re.compile(
@@ -156,15 +156,22 @@ def _consume_override(state: _DecodeState, block: _OverrideBlock) -> None:
         state.drawings.append(DrawingSpan(state.drawing_start, block.start, state.drawing_scale))
         state.drawing_start = None
     for match in _DRAWING.finditer(block.content):
-        state.drawing_scale = max(0, int(match.group(1)))
+        scale = match.group("scale")
+        if scale is None:
+            state.drawing_scale = 0
+        elif len(scale.removeprefix("-")) > 9:
+            digits = scale.removeprefix("-")
+            state.drawing_scale = 0 if scale.startswith("-") or not digits.strip("0") else 1
+        else:
+            state.drawing_scale = max(0, int(scale))
     if state.drawing_scale:
         state.drawing_start = block.end
 
 
-def _consume_text(raw: str, index: int, state: _DecodeState) -> int:
+def _consume_text(raw: str, index: int, state: _DecodeState, soft_break: str) -> int:
     if raw[index] == "\\" and index + 1 < len(raw) and raw[index + 1] in "Nnh":
         escaped = raw[index + 1]
-        state.text.append("\n" if escaped in "Nn" else " ")
+        state.text.append("\n" if escaped == "N" else soft_break if escaped == "n" else " ")
         state.spans.append(RawTextSpan(index, index + 2))
         return index + 2
     state.text.append(raw[index])
@@ -172,9 +179,7 @@ def _consume_text(raw: str, index: int, state: _DecodeState) -> int:
     return index + 1
 
 
-def decode_ass_event(source: RawSubtitleEvent) -> DecodedSubtitleEvent:
-    """Project an authored ASS event to semantic text and exact source spans."""
-    raw = source.raw_text
+def _decode_ass_text(raw: str, soft_break: str) -> _DecodeState:
     state = _DecodeState([], [], [])
     index = 0
     while index < len(raw):
@@ -186,9 +191,26 @@ def decode_ass_event(source: RawSubtitleEvent) -> DecodedSubtitleEvent:
         if state.drawing_scale:
             index += 1
             continue
-        index = _consume_text(raw, index, state)
+        index = _consume_text(raw, index, state, soft_break)
     if state.drawing_start is not None and state.drawing_start < len(raw):
         state.drawings.append(DrawingSpan(state.drawing_start, len(raw), state.drawing_scale))
+    return state
+
+
+def ass_soft_break(_document: str) -> str:
+    """The semantic value mpv exposes for ``\\n`` regardless of visual wrapping mode."""
+    return "\n"
+
+
+def decode_ass_text(raw: str, *, soft_break: str = "\n") -> str:
+    """Project authored ASS text to the semantic text libass exposes."""
+    return "".join(_decode_ass_text(raw, soft_break).text)
+
+
+def decode_ass_event(source: RawSubtitleEvent, *, soft_break: str = "\n") -> DecodedSubtitleEvent:
+    """Project an authored ASS event to semantic text and exact source spans."""
+    raw = source.raw_text
+    state = _decode_ass_text(raw, soft_break)
     return DecodedSubtitleEvent(
         source,
         "".join(state.text),
