@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.miner import MineCue
+from saitenka.app.media import Timespan
 
 if TYPE_CHECKING:
     from saitenka.app.features.profiles.profile_controller import ProfileController
@@ -30,6 +31,9 @@ class MiningEncounterSource:
     def capture(self) -> miner.MiningEncounter:
         cue = self.cue.current
         tooltip = self.tooltip.observation()
+        start = self.playback.number("sub-start")
+        end = self.playback.number("sub-end")
+        span = Timespan(start, end) if start is not None and end is not None else None
         return miner.MiningEncounter(
             cue=MineCue(
                 cue.tokens,
@@ -42,6 +46,7 @@ class MiningEncounterSource:
             ipc=self.ipc,
             media_path=self.playback.text("path"),
             playhead=self.playback.number("time-pos") or 0.0,
+            span=span,
             sentence_html=miner.sentence_html(cue.lines),
             hovered_terms=tooltip.metadata.terms,
         )

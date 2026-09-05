@@ -3795,12 +3795,17 @@ def test_miner_module_owns_the_mining_flow(monkeypatch):
     mined = []
     monkeypatch.setattr(
         miner,
-        "mine_token",
+        "preflight_token",
         lambda p, tok, **_k: mined.append((p.encounter.cue.hover, tok.surface)),
     )
     _enable_mining(r)
     r.graph.tooltip.select(0)
     r.command(bindings.MINE_MSG)
+    await_ready(
+        lambda: not r.graph.mining.operation_pending,
+        "mining preflight did not finish",
+        pump=r.pump,
+    )
     assert mined == [(0, "本命")]
 
 

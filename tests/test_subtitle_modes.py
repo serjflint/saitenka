@@ -254,6 +254,7 @@ _LANES_BEFORE_ARTIFACTS = [
     "mask-atlas-startup",
     "capabilities",
     "interaction-metadata",
+    "mining-operation",
     "mined-seed",
     "episode-analysis",
     "render-pool",
