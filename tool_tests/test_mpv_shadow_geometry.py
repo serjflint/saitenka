@@ -39,7 +39,7 @@ class Result:
 
 def test_locked_manifest_covers_gate_a_by_gate_b_by_profiles_by_contracts() -> None:
     manifest = load_manifest(MANIFEST, repo_root=ROOT)
-    assert manifest["denominator"]["matrix_count"] == 12 * 3 * 5 * 2
+    assert manifest["denominator"]["matrix_count"] == 13 * 3 * 5 * 2
 
 
 @pytest.mark.parametrize(
@@ -132,7 +132,7 @@ def test_layer_support_uses_every_visible_libass_layer() -> None:
 def test_contract_report_is_publishable_only_after_controls_pass() -> None:
     report = build_contract_report(MANIFEST, ROOT)
     assert report["contract_ready"] is True
-    assert report["matrix_count"] == 360
+    assert report["matrix_count"] == 390
 
 
 @pytest.mark.parametrize(
@@ -366,8 +366,8 @@ def test_live_runner_emits_every_locked_matrix_cell(
     report = oracle.run_live_matrix(MANIFEST, ROOT)
     manifest = load_manifest(MANIFEST, repo_root=ROOT)
     assert report["matrix_passed"] is True
-    assert len(report["cases"]) == 360
-    assert Session.captures == 360
+    assert len(report["cases"]) == 390
+    assert Session.captures == 390
     assert all(row["frame_size_matches"] for row in report["cases"])
     assert all(
         row["mpv_difference_threshold_support"]["1"]["pixels"] == len(mask)
