@@ -5,9 +5,13 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
+
 from saitenka.app.procutil import kill_process_tree
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_kill_process_tree_terminates_running_process():
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     assert proc.poll() is None
@@ -16,6 +20,8 @@ def test_kill_process_tree_terminates_running_process():
     assert proc.poll() is not None  # dead
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_kill_process_tree_noop_on_already_exited():
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait(timeout=5)

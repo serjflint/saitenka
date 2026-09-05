@@ -414,6 +414,31 @@ def test_click_outside_the_panel_is_not_captured():
     assert reader.graph.picker.on_click(reader.graph.interaction.click_target(), 0, 0) is False
 
 
+def test_click_inside_panel_outside_rows_is_captured_without_action(monkeypatch):
+    reader, _ipc = _reader(path="/v/ep.mkv")
+    reader.graph.picker.configure_listing(_lister([]))
+    _open(reader)
+    _adopt(reader, candidates=(_candidate("a.srt"),))
+    reader.graph.picker.redraw()
+    panel = reader.graph.picker.panel
+    rect = panel.rect
+    assert rect is not None
+    local_x = local_y = 1
+    assert not any(hit.contains(local_x, local_y) for hit in panel.hits)
+    fetches: list[tuple] = []
+    monkeypatch.setattr(
+        subtitle_modes, "start_fetch", lambda *args, **kwargs: fetches.append((args, kwargs))
+    )
+
+    captured = reader.graph.picker.on_click(
+        reader.graph.interaction.click_target(), rect[0] + local_x, rect[1] + local_y
+    )
+
+    assert captured is True
+    assert reader.graph.picker.state.open is True
+    assert fetches == []
+
+
 def test_scroll_only_fires_with_the_pointer_over_the_panel():
     reader, ipc = _reader(path="/v/ep.mkv")
     reader.graph.picker.configure_listing(_lister([]))

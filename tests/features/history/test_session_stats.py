@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+from saitenka.app.features.history.history_owner import HistoryOwner
 from saitenka.app.session_stats import (
     AsyncSessionWriter,
     SessionRecorder,
@@ -186,6 +187,38 @@ def test_disabled_stats_does_not_touch_ipc():
     )
 
     assert recorder is None
+
+
+def test_history_owner_finish_retires_recorder_before_restart(monkeypatch):
+    from saitenka.app import session_stats
+
+    owner = HistoryOwner(enabled=True)
+    old_recorder = object()
+    new_recorder = object()
+    owner.replace_recorder(old_recorder)
+    finished = []
+    started = []
+
+    def fake_finish(recorder, _analysis):
+        finished.append(recorder)
+        return "summary"
+
+    def fake_start(*, current, enabled, path, arm):
+        started.append((current, enabled, path(), arm))
+        return new_recorder
+
+    monkeypatch.setattr(session_stats, "finish", fake_finish)
+    monkeypatch.setattr(session_stats, "start", fake_start)
+
+    result = owner.finish(None)
+    owner.start(path=lambda: "/a/02.mkv", arm=lambda _seconds: None)
+
+    assert result == "summary"
+    assert finished == [old_recorder]
+    assert [(current, enabled, path) for current, enabled, path, _arm in started] == [
+        (None, True, "/a/02.mkv")
+    ]
+    assert owner.recorder is new_recorder
 
 
 def test_stats_command_lists_complete_and_incomplete_sessions(tmp_path, monkeypatch, capsys):
