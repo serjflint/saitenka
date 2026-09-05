@@ -21,6 +21,11 @@ class OperationKind(StrEnum):
     BULK = "bulk"
 
 
+class OperationStage(StrEnum):
+    PREFLIGHT = "preflight"
+    COMMIT = "commit"
+
+
 @dataclass(frozen=True, slots=True)
 class MiningAction:
     name: str
@@ -30,16 +35,20 @@ class MiningAction:
 @dataclass(frozen=True, slots=True)
 class MiningOutcome:
     actions: tuple[MiningAction, ...]
+    plan: object | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class MiningOperationRequest:
     transaction: miner.MiningTransaction
     kind: OperationKind
-    prepared: miner.PreparedCapture
+    stage: OperationStage
+    cancelled: threading.Event
     token: object | None = None
     force: bool = False
     card: object | None = None
+    plan: object | None = None
+    prepared: miner.PreparedCapture | None = None
 
 
 _ACTION_NAMES = (
@@ -67,22 +76,35 @@ def _recording_apply(actions: list[MiningAction]) -> miner.MiningApply:
 def run_operation(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, MiningOperationRequest):
         raise TypeError("invalid mining operation request")
-    if cancelled.is_set():
+    if cancelled.is_set() or request.cancelled.is_set():
         return MiningOutcome(())
     actions: list[MiningAction] = []
-    transaction = replace(request.transaction, apply=_recording_apply(actions))
+
+    def is_cancelled() -> bool:
+        return cancelled.is_set() or request.cancelled.is_set()
+
+    transaction = replace(
+        request.transaction,
+        apply=_recording_apply(actions),
+        cancelled=is_cancelled,
+    )
+    if request.stage is OperationStage.PREFLIGHT:
+        plan: miner.BulkMinePlan | miner.TokenMinePlan | None
+        if request.kind is OperationKind.BULK:
+            plan = miner.preflight_bulk(transaction)
+        else:
+            assert request.token is not None
+            plan = miner.preflight_token(
+                transaction, request.token, force=request.force, card=request.card
+            )
+        return MiningOutcome(tuple(actions), plan)
+    assert request.prepared is not None and request.plan is not None
     if request.kind is OperationKind.BULK:
-        miner.bulk_mine(transaction, prepared=request.prepared)
+        assert isinstance(request.plan, miner.BulkMinePlan)
+        miner.commit_bulk(transaction, request.plan, request.prepared)
     else:
-        assert request.token is not None
-        miner.mine_token(
-            transaction,
-            request.token,
-            force=request.force,
-            card=request.card,
-            animated=request.prepared.animated,
-            prepared=request.prepared,
-        )
+        assert isinstance(request.plan, miner.TokenMinePlan)
+        miner.commit_token(transaction, request.plan, request.prepared)
     return MiningOutcome(tuple(actions))
 
 

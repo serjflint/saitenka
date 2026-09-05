@@ -183,6 +183,7 @@ class MiningController:
         self._mined_store: MinedCardStore | None = None
         self._operation_issued = 0
         self._operation_inflight: int | None = None
+        self._operation_cancelled: threading.Event | None = None
         self._closed = False
         self._mined_index = MiningIndexState(spec.target_key, 0, SeedStatus.EMPTY, MinedSet())
 
@@ -483,46 +484,156 @@ class MiningController:
             external.toast("mining already in progress", "warn")
             return
         base = f"saitenka_{int(time.time() * 1000)}"
-        prepared = miner.prepare_capture(context, base, animated=animated)
+        cancelled = threading.Event()
         request = mining_operation.MiningOperationRequest(
-            context, kind, prepared, token=token, force=force, card=card
+            context,
+            kind,
+            mining_operation.OperationStage.PREFLIGHT,
+            cancelled,
+            token=token,
+            force=force,
+            card=card,
         )
         submit = self._lifecycle.operation_submit
         if submit is None:
-            outcome = mining_operation.run_operation(request, threading.Event())
-            assert isinstance(outcome, mining_operation.MiningOutcome)
-            mining_operation.apply_outcome(outcome, external)
+            self._run_operation_sync(request, external, base, animated=animated)
             return
+        self._start_operation_async(request, external, base, submit, animated=animated)
 
+    def _run_operation_sync(
+        self,
+        request: mining_operation.MiningOperationRequest,
+        external: miner.MiningApply,
+        base: str,
+        *,
+        animated: bool | None,
+    ) -> None:
+        outcome = mining_operation.run_operation(request, threading.Event())
+        assert isinstance(outcome, mining_operation.MiningOutcome)
+        mining_operation.apply_outcome(outcome, external)
+        if outcome.plan is None:
+            return
+        prepared = miner.prepare_capture(request.transaction, base, animated=animated)
+        commit = mining_operation.MiningOperationRequest(
+            request.transaction,
+            request.kind,
+            mining_operation.OperationStage.COMMIT,
+            request.cancelled,
+            plan=outcome.plan,
+            prepared=prepared,
+        )
+        committed = mining_operation.run_operation(commit, threading.Event())
+        assert isinstance(committed, mining_operation.MiningOutcome)
+        mining_operation.apply_outcome(committed, external)
+
+    def _start_operation_async(
+        self,
+        request: mining_operation.MiningOperationRequest,
+        external: miner.MiningApply,
+        base: str,
+        submit: JobSubmitter,
+        *,
+        animated: bool | None,
+    ) -> None:
         self._operation_issued += 1
         identity = self._operation_issued
         self._operation_inflight = identity
+        self._operation_cancelled = request.cancelled
 
         def finished(completion: EffectFinished) -> None:
-            if completion.identity != identity or self._operation_inflight != identity:
-                return
-            self._operation_inflight = None
-            if self._lifecycle.stopped() or completion.outcome is EffectOutcome.CANCELLED:
-                return
-            if completion.outcome is EffectOutcome.SUCCEEDED and isinstance(
-                completion.result, mining_operation.MiningOutcome
-            ):
-                mining_operation.apply_outcome(completion.result, external)
-            else:
-                external.toast("mine failed unexpectedly", "err")
+            self._complete_operation_async(
+                completion,
+                identity,
+                request,
+                external,
+                base,
+                submit,
+                finished,
+                animated=animated,
+            )
 
-        accepted = submit(
+        accepted = self._submit_operation_stage(submit, identity, request, finished)
+        if accepted:
+            external.toast("mining…", "ok")
+        else:
+            self._finish_operation(identity)
+            external.toast("mining queue unavailable", "err")
+
+    @staticmethod
+    def _submit_operation_stage(
+        submit: JobSubmitter,
+        identity: int,
+        request: mining_operation.MiningOperationRequest,
+        finished: Callable[[EffectFinished], None],
+    ) -> bool:
+        return submit(
             owner=Owner.SESSION,
-            identity=identity,
+            identity=(identity, request.stage),
             lane=mining_operation.LANE,
             request=request,
             on_finished=finished,
         )
-        if accepted:
-            external.toast("mining…", "ok")
-        else:
-            self._operation_inflight = None
+
+    def _complete_operation_async(
+        self,
+        completion: EffectFinished,
+        identity: int,
+        request: mining_operation.MiningOperationRequest,
+        external: miner.MiningApply,
+        base: str,
+        submit: JobSubmitter,
+        finished: Callable[[EffectFinished], None],
+        *,
+        animated: bool | None,
+    ) -> None:
+        stage = self._completion_stage(completion, identity)
+        if stage is None:
+            return
+        if self._lifecycle.stopped() or completion.outcome is EffectOutcome.CANCELLED:
+            self._finish_operation(identity)
+            return
+        outcome = completion.result
+        if completion.outcome is not EffectOutcome.SUCCEEDED or not isinstance(
+            outcome, mining_operation.MiningOutcome
+        ):
+            self._finish_operation(identity)
+            external.toast("mine failed unexpectedly", "err")
+            return
+        mining_operation.apply_outcome(outcome, external)
+        if stage is mining_operation.OperationStage.COMMIT or outcome.plan is None:
+            self._finish_operation(identity)
+            return
+        prepared = miner.prepare_capture(request.transaction, base, animated=animated)
+        commit = mining_operation.MiningOperationRequest(
+            request.transaction,
+            request.kind,
+            mining_operation.OperationStage.COMMIT,
+            request.cancelled,
+            plan=outcome.plan,
+            prepared=prepared,
+        )
+        if not self._submit_operation_stage(submit, identity, commit, finished):
+            self._finish_operation(identity)
             external.toast("mining queue unavailable", "err")
+
+    def _completion_stage(
+        self, completion: EffectFinished, identity: int
+    ) -> mining_operation.OperationStage | None:
+        completion_identity = completion.identity
+        if (
+            not isinstance(completion_identity, tuple)
+            or len(completion_identity) != 2
+            or completion_identity[0] != identity
+            or not isinstance(completion_identity[1], mining_operation.OperationStage)
+            or self._operation_inflight != identity
+        ):
+            return None
+        return completion_identity[1]
+
+    def _finish_operation(self, identity: int) -> None:
+        if self._operation_inflight == identity:
+            self._operation_inflight = None
+            self._operation_cancelled = None
 
     def _operation(self) -> miner.MiningTransaction | None:
         if self._closed:
@@ -550,9 +661,19 @@ class MiningController:
         )
         external = self._apply()
 
+        admitted_identity = target.identity
+
+        def current() -> bool:
+            active = self.active_target
+            return active is not None and active.identity == admitted_identity
+
+        def current_call(call):
+            return lambda *args: call(*args) if current() else None
+
         def mark(expression: str) -> None:
-            self.record_mined_expression(expression)
-            external.mark_mined(expression)
+            if current():
+                self.record_mined_expression(expression)
+                external.mark_mined(expression)
 
         def record_link(
             note_id: int,
@@ -580,15 +701,15 @@ class MiningController:
                 return
 
         apply = miner.MiningApply(
-            external.toast,
-            external.reset_capture,
-            external.captured_image,
-            external.captured_audio,
+            current_call(external.toast),
+            current_call(external.reset_capture),
+            current_call(external.captured_image),
+            current_call(external.captured_audio),
             mark,
-            external.mined_here,
-            external.remember_duplicate,
-            external.preview_existing,
-            external.preview_mined,
+            current_call(external.mined_here),
+            current_call(external.remember_duplicate),
+            current_call(external.preview_existing),
+            current_call(external.preview_mined),
             external.record_mined,
             record_link,
         )
@@ -620,7 +741,6 @@ class MiningController:
         )
 
     def _retire_target_lifecycle(self) -> None:
-        self._operation_inflight = None
         self._lifecycle.cancel_retry()
         self._mined_seed.restart()
         if self._anki_probe is not None:
@@ -634,7 +754,10 @@ class MiningController:
     def invalidate(self) -> None:
         """Refuse in-flight seed publication before the fallible close ledger starts."""
         self._mined_seed.invalidate()
+        if self._operation_cancelled is not None:
+            self._operation_cancelled.set()
         self._operation_inflight = None
+        self._operation_cancelled = None
 
     def close_store(self) -> None:
         if self._mined_store is not None:

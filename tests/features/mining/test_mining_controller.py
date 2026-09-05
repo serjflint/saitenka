@@ -173,10 +173,9 @@ def test_seed_for_current_target_merges_local_mines_and_rejects_old_completion(
 def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) -> None:
     controller, _seed, encounters = _controller(tmp_path, monkeypatch)
     observed: list[float] = []
-    monkeypatch.setattr(miner, "screenshot", lambda *_args: None)
     monkeypatch.setattr(
         miner,
-        "mine_token",
+        "preflight_token",
         lambda transaction, _token, **_kwargs: observed.append(transaction.encounter.playhead),
     )
 
@@ -213,6 +212,20 @@ def test_profile_switch_refuses_an_old_mining_completion(tmp_path, monkeypatch) 
 
     assert not controller.operation_pending
     assert "old" not in controller.index_snapshot()
+    controller.close()
+
+
+def test_rejected_operation_does_not_capture_media(tmp_path, monkeypatch) -> None:
+    operations = _RejectingSubmitter()
+    controller, _seed, _encounters = _controller(tmp_path, monkeypatch, operation_submit=operations)
+    screenshots: list[object] = []
+    monkeypatch.setattr(miner, "screenshot", lambda *_args: screenshots.append(object()))
+
+    controller.mine_index(0)
+
+    assert len(operations.calls) == 1
+    assert screenshots == []
+    assert not controller.operation_pending
     controller.close()
 
 

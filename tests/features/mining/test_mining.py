@@ -666,9 +666,13 @@ def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_sessio
 
     r.graph.mining.mine_token(tok)
 
-    await_ready(anki.entered.is_set, "Anki add did not start")
+    await_ready(anki.entered.is_set, "Anki add did not start", pump=r.pump)
     assert r.graph.mining.operation_pending
     r.graph.mining.mine_token(tok)
+    from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec
+
+    switched = MiningIdentity("other", 1)
+    r.graph.mining.select_mining_spec(MiningSpec(switched, {"deck": "Other", "model": "Lapis"}))
     ipc.set_prop("time-pos", 99.0)
     ipc.set_prop("sub-start", 98.0)
     ipc.set_prop("sub-end", 100.0)
@@ -676,6 +680,7 @@ def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_sessio
     _await_mining(r)
 
     assert len(anki.added) == 1
+    assert "読む" not in r.graph.mining.index_snapshot()
     assert anki.added[0]["fields"]["MiscInfo"].endswith("· 00:21")
     link = r.graph.mining.store.by_note_id(1)
     assert link is not None
@@ -686,6 +691,39 @@ def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_sessio
     )
     assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+
+def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):
+    from util import FakeIPC, await_ready, drain_for
+
+    class BlockingAnki(_FakeAnki):
+        def __init__(self) -> None:
+            super().__init__()
+            self.check_started = threading.Event()
+            self.release_check = threading.Event()
+            self.check_finished = threading.Event()
+
+        def can_add(self, _note):
+            self.check_started.set()
+            assert self.release_check.wait(5), "test did not release Anki health check"
+            self.check_finished.set()
+            return True
+
+    ipc = FakeIPC()
+    anki = BlockingAnki()
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.graph.cue.set_subtitle("本を読む")
+    monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
+    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    r.graph.mining.mine_token(tok)
+    await_ready(anki.check_started.is_set, "Anki health check did not start", pump=r.pump)
+
+    r.close()
+    anki.release_check.set()
+    await_ready(anki.check_finished.is_set, "Anki health check did not finish")
+    drain_for(lambda: None)
+
+    assert anki.added == []
 
 
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_session):
@@ -727,6 +765,7 @@ def test_mine_token_duplicate_shows_existing(monkeypatch, make_session):
     assert anki.added == []  # dedupe: nothing added
     assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
     assert "読む" in r.graph.mining.index_snapshot()
+    assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
 
 
 def test_preview_replay_key_is_tooltip_scoped():

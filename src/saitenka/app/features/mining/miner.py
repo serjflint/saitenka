@@ -34,7 +34,7 @@ from saitenka.app.media import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka_card import MineConfig
+    from saitenka_card import CardData, MineConfig
     from saitenka_tokenize.japanese import Token
     from saitenka_tokenize.registry import Tokenizer
 
@@ -99,6 +99,26 @@ class MiningTransaction:
     scratch: Path
     encounter: MiningEncounter
     apply: MiningApply
+    cancelled: Callable[[], bool] = lambda: False
+
+
+@dataclass(frozen=True, slots=True)
+class TokenMinePlan:
+    token: Token
+    card: CardData
+    force: bool
+
+
+@dataclass(frozen=True, slots=True)
+class BulkMineItem:
+    token: Token
+    card: CardData
+
+
+@dataclass(frozen=True, slots=True)
+class BulkMinePlan:
+    items: tuple[BulkMineItem, ...]
+    duplicates: int
 
 
 def tag_slug(text: str) -> str:
@@ -323,6 +343,8 @@ def _capture_image(
             clip = _encode_animated(p, prepared.base, video, prepared.span)
             if clip:
                 return clip, None
+        if p.cancelled():
+            return "", None
         return p.anki.store_media(f"{prepared.base}.jpg", prepared.still), None
     except (OSError, AnkiError, json.JSONDecodeError) as e:
         log.debug("screenshot capture failed", exc_info=True)
@@ -335,6 +357,8 @@ def _encode_animated(p: MiningTransaction, base: str, video, span) -> str | None
     try:
         # nominal path; animated_screenshot swaps the suffix to the real format (.webp or .gif)
         clip = animated_screenshot(video, span, p.scratch / f"{base}.webp", p.mine_cfg.animated)
+        if p.cancelled():
+            return None
         if clip:
             return p.anki.store_media(clip.name, clip)
     except (OSError, subprocess.SubprocessError, AnkiError, json.JSONDecodeError):
@@ -350,6 +374,8 @@ def _capture_audio(
         if enabled and video and span:
             aud = p.scratch / f"{base}.m4a"
             clip_audio(video, span, aud, normalize=p.mine_cfg.normalize_audio)
+            if p.cancelled():
+                return "", None
             p.apply.captured_audio(aud)
             return p.anki.store_media(f"{base}.m4a", aud), None
     except (
@@ -402,7 +428,7 @@ def _attach_word_audio(p: MiningTransaction, note: dict, card) -> None:
 
     try:
         hit = resolve(p.mine_cfg.word_audio_pack, card.expression, card.reading)
-        if hit is None:
+        if hit is None or p.cancelled():
             return
         media_name = p.anki.store_media(hit.filename, hit.path)
         note["fields"][p.mine_cfg.word_audio_field] = f"[sound:{media_name}]"
@@ -460,19 +486,51 @@ def mine_token(
     bypassing the default entry pick — otherwise the dict-first ``card_for_token`` derives it.
     ``animated`` overrides ``[mine].animated_screenshot`` for this mine (the video-mine shortcut
     passes ``True``)."""
+    plan = preflight_token(p, tok, force=force, card=card)
+    if plan is None:
+        return
+    prepared = prepared or prepare_capture(
+        p, f"saitenka_{int(time.time() * 1000)}", animated=animated
+    )
+    commit_token(p, plan, prepared)
+
+
+def preflight_token(
+    p: MiningTransaction, tok, *, force: bool = False, card=None
+) -> TokenMinePlan | None:
+    """Resolve and deduplicate a token before any media capture."""
+    if p.cancelled():
+        return None
     try:
         card = card if card is not None else card_for_token(p.encounter.dict_set, tok)
-        if not force:
-            existing = dedupe(p.anki, p.mine_cfg, card.expression)
-            if existing:
-                p.apply.mark_mined(card.expression)  # already in the deck → ✓
-                p.apply.mined_here()
-                p.apply.remember_duplicate(tok)
-                p.apply.preview_existing(existing[0], card, "exists")
-                return
+        existing = dedupe(p.anki, p.mine_cfg, card.expression)
+        if p.cancelled():
+            return None
+        if existing and not force:
+            p.apply.mark_mined(card.expression)
+            p.apply.mined_here()
+            p.apply.remember_duplicate(tok)
+            p.apply.preview_existing(existing[0], card, "exists")
+            return None
+        return TokenMinePlan(tok, card, force)
+    except AnkiError as error:
+        p.apply.toast(f"mine failed: {error}", "err")
+    except Exception as error:
+        log.exception("mine_token preflight failed")
+        p.apply.toast(f"mine error: {error}", "err")
+    return None
+
+
+def commit_token(p: MiningTransaction, plan: TokenMinePlan, prepared: PreparedCapture) -> None:
+    """Build and add one preflighted card; ``add_note`` is the commit point."""
+    if p.cancelled():
+        return
+    tok, card, force = plan.token, plan.card, plan.force
+    try:
         video = p.encounter.media_path
-        base = prepared.base if prepared is not None else f"saitenka_{int(time.time() * 1000)}"
-        pic, audio = capture_media(p, base, video, animated=animated, prepared=prepared)
+        pic, audio = capture_media(p, prepared.base, video, prepared=prepared)
+        if p.cancelled():
+            return
         freq = frequency(p.encounter.dict_set, tok)
         sentence_html = bold_word(p.encounter.sentence_html, tok.surface)
         misc, tags = provenance(p.encounter.playhead, video), mine_tags(video)
@@ -486,11 +544,15 @@ def mine_token(
         )
         markers = _markers_for(p, tok, card, content, video=video, tags=tags)
         note = build_note(p.mine_cfg, card, content, tags, allow_duplicate=force, markers=markers)
-        if not force and not p.anki.can_add(note):
+        _attach_word_audio(p, note, card)
+        if p.cancelled():
+            return
+        if not p.anki.can_add(note):
             p.apply.toast(f"can't add {card.expression}", "err")
             return
-        _attach_word_audio(p, note, card)
-        # --- mine-time add_note seam (shared by #253 note-id retention + #93 word-audio) -------
+        if p.cancelled():
+            return
+        # AnkiConnect cannot retract a request after this call begins.
         note_id = p.anki.add_note(note)
         _persist_mined(p, note_id, card, video)
         p.apply.record_mined(1)
@@ -506,31 +568,65 @@ def mine_token(
 
 def bulk_mine(p: MiningTransaction, *, prepared: PreparedCapture | None = None) -> None:
     """Mine every unknown content word in the current cue, sharing one screenshot + audio."""
+    plan = preflight_bulk(p)
+    if plan is None:
+        return
+    prepared = prepared or prepare_capture(p, f"saitenka_{int(time.time() * 1000)}")
+    commit_bulk(p, plan, prepared)
+
+
+def preflight_bulk(p: MiningTransaction) -> BulkMinePlan | None:
+    """Resolve and deduplicate a cue before any media capture."""
     if not p.encounter.cue.tokens:
         p.apply.toast("nothing to mine", "warn")
-        return
+        return None
     targets = _select_bulk_targets(p.encounter.cue)
     if not targets:
         p.apply.toast("no new words", "warn")
+        return None
+    items: list[BulkMineItem] = []
+    duplicates = 0
+    try:
+        for idx in targets:
+            if p.cancelled():
+                return None
+            tok = p.encounter.cue.tokens[idx]
+            card = card_for_token(p.encounter.dict_set, tok)
+            if not card.glossary_html:
+                continue
+            if dedupe(p.anki, p.mine_cfg, card.expression):
+                duplicates += 1
+            else:
+                items.append(BulkMineItem(tok, card))
+    except AnkiError as error:
+        p.apply.toast(f"bulk failed: {error}", "err")
+        return None
+    if not items:
+        p.apply.toast(f"mined 0 · {duplicates} dup", "warn")
+        p.apply.record_mined(0)
+        return None
+    return BulkMinePlan(tuple(items), duplicates)
+
+
+def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapture) -> None:
+    """Add a preflighted cue batch, stopping before the next commit when cancelled."""
+    if p.cancelled():
         return
     video = p.encounter.media_path
-    base = prepared.base if prepared is not None else f"saitenka_{int(time.time() * 1000)}"
-    pic, audio = capture_media(p, base, video, prepared=prepared)
+    pic, audio = capture_media(p, prepared.base, video, prepared=prepared)
+    if p.cancelled():
+        return
     misc, sentence, tags = (
         provenance(p.encounter.playhead, video),
         p.encounter.sentence_html,
         mine_tags(video),
     )
-    mined = dup = 0
+    mined, dup = 0, plan.duplicates
     try:
-        for idx in targets:
-            tok = p.encounter.cue.tokens[idx]
-            card = card_for_token(p.encounter.dict_set, tok)
-            if not card.glossary_html:  # no dict entry (name/particle) — skip
-                continue
-            if dedupe(p.anki, p.mine_cfg, card.expression):
-                dup += 1
-                continue
+        for item in plan.items:
+            if p.cancelled():
+                return
+            tok, card = item.token, item.card
             freq = frequency(p.encounter.dict_set, tok)
             content = CardContent(
                 sentence_html=bold_word(sentence, tok.surface),
@@ -543,6 +639,8 @@ def bulk_mine(p: MiningTransaction, *, prepared: PreparedCapture | None = None) 
             markers = _markers_for(p, tok, card, content, video=video, tags=tags)
             note = build_note(p.mine_cfg, card, content, tags, markers=markers)
             if p.anki.can_add(note):
+                if p.cancelled():
+                    return
                 p.anki.add_note(note)
                 p.apply.mark_mined(card.expression)
                 mined += 1
