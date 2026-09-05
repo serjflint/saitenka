@@ -13,23 +13,21 @@ from __future__ import annotations
 import json
 import logging
 import re
-import sqlite3
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saitenka_card import CardContent, bold_word, build_note, strip_field_html
+from saitenka_card import CardContent, bold_word, build_note, markers_in, strip_field_html
 
-from saitenka import otel_metrics
 from saitenka.app.anki import AnkiError, dedupe
 from saitenka.app.lookup import card_for
 from saitenka.app.media import (
     AudioOutputMissingError,
+    Timespan,
     animated_screenshot,
     clip_audio,
-    current_timespan,
     screenshot,
 )
 
@@ -42,7 +40,6 @@ if TYPE_CHECKING:
 
     from saitenka.app.anki import Anki
     from saitenka.app.dictionary import DictionarySet
-    from saitenka.app.features.mining.mined_store import MinedCardStore
 
 log = logging.getLogger(__name__)
 
@@ -64,17 +61,14 @@ class MineCue:
 
 @dataclass(frozen=True, slots=True)
 class MiningEncounter:
-    """Facts current behavior samples once when the owner admits an operation.
-
-    ``ipc`` remains a live capability: cue bounds are intentionally sampled during media capture and
-    again after commit. Freezing those bounds is a separate mining-reliability decision.
-    """
+    """Facts sampled once when the owner admits an operation."""
 
     cue: MineCue
     dict_set: DictionarySet | None
     ipc: object
     media_path: object
     playhead: float
+    span: Timespan | None
     sentence_html: str
     hovered_terms: tuple
 
@@ -93,6 +87,7 @@ class MiningApply:
     preview_existing: Callable[..., None]
     preview_mined: Callable[..., None]
     record_mined: Callable[[int], None]
+    record_link: Callable[..., None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +96,6 @@ class MiningTransaction:
 
     anki: Anki
     mine_cfg: MineConfig
-    mined_store: MinedCardStore
     scratch: Path
     encounter: MiningEncounter
     apply: MiningApply
@@ -245,8 +239,56 @@ def _markers_for(p: MiningTransaction, tok, card, content: CardContent, *, video
 
 
 # --- media capture ------------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class MediaNeeds:
+    picture: bool
+    audio: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCapture:
+    base: str
+    span: Timespan | None
+    needs: MediaNeeds
+    still: Path | None
+    still_error: Exception | None
+    animated: bool
+
+
+def media_needs(config: MineConfig) -> MediaNeeds:
+    if config.card_format:
+        used = set().union(*(markers_in(str(value)) for value in config.card_format.values()))
+        return MediaNeeds("screenshot" in used, "sentence-audio" in used)
+    return MediaNeeds("picture" in config.fields, "audio" in config.fields)
+
+
+def prepare_capture(
+    p: MiningTransaction, base: str, *, animated: bool | None = None
+) -> PreparedCapture:
+    """Freeze media inputs and perform the sole mpv command before background work starts."""
+    needs = media_needs(p.mine_cfg)
+    use_animation = needs.picture and (
+        p.mine_cfg.animated.enabled if animated is None else animated
+    )
+    p.apply.reset_capture()
+    still = p.scratch / f"{base}.jpg" if needs.picture else None
+    error: Exception | None = None
+    if still is not None:
+        try:
+            screenshot(p.encounter.ipc, still)
+        except OSError as exc:
+            error = exc
+            still = None
+    return PreparedCapture(base, p.encounter.span, needs, still, error, use_animation)
+
+
 def capture_media(
-    p: MiningTransaction, base: str, video, *, animated: bool | None = None
+    p: MiningTransaction,
+    base: str,
+    video,
+    *,
+    animated: bool | None = None,
+    prepared: PreparedCapture | None = None,
 ) -> tuple[str, str]:
     """Capture the card image (a still frame, or an animated clip of the cue — WebP or GIF) + the cue's
     audio and store both in Anki. Returns (pic, audio).
@@ -256,40 +298,32 @@ def capture_media(
     captured locally (``preview.last_jpg`` drives the preview and is the fallback); the clip becomes
     the card image only when the encode succeeds. Also stashes ``preview.last_audio``. Warn-toasts on
     failure."""
-    # any animated path needs mine_cfg (for the encode opts), so gate the whole thing on it — a per-mine
-    # override can't force a clip without a config to encode from.
-    want_animated = bool(p.mine_cfg) and (
-        p.mine_cfg.animated.enabled if animated is None else animated
+    prepared = prepared or prepare_capture(p, base, animated=animated)
+    pic, pic_err = _capture_image(p, video, prepared)
+    audio, audio_err = _capture_audio(
+        p, prepared.base, video, prepared.span, enabled=prepared.needs.audio
     )
-    p.apply.reset_capture()
-    try:
-        span = current_timespan(
-            p.encounter.ipc
-        )  # guarded: an IPC hiccup must not escape and kill the loop
-    except (OSError, ValueError):
-        log.debug("cue timespan read failed — image-only mine", exc_info=True)
-        span = None
-    pic, pic_err = _capture_image(p, base, video, span, animated=want_animated)
-    audio, audio_err = _capture_audio(p, base, video, span)
     _warn_capture_failure(p, pic_err, audio_err)
     return pic, audio
 
 
 def _capture_image(
-    p: MiningTransaction, base: str, video, span, *, animated: bool
+    p: MiningTransaction, video, prepared: PreparedCapture
 ) -> tuple[str, Exception | None]:
     """The card image: the mpv still (always, → ``preview.last_jpg``), replaced by an animated clip when
     ``animated`` and the encode succeeds. Returns (media_name, error-or-None)."""
+    if not prepared.needs.picture:
+        return "", None
+    if prepared.still_error is not None:
+        return "", prepared.still_error
+    assert prepared.still is not None
     try:
-        jpg = p.scratch / f"{base}.jpg"
-        screenshot(p.encounter.ipc, jpg)
-        # local still — drives the preview and is the fallback (may not be uploaded)
-        p.apply.captured_image(jpg)
-        if animated and video and span:
-            clip = _encode_animated(p, base, video, span)
+        p.apply.captured_image(prepared.still)
+        if prepared.animated and video and prepared.span:
+            clip = _encode_animated(p, prepared.base, video, prepared.span)
             if clip:
-                return clip, None  # clip is the card image; the still stays a local-only fallback
-        return p.anki.store_media(f"{base}.jpg", jpg), None  # still is the card image → upload it
+                return clip, None
+        return p.anki.store_media(f"{prepared.base}.jpg", prepared.still), None
     except (OSError, AnkiError, json.JSONDecodeError) as e:
         log.debug("screenshot capture failed", exc_info=True)
         return "", e
@@ -308,10 +342,12 @@ def _encode_animated(p: MiningTransaction, base: str, video, span) -> str | None
     return None
 
 
-def _capture_audio(p: MiningTransaction, base: str, video, span) -> tuple[str, Exception | None]:
+def _capture_audio(
+    p: MiningTransaction, base: str, video, span, *, enabled: bool = True
+) -> tuple[str, Exception | None]:
     """The cue audio clip (→ ``preview.last_audio``). Returns (media_name, error-or-None)."""
     try:
-        if video and span:
+        if enabled and video and span:
             aud = p.scratch / f"{base}.m4a"
             clip_audio(video, span, aud, normalize=p.mine_cfg.normalize_audio)
             p.apply.captured_audio(aud)
@@ -380,20 +416,16 @@ def _persist_mined(p: MiningTransaction, note_id: int, card, video) -> None:
     non-int ``addNote`` result / no active cue) must never break the mine."""
     if not isinstance(note_id, int) or not video:
         return
-    span = current_timespan(p.encounter.ipc)
-    try:
-        with otel_metrics.traced("mined_store_write"):  # main-thread SQLite on a mine (#253 link)
-            p.mined_store.record(
-                note_id=note_id,
-                video_path=str(video),
-                cue_start=span.start if span else 0.0,
-                cue_end=span.end if span else 0.0,
-                expression=card.expression,
-                reading=card.reading,
-                deck=p.mine_cfg.deck,
-            )
-    except (OSError, sqlite3.Error, ValueError):
-        log.debug("mined-card store write failed", exc_info=True)
+    span = p.encounter.span
+    p.apply.record_link(
+        note_id,
+        str(video),
+        span.start if span else 0.0,
+        span.end if span else 0.0,
+        card.expression,
+        card.reading,
+        p.mine_cfg.deck,
+    )
 
 
 def mine_current(p: MiningTransaction) -> None:
@@ -412,7 +444,15 @@ def mine_current(p: MiningTransaction) -> None:
     mine_token(p, tok, card=cards[0] if cards else None)
 
 
-def mine_token(p: MiningTransaction, tok, *, force: bool = False, card=None, animated=None) -> None:
+def mine_token(
+    p: MiningTransaction,
+    tok,
+    *,
+    force: bool = False,
+    card=None,
+    animated=None,
+    prepared: PreparedCapture | None = None,
+) -> None:
     """Mine a specific token into Anki — the hovered subtitle word, or an inner word discovered
     by scanning inside the tooltip (the nested popup's ⊕). ``force`` mines a second card for an
     expression already in the deck (the preview's explicit "add anyway" for a different scene).
@@ -431,9 +471,8 @@ def mine_token(p: MiningTransaction, tok, *, force: bool = False, card=None, ani
                 p.apply.preview_existing(existing[0], card, "exists")
                 return
         video = p.encounter.media_path
-        pic, audio = capture_media(
-            p, f"saitenka_{int(time.time() * 1000)}", video, animated=animated
-        )
+        base = prepared.base if prepared is not None else f"saitenka_{int(time.time() * 1000)}"
+        pic, audio = capture_media(p, base, video, animated=animated, prepared=prepared)
         freq = frequency(p.encounter.dict_set, tok)
         sentence_html = bold_word(p.encounter.sentence_html, tok.surface)
         misc, tags = provenance(p.encounter.playhead, video), mine_tags(video)
@@ -465,7 +504,7 @@ def mine_token(p: MiningTransaction, tok, *, force: bool = False, card=None, ani
         p.apply.toast(f"mine error: {e}", "err")
 
 
-def bulk_mine(p: MiningTransaction) -> None:
+def bulk_mine(p: MiningTransaction, *, prepared: PreparedCapture | None = None) -> None:
     """Mine every unknown content word in the current cue, sharing one screenshot + audio."""
     if not p.encounter.cue.tokens:
         p.apply.toast("nothing to mine", "warn")
@@ -475,7 +514,8 @@ def bulk_mine(p: MiningTransaction) -> None:
         p.apply.toast("no new words", "warn")
         return
     video = p.encounter.media_path
-    pic, audio = capture_media(p, f"saitenka_{int(time.time() * 1000)}", video)
+    base = prepared.base if prepared is not None else f"saitenka_{int(time.time() * 1000)}"
+    pic, audio = capture_media(p, base, video, prepared=prepared)
     misc, sentence, tags = (
         provenance(p.encounter.playhead, video),
         p.encounter.sentence_html,

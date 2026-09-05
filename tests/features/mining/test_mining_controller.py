@@ -8,7 +8,7 @@ from saitenka_card import MineConfig
 from saitenka_tokenize.japanese import Token
 
 from saitenka.app.config import MiningOptions
-from saitenka.app.features.mining import miner
+from saitenka.app.features.mining import miner, mining_operation
 from saitenka.app.features.mining.mining_controller import (
     MiningController,
     MiningIdentity,
@@ -53,6 +53,7 @@ class _EncounterSource:
             object(),
             "/video.mkv",
             float(self.samples),
+            miner.Timespan(10.0, 12.0),
             "猫",
             (),
         )
@@ -70,10 +71,11 @@ def _apply() -> miner.MiningApply:
         lambda *_args: None,
         lambda *_args: None,
         lambda _count: None,
+        lambda *_args: None,
     )
 
 
-def _controller(tmp_path, monkeypatch):
+def _controller(tmp_path, monkeypatch, *, operation_submit=None):
     from saitenka.app.features.mining import mined_store
 
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
@@ -83,7 +85,14 @@ def _controller(tmp_path, monkeypatch):
     encounters = _EncounterSource()
     controller = MiningController(
         spec,
-        MiningLifecycle(seed, _Submitter(), lambda _delay, _due: True, lambda: None, lambda: False),
+        MiningLifecycle(
+            seed,
+            _Submitter(),
+            lambda _delay, _due: True,
+            lambda: None,
+            lambda: False,
+            operation_submit,
+        ),
         settings=MiningOptions(max_bulk=20, anki_ok_ttl=5, anki_ping_timeout=0.1),
         encounter=encounters,
         apply=_apply,
@@ -164,6 +173,7 @@ def test_seed_for_current_target_merges_local_mines_and_rejects_old_completion(
 def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) -> None:
     controller, _seed, encounters = _controller(tmp_path, monkeypatch)
     observed: list[float] = []
+    monkeypatch.setattr(miner, "screenshot", lambda *_args: None)
     monkeypatch.setattr(
         miner,
         "mine_token",
@@ -175,6 +185,34 @@ def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) 
 
     assert observed == [1.0, 2.0]
     assert encounters.samples == 2
+    controller.close()
+
+
+def test_profile_switch_refuses_an_old_mining_completion(tmp_path, monkeypatch) -> None:
+    operations = _Submitter()
+    controller, _seed, _encounters = _controller(tmp_path, monkeypatch, operation_submit=operations)
+    monkeypatch.setattr(miner, "screenshot", lambda *_args: None)
+
+    controller.mine_index(0)
+    call = operations.calls[-1]
+    assert controller.operation_pending
+
+    identity = MiningIdentity("b", 1)
+    controller.select_mining_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
+    call["on_finished"](
+        EffectFinished(
+            EffectId(2),
+            Owner.SESSION,
+            call["identity"],
+            EffectOutcome.SUCCEEDED,
+            result=mining_operation.MiningOutcome(
+                (mining_operation.MiningAction("mark_mined", ("old",)),)
+            ),
+        )
+    )
+
+    assert not controller.operation_pending
+    assert "old" not in controller.index_snapshot()
     controller.close()
 
 

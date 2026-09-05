@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import sqlite3
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -12,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.anki import AnkiError
 from saitenka.app.capabilities import CapabilityProbe
-from saitenka.app.features.mining import mined_seed, miner, preview_access
+from saitenka.app.features.mining import mined_seed, miner, mining_operation, preview_access
 from saitenka.app.features.mining.mined_set import MinedSet
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 
@@ -142,6 +145,7 @@ class MiningLifecycle:
     schedule_retry: Callable[[float, Callable[[], None]], bool]
     cancel_retry: Callable[[], object]
     stopped: Callable[[], bool]
+    operation_submit: JobSubmitter | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +181,8 @@ class MiningController:
         self._anki_probe: CapabilityProbe | None = None
         self._scratch_dir = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
         self._mined_store: MinedCardStore | None = None
+        self._operation_issued = 0
+        self._operation_inflight: int | None = None
         self._closed = False
         self._mined_index = MiningIndexState(spec.target_key, 0, SeedStatus.EMPTY, MinedSet())
 
@@ -206,6 +212,7 @@ class MiningController:
                 ),
                 cancel_retry=lambda: assembly.timers.cancel(LifecycleTimerKind.MINED_SEED_RETRY),
                 stopped=assembly.stopped,
+                operation_submit=mining_operation.configure_runtime_job(assembly.ipc),
             ),
             settings=assembly.settings,
             encounter=assembly.encounter,
@@ -427,7 +434,13 @@ class MiningController:
             )
             else []
         )
-        miner.mine_token(context, token, card=cards[0] if cards else None, animated=animated)
+        self._dispatch_operation(
+            context,
+            mining_operation.OperationKind.WORD,
+            token=token,
+            card=cards[0] if cards else None,
+            animated=animated,
+        )
 
     def mine_token(self, token: Token, *, card=None) -> None:
         from saitenka import otel_metrics
@@ -435,17 +448,81 @@ class MiningController:
         with otel_metrics.traced("anki_mine", source="nested"):
             context = self._operation()
             if context is not None:
-                miner.mine_token(context, token, card=card)
+                self._dispatch_operation(
+                    context, mining_operation.OperationKind.WORD, token=token, card=card
+                )
 
     def force_duplicate(self, request: ForceDuplicate) -> None:
         context = self._operation()
         if context is not None and request.token is not None:
-            miner.mine_token(context, request.token, force=True)
+            self._dispatch_operation(
+                context, mining_operation.OperationKind.WORD, token=request.token, force=True
+            )
 
     def bulk_mine(self) -> None:
         context = self._operation()
         if context is not None:
-            miner.bulk_mine(context)
+            self._dispatch_operation(context, mining_operation.OperationKind.BULK)
+
+    @property
+    def operation_pending(self) -> bool:
+        return self._operation_inflight is not None
+
+    def _dispatch_operation(
+        self,
+        context: miner.MiningTransaction,
+        kind: mining_operation.OperationKind,
+        *,
+        token: object | None = None,
+        force: bool = False,
+        card: object | None = None,
+        animated: bool | None = None,
+    ) -> None:
+        external = context.apply
+        if self.operation_pending:
+            external.toast("mining already in progress", "warn")
+            return
+        base = f"saitenka_{int(time.time() * 1000)}"
+        prepared = miner.prepare_capture(context, base, animated=animated)
+        request = mining_operation.MiningOperationRequest(
+            context, kind, prepared, token=token, force=force, card=card
+        )
+        submit = self._lifecycle.operation_submit
+        if submit is None:
+            outcome = mining_operation.run_operation(request, threading.Event())
+            assert isinstance(outcome, mining_operation.MiningOutcome)
+            mining_operation.apply_outcome(outcome, external)
+            return
+
+        self._operation_issued += 1
+        identity = self._operation_issued
+        self._operation_inflight = identity
+
+        def finished(completion: EffectFinished) -> None:
+            if completion.identity != identity or self._operation_inflight != identity:
+                return
+            self._operation_inflight = None
+            if self._lifecycle.stopped() or completion.outcome is EffectOutcome.CANCELLED:
+                return
+            if completion.outcome is EffectOutcome.SUCCEEDED and isinstance(
+                completion.result, mining_operation.MiningOutcome
+            ):
+                mining_operation.apply_outcome(completion.result, external)
+            else:
+                external.toast("mine failed unexpectedly", "err")
+
+        accepted = submit(
+            owner=Owner.SESSION,
+            identity=identity,
+            lane=mining_operation.LANE,
+            request=request,
+            on_finished=finished,
+        )
+        if accepted:
+            external.toast("mining…", "ok")
+        else:
+            self._operation_inflight = None
+            external.toast("mining queue unavailable", "err")
 
     def _operation(self) -> miner.MiningTransaction | None:
         if self._closed:
@@ -467,6 +544,7 @@ class MiningController:
             encounter.ipc,
             encounter.media_path,
             encounter.playhead,
+            encounter.span,
             encounter.sentence_html,
             encounter.hovered_terms,
         )
@@ -475,6 +553,31 @@ class MiningController:
         def mark(expression: str) -> None:
             self.record_mined_expression(expression)
             external.mark_mined(expression)
+
+        def record_link(
+            note_id: int,
+            video_path: str,
+            cue_start: float,
+            cue_end: float,
+            expression: str,
+            reading: str,
+            deck: str,
+        ) -> None:
+            from saitenka import otel_metrics
+
+            try:
+                with otel_metrics.traced("mined_store_write"):
+                    self.store.record(
+                        note_id=note_id,
+                        video_path=video_path,
+                        cue_start=cue_start,
+                        cue_end=cue_end,
+                        expression=expression,
+                        reading=reading,
+                        deck=deck,
+                    )
+            except (OSError, sqlite3.Error, ValueError):
+                return
 
         apply = miner.MiningApply(
             external.toast,
@@ -487,9 +590,10 @@ class MiningController:
             external.preview_existing,
             external.preview_mined,
             external.record_mined,
+            record_link,
         )
         return miner.MiningTransaction(
-            target.anki, target.config, self.store, self._scratch_dir, encounter, apply
+            target.anki, target.config, self._scratch_dir, encounter, apply
         )
 
     def preview_access(self) -> MiningPreviewAccess:
@@ -516,6 +620,7 @@ class MiningController:
         )
 
     def _retire_target_lifecycle(self) -> None:
+        self._operation_inflight = None
         self._lifecycle.cancel_retry()
         self._mined_seed.restart()
         if self._anki_probe is not None:
@@ -529,6 +634,7 @@ class MiningController:
     def invalidate(self) -> None:
         """Refuse in-flight seed publication before the fallible close ledger starts."""
         self._mined_seed.invalidate()
+        self._operation_inflight = None
 
     def close_store(self) -> None:
         if self._mined_store is not None:
