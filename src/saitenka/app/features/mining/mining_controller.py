@@ -23,14 +23,40 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from PIL.Image import Image as PILImage
-    from saitenka_card import MineConfig
+    from saitenka_card import CardData, MineConfig
     from saitenka_tokenize.japanese import Token
 
     from saitenka.app.anki import Anki
     from saitenka.app.config import MiningOptions
     from saitenka.app.features.mining.mined_store import MinedCardStore
     from saitenka.app.lifecycle_timers import LifecycleTimers
+    from saitenka.app.media import Timespan
     from saitenka.runtime.jobs import JobSubmitter
+
+
+def _commit_mined_action(
+    *,
+    span: Timespan | None,
+    deck: str,
+    record_link: Callable[..., None],
+    record_mined: Callable[[int], None],
+    mark: Callable[[str], None],
+) -> Callable[[int, CardData, object], None]:
+    def commit(note_id: int, card: CardData, video: object) -> None:
+        if isinstance(note_id, int) and video:
+            record_link(
+                note_id,
+                str(video),
+                span.start if span else 0.0,
+                span.end if span else 0.0,
+                card.expression,
+                card.reading,
+                deck,
+            )
+        record_mined(1)
+        mark(card.expression)
+
+    return commit
 
 
 @dataclass(frozen=True, slots=True)
@@ -711,21 +737,6 @@ class MiningController:
             except (OSError, sqlite3.Error, ValueError):
                 return
 
-        def commit_mined(note_id: int, card, video: object) -> None:
-            if isinstance(note_id, int) and video:
-                span = encounter.span
-                record_link(
-                    note_id,
-                    str(video),
-                    span.start if span else 0.0,
-                    span.end if span else 0.0,
-                    card.expression,
-                    card.reading,
-                    target.config.deck,
-                )
-            external.record_mined(1)
-            mark(card.expression)
-
         apply = miner.MiningApply(
             current_call(external.toast),
             current_call(external.reset_capture),
@@ -738,7 +749,13 @@ class MiningController:
             current_call(external.preview_mined),
             external.record_mined,
             record_link,
-            commit_mined,
+            _commit_mined_action(
+                span=encounter.span,
+                deck=target.config.deck,
+                record_link=record_link,
+                record_mined=external.record_mined,
+                mark=mark,
+            ),
         )
         return miner.MiningTransaction(
             target.anki, target.config, self._scratch_dir, encounter, apply
