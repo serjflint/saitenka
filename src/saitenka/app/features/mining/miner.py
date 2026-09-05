@@ -437,6 +437,11 @@ def _attach_word_audio(p: MiningTransaction, note: dict, card) -> None:
         log.debug("word-audio attach failed", exc_info=True)
 
 
+def _persist_mined(p: MiningTransaction, note_id: int, card, video) -> None:
+    """Publish one committed note's durable owner-thread effects."""
+    p.apply.commit_mined(note_id, card, video)
+
+
 def mine_current(p: MiningTransaction) -> None:
     idx = mine_target(p.encounter.cue)
     if idx is None:
@@ -537,7 +542,7 @@ def commit_token(p: MiningTransaction, plan: TokenMinePlan, prepared: PreparedCa
             return
         # AnkiConnect cannot retract a request after this call begins.
         note_id = p.anki.add_note(note)
-        p.apply.commit_mined(note_id, card, video)
+        _persist_mined(p, note_id, card, video)
         p.apply.mined_here()
         p.apply.preview_mined(card, tok, video, "duplicate" if force else "mined")
     except AnkiError as e:
@@ -623,7 +628,7 @@ def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapt
                 if p.cancelled():
                     return
                 note_id = p.anki.add_note(note)
-                p.apply.commit_mined(note_id, card, video)
+                _persist_mined(p, note_id, card, video)
                 mined += 1
             else:
                 dup += 1
