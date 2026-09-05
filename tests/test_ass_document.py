@@ -112,7 +112,7 @@ def annotations_from_authored_color_boundaries(
 @pytest.mark.parametrize(
     ("raw", "text", "source_fragments", "drawings"),
     [
-        ("猫\\N犬\\n魚\\h鳥", "猫\n犬 魚 鳥", ("猫", "\\N", "犬", "\\n", "魚", "\\h", "鳥"), ()),
+        ("猫\\N犬\\n魚\\h鳥", "猫\n犬\n魚 鳥", ("猫", "\\N", "犬", "\\n", "魚", "\\h", "鳥"), ()),
         ("{\\i1}猫{\\b1}犬{\\i0}", "猫犬", ("猫", "犬"), ()),
         ("{\\p1}m 0 0 l 10 10{\\p0}字", "字", ("字",), ((5, 18, 1),)),
         ("猫{broken", "猫{broken", tuple("猫{broken"), ()),
@@ -135,11 +135,23 @@ def test_raw_spans_do_not_guess_one_boundary_across_an_override() -> None:
     assert tuple((span.start, span.end) for span in decoded.raw_spans) == ((0, 1), (6, 7))
 
 
-def test_soft_break_is_a_newline_only_for_wrap_style_two() -> None:
+def test_soft_break_is_a_semantic_newline_independent_of_visual_wrapping() -> None:
     source = event(r"猫\n犬")
 
-    assert decode_ass_event(source).text == "猫 犬"
-    assert decode_ass_event(source, soft_break="\n").text == "猫\n犬"
+    assert decode_ass_event(source).text == "猫\n犬"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (r"A{\p1}m 0 0{\p}TEXT", "ATEXT"),
+        (r"A{\p1}m 0 0{\pbo2}TEXT", "ATEXT"),
+        (r"A{\p1\pbo2}m 0 0{\p0}TEXT", "Am 0 0TEXT"),
+        (r"A{\pos(20,30)}TEXT", "ATEXT"),
+    ],
+)
+def test_drawing_mode_matches_libass_tag_precedence(raw: str, expected: str) -> None:
+    assert decode_ass_event(event(raw)).text == expected
 
 
 def test_legacy_offsets_do_not_masquerade_as_exact_spans() -> None:

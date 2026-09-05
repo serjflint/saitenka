@@ -82,13 +82,19 @@ def test_parse_ass_keeps_dialogue_from_an_unclosed_override_block() -> None:
     assert parse_ass(content)[0].text == r"猫{\b1犬"
 
 
-@pytest.mark.parametrize(("wrap_style", "expected"), [("0", "猫 犬"), ("2", "猫\n犬")])
-def test_parse_ass_applies_wrap_style_to_soft_breaks(wrap_style: str, expected: str) -> None:
+@pytest.mark.parametrize("wrap_style", ["0", "2"])
+def test_parse_ass_keeps_semantic_soft_breaks_across_wrap_styles(wrap_style: str) -> None:
     content = ASS.replace("Title: x", f"Title: x\nWrapStyle: {wrap_style}").replace(
         "{\\an8}こんにちは", r"猫\n犬"
     )
 
-    assert parse_ass(content)[0].text == expected
+    assert parse_ass(content)[0].text == "猫\n犬"
+
+
+def test_parse_ass_bounds_oversized_drawing_scales() -> None:
+    content = ASS.replace("{\\an8}こんにちは", "{\\p" + "9" * 5000 + "}x")
+
+    assert [cue.text for cue in parse_ass(content)] == ["セリフ、読点あり", "また\nあした"]
 
 
 def test_parse_cues_dispatches_by_extension_and_sorts():

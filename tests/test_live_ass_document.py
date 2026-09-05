@@ -104,6 +104,9 @@ def _observe_mpv_subtitle_properties(
     [
         r"{\an7\alpha&H40&}猫\N犬\h鳥{\b1}を見る{\b0}",
         r"前{\p1}m 0 0 l 10 10{\p0}中{\pos(20,30)}後",
+        r"A{\p1}m 0 0{\p}TEXT",
+        r"A{\p1}m 0 0{\pbo2}TEXT",
+        r"A{\p1\pbo2}m 0 0{\p0}TEXT",
         r"猫\n犬",
     ],
 )

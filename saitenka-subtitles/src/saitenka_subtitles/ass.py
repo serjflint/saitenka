@@ -21,7 +21,7 @@ from saitenka_subtitles.document import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-_DRAWING = re.compile(r"\\p(-?\d+)(?!\d)")
+_DRAWING = re.compile(r"\\p(?:(?P<scale>-?\d+)(?!\d)|bo(?:-?\d+)?(?=\\|$)|(?=\\|$))")
 _DYNAMIC = re.compile(r"\\(?:t|move|fad|fade)(?=[(\d\\}]|$)")
 _KARAOKE = re.compile(r"\\(?:kt|k|K|kf|ko)(?=[\d\\}]|$)")
 _COLOR_STATE = re.compile(
@@ -156,7 +156,13 @@ def _consume_override(state: _DecodeState, block: _OverrideBlock) -> None:
         state.drawings.append(DrawingSpan(state.drawing_start, block.start, state.drawing_scale))
         state.drawing_start = None
     for match in _DRAWING.finditer(block.content):
-        state.drawing_scale = max(0, int(match.group(1)))
+        scale = match.group("scale")
+        if scale is None:
+            state.drawing_scale = 0
+        elif len(scale.removeprefix("-")) > 9:
+            state.drawing_scale = 0 if scale.startswith("-") else 1
+        else:
+            state.drawing_scale = max(0, int(scale))
     if state.drawing_scale:
         state.drawing_start = block.end
 
@@ -190,26 +196,17 @@ def _decode_ass_text(raw: str, soft_break: str) -> _DecodeState:
     return state
 
 
-def ass_soft_break(document: str) -> str:
-    """The semantic value of ``\\n`` for the document's wrapping mode."""
-    in_script_info = False
-    for line in document.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("[") and stripped.endswith("]"):
-            in_script_info = stripped.casefold() == "[script info]"
-            continue
-        name, separator, value = line.partition(":")
-        if in_script_info and separator and name.strip().casefold() == "wrapstyle":
-            return "\n" if value.strip() == "2" else " "
-    return " "
+def ass_soft_break(_document: str) -> str:
+    """The semantic value mpv exposes for ``\\n`` regardless of visual wrapping mode."""
+    return "\n"
 
 
-def decode_ass_text(raw: str, *, soft_break: str = " ") -> str:
+def decode_ass_text(raw: str, *, soft_break: str = "\n") -> str:
     """Project authored ASS text to the semantic text libass exposes."""
     return "".join(_decode_ass_text(raw, soft_break).text)
 
 
-def decode_ass_event(source: RawSubtitleEvent, *, soft_break: str = " ") -> DecodedSubtitleEvent:
+def decode_ass_event(source: RawSubtitleEvent, *, soft_break: str = "\n") -> DecodedSubtitleEvent:
     """Project an authored ASS event to semantic text and exact source spans."""
     raw = source.raw_text
     state = _decode_ass_text(raw, soft_break)
