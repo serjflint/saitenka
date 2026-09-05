@@ -69,6 +69,8 @@ def _cli_app():
     return app
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_cli_flag_inventory_matches_mpv_reader():
     """Every legacy flag must exist on the `run` command with its exact spelling."""
     out = subprocess.run(
@@ -84,6 +86,8 @@ def test_cli_flag_inventory_matches_mpv_reader():
     assert not missing, f"flags missing from `run --help`: {missing}"
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_cli_has_subcommand_skeleton():
     out = subprocess.run(
         [sys.executable, "-m", "saitenka.app.cli", "--help"],
