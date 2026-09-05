@@ -81,7 +81,7 @@ def geometry_error_code(error: BaseException | str) -> GeometryErrorCode:
         ("token overlap", GeometryErrorCode.OVERLAPPING_PALETTE_PIXELS),
         # Ahead of the bare "token" fragment below, which two of these also contain — the envelope's
         # refusals are a property of the typesetting, not of how the tokens were mapped onto it.
-        ("animated or karaoke", GeometryErrorCode.TYPESETTING),
+        ("animated overrides", GeometryErrorCode.TYPESETTING),
         ("blurred", GeometryErrorCode.TYPESETTING),
         ("drawing events", GeometryErrorCode.TYPESETTING),
         ("ass effects", GeometryErrorCode.TYPESETTING),

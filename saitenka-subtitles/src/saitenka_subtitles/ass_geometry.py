@@ -12,6 +12,7 @@ from saitenka_subtitles.ass import (
     UnsupportedAssEvent,
     allocate_token_colors,
     decode_ass_event,
+    has_karaoke_override,
     parse_ass_event_line,
     parse_ass_styles,
     rewrite_ass_event,
@@ -62,6 +63,7 @@ class PreparedAssFrame:
     #: Required, not defaulted: a default is what let this field ship reading zero for every cue,
     #: which silently switched the overprint off everywhere rather than failing anywhere.
     play_res_y: int
+    requires_coverage: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,6 +369,7 @@ def prepare_ass_hit_map_frame(
         ),
         tuple(_bgr_to_rgb(color) for color in reserved_bgr),
         parsed.play_res_y,
+        any(has_karaoke_override(event.decoded.source) for event in annotated),
     )
 
 

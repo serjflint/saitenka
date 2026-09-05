@@ -34,7 +34,7 @@ def test_contract_and_resource_errors_are_bounded_unsupported_decisions(
 @pytest.mark.parametrize(
     "detail",
     [
-        "animated or karaoke overrides are not color-rewritten",
+        "animated overrides are outside the static interactive envelope",
         "a blurred token's extent is not the word's extent",
         "drawing events are not color-rewritten",
         "ASS effects are outside the static interactive envelope",
@@ -59,7 +59,7 @@ def test_the_envelope_refusals_are_named_rather_than_reported_as_provider_errors
 @pytest.mark.parametrize(
     ("raw", "span"),
     [
-        ("{\\k20}歌う", (0, 2)),
+        ("{\\t(\\fscx120)}動く", (0, 2)),
         ("{\\blur4}猫", (0, 1)),
         ("{\\blur-}猫", (0, 1)),
         ("{\\p1}m 0 0{\\p0}字", (0, 1)),

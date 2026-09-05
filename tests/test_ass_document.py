@@ -153,8 +153,18 @@ def test_parse_ass_styles_uses_authored_format_order() -> None:
         b"[V4+ Styles]\nFormat: Fontname, PrimaryColour, Name\nStyle: Arial,&H00ABCDEF,Default\n"
     )
     assert parse_ass_styles(extradata) == AssStyleCatalog(
-        (AssStyle("Default", "00ABCDEF", "Arial"),)
+        (AssStyle("Default", "00ABCDEF", "Arial", secondary_color="00ABCDEF"),)
     )
+
+
+def test_parse_ass_styles_refuses_a_malformed_secondary_color() -> None:
+    extradata = (
+        b"[V4+ Styles]\nFormat: Name, PrimaryColour, SecondaryColour\n"
+        b"Style: Default,&H00ABCDEF,malformed\n"
+    )
+
+    with pytest.raises(UnsupportedAssEvent, match="secondary color"):
+        parse_ass_styles(extradata)
 
 
 def test_a_style_without_a_usable_size_still_parses() -> None:
@@ -397,7 +407,7 @@ def test_every_token_gets_its_visible_color_and_source_color_is_restored() -> No
         "102030",
         "A0B0C0",
     )
-    assert rewrite.event.raw_text.endswith("{\\1c&HABCDEF&}")
+    assert rewrite.event.raw_text.endswith("{\\1c&HABCDEF&\\2c&HABCDEF&}")
 
 
 def test_every_gate_a_required_core_event_rewrites_losslessly() -> None:
@@ -406,7 +416,7 @@ def test_every_gate_a_required_core_event_rewrites_losslessly() -> None:
     )
     required = [case for case in manifest["cases"] if case["expectation"] == "required-core"]
 
-    assert len(required) == 12
+    assert len(required) == 13
     for case in required:
         palette_by_event: dict[str, dict[int, int]] = {}
         for item in case["palette"]:
@@ -439,7 +449,7 @@ def test_every_gate_a_fallback_candidate_is_rejected() -> None:
     )
     fallback = [case for case in manifest["cases"] if case["expectation"] == "fallback-candidate"]
 
-    assert len(fallback) == 7
+    assert len(fallback) == 6
     for case in fallback:
         for source_order, event_row in enumerate(case["visible_events"]):
             source = parse_ass_event_line(f"Dialogue: {event_row}", TRACK, source_order)
@@ -473,27 +483,28 @@ def test_bidi_controls_fail_closed(control: str) -> None:
 def test_injection_oracle_detects_an_omitted_token_override() -> None:
     source = annotated("猫犬", (0, 1), (1, 2))
     rewrite = rewrite_ass_event(source, {0: 0x010203, 1: 0x102030}, CATALOG)
-    broken = rewrite.event.raw_text.replace("{\\1c&H102030&}", "", 1)
+    broken = rewrite.event.raw_text.replace("{\\1c&H102030&\\2c&H102030&}", "", 1)
     assert effective_character_colors(broken) == ("010203", "00FFFFFF")
 
 
 def test_injection_oracle_detects_a_shifted_token_boundary() -> None:
     source = annotated("猫犬", (0, 1), (1, 2))
     rewrite = rewrite_ass_event(source, {0: 0x010203, 1: 0x102030}, CATALOG)
-    broken = rewrite.event.raw_text.replace("{\\1c&H010203&}猫", "猫{\\1c&H010203&}", 1)
+    override = "{\\1c&H010203&\\2c&H010203&}"
+    broken = rewrite.event.raw_text.replace(f"{override}猫", f"猫{override}", 1)
     assert effective_character_colors(broken) == ("00FFFFFF", "102030")
 
 
 def test_source_reset_between_tokens_uses_the_named_style_color() -> None:
     source = annotated("猫{\\rAlt}犬", (0, 1), (1, 2))
     rewrite = rewrite_ass_event(source, {0: 0x010203, 1: 0x102030}, CATALOG)
-    assert rewrite.event.raw_text.endswith("犬{\\1c&H00112233&}")
+    assert rewrite.event.raw_text.endswith("犬{\\1c&H00112233&\\2c&H00112233&}")
 
 
 def test_parameterless_primary_color_reset_restores_the_active_style() -> None:
     source = annotated("{\\rAlt\\c&HABCDEF&}猫{\\c}犬", (0, 1), (1, 2), style="Default")
     rewrite = rewrite_ass_event(source, {0: 0x010203, 1: 0x102030}, CATALOG)
-    assert rewrite.event.raw_text.endswith("犬{\\1c&H00112233&}")
+    assert rewrite.event.raw_text.endswith("犬{\\1c&H00112233&\\2c&H00112233&}")
 
 
 def test_unterminated_source_color_is_restored_after_the_token() -> None:
@@ -531,11 +542,9 @@ def test_animated_effect_field_fails_closed() -> None:
 @pytest.mark.parametrize(
     ("raw", "span", "reason"),
     [
-        ("{\\k20}歌う", (0, 2), "animated or karaoke"),
-        ("{\\kt20}歌う", (0, 2), "animated or karaoke"),
-        ("{\\fad(100,100)}猫", (0, 1), "animated or karaoke"),
-        ("{\\fade(0,255,0,0,100,200,300)}猫", (0, 1), "animated or karaoke"),
-        ("{\\t(\\fscx120)}動く", (0, 2), "animated or karaoke"),
+        ("{\\fad(100,100)}猫", (0, 1), "animated overrides"),
+        ("{\\fade(0,255,0,0,100,200,300)}猫", (0, 1), "animated overrides"),
+        ("{\\t(\\fscx120)}動く", (0, 2), "animated overrides"),
         ("{\\blur4}猫", (0, 1), "extent is not the word"),
         ("{\\be2}猫", (0, 1), "extent is not the word"),
         ("{\\blur}猫", (0, 1), "extent is not the word"),
@@ -548,6 +557,7 @@ def test_animated_effect_field_fails_closed() -> None:
         ("色{\\c&H112233}変更", (0, 3), "crosses a token"),
         ("色{\\cZZ}変更", (0, 3), "unparsed primary-color"),
         ("色{\\c&H123456789}変更", (0, 3), "unparsed primary-color"),
+        ("色{\\2cZZ}変更", (0, 3), "unparsed secondary-color"),
         ("猫{broken", (0, 8), "unclosed"),
     ],
 )
@@ -565,6 +575,20 @@ def test_a_blur_that_spreads_nothing_is_not_a_refusal(raw: str) -> None:
     line overrides them back. Refusing the tag rather than the effect would refuse those tracks for
     a command that changes no pixel."""
     assert rewrite_ass_event(annotated(raw, (0, 1)), {0: 0x010203}, CATALOG) is not None
+
+
+@pytest.mark.parametrize("tag", [r"\k20", r"\K20", r"\kf20", r"\ko20", r"\kt20"])
+def test_karaoke_keeps_the_token_color_on_both_sweep_channels(tag: str) -> None:
+    rewrite = rewrite_ass_event(annotated(f"{{{tag}}}歌う", (0, 2)), {0: 0x010203}, CATALOG)
+
+    assert r"{\1c&H010203&\2c&H010203&}" in rewrite.event.raw_text
+
+
+def test_karaoke_refuses_a_secondary_color_change_inside_a_token() -> None:
+    source = annotated(r"{\k20}歌{\2c&H112233&}う", (0, 2))
+
+    with pytest.raises(UnsupportedAssEvent, match="source color or reset"):
+        rewrite_ass_event(source, {0: 0x010203}, CATALOG)
 
 
 @pytest.mark.integration
@@ -645,3 +669,9 @@ def test_palette_rejects_repeated_identity_and_exhaustion() -> None:
         allocate_token_colors((source, source))
     with pytest.raises(ValueError, match="exhausted"):
         allocate_token_colors((source,), maximum_color=2, reserved_colors=(1,))
+
+
+def test_black_is_a_valid_authored_reserved_color() -> None:
+    source = annotated("猫", (0, 1))
+
+    assert allocate_token_colors((source,), reserved_colors=(0,))[0].bgr == 1
