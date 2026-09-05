@@ -7,6 +7,7 @@ OSD saitenka. Audio is cut from the source file over the current subtitle's time
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -42,6 +43,24 @@ def screenshot(ipc, path: str | Path) -> Path:
 # range. Single-pass (measure+correct in one ffmpeg run) — two-pass would double mining latency for a
 # few-second clip and buys little on speech.
 _LOUDNORM = "loudnorm=I=-23:TP=-1.5:LRA=11"
+_AUDIO_EXTRACTION_TIMEOUT_S = 120
+_LOCAL_MATROSKA_SUFFIXES = frozenset({".mkv", ".mka", ".mks", ".webm"})
+_URL = re.compile(r"^[A-Za-z][A-Za-z\d+.-]*://")
+
+
+class AudioOutputMissingError(RuntimeError):
+    """FFmpeg reported success without creating the requested audio file."""
+
+
+def _audio_probe_args(video: str | Path, track: int) -> list[str]:
+    source = str(video)
+    if (
+        track >= 0
+        and not _URL.match(source)
+        and Path(source).suffix.lower() in _LOCAL_MATROSKA_SUFFIXES
+    ):
+        return ["-probesize", "32768", "-analyzeduration", "0"]
+    return []
 
 
 def clip_audio(
@@ -66,6 +85,7 @@ def clip_audio(
     af = f"{_LOUDNORM},{fades}" if normalize else fades
     from saitenka.mpvio.discover import find_tool
 
+    out = Path(path)
     cmd = [
         find_tool("ffmpeg") or "ffmpeg",  # GUI-launched mpv has a minimal PATH without Homebrew
         "-y",
@@ -73,6 +93,7 @@ def clip_audio(
         f"{p.start:.3f}",
         "-to",
         f"{p.end:.3f}",
+        *_audio_probe_args(video, track),
         "-i",
         str(video),
         "-map",
@@ -85,10 +106,15 @@ def clip_audio(
         "aac",
         "-b:a",
         "128k",
-        str(path),
+        str(out),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
-    return Path(path)
+    out.unlink(missing_ok=True)
+    subprocess.run(cmd, check=True, capture_output=True, timeout=_AUDIO_EXTRACTION_TIMEOUT_S)
+    if not out.is_file():
+        raise AudioOutputMissingError(
+            "FFmpeg audio extraction succeeded without creating an output file"
+        )
+    return out
 
 
 # WebP animated encoders, best-quality first. Both produce a small animated .webp that drops into the

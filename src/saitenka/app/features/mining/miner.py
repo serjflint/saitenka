@@ -25,7 +25,13 @@ from saitenka_card import CardContent, bold_word, build_note, strip_field_html
 from saitenka import otel_metrics
 from saitenka.app.anki import AnkiError, dedupe
 from saitenka.app.lookup import card_for
-from saitenka.app.media import animated_screenshot, clip_audio, current_timespan, screenshot
+from saitenka.app.media import (
+    AudioOutputMissingError,
+    animated_screenshot,
+    clip_audio,
+    current_timespan,
+    screenshot,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -310,19 +316,43 @@ def _capture_audio(p: MiningTransaction, base: str, video, span) -> tuple[str, E
             clip_audio(video, span, aud, normalize=p.mine_cfg.normalize_audio)
             p.apply.captured_audio(aud)
             return p.anki.store_media(f"{base}.m4a", aud), None
-    except (OSError, subprocess.CalledProcessError, AnkiError, json.JSONDecodeError) as e:
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        AudioOutputMissingError,
+        AnkiError,
+        json.JSONDecodeError,
+    ) as e:
         log.debug("audio capture failed", exc_info=True)
         return "", e
     return "", None
 
 
 def _warn_capture_failure(p: MiningTransaction, pic_err, audio_err) -> None:
+    message = _capture_failure_message(pic_err, audio_err)
+    if message is not None:
+        p.apply.toast(*message)
+
+
+def _capture_failure_message(pic_err, audio_err) -> tuple[str, str] | None:
+    audio_reason = _audio_failure_reason(audio_err)
     if pic_err and audio_err:
-        p.apply.toast("media capture failed (no image/audio on card)", "warn")
-    elif pic_err:
-        p.apply.toast("screenshot failed — audio only", "warn")
-    elif audio_err:
-        p.apply.toast("audio clip failed — image only", "warn")
+        return f"media capture failed (no image; {audio_reason})", "warn"
+    if pic_err:
+        return "screenshot failed — audio only", "warn"
+    if audio_err:
+        return f"{audio_reason} — image only", "warn"
+    return None
+
+
+def _audio_failure_reason(error: Exception | None) -> str:
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "audio extraction timed out"
+    if isinstance(error, subprocess.CalledProcessError):
+        return "audio ffmpeg failed"
+    if isinstance(error, AudioOutputMissingError):
+        return "ffmpeg produced no audio"
+    return "audio clip failed"
 
 
 # --- mining -------------------------------------------------------------------------------------

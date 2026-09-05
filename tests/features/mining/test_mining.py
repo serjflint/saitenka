@@ -1,5 +1,7 @@
 """Mining: card builder, dedup query, sentence bolding, media args, toast (no real Anki add)."""
 
+import subprocess
+
 import pytest
 from saitenka_card import (
     KNOWN_MARKERS,
@@ -15,7 +17,7 @@ from session_builder import build_session
 from saitenka.app.features.mining import miner
 from saitenka.app.features.preview import miner_ui
 from saitenka.app.lookup import card_for
-from saitenka.app.media import Timespan, clip_audio
+from saitenka.app.media import AudioOutputMissingError, Timespan, clip_audio
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.toast import render_toast
 
@@ -290,33 +292,102 @@ def test_timespan_padding():
     assert Timespan(0.1, 0.2).padded(0.5).start == 0.0  # clamps at 0
 
 
-def test_clip_audio_builds_ffmpeg(monkeypatch):
+def test_clip_audio_builds_ffmpeg(monkeypatch, tmp_path):
     calls = {}
 
-    def fake_run(cmd, **_kw):
+    def fake_run(cmd, **kwargs):
         calls["cmd"] = cmd
+        calls["kwargs"] = kwargs
+        tmp_path.joinpath("out.m4a").write_bytes(b"audio")
 
     monkeypatch.setattr("saitenka.app.media.subprocess.run", fake_run)
     # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
     monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
-    clip_audio("/v.mkv", Timespan(10, 12), "/out.m4a", pad=0.5, track=0)
+    clip_audio("/v.mkv", Timespan(10, 12), tmp_path / "out.m4a", pad=0.5, track=0)
     cmd = calls["cmd"]
     assert cmd[0] == "ffmpeg" and "aac" in cmd
     assert "0:a:0" in cmd
     assert "9.500" in cmd and "12.500" in cmd  # padded span
     assert "loudnorm" not in cmd[cmd.index("-af") + 1]  # normalization is opt-in
+    assert cmd[cmd.index("-probesize") + 1] == "32768"
+    assert cmd[cmd.index("-analyzeduration") + 1] == "0"
+    assert cmd.index("-probesize") < cmd.index("-i")
+    assert calls["kwargs"]["timeout"] == 120
 
 
-def test_clip_audio_normalize_prepends_loudnorm(monkeypatch):
+def test_clip_audio_normalize_prepends_loudnorm(monkeypatch, tmp_path):
     calls = {}
-    monkeypatch.setattr(
-        "saitenka.app.media.subprocess.run", lambda cmd, **_kw: calls.__setitem__("cmd", cmd)
-    )
+
+    def fake_run(cmd, **_kwargs):
+        calls["cmd"] = cmd
+        tmp_path.joinpath("out.m4a").write_bytes(b"audio")
+
+    monkeypatch.setattr("saitenka.app.media.subprocess.run", fake_run)
     monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
-    clip_audio("/v.mkv", Timespan(10, 12), "/out.m4a", normalize=True)
+    clip_audio("/v.mkv", Timespan(10, 12), tmp_path / "out.m4a", normalize=True)
     af = calls["cmd"][calls["cmd"].index("-af") + 1]
     # loudnorm runs BEFORE the fades so it measures the raw span, not the faded-out tails
     assert af.startswith("loudnorm=I=-23:") and af.index("loudnorm") < af.index("afade")
+
+
+@pytest.mark.parametrize("video", ["/v.mp4", "https://example.test/v.mkv"])
+def test_clip_audio_keeps_normal_probing_for_nonlocal_matroska(monkeypatch, tmp_path, video):
+    calls = {}
+
+    def fake_run(cmd, **_kwargs):
+        calls["cmd"] = cmd
+        tmp_path.joinpath("out.m4a").write_bytes(b"audio")
+
+    monkeypatch.setattr("saitenka.app.media.subprocess.run", fake_run)
+    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
+    clip_audio(video, Timespan(10, 12), tmp_path / "out.m4a")
+    assert "-probesize" not in calls["cmd"] and "-analyzeduration" not in calls["cmd"]
+
+
+def test_clip_audio_rejects_success_without_output(monkeypatch, tmp_path):
+    monkeypatch.setattr("saitenka.app.media.subprocess.run", lambda *_a, **_kw: None)
+    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
+    with pytest.raises(AudioOutputMissingError, match="without creating an output file"):
+        clip_audio("/v.mkv", Timespan(10, 12), tmp_path / "out.m4a")
+
+
+def test_audio_capture_failures_have_distinct_visible_diagnostics():
+    messages = [
+        miner._capture_failure_message(None, subprocess.TimeoutExpired("ffmpeg", 120))[0],
+        miner._capture_failure_message(None, subprocess.CalledProcessError(1, "ffmpeg"))[0],
+        miner._capture_failure_message(None, AudioOutputMissingError("missing"))[0],
+    ]
+    assert messages == [
+        "audio extraction timed out — image only",
+        "audio ffmpeg failed — image only",
+        "ffmpeg produced no audio — image only",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (subprocess.TimeoutExpired("ffmpeg", 120), "audio extraction timed out — image only"),
+        (subprocess.CalledProcessError(1, "ffmpeg"), "audio ffmpeg failed — image only"),
+    ],
+)
+def test_capture_media_reports_audio_subprocess_failure(monkeypatch, failure, message):
+    r = _capture_reader(animated_enabled=False)
+    _stub_capture(monkeypatch, animated_result=None)
+    monkeypatch.setattr(
+        miner, "clip_audio", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure)
+    )
+    toasts = []
+    monkeypatch.setattr(
+        r.graph.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind)),
+    )
+
+    picture, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
+
+    assert picture.endswith(".jpg") and audio == ""
+    assert toasts == [(message, "warn")]
 
 
 def test_toast_renders_each_kind():
