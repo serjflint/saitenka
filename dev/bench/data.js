@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788645179672,
+  "lastUpdate": 1788645235614,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -14321,6 +14321,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.049816,
             "range": "3 replicas; min 0.871936; max 1.17656; MAD 0.126742; worst 1.17656",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ba1dabc660b56697bbc529b3af21c29294ce1e00",
+          "message": "Merge pull request #499 from serjflint/issue-375\n\nfix(mining): bound audio extraction",
+          "timestamp": "2026-09-06T02:50:41+05:00",
+          "tree_id": "5fa7fd16ad8ab8675dc3ca8afa8e2f7a69e371e2",
+          "url": "https://github.com/serjflint/saitenka/commit/ba1dabc660b56697bbc529b3af21c29294ce1e00"
+        },
+        "date": 1788645234167,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.32782,
+            "range": "3 replicas; min 6.10565; max 6.37731; MAD 0.049488",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.822679,
+            "range": "3 replicas; min 8.56126; max 9.32363; MAD 0.261418; worst 9.32363",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.819307,
+            "range": "3 replicas; min 18.6748; max 18.962; MAD 0.142649",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.099663,
+            "range": "3 replicas; min 19.0034; max 20.8127; MAD 0.096288; worst 20.8127",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.182247,
+            "range": "3 replicas; min 11.9286; max 14.511; MAD 0.253651",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.090003,
+            "range": "3 replicas; min 0.088323; max 0.092772; MAD 0.00168; worst 0.092772",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.56362,
+            "range": "3 replicas; min 38.6636; max 47.584; MAD 3.02043; worst 47.584",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.886641,
+            "range": "3 replicas; min 2.59014; max 492.827; MAD 0.296503; worst 492.827",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 0.93028,
+            "range": "3 replicas; min 0.895973; max 1.04079; MAD 0.034307; worst 1.04079",
             "unit": "ms"
           }
         ]
