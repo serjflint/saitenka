@@ -364,6 +364,32 @@ def test_audio_capture_failures_have_distinct_visible_diagnostics():
     ]
 
 
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        (subprocess.TimeoutExpired("ffmpeg", 120), "audio extraction timed out — image only"),
+        (subprocess.CalledProcessError(1, "ffmpeg"), "audio ffmpeg failed — image only"),
+    ],
+)
+def test_capture_media_reports_audio_subprocess_failure(monkeypatch, failure, message):
+    r = _capture_reader(animated_enabled=False)
+    _stub_capture(monkeypatch, animated_result=None)
+    monkeypatch.setattr(
+        miner, "clip_audio", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure)
+    )
+    toasts = []
+    monkeypatch.setattr(
+        r.graph.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind)),
+    )
+
+    picture, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
+
+    assert picture.endswith(".jpg") and audio == ""
+    assert toasts == [(message, "warn")]
+
+
 def test_toast_renders_each_kind():
     for kind in ("ok", "warn", "err"):
         img = render_toast(f"mined 読む ({kind})", kind)
