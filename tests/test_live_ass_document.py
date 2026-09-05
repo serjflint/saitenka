@@ -107,6 +107,8 @@ def _observe_mpv_subtitle_properties(
         r"A{\p1}m 0 0{\p}TEXT",
         r"A{\p1}m 0 0{\pbo2}TEXT",
         r"A{\p1\pbo2}m 0 0{\p0}TEXT",
+        r"A{\p00000000000000000000}TEXT",
+        r"A{\p00000000000000000001}TEXT",
         r"猫\n犬",
     ],
 )

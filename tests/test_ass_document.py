@@ -147,6 +147,8 @@ def test_soft_break_is_a_semantic_newline_independent_of_visual_wrapping() -> No
         (r"A{\p1}m 0 0{\p}TEXT", "ATEXT"),
         (r"A{\p1}m 0 0{\pbo2}TEXT", "ATEXT"),
         (r"A{\p1\pbo2}m 0 0{\p0}TEXT", "Am 0 0TEXT"),
+        (r"A{\p00000000000000000000}TEXT", "ATEXT"),
+        (r"A{\p00000000000000000001}TEXT", "A"),
         (r"A{\pos(20,30)}TEXT", "ATEXT"),
     ],
 )

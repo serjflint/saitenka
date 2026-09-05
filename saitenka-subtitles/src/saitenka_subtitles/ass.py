@@ -160,7 +160,8 @@ def _consume_override(state: _DecodeState, block: _OverrideBlock) -> None:
         if scale is None:
             state.drawing_scale = 0
         elif len(scale.removeprefix("-")) > 9:
-            state.drawing_scale = 0 if scale.startswith("-") else 1
+            digits = scale.removeprefix("-")
+            state.drawing_scale = 0 if scale.startswith("-") or not digits.strip("0") else 1
         else:
             state.drawing_scale = max(0, int(scale))
     if state.drawing_scale:
