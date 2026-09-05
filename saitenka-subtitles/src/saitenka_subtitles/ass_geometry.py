@@ -90,6 +90,9 @@ def _token_faces(
     faces: dict[SubtitleEventId, tuple[str, float]] = {}
     for event in events:
         source = event.decoded.source
+        if has_karaoke_override(source):
+            faces[source.identity] = ("", 0.0)
+            continue
         style = by_name.get(source.style)
         faces[source.identity] = ("", 0.0) if style is None else (style.font_name, style.font_size)
     return faces

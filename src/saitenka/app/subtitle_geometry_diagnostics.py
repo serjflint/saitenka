@@ -42,8 +42,8 @@ class GeometryErrorCode(StrEnum):
     SEMANTIC_MISMATCH = "semantic-projection-mismatch"
     PALETTE_BUDGET = "token-budget-exceeded"
     ANNOTATION_MAPPING = "token-mapping-invalid"
-    #: The cue is typeset with something the interactive envelope refuses — animation, karaoke, a
-    #: vector drawing, a blur, an ASS effect, bidirectional text. A property of the track, not a
+    #: The cue is typeset with something the interactive envelope refuses — animation, a vector
+    #: drawing, a blur, an ASS effect, bidirectional text. A property of the track, not a
     #: failure: it will refuse the same cue every time, and `provider-error` said the opposite.
     TYPESETTING = "typesetting-unsupported"
     PROVIDER = "provider-error"

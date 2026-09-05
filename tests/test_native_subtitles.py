@@ -2932,7 +2932,9 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
 
 
 def test_karaoke_keeps_masks_for_raster_tinting(tmp_path: Path) -> None:
-    result, ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS.decode().replace(",,猫を見る\n", r",,{\k20}猫を見る" + "\n").encode())
     assert result.graph.subtitle_presentation.native is not None
@@ -2945,6 +2947,8 @@ def test_karaoke_keeps_masks_for_raster_tinting(tmp_path: Path) -> None:
     settle_jobs(result, ipc)
 
     assert backend.requests[-1].keep_coverage is True
+    assert presented_overpaints(ipc)
+    assert not [payload for payload in overlay_payloads(ipc) if "\\fn" in payload]
     result.close()
 
 
