@@ -88,6 +88,7 @@ class MiningApply:
     preview_mined: Callable[..., None]
     record_mined: Callable[[int], None]
     record_link: Callable[..., None]
+    commit_mined: Callable[..., None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,24 +437,6 @@ def _attach_word_audio(p: MiningTransaction, note: dict, card) -> None:
         log.debug("word-audio attach failed", exc_info=True)
 
 
-def _persist_mined(p: MiningTransaction, note_id: int, card, video) -> None:
-    """Record the mined note ↔ episode/cue link in the durable mined-card store (#253), so the
-    sidebar Mine tab can list this episode's cards offline. Best-effort: a store failure (or a
-    non-int ``addNote`` result / no active cue) must never break the mine."""
-    if not isinstance(note_id, int) or not video:
-        return
-    span = p.encounter.span
-    p.apply.record_link(
-        note_id,
-        str(video),
-        span.start if span else 0.0,
-        span.end if span else 0.0,
-        card.expression,
-        card.reading,
-        p.mine_cfg.deck,
-    )
-
-
 def mine_current(p: MiningTransaction) -> None:
     idx = mine_target(p.encounter.cue)
     if idx is None:
@@ -554,9 +537,7 @@ def commit_token(p: MiningTransaction, plan: TokenMinePlan, prepared: PreparedCa
             return
         # AnkiConnect cannot retract a request after this call begins.
         note_id = p.anki.add_note(note)
-        _persist_mined(p, note_id, card, video)
-        p.apply.record_mined(1)
-        p.apply.mark_mined(card.expression)
+        p.apply.commit_mined(note_id, card, video)
         p.apply.mined_here()
         p.apply.preview_mined(card, tok, video, "duplicate" if force else "mined")
     except AnkiError as e:
@@ -642,9 +623,7 @@ def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapt
                 if p.cancelled():
                     return
                 note_id = p.anki.add_note(note)
-                _persist_mined(p, note_id, card, video)
-                p.apply.record_mined(1)
-                p.apply.mark_mined(card.expression)
+                p.apply.commit_mined(note_id, card, video)
                 mined += 1
             else:
                 dup += 1

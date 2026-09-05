@@ -41,6 +41,7 @@ class MiningProjection:
             preview_mined=self._preview_mined,
             record_mined=self.record_mined,
             record_link=lambda *_args: None,
+            commit_mined=lambda *_args: None,
         )
 
     def _mark_mined(self, expression: str) -> None:

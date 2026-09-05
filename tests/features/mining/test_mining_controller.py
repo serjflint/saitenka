@@ -72,6 +72,7 @@ def _apply() -> miner.MiningApply:
         lambda *_args: None,
         lambda _count: None,
         lambda *_args: None,
+        lambda *_args: None,
     )
 
 

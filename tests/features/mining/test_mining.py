@@ -970,15 +970,13 @@ def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_s
     transaction = _ports(r)
     plan = miner.preflight_bulk(transaction)
     assert plan is not None and len(plan.items) >= 2
-    links = []
-    counts = []
+    committed = []
     toasts = []
     transaction = replace(
         transaction,
         apply=replace(
             transaction.apply,
-            record_link=lambda *args: links.append(args),
-            record_mined=counts.append,
+            commit_mined=lambda note_id, _card, _video: committed.append(note_id),
             toast=lambda text, kind="ok": toasts.append((text, kind)),
         ),
     )
@@ -994,8 +992,7 @@ def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_s
 
     miner.commit_bulk(transaction, plan, prepared)
 
-    assert [link[0] for link in links] == [1]
-    assert counts == [1]
+    assert committed == [1]
     assert toasts == [("bulk failed: connection lost", "err")]
 
 

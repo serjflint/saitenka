@@ -711,6 +711,21 @@ class MiningController:
             except (OSError, sqlite3.Error, ValueError):
                 return
 
+        def commit_mined(note_id: int, card, video: object) -> None:
+            if isinstance(note_id, int) and video:
+                span = encounter.span
+                record_link(
+                    note_id,
+                    str(video),
+                    span.start if span else 0.0,
+                    span.end if span else 0.0,
+                    card.expression,
+                    card.reading,
+                    target.config.deck,
+                )
+            external.record_mined(1)
+            mark(card.expression)
+
         apply = miner.MiningApply(
             current_call(external.toast),
             current_call(external.reset_capture),
@@ -723,6 +738,7 @@ class MiningController:
             current_call(external.preview_mined),
             external.record_mined,
             record_link,
+            commit_mined,
         )
         return miner.MiningTransaction(
             target.anki, target.config, self._scratch_dir, encounter, apply

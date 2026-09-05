@@ -78,6 +78,7 @@ _ACTION_NAMES = (
     "preview_mined",
     "record_mined",
     "record_link",
+    "commit_mined",
 )
 
 
