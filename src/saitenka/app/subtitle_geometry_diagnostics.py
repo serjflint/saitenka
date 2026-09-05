@@ -42,8 +42,8 @@ class GeometryErrorCode(StrEnum):
     SEMANTIC_MISMATCH = "semantic-projection-mismatch"
     PALETTE_BUDGET = "token-budget-exceeded"
     ANNOTATION_MAPPING = "token-mapping-invalid"
-    #: The cue is typeset with something the interactive envelope refuses — animation, karaoke, a
-    #: vector drawing, a blur, an ASS effect, bidirectional text. A property of the track, not a
+    #: The cue is typeset with something the interactive envelope refuses — animation, a vector
+    #: drawing, a blur, an ASS effect, bidirectional text. A property of the track, not a
     #: failure: it will refuse the same cue every time, and `provider-error` said the opposite.
     TYPESETTING = "typesetting-unsupported"
     PROVIDER = "provider-error"
@@ -81,13 +81,14 @@ def geometry_error_code(error: BaseException | str) -> GeometryErrorCode:
         ("token overlap", GeometryErrorCode.OVERLAPPING_PALETTE_PIXELS),
         # Ahead of the bare "token" fragment below, which two of these also contain — the envelope's
         # refusals are a property of the typesetting, not of how the tokens were mapped onto it.
-        ("animated or karaoke", GeometryErrorCode.TYPESETTING),
+        ("animated overrides", GeometryErrorCode.TYPESETTING),
         ("blurred", GeometryErrorCode.TYPESETTING),
         ("drawing events", GeometryErrorCode.TYPESETTING),
         ("ass effects", GeometryErrorCode.TYPESETTING),
         ("bidirectional", GeometryErrorCode.TYPESETTING),
         ("ligature", GeometryErrorCode.TYPESETTING),
         ("unparsed primary-color", GeometryErrorCode.TYPESETTING),
+        ("unparsed secondary-color", GeometryErrorCode.TYPESETTING),
         ("token", GeometryErrorCode.ANNOTATION_MAPPING),
     )
     return next(

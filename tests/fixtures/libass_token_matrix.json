@@ -3,8 +3,8 @@
   "denominator": {
     "count": 19,
     "key_set_sha256": "da0c6eb12bf03f3a7e8a697c0616055e9d07c4db67c11bb91030bca1ea202cd8",
-    "classification_sha256": "1c46e8ba663cc218b9ab4688913f6acd26a2884a294c3e017c957c9597556031",
-    "contract_set_sha256": "88f9f2893b04f3230c48738b5db08ae37186b3de6d6100a823873f9f9c7d480b",
+    "classification_sha256": "aad18419ffdd305c1fc58c81b63c70d9869c09d29f2523d716d2c4076ed786cf",
+    "contract_set_sha256": "949cbb93fc1af47f972317b41c778ebffa0e9aa6db8b92e5203620dd4db19127",
     "ass_header_sha256": "aa362c21a41a69e23a6b7fccdb7b8ecb9ac9f8500a3921a3350bc486e39aa3c9",
     "maximum_chebyshev_distance_px": 1
   },
@@ -158,10 +158,10 @@
     },
     {
       "id": "karaoke",
-      "expectation": "fallback-candidate",
-      "timestamp_ms": 1500,
+      "expectation": "required-core",
+      "timestamp_ms": 1100,
       "visible_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\k20\\c&H111111&}歌う{\\k20\\c&H222222&}字幕"],
-      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\k20\\c&H010101&}歌う{\\k20\\c&H020202&}字幕"],
+      "id_events": ["0,0:00:01.00,0:00:03.00,Default,e0,0,0,0,,{\\k20\\1c&H010101&\\2c&H010101&}歌う{\\k20\\1c&H020202&\\2c&H020202&}字幕"],
       "palette": [{"rgb": "010101", "event_id": "e0", "token_index": 0}, {"rgb": "020202", "event_id": "e0", "token_index": 1}],
       "reserved_rgb": []
     },
