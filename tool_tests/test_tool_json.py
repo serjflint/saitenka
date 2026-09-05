@@ -41,3 +41,29 @@ def test_missing_instrument_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setattr(tj.subprocess, "run", missing)
     with pytest.raises(tj.InstrumentError, match="unavailable"):
         tj.run_json(["instrument"], tmp_path, list)
+
+
+def test_repository_root_uses_the_launch_directory(monkeypatch, tmp_path):
+    root = tmp_path / "repo"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _completed(f"{root}\n")
+
+    monkeypatch.setattr(tj.subprocess, "run", run)
+
+    assert tj.repository_root(nested) == root
+    assert calls[0][1]["cwd"] == nested
+
+
+def test_repository_path_anchors_relative_paths(tmp_path):
+    root = tmp_path / "repo"
+    assert tj.repository_path(root, None, ".ledger.jsonl") == root / ".ledger.jsonl"
+    assert tj.repository_path(root, Path("state/ledger.jsonl"), ".ledger.jsonl") == (
+        root / "state/ledger.jsonl"
+    )
+    absolute = tmp_path / "external.jsonl"
+    assert tj.repository_path(root, absolute, ".ledger.jsonl") == absolute

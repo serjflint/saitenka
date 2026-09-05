@@ -41,7 +41,7 @@ on rerun (`tests/test_sub_index_properties.py`). Then re-run the tool to confirm
 - git-guarded, minutes/module; a complete campaign is reused, `--force` rebuilds.
 - **cosmic-ray re-enables the GIL** via SQLAlchemy in its own harness — expected, not a regression (the
   test subprocess still runs free-threaded).
-- The **Sharpen loop** consumes mutation as its Efficacy axis (`.agents/sharpen/GUIDE.md`).
+- The **Sharpen loop** consumes mutation as its Efficacy input (`.agents/sharpen/SPEC.md`).
 
 ## Grow/Sharpen handoff
 

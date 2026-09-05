@@ -138,3 +138,61 @@ def test_survival_reads_new_efficacy_detail_and_preserves_unknown_after():
         }
     )
     assert st.survival_from_ledger(ledger, "app/x.py") == 0.4
+
+
+def test_github_queries_run_from_the_repository_root(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_run_json(command, cwd, _expected):
+        calls.append((command, cwd))
+        return []
+
+    monkeypatch.setattr(st, "run_json", fake_run_json)
+
+    assert st.open_pr_paths(tmp_path) == set()
+    assert calls == [(["gh", "pr", "list", "--state", "open", "--json", "files"], tmp_path)]
+
+
+def test_main_anchors_the_default_ledger_at_the_repository_root(monkeypatch, tmp_path):
+    captured = {}
+    monkeypatch.setattr(sys, "argv", ["sharpen_triage.py", "--no-network"])
+    monkeypatch.setattr(st, "repository_root", lambda _path: tmp_path)
+
+    def fake_rank(root, ledger_path, *, check_network):
+        captured.update(root=root, ledger_path=ledger_path, check_network=check_network)
+        return []
+
+    monkeypatch.setattr(st, "rank", fake_rank)
+
+    st.main()
+
+    assert captured == {
+        "root": tmp_path,
+        "ledger_path": (tmp_path / ".ledger.sharpen.jsonl").resolve(),
+        "check_network": False,
+    }
+
+
+def test_unsharpenable_candidate_is_excluded(monkeypatch, tmp_path):
+    root = _repo(tmp_path)
+    ledger_path = root / ".ledger.sharpen.jsonl"
+    source_hash = sl.source_sha(root, "app/config.py", ["tests/test_shared.py"])
+    ledger_path.write_text(
+        '{"type":"manifest","toolset_version":1}\n'
+        f'{{"module":"app/config.py","source_sha":"{source_hash}",'
+        '"toolset_version":1,"state":"unsharpenable"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        st,
+        "conformance_by_module",
+        lambda *_args: {"app/config.py": (1, 1, 0)},
+    )
+    monkeypatch.setattr(st, "open_pr_paths", lambda _root: set())
+    monkeypatch.setattr(st, "churn_and_age", lambda *_args: (0, None))
+    monkeypatch.setattr(st, "campaign_readiness", lambda *_args: (False, 0))
+
+    candidates = st.rank(root, ledger_path, check_network=False)
+
+    candidate = next(item for item in candidates if item.module == "app/config.py")
+    assert candidate.excluded == "unsharpenable & unchanged"

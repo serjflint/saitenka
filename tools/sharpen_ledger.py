@@ -3,7 +3,7 @@
 The loop's durable memory: which module was audited, at what content-hash, under which toolset. Triage
 reads it to skip sharpened-and-unchanged modules and grow-filed gaps; an audit appends one record. The key
 is a **content-hash** (`source_sha` over the module's bytes + its mapped test files' bytes), not mtime,
-so a sharpened verdict survives clones/CI. See `.agents/sharpen/SPEC.md` → *Ledger*.
+so a sharpened verdict survives clones/CI. See `.agents/sharpen/SPEC.md` → *Durable memory*.
 
 Module keys are relative to `src/saitenka/` — e.g. `app/sub_index.py` — matching the existing records.
 """
@@ -16,16 +16,12 @@ import hashlib
 import json
 import sys
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
-import sharpen_policy as policy
+from tool_json import repository_path, repository_root
 
 SRC = "src/saitenka"  # module keys are relative to here
 TESTS = "tests"
-CONTRACT_VERSION = 6
-OUTER_REFLECTION_CADENCE = 3
-REQUIRED_AXES = set(policy.load_policy()["axes"])
 
 # Status of a module against the ledger (what triage acts on).
 UNSEEN = "unseen"  # never audited → prime candidate
@@ -34,79 +30,8 @@ STALE_TOOLSET = "stale-toolset"  # toolset_version bumped → whole ledger re-au
 IN_PROGRESS = "in-progress"  # audited, unchanged, work explicitly left undone
 SHARPENED_CURRENT = "sharpened-current"  # sharpened, unchanged, current toolset → SKIP
 DRY_RUN = "dry-run"  # recorded as a dry-run (no valid review) → re-selectable
-STALE_CONTRACT = "stale-contract"
-
-
-def _policy_record(record: dict) -> dict:
-    axes = record.get("axes")
-    if not isinstance(axes, dict) or "efficacy" in axes or "survival" not in axes:
-        return record
-    return {**record, "axes": {"efficacy": axes["survival"], **axes}}
-
-
-def _has_axis_evidence(record: dict) -> bool:
-    return bool(
-        isinstance(record.get("audited"), str)
-        and record["audited"].strip()
-        and policy.axis_evidence_valid(_policy_record(record))
-    )
-
-
-def _has_valid_review(record: dict) -> bool:
-    review = record.get("review")
-    if not isinstance(review, dict):
-        return False
-    identities = [review.get(key) for key in ("author", "skeptic", "judge")]
-    if not all(isinstance(item, str) and item.strip() for item in identities):
-        return False
-    normalized = {item.strip().casefold() for item in identities if isinstance(item, str)}
-    return len(normalized) == 3 and all(
-        review.get(key) == "UPHELD" for key in ("skeptic_verdict", "judge_verdict", "verdict")
-    )
-
-
-def _has_passing_shippable_axes(record: dict) -> bool:
-    return policy.shippable_axes_valid(_policy_record(record))
-
-
-def _record_contract_valid(record: dict, toolset_version: int) -> bool:
-    if (
-        record.get("toolset_version") != toolset_version
-        or record.get("contract_version") != CONTRACT_VERSION
-        or not _has_axis_evidence(record)
-    ):
-        return False
-    return record.get("state") not in {"sharpened", "in-progress"} or (
-        _has_valid_review(record) and _has_passing_shippable_axes(record)
-    )
-
-
-def _valid_outer_reflection(record: dict, toolset_version: int) -> bool:
-    decision = record.get("human_decision")
-    valid = bool(
-        record.get("type") == "outer-reflection"
-        and record.get("toolset_version") == toolset_version
-        and record.get("contract_version") == CONTRACT_VERSION
-        and isinstance(record.get("findings"), list)
-        and record["findings"]
-        and isinstance(record.get("next"), list)
-        and record["next"]
-        and isinstance(decision, dict)
-        and decision.get("decision") == "accepted"
-        and decision.get("source") == "human-provided"
-        and all(
-            isinstance(decision.get(key), str) and decision[key].strip()
-            for key in ("identity", "decision_id", "accepted_at")
-        )
-    )
-    if not valid:
-        return False
-    assert isinstance(decision, dict)
-    try:
-        datetime.fromisoformat(decision["accepted_at"])
-    except (TypeError, ValueError):
-        return False
-    return True
+UNSHARPENABLE = "unsharpenable"  # concrete infeasibility recorded → SKIP
+FILED = "filed"  # product or Grow issue owns the unchanged coordinate → SKIP
 
 
 def source_sha(root: Path, module_key: str, test_files: list[str]) -> str:
@@ -301,8 +226,6 @@ class Ledger:
             return UNSEEN
         if int(rec.get("toolset_version", 1)) != self.toolset_version:
             return STALE_TOOLSET
-        if not _record_contract_valid(rec, self.toolset_version):
-            return STALE_CONTRACT
         try:
             current = source_sha(root, module_key, test_files)
         except FileNotFoundError:
@@ -314,6 +237,10 @@ class Ledger:
             return SHARPENED_CURRENT
         if state == "dry-run":
             return DRY_RUN
+        if state == "unsharpenable":
+            return UNSHARPENABLE
+        if state == "filed" or rec.get("filed") or rec.get("grow-filed"):
+            return FILED
         return IN_PROGRESS
 
     def grow_filed(self) -> dict[str, list[str]]:
@@ -321,8 +248,6 @@ class Ledger:
         out: dict[str, list[str]] = {}
         latest = {record["module"]: record for record in self._module_records()}
         for r in latest.values():
-            if not _record_contract_valid(r, self.toolset_version):
-                continue
             ids = r.get("grow-filed") or r.get("grow_filed") or []
             if ids:
                 out[r["module"]] = list(ids)
@@ -333,43 +258,9 @@ class Ledger:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         self.lines.append(record)
 
-    def audits_since_outer_reflection(self) -> int:
-        last = -1
-        for index, record in enumerate(self.lines):
-            if _valid_outer_reflection(record, self.toolset_version):
-                last = index
-        return sum(
-            1
-            for record in self.lines[last + 1 :]
-            if "module" in record
-            and "source_sha" in record
-            and _record_contract_valid(record, self.toolset_version)
-        )
-
-    def outer_reflection_due(self) -> bool:
-        return self.audits_since_outer_reflection() >= OUTER_REFLECTION_CADENCE
-
-
-def _validate_test_files(root: Path, test_files: object) -> list[str]:
-    if not isinstance(test_files, list) or not test_files:
-        raise ValueError("record requires a non-empty tests list")
-    tests_root = (root / TESTS).resolve()
-    for item in test_files:
-        if not isinstance(item, str):
-            raise TypeError("record tests must be strings")
-        path = (root / item).resolve()
-        try:
-            path.relative_to(tests_root)
-        except ValueError as exc:
-            raise ValueError("record tests must stay under tests") from exc
-        if not path.is_file() or not path.name.startswith("test_") or path.suffix != ".py":
-            raise ValueError("record tests must be existing test_*.py files")
-    return sorted(test_files)
-
 
 def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
-    if ledger.outer_reflection_due():
-        raise ValueError("outer reflection is due; module records are blocked")
+    """Validate the disposition and derive its mapped tests and content hash."""
     module = record.get("module")
     if not isinstance(module, str) or not module:
         raise ValueError("record requires a non-empty module")
@@ -381,103 +272,47 @@ def prepare_record(record: dict, root: Path, ledger: Ledger) -> dict:
         raise ValueError("record module must stay under src/saitenka") from exc
     if not module_path.is_file():
         raise ValueError("record module must be an existing file")
-    tests = _validate_test_files(root, record.get("tests"))
-    if record.get("state") not in {
-        "sharpened",
-        "in-progress",
-        "blocked-on-bug",
-        "dry-run",
-        "left-undone",
-    }:
-        raise ValueError("record has invalid state")
-    if not isinstance(record.get("audited"), str) or not record["audited"].strip():
-        raise ValueError("record requires audited timestamp")
-    if not _has_axis_evidence(record):
-        raise ValueError("record must account for every required axis")
-    if record["state"] in {"sharpened", "in-progress"} and not _has_valid_review(record):
-        raise ValueError(
-            "shippable record requires three distinct review identities and UPHELD votes"
-        )
-    if record["state"] in {"sharpened", "in-progress"} and not _has_passing_shippable_axes(record):
-        raise ValueError("shippable record requires passing applied objective-axis evidence")
+    state = record.get("state")
+    if state not in {"sharpened", "filed", "unsharpenable"}:
+        raise ValueError("record state must be sharpened, filed, or unsharpenable")
+    refs = record.get("filed") or record.get("grow-filed")
+    if state == "filed" and not (
+        isinstance(refs, list) and refs and all(isinstance(ref, str) and ref for ref in refs)
+    ):
+        raise ValueError("filed record requires filed or grow-filed references")
+    tests = map_tests_to_modules(root).get(module, [])
+    if not tests:
+        raise ValueError("Sharpen requires at least one mapped test")
     prepared = dict(record)
     prepared["tests"] = tests
     prepared["source_sha"] = source_sha(root, module, tests)
     prepared["toolset_version"] = ledger.toolset_version
-    prepared["contract_version"] = CONTRACT_VERSION
-    return prepared
-
-
-def prepare_outer_reflection(record: dict, ledger: Ledger) -> dict:
-    if not ledger.outer_reflection_due():
-        raise ValueError("outer reflection is not due")
-    for key in ("findings", "next"):
-        value = record.get(key)
-        if (
-            not isinstance(value, list)
-            or not value
-            or not all(isinstance(item, str) and item for item in value)
-        ):
-            raise ValueError(f"outer reflection requires a non-empty {key} string list")
-    for key in ("date", "toolset_decision"):
-        if not isinstance(record.get(key), str) or not record[key].strip():
-            raise ValueError(f"outer reflection requires {key}")
-    decision = record.get("human_decision")
-    if not isinstance(decision, dict):
-        raise TypeError("outer reflection requires human_decision provenance")
-    if decision.get("decision") != "accepted":
-        raise ValueError("outer reflection human decision must be accepted")
-    if decision.get("source") != "human-provided":
-        raise ValueError("outer reflection must identify a human-provided decision")
-    for key in ("identity", "decision_id", "accepted_at"):
-        if not isinstance(decision.get(key), str) or not decision[key].strip():
-            raise ValueError(f"outer reflection human decision requires {key}")
-    try:
-        datetime.fromisoformat(decision["accepted_at"])
-    except ValueError as exc:
-        raise ValueError("outer reflection accepted_at must be ISO-8601") from exc
-    prepared = dict(record)
-    prepared["type"] = "outer-reflection"
-    prepared["toolset_version"] = ledger.toolset_version
-    prepared["contract_version"] = CONTRACT_VERSION
     return prepared
 
 
 def _main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--ledger", type=Path, default=Path(".ledger.sharpen.jsonl"))
+    parser.add_argument("--repo", type=Path)
+    parser.add_argument("--ledger", type=Path)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("reflection-status")
-    for name in ("append", "append-reflection"):
-        command = sub.add_parser(name)
-        records = command.add_mutually_exclusive_group(required=True)
-        records.add_argument("--record-json")
-        records.add_argument("--record-file", type=Path)
+    append = sub.add_parser("append", help="derive hash fields and append one durable result")
+    records = append.add_mutually_exclusive_group(required=True)
+    records.add_argument("--record-json")
+    records.add_argument("--record-file", type=Path)
     args = parser.parse_args()
-    root = args.repo.resolve()
-    ledger_path = args.ledger if args.ledger.is_absolute() else root / args.ledger
+
+    root = args.repo.resolve() if args.repo is not None else repository_root(Path.cwd())
+    ledger_path = repository_path(root, args.ledger, ".ledger.sharpen.jsonl")
     ledger = Ledger.load(ledger_path.resolve())
-    if args.command == "reflection-status":
-        print(
-            json.dumps(
-                {
-                    "due": ledger.outer_reflection_due(),
-                    "audits": ledger.audits_since_outer_reflection(),
-                    "cadence": OUTER_REFLECTION_CADENCE,
-                }
-            )
-        )
-        return 0
-    raw = args.record_file.read_text(encoding="utf-8") if args.record_file else args.record_json
+    raw = (
+        args.record_file.read_text(encoding="utf-8")
+        if args.record_file is not None
+        else args.record_json
+    )
     record = json.loads(raw)
     if not isinstance(record, dict):
         raise TypeError("record must be a JSON object")
-    prepared = (
-        prepare_outer_reflection(record, ledger)
-        if args.command == "append-reflection"
-        else prepare_record(record, root, ledger)
-    )
+    prepared = prepare_record(record, root, ledger)
     ledger.append(prepared)
     print(json.dumps(prepared, ensure_ascii=False))
     return 0

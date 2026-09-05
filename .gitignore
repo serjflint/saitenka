@@ -91,4 +91,3 @@ site/
 
 # Grow loop: generated coverage-context signal + its temp coverage files
 .grow-contexts.json
-.grow_contexts.*

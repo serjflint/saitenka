@@ -13,36 +13,6 @@ import sharpen_ledger as sl
 
 MANIFEST = {"type": "manifest", "toolset_version": 1}
 TESTS = ["tests/test_foo.py"]
-AXES = {
-    "efficacy": {"status": "pass", "evidence": "no survivors"},
-    "conformance": {"status": "pass", "evidence": "no violations"},
-    "preservation": {"status": "pass", "evidence": "negative control"},
-    "brittleness": {"status": "pass", "evidence": "no witnesses"},
-    "redundancy": {"status": "advisory", "evidence": "one focused test"},
-}
-REVIEW = {
-    "author": "author-1",
-    "skeptic": "skeptic-1",
-    "judge": "judge-1",
-    "skeptic_verdict": "UPHELD",
-    "judge_verdict": "UPHELD",
-    "verdict": "UPHELD",
-}
-AUDITED = "2026-09-03T00:00:00Z"
-
-
-def _current_record(sha: str) -> dict:
-    return {
-        "module": "app/foo.py",
-        "source_sha": sha,
-        "toolset_version": 1,
-        "contract_version": sl.CONTRACT_VERSION,
-        "state": "sharpened",
-        "audited": AUDITED,
-        "axes": {axis: evidence for axis, evidence in AXES.items() if axis != "conformance"},
-        "axes_not_applied": ["conformance: efficacy was the active primary axis"],
-        "review": REVIEW,
-    }
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -90,21 +60,15 @@ def test_status_is_unseen_without_a_record(tmp_path):
 def test_status_is_sharpened_current_when_sharpened_and_unchanged(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = _current_record(sha)
+    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
     ledger = _ledger(root, [MANIFEST, rec])
     assert ledger.status("app/foo.py", root, TESTS) == sl.SHARPENED_CURRENT
-
-
-def test_current_contract_preserves_the_survival_axis_alias():
-    record = _current_record("sha")
-    record["axes"]["survival"] = record["axes"].pop("efficacy")
-    assert sl._record_contract_valid(record, 1)
 
 
 def test_status_goes_stale_when_the_source_is_edited(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = _current_record(sha)
+    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
     ledger = _ledger(root, [MANIFEST, rec])
     (root / "src/saitenka/app/foo.py").write_text("X = 99\n", encoding="utf-8")
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_SHA
@@ -118,213 +82,33 @@ def test_status_goes_stale_when_the_toolset_version_bumps(tmp_path):
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_TOOLSET
 
 
-def test_status_goes_stale_when_the_contract_changes(tmp_path):
+def test_status_is_terminal_when_the_coordinate_is_unsharpenable(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
     rec = {
         "module": "app/foo.py",
         "source_sha": sha,
         "toolset_version": 1,
-        "contract_version": sl.CONTRACT_VERSION - 1,
-        "state": "sharpened",
+        "state": "unsharpenable",
     }
     ledger = _ledger(root, [MANIFEST, rec])
-    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
+
+    assert ledger.status("app/foo.py", root, TESTS) == sl.UNSHARPENABLE
 
 
-def test_current_contract_without_axis_evidence_cannot_suppress_a_module(tmp_path):
+def test_status_is_terminal_when_an_issue_owns_the_coordinate(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = _current_record(sha)
-    rec.pop("axes_not_applied")
-    ledger = _ledger(root, [MANIFEST, rec])
-    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
-
-
-def test_sharpened_record_requires_meaningful_axes_and_review(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    base = {
+    rec = {
         "module": "app/foo.py",
-        "tests": TESTS,
-        "state": "sharpened",
-        "audited": AUDITED,
-        "axes": AXES,
-        "axes_not_applied": [],
-        "review": REVIEW,
+        "source_sha": sha,
+        "toolset_version": 1,
+        "state": "filed",
+        "grow-filed": ["#43"],
     }
-    for mutation in (
-        {"axes": dict.fromkeys(sl.REQUIRED_AXES)},
-        {"axes": {}, "axes_not_applied": sorted(sl.REQUIRED_AXES)},
-        {"review": None},
-        {"review": {**REVIEW, "judge": " skeptic-1 "}},
-    ):
-        with pytest.raises(ValueError):
-            sl.prepare_record({**base, **mutation}, root, ledger)
-
-
-def test_in_progress_record_requires_passing_objective_axes(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    axes = {**AXES, "efficacy": {"status": "fail", "evidence": "survivor remained"}}
-    with pytest.raises(ValueError, match="passing applied objective-axis"):
-        sl.prepare_record(
-            {
-                "module": "app/foo.py",
-                "tests": TESTS,
-                "state": "in-progress",
-                "audited": AUDITED,
-                "axes": axes,
-                "axes_not_applied": [],
-                "review": REVIEW,
-            },
-            root,
-            ledger,
-        )
-
-
-def test_in_progress_record_accepts_explicitly_unavailable_optional_axes(tmp_path):
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    prepared = sl.prepare_record(
-        {
-            "module": "app/foo.py",
-            "tests": TESTS,
-            "state": "in-progress",
-            "audited": AUDITED,
-            "axes": {
-                "conformance": AXES["conformance"],
-            },
-            "axes_not_applied": [
-                "efficacy: no complete campaign DB",
-                "preservation: no existing assertion changed",
-                "brittleness: certified probe is not implemented",
-                "redundancy: advisory analysis not run",
-            ],
-            "review": REVIEW,
-        },
-        root,
-        ledger,
-    )
-    assert prepared["state"] == "in-progress"
-
-
-def test_in_progress_record_accepts_efficacy_with_conformance_unavailable(tmp_path):
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    prepared = sl.prepare_record(
-        {
-            "module": "app/foo.py",
-            "tests": TESTS,
-            "state": "in-progress",
-            "audited": AUDITED,
-            "axes": {"efficacy": AXES["efficacy"]},
-            "axes_not_applied": [
-                "conformance: efficacy was the active primary axis",
-                "preservation: no existing assertion changed",
-                "brittleness: certified probe is not implemented",
-                "redundancy: advisory analysis not run",
-            ],
-            "review": REVIEW,
-        },
-        root,
-        ledger,
-    )
-    assert prepared["state"] == "in-progress"
-
-
-def test_shippable_record_rejects_contradictory_primary_axis_accounting(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    with pytest.raises(ValueError, match="every required axis"):
-        sl.prepare_record(
-            {
-                "module": "app/foo.py",
-                "tests": TESTS,
-                "state": "in-progress",
-                "audited": AUDITED,
-                "axes": {
-                    "efficacy": AXES["efficacy"],
-                    "conformance": AXES["conformance"],
-                },
-                "axes_not_applied": [
-                    "efficacy: contradictory",
-                    "conformance: contradictory",
-                    "preservation: no existing assertion changed",
-                    "brittleness: certified probe is not implemented",
-                    "redundancy: advisory analysis not run",
-                ],
-                "review": REVIEW,
-            },
-            root,
-            ledger,
-        )
-
-
-def test_shippable_record_rejects_two_applied_primary_axes(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    with pytest.raises(ValueError, match="passing applied objective-axis"):
-        sl.prepare_record(
-            {
-                "module": "app/foo.py",
-                "tests": TESTS,
-                "state": "in-progress",
-                "audited": AUDITED,
-                "axes": {
-                    "efficacy": AXES["efficacy"],
-                    "conformance": AXES["conformance"],
-                },
-                "axes_not_applied": [
-                    "preservation: no existing assertion changed",
-                    "brittleness: certified probe is not implemented",
-                    "redundancy: advisory analysis not run",
-                ],
-                "review": REVIEW,
-            },
-            root,
-            ledger,
-        )
-
-
-def test_in_progress_record_rejects_failed_optional_axis(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    axes = {**AXES, "preservation": {"status": "fail", "evidence": "witness regressed"}}
-    with pytest.raises(ValueError, match="passing applied objective-axis"):
-        sl.prepare_record(
-            {
-                "module": "app/foo.py",
-                "tests": TESTS,
-                "state": "in-progress",
-                "audited": AUDITED,
-                "axes": axes,
-                "axes_not_applied": [],
-                "review": REVIEW,
-            },
-            root,
-            ledger,
-        )
-
-
-def test_failed_objective_axis_cannot_suppress_triage(tmp_path):
-    root = _repo(tmp_path)
-    sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = _current_record(sha)
-    rec["state"] = "in-progress"
-    rec["axes"] = {**AXES, "efficacy": {"status": "fail", "evidence": "survivor remained"}}
     ledger = _ledger(root, [MANIFEST, rec])
-    assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_CONTRACT
+
+    assert ledger.status("app/foo.py", root, TESTS) == sl.FILED
 
 
 def test_latest_returns_the_most_recent_record(tmp_path):
@@ -337,20 +121,9 @@ def test_latest_returns_the_most_recent_record(tmp_path):
 
 def test_grow_filed_maps_module_to_open_issue_refs(tmp_path):
     root = _repo(tmp_path)
-    rec = {**_current_record("x"), "state": "in-progress", "grow-filed": ["#43"]}
+    rec = {"module": "app/foo.py", "source_sha": "x", "state": "in-progress", "grow-filed": ["#43"]}
     ledger = _ledger(root, [MANIFEST, rec])
     assert ledger.grow_filed() == {"app/foo.py": ["#43"]}
-
-
-def test_grow_filed_ignores_old_contract_records(tmp_path):
-    root = _repo(tmp_path)
-    rec = {
-        **_current_record("x"),
-        "contract_version": sl.CONTRACT_VERSION - 1,
-        "grow-filed": ["#43"],
-    }
-    ledger = _ledger(root, [MANIFEST, rec])
-    assert ledger.grow_filed() == {}
 
 
 def test_append_round_trips_a_record(tmp_path):
@@ -358,6 +131,42 @@ def test_append_round_trips_a_record(tmp_path):
     ledger = _ledger(root, [MANIFEST])
     ledger.append({"module": "app/foo.py", "source_sha": "z", "state": "sharpened"})
     assert sl.Ledger.load(root / ".ledger.sharpen.jsonl").latest("app/foo.py")["source_sha"] == "z"
+
+
+def test_append_cli_derives_tests_hash_and_toolset(monkeypatch, tmp_path, capsys):
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [{"type": "manifest", "toolset_version": 7}])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "sharpen_ledger.py",
+            "--repo",
+            str(root),
+            "--ledger",
+            str(ledger.path),
+            "append",
+            "--record-json",
+            '{"module":"app/foo.py","state":"sharpened"}',
+        ],
+    )
+
+    assert sl._main() == 0
+
+    written = json.loads(capsys.readouterr().out)
+    assert written["tests"] == TESTS
+    assert written["source_sha"] == sl.source_sha(root, "app/foo.py", TESTS)
+    assert written["toolset_version"] == 7
+
+
+def test_prepare_record_rejects_a_module_outside_source_root(tmp_path):
+    import pytest
+
+    root = _repo(tmp_path)
+    ledger = _ledger(root, [MANIFEST])
+
+    with pytest.raises(ValueError, match="stay under"):
+        sl.prepare_record({"module": "../../../tools/x.py", "state": "sharpened"}, root, ledger)
 
 
 def test_map_tests_to_modules_keeps_every_directly_imported_module(tmp_path):
@@ -389,162 +198,7 @@ def test_attribution_is_function_level_and_evidence_bearing(tmp_path):
 def test_status_is_stale_when_the_module_moved_instead_of_raising(tmp_path):
     root = _repo(tmp_path)
     sha = sl.source_sha(root, "app/foo.py", TESTS)
-    rec = _current_record(sha)
+    rec = {"module": "app/foo.py", "source_sha": sha, "toolset_version": 1, "state": "sharpened"}
     ledger = _ledger(root, [MANIFEST, rec])
     (root / "src/saitenka/app/foo.py").unlink()  # module moved/deleted
     assert ledger.status("app/foo.py", root, TESTS) == sl.STALE_SHA  # re-audit, never crash
-
-
-def test_prepare_record_owns_identity_and_requires_axis_reflection(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    ledger = _ledger(root, [MANIFEST])
-    record = {
-        "module": "app/foo.py",
-        "tests": TESTS,
-        "state": "dry-run",
-        "audited": "2026-09-03T00:00:00Z",
-        "axes": {"conformance": {"status": "pass", "evidence": "no violations"}},
-    }
-    with pytest.raises(ValueError, match="every required axis"):
-        sl.prepare_record(record, root, ledger)
-    prepared = sl.prepare_record(
-        {
-            **record,
-            "axes_not_applied": [
-                "efficacy: no DB",
-                "preservation: no replacement",
-                "brittleness: probe unavailable",
-                "redundancy: advisory",
-            ],
-        },
-        root,
-        ledger,
-    )
-    assert prepared["source_sha"] == sl.source_sha(root, "app/foo.py", TESTS)
-    assert prepared["contract_version"] == sl.CONTRACT_VERSION
-
-
-def test_outer_reflection_becomes_due_and_human_receipt_resets_it(tmp_path):
-    root = _repo(tmp_path)
-    records = [
-        MANIFEST,
-        *(
-            {
-                **_current_record(str(index)),
-                "module": f"app/{index}.py",
-                "state": "dry-run",
-            }
-            for index in range(sl.OUTER_REFLECTION_CADENCE)
-        ),
-    ]
-    ledger = _ledger(root, records)
-    assert ledger.outer_reflection_due()
-    reflection = sl.prepare_outer_reflection(
-        {
-            "date": "2026-09-03",
-            "findings": ["f"],
-            "next": ["n"],
-            "toolset_decision": "keep v1",
-            "human_decision": {
-                "identity": "maintainer",
-                "decision_id": "decision-1",
-                "decision": "accepted",
-                "accepted_at": "2026-09-03T00:00:00Z",
-                "source": "human-provided",
-            },
-        },
-        ledger,
-    )
-    ledger.append(reflection)
-    assert not ledger.outer_reflection_due()
-
-
-def test_outer_reflection_rejects_vacuous_or_unapproved_reset(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    records = [
-        MANIFEST,
-        *(
-            {
-                **_current_record(str(index)),
-                "module": f"app/{index}.py",
-                "state": "dry-run",
-            }
-            for index in range(sl.OUTER_REFLECTION_CADENCE)
-        ),
-    ]
-    ledger = _ledger(root, records)
-    base = {
-        "date": "2026-09-03",
-        "findings": ["f"],
-        "next": ["n"],
-        "toolset_decision": "keep v3",
-        "human_decision": {
-            "identity": "maintainer",
-            "decision_id": "d1",
-            "decision": "accepted",
-            "accepted_at": "2026-09-03T00:00:00Z",
-            "source": "human-provided",
-        },
-    }
-    with pytest.raises(ValueError, match="non-empty findings"):
-        sl.prepare_outer_reflection({**base, "findings": []}, ledger)
-    with pytest.raises(ValueError, match="must be accepted"):
-        sl.prepare_outer_reflection(
-            {**base, "human_decision": {**base["human_decision"], "decision": "rejected"}},
-            ledger,
-        )
-
-
-def test_unvalidated_outer_reflection_does_not_reset_cadence(tmp_path):
-    root = _repo(tmp_path)
-    audits = [
-        {**_current_record(str(index)), "module": f"app/{index}.py", "state": "dry-run"}
-        for index in range(sl.OUTER_REFLECTION_CADENCE)
-    ]
-    fake = {
-        "type": "outer-reflection",
-        "toolset_version": 1,
-        "contract_version": sl.CONTRACT_VERSION,
-        "findings": ["f"],
-        "next": ["n"],
-        "human_decision": {
-            "identity": "maintainer",
-            "decision_id": "invented",
-            "decision": "accepted",
-            "accepted_at": "x",
-        },
-    }
-
-    assert _ledger(root, [MANIFEST, fake, *audits]).outer_reflection_due()
-
-
-def test_module_append_is_blocked_while_outer_reflection_is_due(tmp_path):
-    import pytest
-
-    root = _repo(tmp_path)
-    records = [
-        MANIFEST,
-        *(
-            {
-                **_current_record(str(index)),
-                "module": f"app/{index}.py",
-                "state": "dry-run",
-            }
-            for index in range(sl.OUTER_REFLECTION_CADENCE)
-        ),
-    ]
-    ledger = _ledger(root, records)
-    record = {
-        "module": "app/foo.py",
-        "tests": TESTS,
-        "state": "dry-run",
-        "audited": AUDITED,
-        "axes": AXES,
-        "axes_not_applied": [],
-    }
-    with pytest.raises(ValueError, match="outer reflection is due"):
-        sl.prepare_record(record, root, ledger)

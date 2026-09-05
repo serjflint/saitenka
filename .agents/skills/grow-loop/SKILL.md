@@ -1,87 +1,46 @@
 ---
 name: grow-loop
 description: >-
-  Run or resume one Saitenka Grow audit: find an orphan scenario, choose the test kind and
-  oracle through write-test, add one focused test, run the deterministic growth gate, obtain
-  two isolated adversarial reviews, and record a dry-run or PR-ready result. Trigger on "run
-  Grow", "grow the tests", "find missing test coverage", or requests to operate `.agents/grow`.
-  Default to a ledger-only dry-run. Not for strengthening an existing assertion (sharpen-loop),
-  launching mutation/fuzz/crosshair campaigns (test-adequacy), or product/tooling changes
-  (contribute).
+  Run one bounded Saitenka Grow audit: find one missing scenario, add one focused test, prove its oracle
+  has new detection power, obtain isolated review for a PR-ready artifact, and offer genuine findings.
+  Use for "run Grow", "grow tests", or missing scenario coverage. Not for changing existing assertions
+  (sharpen-loop), adequacy campaigns (test-adequacy), or production fixes (contribute).
 metadata:
   project: saitenka
 ---
 
 # Grow Loop
 
-Run one bounded additive test-growth audit while preserving objective gates and reviewer isolation.
+Read `.agents/grow/SPEC.md` completely, then run one additive audit.
 
-## Load the contract
+## Procedure
 
-Before taking action, read completely:
+1. Default to exploration with no outward action. Open a PR only when the user authorizes it.
+2. Use a clean worktree and select one idle module. Treat triage and optional mutation data as hints;
+   verify the chosen scenario against source and mapped tests.
+3. Before authoring, query `grow_ledger.py status` for the chosen semantic coordinate. Skip
+   `closed-current`, `filed`, and `unclosable`.
+4. Use the `write-test` skill to choose the tier, seam, extension point, and oracle. Add one test or
+   extend one existing case without altering prior assertions.
+5. Run the mapped baseline and focused changed test. A red-on-pristine oracle is a product finding and
+   routes to `contribute`.
+6. Run `grow_gate.py additive` and `liveness`. For a scenario, require either a focused old-survives /
+   new-kills mutant or a real new coverage path. For concurrency, require the guarded test and unguarded
+   negative control.
+7. For a PR-ready result, obtain two isolated read-only adversarial reviews of the exact final diff.
+   Reviewers receive the target, claimed observable behavior, diff, and validation only.
+8. Offer a genuine finding as a PR or issue. Do not revert it merely to keep the main worktree clean.
+9. Append a ledger record only for durable duplicate-prevention: PR/landed, issue-filed, or unclosable.
+   Do not write receipts for no-candidate, bounce, or clean exploration.
+10. Follow the repository contribution gates for a PR. Never merge.
 
-1. `.agents/grow/SPEC.md` — behavior and safety policy.
-2. `.agents/grow/ADAPTERS.md` — host operations, response contracts, and provenance.
-3. `.agents/grow/PROMPTS.md` — canonical role payloads.
-4. The `write-test` skill — choose the tier, fake/real seam, extension point, and oracle family.
+Use context-free subagents for reviewers when available. Deterministic commands stay with the root agent.
 
-Read `.agents/grow/GUIDE.md` only to explain the design or resolve ambiguity.
+## Reflection
 
-## Choose the mode
-
-- Unspecified means `openPr=false`: ledger-only dry-run, no push, issue, PR, or merge.
-- Set `openPr=true` only when the user explicitly requests outward action.
-- Use one orphan gap per run; respect a pinned module only when deterministic triage says it is live.
-- Consume complete adequacy artifacts only. Missing mutation data is a `test-adequacy` prerequisite,
-  never a campaign launched inside Grow.
-
-## Execute with Codex
-
-1. Work in a clean dedicated worktree; keep commands relative to it.
-2. Run triage, baselines, objective gates, hashing, and ledgers directly from the repository root.
-3. Apply the `write-test` decision tree. Pass only the selected tier, seam, extension point, oracle,
-   gap coordinate, scope guard, and prior bounce to a fresh isolated author.
-4. Permit additive test edits only. Any changed/removed existing assertion routes to Sharpen.
-5. Run every applicable deterministic Grow arm and verify temporary mutations restore exact bytes.
-   For a scenario, liveness is mandatory and growth-adhoc/context-delta are alternative growth proofs;
-   a context bounce does not override a passing scenario mutant. Recompute disposition from the
-   individual results instead of trusting an agent-supplied aggregate.
-6. Invoke skeptic and then judge in separate fresh contexts. Give each factual WHAT plus DIFF, never
-   author rationale or the other review. Two UPHOLDs are required.
-7. Prefer a different model family for reviewers when the host roster offers one. Isolation is
-   mandatory; cross-family routing is recommended, not required.
-8. When `openPr=true`, run `uv run poe all` after reviews and before opening a ready PR. Gate failure
-   forces a dry-run/no-PR result. Never merge.
-9. Record real invocation ids, verdicts, applied arms, skipped-axis reasons, and final disposition. If a
-   completed live-module scenario map finds no orphan, append a no-gap module audit so unchanged evidence
-   is not inspected again; a no-live selection records nothing.
-10. Revert the test edit in dry-run mode so only the ledger append remains.
-11. **Mandatory pre-receipt phase — Reflect.** On every completed outcome, including `no-orphan`, `no-live`, baseline
-    failure, gate bounce, refutation, dry-run, and ship paths, invoke a fresh isolated reflector with only
-    the factual run trace. Validate its `reflection` response against `contracts.json`; it may append
-    findings and the mandatory run receipt only through `tools/grow_reflect.py append-run`; it must not edit code or open outward actions. Do not
-    write no suppressive Grow receipt until this invocation returns a durably-appended receipt. Bind that
-    receipt into the Grow ledger record; a thrown adapter/tool failure is an incomplete invocation, never
-    a completed outcome.
-
-Use `spawn_agent` with `fork_turns="none"` when available. Run author, skeptic, and judge sequentially
-because they share a worktree. Optional LSP navigation may locate symbols/callers; never invoke or depend
-on the infrastructure-only `pyrefly-lsp` skill.
-
-## Handoffs
-
-- Survivor/crasher/counterexample → `test-adequacy`, then author a property plus pinned `@example`.
-- Product bug, source fix, loop-tool change, dependency, or config work → `contribute` as a separate PR.
-- Repeated reflection evidence needing external prior art → `research` outside the candidate run.
-- An ordinary test-only Grow PR stays in this loop; do not nest a full contribution workflow around it.
-- A completed dry-run receipt may feed `assurance-pipeline` before feature work begins. Return the scenario,
-  liveness, restoration, and growth evidence; the reverted edit is a coordinate, not package-tree content.
+Run a separate retrospective only when requested or after repeated false passes/bounces. It is advisory
+planning work, never a gate or ledger receipt.
 
 ## Verify
 
-Before success, confirm the mapped baseline was green, the edit is additive, every applicable arm passed,
-temporary bytes restored, reviewer identities are distinct, `poe all` passed on a ship path, and a dry-run
-left no test edit or outward action. Confirm `Reflect` completed before any suppressive receipt; a missing
-or failed reflector means the procedure did not complete.
-
-Run `bash scripts/smoke.sh` from this skill directory or the repository-root equivalent.
+Run `bash .agents/skills/grow-loop/scripts/smoke.sh`.

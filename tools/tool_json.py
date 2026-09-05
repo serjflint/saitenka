@@ -4,14 +4,34 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from pathlib import Path
 
 
 class InstrumentError(RuntimeError):
     """A measurement instrument did not produce trustworthy output."""
+
+
+def repository_root(start: Path) -> Path:
+    """Resolve the containing worktree instead of trusting the launch directory."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=start,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise InstrumentError("instrument unavailable: git") from exc
+    if proc.returncode != 0 or not proc.stdout.strip():
+        detail = proc.stderr.strip() or "no repository root"
+        raise InstrumentError(f"repository resolution failed: {detail}")
+    return Path(proc.stdout.strip()).resolve()
+
+
+def repository_path(root: Path, supplied: Path | None, default: str) -> Path:
+    path = supplied or Path(default)
+    return path if path.is_absolute() else root / path
 
 
 def run_json[JsonShape: (list, dict)](
