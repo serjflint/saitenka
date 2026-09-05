@@ -15,7 +15,9 @@ study system. Together they approach immersion from six different angles.
   goes to a Jiten study deck, never to Anki. In exchange for that account it can do the one thing a
   read-only Anki reader cannot: **grade the card from the popup** while the video is paused.
 - **SubMiner** is a feature-broad Electron app with a large integration surface and turn-key desktop
-  installers (AniList scrobbling, Jellyfin integration, a media launcher, cross-machine sync).
+  installers (AniList scrobbling, Jellyfin integration, a media launcher, cross-machine sync). Its
+  per-card timing/context review happens after word selection; it is not batch candidate-word
+  curation.
 - **Autocards** is a retroactive media back-filler: it doesn't create cards or show dictionaries — it
   batch-attaches a screenshot and sentence audio to text-only cards you made elsewhere, by matching each
   card's Sentence field against the subtitle's timing.
@@ -59,7 +61,7 @@ latency, see [Speed](benchmarks.md); to try it, see [Get started](../start/insta
 | Camera OCR mining | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ [mobile OCR](https://migaku.com/faq/features) |
 | Streaming video mining (YouTube · Netflix · Disney+ · Viki) | ❌ | ❌ | ❌ | ❌ | ⚠️ YouTube import | ✅ [desktop sites](https://migaku.com/faq/getting-started) |
 | Audiobook / **YouTube URL + playlist** batch mining (yt-dlp) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| **Pre-mine word curation** — review candidates before cards | ❌ | ⚠️ [per-card review: screenshot, waveform trim, sentence edit](https://github.com/Sirush/JitenMPV/blob/6d3efe3383c26efe46763ece126deb88f8348344/src/JitenMPV.App/Views/MiningReviewWindow.axaml) | ❌ | ❌ | ✅ | ❌ |
+| **Pre-mine word curation** — review candidates before cards | ❌ | ⚠️ [per-card review: screenshot, waveform trim, sentence edit](https://github.com/Sirush/JitenMPV/blob/6d3efe3383c26efe46763ece126deb88f8348344/src/JitenMPV.App/Views/MiningReviewWindow.axaml) | ⚠️ [per-card timing/context review](https://github.com/ksyasuda/SubMiner/commit/84f718043ab6eadf9e21650908607ca92d5262c2) | ❌ | ✅ | ❌ |
 | Built-in courses + spaced-repetition app | ❌ | ⚠️ [the Jiten web service is the SRS](https://jiten.moe) | ❌ | ❌ | ❌ | ✅ [Migaku Memory](https://migaku.com/faq/features) |
 | jimaku.cc · TsukiHime subtitle fetch | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Built-in subtitle **retiming/resync** (alass) | ✅ automatic | ❌ | ⚠️ | ❌ external tool | ✅ utility | ⚠️ [manual timing offsets](https://migaku.com/blog/changelog) |
