@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- Mining audio now times out cleanly on an unresponsive source, avoids scanning unrelated Matroska
+  attachments, and reports when FFmpeg exits without producing a clip.
 - A profile's configured translation language now selects that subtitle track at startup and after a
   live profile cycle instead of silently retaining English.
 - **The first hover after the pointer enters the video showed no tooltip.** The word's dictionary
