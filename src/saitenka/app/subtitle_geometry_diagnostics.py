@@ -88,6 +88,7 @@ def geometry_error_code(error: BaseException | str) -> GeometryErrorCode:
         ("bidirectional", GeometryErrorCode.TYPESETTING),
         ("ligature", GeometryErrorCode.TYPESETTING),
         ("unparsed primary-color", GeometryErrorCode.TYPESETTING),
+        ("unparsed secondary-color", GeometryErrorCode.TYPESETTING),
         ("token", GeometryErrorCode.ANNOTATION_MAPPING),
     )
     return next(

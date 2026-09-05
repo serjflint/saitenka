@@ -41,6 +41,7 @@ def test_contract_and_resource_errors_are_bounded_unsupported_decisions(
         "bidirectional text is outside the interactive envelope",
         "a token boundary may split a Latin ligature",
         "unparsed primary-color command is not color-rewritten",
+        "unparsed secondary-color command is not color-rewritten",
     ],
 )
 def test_the_envelope_refusals_are_named_rather_than_reported_as_provider_errors(
@@ -64,6 +65,7 @@ def test_the_envelope_refusals_are_named_rather_than_reported_as_provider_errors
         ("{\\blur-}猫", (0, 1)),
         ("{\\p1}m 0 0{\\p0}字", (0, 1)),
         ("色{\\cZZ}変更", (0, 3)),
+        ("色{\\2cZZ}変更", (0, 3)),
     ],
 )
 def test_the_classifier_reads_the_message_the_rewrite_actually_raises(
