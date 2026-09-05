@@ -112,7 +112,7 @@ def annotations_from_authored_color_boundaries(
 @pytest.mark.parametrize(
     ("raw", "text", "source_fragments", "drawings"),
     [
-        ("猫\\N犬\\h鳥", "猫\n犬 鳥", ("猫", "\\N", "犬", "\\h", "鳥"), ()),
+        ("猫\\N犬\\n魚\\h鳥", "猫\n犬 魚 鳥", ("猫", "\\N", "犬", "\\n", "魚", "\\h", "鳥"), ()),
         ("{\\i1}猫{\\b1}犬{\\i0}", "猫犬", ("猫", "犬"), ()),
         ("{\\p1}m 0 0 l 10 10{\\p0}字", "字", ("字",), ((5, 18, 1),)),
         ("猫{broken", "猫{broken", tuple("猫{broken"), ()),
@@ -133,6 +133,13 @@ def test_decode_ass_text_keeps_exact_raw_spans(
 def test_raw_spans_do_not_guess_one_boundary_across_an_override() -> None:
     decoded = decode_ass_event(event("猫{\\b1}犬"))
     assert tuple((span.start, span.end) for span in decoded.raw_spans) == ((0, 1), (6, 7))
+
+
+def test_soft_break_is_a_newline_only_for_wrap_style_two() -> None:
+    source = event(r"猫\n犬")
+
+    assert decode_ass_event(source).text == "猫 犬"
+    assert decode_ass_event(source, soft_break="\n").text == "猫\n犬"
 
 
 def test_legacy_offsets_do_not_masquerade_as_exact_spans() -> None:

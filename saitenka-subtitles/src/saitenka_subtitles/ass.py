@@ -161,10 +161,10 @@ def _consume_override(state: _DecodeState, block: _OverrideBlock) -> None:
         state.drawing_start = block.end
 
 
-def _consume_text(raw: str, index: int, state: _DecodeState) -> int:
+def _consume_text(raw: str, index: int, state: _DecodeState, soft_break: str) -> int:
     if raw[index] == "\\" and index + 1 < len(raw) and raw[index + 1] in "Nnh":
         escaped = raw[index + 1]
-        state.text.append("\n" if escaped in "Nn" else " ")
+        state.text.append("\n" if escaped == "N" else soft_break if escaped == "n" else " ")
         state.spans.append(RawTextSpan(index, index + 2))
         return index + 2
     state.text.append(raw[index])
@@ -172,9 +172,7 @@ def _consume_text(raw: str, index: int, state: _DecodeState) -> int:
     return index + 1
 
 
-def decode_ass_event(source: RawSubtitleEvent) -> DecodedSubtitleEvent:
-    """Project an authored ASS event to semantic text and exact source spans."""
-    raw = source.raw_text
+def _decode_ass_text(raw: str, soft_break: str) -> _DecodeState:
     state = _DecodeState([], [], [])
     index = 0
     while index < len(raw):
@@ -186,9 +184,35 @@ def decode_ass_event(source: RawSubtitleEvent) -> DecodedSubtitleEvent:
         if state.drawing_scale:
             index += 1
             continue
-        index = _consume_text(raw, index, state)
+        index = _consume_text(raw, index, state, soft_break)
     if state.drawing_start is not None and state.drawing_start < len(raw):
         state.drawings.append(DrawingSpan(state.drawing_start, len(raw), state.drawing_scale))
+    return state
+
+
+def ass_soft_break(document: str) -> str:
+    """The semantic value of ``\\n`` for the document's wrapping mode."""
+    in_script_info = False
+    for line in document.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            in_script_info = stripped.casefold() == "[script info]"
+            continue
+        name, separator, value = line.partition(":")
+        if in_script_info and separator and name.strip().casefold() == "wrapstyle":
+            return "\n" if value.strip() == "2" else " "
+    return " "
+
+
+def decode_ass_text(raw: str, *, soft_break: str = " ") -> str:
+    """Project authored ASS text to the semantic text libass exposes."""
+    return "".join(_decode_ass_text(raw, soft_break).text)
+
+
+def decode_ass_event(source: RawSubtitleEvent, *, soft_break: str = " ") -> DecodedSubtitleEvent:
+    """Project an authored ASS event to semantic text and exact source spans."""
+    raw = source.raw_text
+    state = _decode_ass_text(raw, soft_break)
     return DecodedSubtitleEvent(
         source,
         "".join(state.text),

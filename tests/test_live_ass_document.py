@@ -99,11 +99,18 @@ def _observe_mpv_subtitle_properties(
 
 @pytest.mark.live
 @pytest.mark.timeout(30)
-def test_decode_ass_matches_mpv_sub_text_for_supported_static_event() -> None:
+@pytest.mark.parametrize(
+    "raw",
+    [
+        r"{\an7\alpha&H40&}猫\N犬\h鳥{\b1}を見る{\b0}",
+        r"前{\p1}m 0 0 l 10 10{\p0}中{\pos(20,30)}後",
+        r"猫\n犬",
+    ],
+)
+def test_decode_ass_matches_mpv_sub_text(raw: str) -> None:
     mpv = find_mpv(None)
     if not mpv:
         pytest.skip("mpv not found")
-    raw = r"{\an7\alpha&H40&}猫\N犬\h鳥{\b1}を見る{\b0}"
     identity = SubtitleEventId(SubtitleTrackId("live:ass:1"), 0, 8_000, 0, 0)
     expected = decode_ass_event(RawSubtitleEvent(identity, raw)).text
     replies = _observe_mpv_subtitle_properties(

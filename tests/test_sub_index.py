@@ -53,12 +53,42 @@ def test_parse_ass_uses_format_order_strips_overrides_keeps_text_commas():
     assert len(cues) == 3
     assert cues[0].start == 1.0 and cues[0].text == "こんにちは"  # {\an8} stripped
     assert cues[1].text == "セリフ、読点あり"  # a comma inside Text is preserved (re-joined)
-    assert cues[2].text == "また\\Nあした"  # ASS line break kept literally (\N)
+    assert cues[2].text == "また\nあした"
 
 
 def test_parse_ass_strips_html_markup():
     content = ASS.replace("こんにちは", '<font color="japanese">こんにちは</font>')
     assert parse_ass(content)[0].text == "こんにちは"
+
+
+def test_parse_ass_removes_drawing_runs_and_keeps_surrounding_dialogue() -> None:
+    content = ASS.replace(
+        "{\\an8}こんにちは",
+        r"前{\p1}m 0 0 l 10 10{\p0}中{\pos(20,30)}後",
+    )
+
+    assert parse_ass(content)[0].text == "前中後"
+
+
+def test_parse_ass_drops_a_drawing_only_event() -> None:
+    content = ASS.replace("{\\an8}こんにちは", r"{\p1}m 0 0 l 10 10")
+
+    assert [cue.text for cue in parse_ass(content)] == ["セリフ、読点あり", "また\nあした"]
+
+
+def test_parse_ass_keeps_dialogue_from_an_unclosed_override_block() -> None:
+    content = ASS.replace("{\\an8}こんにちは", r"猫{\b1犬")
+
+    assert parse_ass(content)[0].text == r"猫{\b1犬"
+
+
+@pytest.mark.parametrize(("wrap_style", "expected"), [("0", "猫 犬"), ("2", "猫\n犬")])
+def test_parse_ass_applies_wrap_style_to_soft_breaks(wrap_style: str, expected: str) -> None:
+    content = ASS.replace("Title: x", f"Title: x\nWrapStyle: {wrap_style}").replace(
+        "{\\an8}こんにちは", r"猫\n犬"
+    )
+
+    assert parse_ass(content)[0].text == expected
 
 
 def test_parse_cues_dispatches_by_extension_and_sorts():
