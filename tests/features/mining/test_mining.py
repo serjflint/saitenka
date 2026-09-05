@@ -898,6 +898,56 @@ def test_bulk_mine_counts_and_toasts(monkeypatch, make_session):
     assert any("mined" in t for t in toasts)
 
 
+def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_session):
+    from dataclasses import replace
+
+    from util import FakeIPC
+
+    from saitenka.app.anki import AnkiError
+
+    class PartialAnki(_FakeAnki):
+        def add_note(self, note):
+            if self.added:
+                raise AnkiError("connection lost")
+            return super().add_note(note)
+
+    ipc = FakeIPC()
+    ipc.props["path"] = "/x/Show - 01.mkv"
+    anki = PartialAnki()
+    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    r.graph.cue.set_subtitle("本を読む")
+    transaction = _ports(r)
+    plan = miner.preflight_bulk(transaction)
+    assert plan is not None and len(plan.items) >= 2
+    links = []
+    counts = []
+    toasts = []
+    transaction = replace(
+        transaction,
+        apply=replace(
+            transaction.apply,
+            record_link=lambda *args: links.append(args),
+            record_mined=counts.append,
+            toast=lambda text, kind="ok": toasts.append((text, kind)),
+        ),
+    )
+    monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
+    prepared = miner.PreparedCapture(
+        "bulk",
+        None,
+        miner.MediaNeeds(picture=False, audio=False),
+        None,
+        None,
+        animated=False,
+    )
+
+    miner.commit_bulk(transaction, plan, prepared)
+
+    assert [link[0] for link in links] == [1]
+    assert counts == [1]
+    assert toasts == [("bulk failed: connection lost", "err")]
+
+
 def _make_dict(path, title, entries):
     """Minimal Yomitan v3 dict zip (mirrors test_dictionary._make_dict)."""
     import json

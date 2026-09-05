@@ -625,7 +625,7 @@ def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapt
     try:
         for item in plan.items:
             if p.cancelled():
-                return
+                break
             tok, card = item.token, item.card
             freq = frequency(p.encounter.dict_set, tok)
             content = CardContent(
@@ -641,15 +641,17 @@ def commit_bulk(p: MiningTransaction, plan: BulkMinePlan, prepared: PreparedCapt
             if p.anki.can_add(note):
                 if p.cancelled():
                     return
-                p.anki.add_note(note)
+                note_id = p.anki.add_note(note)
+                _persist_mined(p, note_id, card, video)
                 p.apply.mark_mined(card.expression)
                 mined += 1
             else:
                 dup += 1
         p.apply.toast(f"mined {mined} · {dup} dup", "ok" if mined else "warn")
-        p.apply.record_mined(mined)
     except AnkiError as e:
         p.apply.toast(f"bulk failed: {e}", "err")
+    finally:
+        p.apply.record_mined(mined)
 
 
 def mined_expressions(anki, mine_cfg) -> set[str] | None:
