@@ -224,13 +224,21 @@ def finish_listing(completion: EffectFinished) -> tuple[int, ListingResult] | No
 
 
 def _rows(state: PickerState) -> list[SidebarRow]:
+    from saitenka.app.subtitle_selection import language_name
+
+    candidates = listing_of(state).candidates
+    # Only when the set actually spans languages: naming one on every row of a single-language list is
+    # noise, and the tag line is narrow (#495).
+    mixed = len({language_name(candidate.language) for candidate in candidates}) > 1
     rows: list[SidebarRow] = []
-    for index, candidate in enumerate(listing_of(state).candidates):
-        # provider · format · match — same dot-tag idiom as the provider pill; `match` = the release
-        # RESOLUTION matches this encode (a picker-fetch is never pre-downloaded), `srt`/`ass` the format.
+    for index, candidate in enumerate(candidates):
+        # provider · language? · format · match — same dot-tag idiom as the provider pill; `match` = the
+        # release RESOLUTION matches this encode (a picker-fetch is never pre-downloaded), `srt`/`ass`
+        # the format.
         ext = Path(candidate.name).suffix.lstrip(".").lower()
         tags = [
             candidate.provider,
+            *([language_name(candidate.language)] if mixed else []),
             *([ext] if ext else []),
             *(["match"] if candidate.match else []),
         ]

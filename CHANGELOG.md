@@ -7,8 +7,22 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- **TsukiHime now serves every language it carries, not only Japanese.** A release routinely holds one
+  subtitle per language — one real release offers 243 attachments across 17 languages — and the
+  provider discarded all but Japanese while parsing. A profile's target language now selects among
+  them, so a French profile is served French. Subtitle candidates carry their source language through
+  the provider contract; the picker names the language when a listing spans more than one, and a
+  result the source left untagged is offered to you by hand rather than attached unattended.
+
 ### Fixed
 
+- **The TsukiHime provider could not fetch anything at all.** Its requests carried urllib's default
+  user agent, which Cloudflare answers with a 403, so every search, listing and download failed.
+- Cached subtitles are now kept per target language. One video watched under two profiles kept a
+  single cache slot, so a French session could be handed the Japanese subtitle a previous session had
+  stored. Existing Japanese entries keep their current names, including hand-picked and re-timed ones.
 - Mining no longer blocks subtitle interaction while FFmpeg or Anki is working, and each admitted
   card keeps the cue, timing, media, and profile snapshot from the moment the shortcut was pressed.
 - Mining audio now times out cleanly on an unresponsive source, avoids scanning unrelated Matroska

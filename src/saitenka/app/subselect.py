@@ -38,6 +38,9 @@ from saitenka.app.subtitle_providers import (
 from saitenka.app.subtitle_selection import (
     lang_matches as _lang_matches,
 )
+from saitenka.app.subtitle_selection import (
+    matches_target_language,
+)
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
@@ -57,6 +60,7 @@ class SubtitleCandidate:
     size: int
     match: bool  # release/resolution match hint for this encode
     download: Callable[[], tuple[Path | None, str]]
+    language: str | None = None  # raw source tag; None when the provider reports none
 
 
 def select_sub_track(ipc, slang: str) -> int | None:
@@ -94,11 +98,15 @@ def _subtitle_identity(
 
 
 def _cached_subtitle(
-    video_path: Path, title: str, episode: int | None, *, resync: bool
+    video_path: Path, title: str, episode: int | None, *, resync: bool, language: str | None = None
 ) -> tuple[Path | None, str | None]:
     from saitenka.app.subtitle_cache import cached_subs
 
-    hit = cached_subs(video_path, title, episode, resync=resync) if video_path.exists() else None
+    hit = (
+        cached_subs(video_path, title, episode, resync=resync, language=language)
+        if video_path.exists()
+        else None
+    )
     if hit is not None:
         log.info("subtitle cache hit: %s", hit)
     status = f"subtitle cache: using {hit.name} for {title!r} ep {episode}" if hit else None
@@ -112,6 +120,7 @@ def _finish_subtitle(
     sub_path: str | Path,
     *,
     resync: bool,
+    language: str | None = None,
 ) -> Path:
     finished = Path(sub_path)
     if resync and video_path.exists():
@@ -121,7 +130,9 @@ def _finish_subtitle(
     if video_path.exists():
         from saitenka.app.subtitle_cache import store_subs
 
-        finished = store_subs(video_path, title, episode, finished, resync=resync)
+        finished = store_subs(
+            video_path, title, episode, finished, resync=resync, language=language
+        )
     return finished
 
 
@@ -215,7 +226,11 @@ def download_tsukihime_candidate_path(
     if video_path.exists():
         from saitenka.app.subtitle_cache import store_subs
 
-        sub_path = store_subs(video_path, title, ep, sub_path, resync=False)
+        # Keyed by what the file IS, not by the active profile: the slot describes its own contents,
+        # and Japanese resolves to the legacy unmarked slot either way.
+        sub_path = store_subs(
+            video_path, title, ep, sub_path, resync=False, language=attachment.language
+        )
     return Path(sub_path), f"tsukihime: added {Path(sub_path).name}"
 
 
@@ -240,6 +255,7 @@ def _jimaku_candidates(
             size=jf.size,
             match=_resolution_match(video, jf.name),
             download=_jimaku_download(video, jf, jimaku_key, title_override),
+            language="ja",  # jimaku.moe publishes Japanese subtitles only; its files carry no tag
         )
         for jf in JimakuClient(jimaku_key).episode_files(title, episode, video=video)
     ]
@@ -284,6 +300,7 @@ def _tsukihime_candidates(
             size=0,  # TsukiHime attachments don't expose a size
             match=_resolution_match(video, release.name),
             download=_tsukihime_download(video, release, attachment, config, title_override),
+            language=attachment.language,
         )
         for release, attachment in pairs
     ]
@@ -325,6 +342,7 @@ def _tsukihime_provider_fetch(
         episode=ctx.episode,
         resync=ctx.resync,
         force=ctx.force,
+        language=ctx.language,
     )
 
 
@@ -337,7 +355,10 @@ _BUILTIN_PROVIDERS = (
     ),
     SubtitleProvider(
         name="tsukihime",
-        languages=frozenset({"jp"}),
+        # Language-agnostic: a release carries whatever the encoder muxed, and a census of 30 releases
+        # found 30+ languages — more French attachments than Japanese. Which of them a profile may use
+        # is the per-candidate policy's call, not a registry-level capability.
+        languages=frozenset(),
         candidates=_tsukihime_provider_candidates,
         fetch_attempt=_tsukihime_provider_fetch,
     ),
@@ -351,8 +372,8 @@ def register_builtin_providers() -> None:
             register_provider(provider)
 
 
-# Both providers are Japanese-only today — capability, not a branch, so a future non-JP profile
-# excludes them without touching this module (#254 phase 1).
+# Capability, not a branch, so a profile's language selects providers without touching this module
+# (#254 phase 1). Jimaku stays Japanese-only; TsukiHime serves every language it is given (#495).
 register_builtin_providers()
 
 
@@ -363,12 +384,19 @@ def list_candidates(
     jimaku_key: str | None = None,
     title_override: str | None = None,
     tsukihime_config: dict | None = None,
+    language: str | None = None,
 ) -> tuple[list[SubtitleCandidate], list[str]]:
     """Aggregate pickable subtitle candidates across the enabled providers (Window 1). Returns
     ``(candidates, warnings)``; a provider that raises contributes a warning row instead of an
-    exception, so one dead provider never blanks the panel. No mpv IPC — off-thread safe."""
+    exception, so one dead provider never blanks the panel. No mpv IPC — off-thread safe.
+
+    ``language`` (the active profile's target) drops results a provider reports in another language.
+    Untagged results survive: a human reading the picker can judge what a tag can't tell us."""
     ctx = ProviderContext(
-        jimaku_key=jimaku_key, title_override=title_override, tsukihime_config=tsukihime_config
+        jimaku_key=jimaku_key,
+        title_override=title_override,
+        tsukihime_config=tsukihime_config,
+        language=language,
     )
     candidates: list[SubtitleCandidate] = []
     warnings: list[str] = []
@@ -378,7 +406,12 @@ def list_candidates(
             continue
         try:
             found, warn = entry.candidates(video, ctx)
-            candidates.extend(found)
+            candidates.extend(
+                candidate
+                for candidate in found
+                if candidate.language is None
+                or matches_target_language(candidate.language, language)
+            )
             warnings.extend(warn)
         except Exception as exc:  # noqa: BLE001  # any provider failure → a soft warning, never fatal
             warnings.append(f"{provider}: {exc}")
@@ -394,9 +427,11 @@ def fetch_tsukihime_path(
     resync: bool = True,
     force: bool = False,
     dest_dir: str | Path | None = None,
+    language: str | None = None,
 ) -> tuple[Path | None, str]:
     """Fetch a unique TsukiHime match without touching mpv IPC. ``force`` skips the cache (see
-    :func:`fetch_jimaku_path`)."""
+    :func:`fetch_jimaku_path`). ``language`` narrows a release's attachments before the uniqueness
+    guard, so a release carrying a dozen languages still resolves to one file."""
     from saitenka.app.tsukihime import (
         API_BASE,
         DEFAULT_RESULT_CAP,
@@ -408,7 +443,9 @@ def fetch_tsukihime_path(
     cfg = config or {}
     video_path, title, requested_episode = _subtitle_identity(video, title_override, episode)
     if not force:
-        hit, cache_status = _cached_subtitle(video_path, title, requested_episode, resync=resync)
+        hit, cache_status = _cached_subtitle(
+            video_path, title, requested_episode, resync=resync, language=language
+        )
         if hit is not None:
             assert cache_status is not None
             return hit, cache_status
@@ -418,11 +455,14 @@ def fetch_tsukihime_path(
             api_base=cfg.get("api_base", API_BASE),
             timeout=float(cfg.get("timeout", DEFAULT_TIMEOUT)),
             result_cap=int(cfg.get("result_cap", DEFAULT_RESULT_CAP)),
+            language=language,
         )
         sub_path = client.fetch(title, requested_episode, destination)
     except (TsukiHimeError, TypeError, ValueError) as exc:
         return None, f"tsukihime failed: {exc}"
-    sub_path = _finish_subtitle(video_path, title, requested_episode, sub_path, resync=resync)
+    sub_path = _finish_subtitle(
+        video_path, title, requested_episode, sub_path, resync=resync, language=language
+    )
     return (
         Path(sub_path),
         f"tsukihime: added {Path(sub_path).name} for {title!r} ep {requested_episode}",
@@ -430,26 +470,14 @@ def fetch_tsukihime_path(
 
 
 def fetch_provider_path(
-    video: str,
-    providers: tuple[str, ...],
-    *,
-    jimaku_key: str | None = None,
-    title_override: str | None = None,
-    episode: int | None = None,
-    resync: bool = True,
-    force: bool = False,
-    tsukihime_config: dict | None = None,
+    video: str, providers: tuple[str, ...], ctx: ProviderContext | None = None
 ) -> tuple[Path | None, str]:
-    """Run configured providers in deterministic order without touching playback. ``force`` skips the
-    cache so a user retry re-fetches + re-syncs (see :func:`fetch_jimaku_path`)."""
-    ctx = ProviderContext(
-        jimaku_key=jimaku_key,
-        title_override=title_override,
-        tsukihime_config=tsukihime_config,
-        episode=episode,
-        resync=resync,
-        force=force,
-    )
+    """Run configured providers in deterministic order without touching playback.
+
+    Takes the ``ProviderContext`` whole rather than re-listing its fields: this unpacked into seven
+    keywords and re-packed them one line later, so every new provider input had to be threaded through
+    twice (``ctx.force`` skips the cache — see :func:`fetch_jimaku_path`)."""
+    ctx = ctx or ProviderContext()
     attempts = [
         (provider, entry.fetch_attempt(video, ctx))
         for provider in providers
@@ -499,12 +527,15 @@ def provider_fetch_factory(
         return lambda: fetch_provider_path(
             video,
             providers,
-            jimaku_key=cfg.jimaku_key,
-            title_override=cfg.jimaku_title,
-            episode=cfg.episode,
-            resync=cfg.resync,
-            force=force,
-            tsukihime_config=cfg.tsukihime_config,
+            ProviderContext(
+                jimaku_key=cfg.jimaku_key,
+                title_override=cfg.jimaku_title,
+                episode=cfg.episode,
+                resync=cfg.resync,
+                force=force,
+                tsukihime_config=cfg.tsukihime_config,
+                language=cfg.language,
+            ),
         )
 
     return factory
@@ -527,6 +558,7 @@ def configure_providers(configure_retry, configure_picker, cfg: ProviderConfig) 
             jimaku_key=cfg.jimaku_key,
             title_override=cfg.jimaku_title,
             tsukihime_config=cfg.tsukihime_config,
+            language=cfg.language,
         )
         if cfg.enabled_providers
         else None
@@ -664,7 +696,9 @@ def _adopt_cached_subtitle(ipc, opts: AttachSubtitleOptions) -> str:
     if not video:
         return ""
     video_path, title, episode = _subtitle_identity(str(video), opts.jimaku_title, opts.episode)
-    hit, status = _cached_subtitle(video_path, title, episode, resync=opts.resync)
+    hit, status = _cached_subtitle(
+        video_path, title, episode, resync=opts.resync, language=opts.language
+    )
     if hit is None:
         return ""
     # Tagged, not selected: `select_initial` below owns the choice, exactly as it does in `run` for

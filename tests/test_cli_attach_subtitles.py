@@ -79,8 +79,8 @@ def test_attach_defers_ordered_provider_chain_without_touching_playback(monkeypa
     reader, ipc = SessionController(), IPC()
     calls = []
 
-    def fetch(video, providers, **kwargs):
-        calls.append((video, providers, kwargs["tsukihime_config"]))
+    def fetch(video, providers, ctx):
+        calls.append((video, providers, ctx.tsukihime_config))
         return Path("episode.ja.ass"), "tsukihime: added"
 
     monkeypatch.setattr(subselect, "fetch_provider_path", fetch)

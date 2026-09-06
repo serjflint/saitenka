@@ -200,3 +200,56 @@ def test_extensionless_source_defaults_to_srt(monkeypatch, tmp_path):
     dest = cache.store_subs(video, "Show", 1, src)
 
     assert dest.suffix == ".srt"
+
+
+def test_each_target_language_gets_its_own_slot(monkeypatch, tmp_path):
+    """One video, two profiles: the French session must not be served the Japanese file cached by the
+    Japanese one. Before TsukiHime served every language this could not arise — no provider answered a
+    non-Japanese profile, so the slot never needed the dimension (#495)."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    japanese = tmp_path / "jp.ass"
+    japanese.write_text("[Script Info]", encoding="utf-8")
+    french = tmp_path / "fr.ass"
+    french.write_text("[Script Info]", encoding="utf-8")
+
+    jp_slot = cache.store_subs(video, "Show", 1, japanese, language="jp")
+    fr_slot = cache.store_subs(video, "Show", 1, french, language="fr")
+
+    assert jp_slot != fr_slot
+    assert cache.cached_subs(video, "Show", 1, language="jp") == jp_slot
+    assert cache.cached_subs(video, "Show", 1, language="fr") == fr_slot
+
+
+def test_japanese_keeps_the_unmarked_legacy_slot(monkeypatch, tmp_path):
+    """Every file already in a user's cache was written by a Japanese-only provider, so Japanese must
+    resolve to the same unmarked name it did before — otherwise the upgrade silently orphans the
+    hand-picked ``-raw`` and ``-retimed`` entries, which is work the user cannot get back."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    src = tmp_path / "old.ass"
+    src.write_text("[Script Info]", encoding="utf-8")
+
+    legacy = cache.store_subs(video, "Show", 1, src)  # written the pre-#495 way, without a language
+
+    assert cache.cached_subs(video, "Show", 1, language="jp") == legacy
+    assert cache.cached_subs(video, "Show", 1, language="ja") == legacy
+    assert cache.cached_subs(video, "Show", 1, language="jpn") == legacy
+    assert "-jp" not in legacy.name
+
+
+def test_a_hand_picked_raw_entry_survives_per_language(monkeypatch, tmp_path):
+    """The ``-raw`` slot holds a file the user chose by hand. Adding the language component must keep
+    the mode suffix last, so the picker's French pick lands in its own raw slot rather than colliding
+    with the Japanese one."""
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = _video(tmp_path)
+    src = tmp_path / "picked.ass"
+    src.write_text("[Script Info]", encoding="utf-8")
+
+    jp_raw = cache.store_subs(video, "Show", 1, src, resync=False, language="jp")
+    fr_raw = cache.store_subs(video, "Show", 1, src, resync=False, language="fr")
+
+    assert jp_raw.stem.endswith("-raw")
+    assert fr_raw.stem.endswith("-fr-raw")
+    assert jp_raw != fr_raw

@@ -51,13 +51,16 @@ def _reader(**props) -> tuple[TestSession, FakeIPC]:
     return reader, ipc
 
 
-def _candidate(name: str, *, provider="jimaku", size=1000, match=False, download=None):
+def _candidate(
+    name: str, *, provider="jimaku", size=1000, match=False, download=None, language=None
+):
     return SubtitleCandidate(
         provider=provider,
         name=name,
         size=size,
         match=match,
         download=download or (lambda: ("/tmp/x.srt", "ok")),
+        language=language,
     )
 
 
@@ -612,3 +615,50 @@ def test_an_empty_listing_has_nowhere_to_scroll():
     """Before a listing lands there are no rows; scrolling to a positive offset would render blank."""
     assert picker.clamp_scroll(0, 1, 0) == 0
     assert picker.clamp_scroll(0, 1, 1) == 0
+
+
+def test_rows_name_the_language_only_when_the_listing_spans_more_than_one(monkeypatch):
+    """A TsukiHime release carries a dozen languages, so a mixed listing has to say which is which.
+    A single-language listing must not — the tag line is narrow and the answer would be on every
+    row (#495)."""
+    mixed = [
+        _candidate("jp.ass", provider="tsukihime", language="jpn"),
+        _candidate("fr.ass", provider="tsukihime", language="fr-FR"),
+        _candidate("untagged.ass", provider="tsukihime", language=None),
+    ]
+    reader, _ipc = _reader(path="/v/Show - 01.mkv")
+    reader.graph.picker.configure_listing(_lister(mixed))
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
+    sub_picker.open_picker(
+        _listing_ports(reader),
+        reader.graph.playback.query("path"),
+        retire_hover=reader.graph.tooltip.retire_hover,
+    )
+    _adopt(reader, candidates=mixed)
+
+    assert [row.status for row in sub_picker._rows(reader.graph.picker.state)] == [
+        "tsukihime · Japanese · ass",
+        "tsukihime · fr-FR · ass",
+        "tsukihime · unknown language · ass",
+    ]
+
+
+def test_rows_stay_unlabelled_when_every_candidate_is_the_same_language(monkeypatch):
+    same = [
+        _candidate("a.ass", provider="tsukihime", language="jpn"),
+        _candidate("b.ass", provider="tsukihime", language="ja"),
+    ]
+    reader, _ipc = _reader(path="/v/Show - 01.mkv")
+    reader.graph.picker.configure_listing(_lister(same))
+    monkeypatch.setattr(sub_picker, "_start_listing", lambda _v, _ports: None)
+    sub_picker.open_picker(
+        _listing_ports(reader),
+        reader.graph.playback.query("path"),
+        retire_hover=reader.graph.tooltip.retire_hover,
+    )
+    _adopt(reader, candidates=same)
+
+    assert [row.status for row in sub_picker._rows(reader.graph.picker.state)] == [
+        "tsukihime · ass",
+        "tsukihime · ass",
+    ]

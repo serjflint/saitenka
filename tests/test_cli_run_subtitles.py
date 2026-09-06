@@ -227,7 +227,7 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
                 toast=lambda *_a, **_kw: None,
             )
 
-    def fetch(video, providers, **_kwargs):
+    def fetch(video, providers, _ctx):
         calls.append((video, providers))
         return tmp_path / "episode.ja.srt", "tsukihime: added episode.ja.srt"
 
