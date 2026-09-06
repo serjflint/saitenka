@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788654942014,
+  "lastUpdate": 1788654979489,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -14555,6 +14555,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 2.697565,
             "range": "3 replicas; min 1.50601; max 4.90293; MAD 1.19155; worst 4.90293",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bec4352903f658dfd5880f15725780b6cea3fd8a",
+          "message": "Merge pull request #500 from serjflint/issue-346\n\nfix(subtitles): remove ASS drawings from cue text",
+          "timestamp": "2026-09-06T05:35:16+05:00",
+          "tree_id": "1a4644f87d3c45790b8185d108b31c8f51b52ab5",
+          "url": "https://github.com/serjflint/saitenka/commit/bec4352903f658dfd5880f15725780b6cea3fd8a"
+        },
+        "date": 1788654978634,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.399076,
+            "range": "3 replicas; min 6.35535; max 6.41153; MAD 0.012458",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.571013,
+            "range": "3 replicas; min 8.80959; max 9.7547; MAD 0.183684; worst 9.7547",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.520714,
+            "range": "3 replicas; min 18.4825; max 18.5358; MAD 0.015113",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.615525,
+            "range": "3 replicas; min 18.5686; max 18.6477; MAD 0.032178; worst 18.6477",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.609983,
+            "range": "3 replicas; min 12.1675; max 13.3404; MAD 0.442448",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.08748,
+            "range": "3 replicas; min 0.086868; max 0.08751; MAD 3e-05; worst 0.08751",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 38.871966,
+            "range": "3 replicas; min 38.3036; max 56.2605; MAD 0.568379; worst 56.2605",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.664224,
+            "range": "3 replicas; min 2.47781; max 2.98372; MAD 0.186417; worst 2.98372",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.030018,
+            "range": "3 replicas; min 1.02644; max 1.15566; MAD 0.003582; worst 1.15566",
             "unit": "ms"
           }
         ]
