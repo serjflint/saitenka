@@ -152,3 +152,26 @@ def test_run_launch_registers_builtin_providers_from_an_empty_registry(monkeypat
         language="jp",
     ) == ("jimaku", "tsukihime")
     assert get_provider("tsukihime") is not None
+
+
+def test_the_registered_builtins_serve_japanese_and_tsukihime_serves_every_language():
+    """The real registry, not a stub: jimaku.moe is a Japanese-only site, but a TsukiHime release
+    carries whatever the encoder muxed — a census of 30 releases found 30+ languages, French
+    outnumbering Japanese. Which of them a profile may use is the per-candidate policy's call (#495)."""
+    from saitenka.app import subselect  # noqa: F401  # registers the built-ins
+
+    assert enabled_providers_for("jp", (("jimaku", True), ("tsukihime", True))) == (
+        "jimaku",
+        "tsukihime",
+    )
+    assert enabled_providers_for("fr", (("jimaku", True), ("tsukihime", True))) == ("tsukihime",)
+    assert enabled_providers_for("de-CH", (("jimaku", True), ("tsukihime", True))) == ("tsukihime",)
+
+
+def test_a_context_with_no_language_still_filters_to_the_target():
+    """``None`` means "do not filter", which is the wrong default for an unattended fetch: a release
+    carrying only English would be attached to a Japanese session. The context defaults to the target
+    language so declining the filter has to be asked for."""
+    from saitenka_tokenize.languages import MAIN_LANG
+
+    assert ProviderContext().language == MAIN_LANG

@@ -12,9 +12,14 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from saitenka import __version__
 from saitenka.app.jimaku import _ssl_context, parse_filename
+from saitenka.app.subtitle_selection import matches_target_language
 
 API_BASE = "https://api.tsukihime.org/v1"
+# Cloudflare rule 1010 rejects urllib's default `Python-urllib/x.y` UA with a 403 — every request the
+# provider makes, so the whole provider is dead without this. Any non-default UA passes.
+USER_AGENT = f"saitenka/{__version__}"
 STORAGE_BASE = "https://storage.tsukihime.org"
 ALLOWED_DOWNLOAD_DOMAINS = ("tsukihime.org", "animetosho.org")
 DEFAULT_TIMEOUT = 15.0
@@ -26,7 +31,6 @@ IMPORTED_ID_FLOOR = 1_000_000_000
 XZ_MAGIC = b"\xfd7zXZ\x00"
 
 _TEXT_CODECS = {"ass": ".ass", "ssa": ".ssa", "srt": ".srt", "subrip": ".srt"}
-_JAPANESE_LANGS = {"ja", "jp", "jpn", "japanese"}
 
 
 class TsukiHimeError(RuntimeError):
@@ -46,6 +50,7 @@ class TsukiHimeAttachment:
     extension: str
     url: str
     source_name: str
+    language: str | None = None  # raw reported tag; None when the release omits one
 
 
 def _host_allowed(host: str | None, domains: tuple[str, ...]) -> bool:
@@ -73,6 +78,12 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _validated_https(newurl, self.domains)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(  # noqa: S310  # https-validated by the caller before we get here
+        url, headers={"User-Agent": USER_AGENT}
+    )
 
 
 def _opener(domains: tuple[str, ...]):
@@ -115,11 +126,6 @@ def _decompress_limited(data: bytes, limit: int = MAX_SUBTITLE_BYTES) -> bytes:
 
 def _normalized_title(value: str) -> str:
     return re.sub(r"[^\w]+", " ", value.casefold()).strip()
-
-
-def _is_japanese(lang: object) -> bool:
-    normalized = str(lang or "").casefold().replace("_", "-").split("-", 1)[0]
-    return normalized in _JAPANESE_LANGS
 
 
 def _attachment_url(attachment_id: int, *, imported: bool) -> str:
@@ -173,13 +179,15 @@ def _attachment_from_raw(
     if not isinstance(attachment_id, int) or attachment_id <= 0 or not isinstance(info, dict):
         return None
     extension = _TEXT_CODECS.get(str(info.get("codec") or "").casefold())
-    if extension is None or not _is_japanese(info.get("lang")):
+    if extension is None:
         return None
+    raw_lang = info.get("lang")
     return TsukiHimeAttachment(
         attachment_id,
         extension,
         _attachment_url(attachment_id, imported=imported),
         source_name,
+        raw_lang if isinstance(raw_lang, str) and raw_lang.strip() else None,
     )
 
 
@@ -198,7 +206,7 @@ def _file_attachments(raw_file: object, *, imported: bool) -> list[TsukiHimeAtta
     ]
 
 
-def _japanese_attachments(payload: object, *, imported: bool) -> list[TsukiHimeAttachment]:
+def _text_attachments(payload: object, *, imported: bool) -> list[TsukiHimeAttachment]:
     if not isinstance(payload, dict):
         raise TsukiHimeError("malformed TsukiHime release response")
     raw_files = payload.get("files")
@@ -223,6 +231,7 @@ class TsukiHimeClient:
         api_base: str = API_BASE,
         timeout: float = DEFAULT_TIMEOUT,
         result_cap: int = DEFAULT_RESULT_CAP,
+        language: str | None = None,
         opener=None,
         max_response_bytes: int = MAX_RESPONSE_BYTES,
         max_download_bytes: int = MAX_DOWNLOAD_BYTES,
@@ -235,6 +244,7 @@ class TsukiHimeClient:
         self.api_base = api_base.rstrip("/")
         self.timeout = timeout
         self.result_cap = result_cap
+        self.language = language
         self.max_response_bytes = max_response_bytes
         self.max_download_bytes = max_download_bytes
         self.max_subtitle_bytes = max_subtitle_bytes
@@ -249,7 +259,7 @@ class TsukiHimeClient:
         url = f"{self.api_base}{path}" + (f"?{query}" if query else "")
         _validated_https(url, self._api_domains)
         try:
-            with self._api_opener.open(url, timeout=self.timeout) as response:
+            with self._api_opener.open(_request(url), timeout=self.timeout) as response:
                 _validated_https(response.geturl(), self._api_domains)
                 return json.loads(_read_limited(response, self.max_response_bytes))
         except (
@@ -263,7 +273,9 @@ class TsukiHimeClient:
     def _download(self, attachment: TsukiHimeAttachment) -> bytes:
         _validated_https(attachment.url, ALLOWED_DOWNLOAD_DOMAINS)
         try:
-            with self._download_opener.open(attachment.url, timeout=self.timeout) as response:
+            with self._download_opener.open(
+                _request(attachment.url), timeout=self.timeout
+            ) as response:
                 _validated_https(response.geturl(), ALLOWED_DOWNLOAD_DOMAINS)
                 return _read_limited(response, self.max_download_bytes)
         except (urllib.error.URLError, TimeoutError) as exc:
@@ -279,14 +291,15 @@ class TsukiHimeClient:
         )
 
     def _release_attachments(self, release: TsukiHimeRelease) -> list[TsukiHimeAttachment]:
-        return _japanese_attachments(
-            self._get(f"/torrents/{release.id}"), imported=release.imported
-        )
+        return _text_attachments(self._get(f"/torrents/{release.id}"), imported=release.imported)
 
     def episode_candidates(
         self, title: str, episode: int | None
     ) -> tuple[list[tuple[TsukiHimeRelease, TsukiHimeAttachment]], bool]:
-        """Every (release, JP text attachment) pair for the episode — the interactive picker's list.
+        """Every (release, text attachment) pair for the episode — the interactive picker's list, in
+        every language the release carries. Language is a tag on each pair, not a filter here: the
+        provider boundary applies the profile's policy, and unknown-language rows survive to the picker.
+
         Deliberately WITHOUT the uniqueness guard :meth:`fetch` enforces: that guard is fetch's
         *unattended*-safety contract (attach the wrong show silently is worse than nothing), but a human
         looking at the panel can disambiguate. Returns ``(candidates, truncated)`` so the caller can warn
@@ -323,9 +336,17 @@ class TsukiHimeClient:
                 f"expected one matching release, found {len(releases)}: {candidates}"
             )
         release = releases[0]
-        attachments = self._release_attachments(release)
+        # Filter to the profile's language BEFORE the uniqueness guard. A release routinely carries a
+        # dozen languages, so counting them all would make every multilingual release ambiguous.
+        attachments = [
+            attachment
+            for attachment in self._release_attachments(release)
+            if matches_target_language(attachment.language, self.language)
+        ]
         if len(attachments) != 1:
+            found = ", ".join(sorted({a.language or "untagged" for a in attachments})) or "none"
             raise TsukiHimeError(
-                f"release {release.name!r} has {len(attachments)} Japanese text attachments"
+                f"release {release.name!r} has {len(attachments)} text attachments in "
+                f"{self.language or 'any language'} ({found})"
             )
         return self.download_attachment(release, attachments[0], dest_dir)

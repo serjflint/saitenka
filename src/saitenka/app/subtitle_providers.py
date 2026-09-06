@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from saitenka_tokenize.languages import MAIN_LANG
+
 from saitenka.app.subtitle_selection import wanted_languages
 
 if TYPE_CHECKING:
@@ -35,6 +37,11 @@ class ProviderContext:
     episode: int | None = None
     resync: bool = True
     force: bool = False
+    #: Active profile's target language. Defaults to the target rather than to ``None`` (which declines
+    #: filtering entirely): an unattended fetch that cannot name a language would attach a lone English
+    #: release to a Japanese session. Same reasoning as ``ProviderConfig.language`` — defaulting it per
+    #: call site is how the two came to disagree.
+    language: str | None = MAIN_LANG
 
 
 CandidatesFn = Callable[[str, ProviderContext], "tuple[list[SubtitleCandidate], list[str]]"]

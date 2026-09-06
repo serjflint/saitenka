@@ -54,6 +54,22 @@ def lang_matches(lang: str | None, wants: list[str]) -> bool:
     return any(_tag_matches_preference(low, want) for want in expanded)
 
 
+def matches_target_language(tag: str | None, language: str | None) -> bool:
+    """Whether a *provider result* reporting ``tag`` is study material for a ``language`` profile.
+
+    Wraps :func:`lang_matches` with the one thing provider metadata needs and mpv tracks don't: a blank
+    tag is **not** a match. For a track, untagged wildcards because the file usually has only one and
+    :func:`looks_japanese` settles the rest; for a provider it would silently auto-attach a release of
+    unknown language. Unknown stays visible in the manual picker instead — it just never wins on its own.
+    ``language=None`` means the caller declined to filter.
+    """
+    if language is None:
+        return True
+    if not (tag and tag.strip()):
+        return False
+    return lang_matches(tag, [language])
+
+
 @dataclass(frozen=True)
 class SubtitleTracks:
     jp_sid: int | None

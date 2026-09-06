@@ -8,6 +8,7 @@ written with.
 
 from __future__ import annotations
 
+import pytest
 import util
 
 from saitenka.app import subselect
@@ -548,8 +549,8 @@ class _FakeReader:
 def test_provider_fetch_factory_defers_fetch_and_forwards_every_arg(monkeypatch):
     seen: dict = {}
 
-    def fake_fetch(video, providers, **kwargs):
-        seen.update(video=video, providers=providers, **kwargs)
+    def fake_fetch(video, providers, ctx):
+        seen.update(video=video, providers=providers, **vars(ctx))
         return None, "ok"
 
     monkeypatch.setattr(subselect, "fetch_provider_path", fake_fetch)
@@ -577,6 +578,7 @@ def test_provider_fetch_factory_defers_fetch_and_forwards_every_arg(monkeypatch)
         "resync": False,
         "force": True,
         "tsukihime_config": {"enabled": True},
+        "language": "jp",
     }
 
 
@@ -618,7 +620,7 @@ def test_configure_providers_retry_forces_a_refetch(monkeypatch):
     monkeypatch.setattr(
         subselect,
         "fetch_provider_path",
-        lambda _video, _providers, **kw: (seen.update(kw), (None, "ok"))[1],
+        lambda _video, _providers, ctx: (seen.update(vars(ctx)), (None, "ok"))[1],
     )
     reader = _FakeReader()
     subselect.configure_providers(
@@ -671,15 +673,122 @@ def test_attach_leaves_an_existing_japanese_track_alone(monkeypatch):
     assert not [call for call in ipc.calls if call[0] == "sub-add"]
 
 
-def test_attach_does_not_hand_a_japanese_cache_to_another_language(monkeypatch):
-    """Both providers are Japanese-only, so a JP file cached from a prior run must not load as an
-    external track over a second-language profile's own subtitles."""
-    probed = []
-    monkeypatch.setattr(
-        subselect, "_cached_subtitle", lambda *_a, **_kw: (probed.append(1), (None, None))[1]
-    )
-    ipc = FakeIPC(tracks=[EN], path="/videos/Show - 01.mkv")
+def test_attach_does_not_hand_a_japanese_cache_to_another_language(monkeypatch, tmp_path):
+    """A JP file cached from a prior run must not load as an external track over a second-language
+    profile's own subtitles.
 
+    Until TsukiHime became language-agnostic this held for the wrong reason — no provider served
+    French, so the cache was never consulted. Now it is consulted, and the language-keyed slot is what
+    keeps the Japanese file out: asserted by storing one and watching a French profile miss it.
+    """
+    from saitenka.app import subtitle_cache
+
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    monkeypatch.setattr(subtitle_cache, "subs_cache_dir", lambda: tmp_path / "cache")
+    japanese = tmp_path / "jp.ass"
+    japanese.write_text("[Script Info]")
+    stored = subtitle_cache.store_subs(video, "Show", 1, japanese, language="jp")
+
+    assert subtitle_cache.cached_subs(video, "Show", 1, language="jp") == stored
+    assert subtitle_cache.cached_subs(video, "Show", 1, language="fr") is None
+
+    ipc = FakeIPC(tracks=[EN], path=str(video))
     subselect.prepare_attach_startup(ipc, _attach_opts(language="fr"))
 
-    assert probed == []
+    assert not [call for call in ipc.calls if call[0] == "sub-add"]
+
+
+def _lang_cand(name, language):
+    return subselect.SubtitleCandidate(
+        provider="tsukihime",
+        name=name,
+        size=0,
+        match=False,
+        download=lambda: (None, ""),
+        language=language,
+    )
+
+
+@pytest.mark.parametrize(
+    ("language", "kept"),
+    [
+        # Japanese is unchanged, through every spelling the API and the profile use between them.
+        ("jp", ["ja.ass", "jpn.ass", "untagged.ass"]),
+        ("ja", ["ja.ass", "jpn.ass", "untagged.ass"]),
+        # French: plain, regional, and the ISO 639-2 spelling all answer.
+        ("fr", ["fr.ass", "fr-FR.ass", "fra.ass", "untagged.ass"]),
+        # A script subtag is a suffix like any other, so `zh` answers `zh-Hans`.
+        ("zh", ["zh-Hans.ass", "untagged.ass"]),
+        # `enm` is Middle English — 50 real attachments on one release — and must not answer `en`.
+        ("en", ["en.ass", "untagged.ass"]),
+        # No profile language declines to filter at all.
+        (None, None),
+    ],
+)
+def test_list_candidates_keeps_the_profile_language_and_every_untagged_row(
+    language, kept, monkeypatch
+):
+    """The boundary policy: a reported tag must match, an absent one always survives. Unknown reaching
+    the picker is deliberate — a human can judge what a missing tag cannot (#495)."""
+    tags = ["ja", "jpn", "fr", "fr-FR", "fra", "zh-Hans", "en", "enm", None]
+    rows = [_lang_cand(f"{tag or 'untagged'}.ass", tag) for tag in tags]
+    monkeypatch.setattr(subselect, "_tsukihime_candidates", lambda *_a: (rows, []))
+
+    candidates, _warnings = subselect.list_candidates(
+        "/v/Show - 01.mkv", ("tsukihime",), language=language
+    )
+
+    names = [candidate.name for candidate in candidates]
+    assert names == (kept if kept is not None else [row.name for row in rows])
+
+
+def test_list_candidates_never_drops_a_provider_that_reports_no_language(monkeypatch):
+    """Jimaku files carry no per-file tag. Whatever the provider declares for them, a candidate the
+    boundary cannot classify must not vanish from the panel."""
+    rows = [
+        subselect.SubtitleCandidate(
+            provider="jimaku", name="a.srt", size=0, match=True, download=lambda: (None, "")
+        )
+    ]
+    monkeypatch.setattr(subselect, "_jimaku_candidates", lambda *_a: rows)
+
+    candidates, _warnings = subselect.list_candidates(
+        "/v/Show - 01.mkv", ("jimaku",), language="fr"
+    )
+
+    assert [candidate.name for candidate in candidates] == ["a.srt"]
+
+
+def test_an_untagged_pick_is_cached_for_the_profile_that_chose_it(monkeypatch, tmp_path):
+    """The untagged candidate is the one this feature exists to let through, so it is also the one the
+    picker is most likely to store. Keyed by the attachment's own (absent) tag it would land in the
+    unmarked Japanese slot: orphaned for the French profile that picked it, and served to a Japanese
+    one that never asked."""
+    import saitenka.app.tsukihime as th
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    from saitenka.app import subtitle_cache
+
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "picked.ass"
+    downloaded.write_text("[Script Info]", encoding="utf-8")
+    attachment = th.TsukiHimeAttachment(9, ".ass", "https://x/9.xz", "Show - 01.mkv", None)
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def download_attachment(self, *_args):
+            return downloaded
+
+    monkeypatch.setattr(th, "TsukiHimeClient", Client)
+
+    release = th.TsukiHimeRelease(1, "Show - 01.mkv", imported=False)
+    path, _status = subselect.download_tsukihime_candidate_path(
+        str(video), release, attachment, language="fr"
+    )
+
+    assert subtitle_cache.cached_subs(video, "Show", 1, language="fr") == path
+    assert subtitle_cache.cached_subs(video, "Show", 1, language="jp") is None

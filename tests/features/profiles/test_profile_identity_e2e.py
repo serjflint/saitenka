@@ -145,14 +145,16 @@ def test_jp_aliases_yield_the_identical_identity_as_canonical_jp(alias):
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 def test_non_jp_profile_yields_a_distinct_identity_end_to_end():
     """Proves the oracle distinguishes rather than always-passing: a French profile selects the latin
-    tokenizer (NOT unidic) AND the jp-only jimaku/tsukihime providers drop out — end-to-end."""
+    tokenizer (NOT unidic) AND the jp-only jimaku provider drops out — end-to-end. TsukiHime survives
+    because it is language-agnostic (#495), which is the point: the gate keys on capability, not on a
+    provider name."""
     register_tokenizer("latin", _FakeLatin)
     tokenizer, main, providers = _resolve_identity(
         {"profile": {"language": "fr", "tokenizer": "latin"}}
     )
     assert tokenizer == "latin"  # distinct from the JP unidic
     assert main == "fr"
-    assert providers == ()  # jp-only providers gated out under a non-JP language
+    assert providers == ("tsukihime",)  # jp-only jimaku gated out; the agnostic source remains
 
 
 def test_non_jp_language_keeps_language_agnostic_providers(monkeypatch):

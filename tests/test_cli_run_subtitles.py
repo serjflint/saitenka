@@ -227,7 +227,7 @@ def test_run_retry_factory_uses_current_media_and_provider_order(tmp_path, monke
                 toast=lambda *_a, **_kw: None,
             )
 
-    def fetch(video, providers, **_kwargs):
+    def fetch(video, providers, _ctx):
         calls.append((video, providers))
         return tmp_path / "episode.ja.srt", "tsukihime: added episode.ja.srt"
 
@@ -282,3 +282,34 @@ def test_run_with_no_current_provider_clears_runtime_callbacks(tmp_path):
     )
 
     assert retry[-1] is None and picker[-1] is None
+
+
+def _cached_for(video, *, language):
+    return cli_run._configured_subtitles(
+        video,
+        None,
+        1,
+        jimaku=True,
+        tsukihime=True,
+        resync=True,
+        language=language,
+    )[0]
+
+
+def test_run_does_not_hand_a_japanese_cache_to_another_language(monkeypatch, tmp_path):
+    """``run`` resolves the cache before mpv launches, so a wrong-language hit here is what the user
+    watches the whole episode with.
+
+    This used to be safe only because every provider was Japanese-only, which left the cache
+    unconsulted under a French profile. TsukiHime now serves every language, so the provider gate no
+    longer decides it — the language-keyed slot does.
+    """
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    japanese = tmp_path / "jp.ass"
+    japanese.write_text("[Script Info]", encoding="utf-8")
+    stored = subtitle_cache.store_subs(video, "Show", 1, japanese, language="jp")
+
+    assert _cached_for(video, language="jp") == stored  # the profile that stored it still gets it
+    assert _cached_for(video, language="fr") is None

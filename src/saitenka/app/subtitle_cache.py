@@ -1,4 +1,4 @@
-"""Persistent cache for finished Japanese subtitles, independent of their provider."""
+"""Persistent cache for finished subtitles, independent of their provider."""
 
 from __future__ import annotations
 
@@ -25,11 +25,32 @@ def subs_cache_dir() -> Path:
     return cache_dir() / "subtitles"
 
 
-def _slot(video: str | os.PathLike, title: str, episode, *, resync: bool = True) -> str:
-    """The extension-less cache slot for (video, title, episode, size, mode). The real download's
-    extension is appended at store time (#237) — an ASS body no longer masquerades under ``.srt`` (the
-    lie ``_alass_ready_source`` had to unpick at the aligner seam), and the file names what it holds.
-    ``size`` invalidates the slot when the video is re-encoded under the same name."""
+def _language_mode(language: str | None) -> str:
+    """The slot's language component. Japanese resolves to the empty legacy spelling: every file already
+    on disk was written by a Japanese-only provider, so treating an unmarked slot as Japanese is true,
+    and it keeps a user's hand-picked ``-raw`` / ``-retimed`` entries addressable across the upgrade."""
+    from saitenka_tokenize.languages import MAIN_LANG, language_base
+
+    if language is None or language_base(language) == language_base(MAIN_LANG):
+        return ""
+    return f"-{language_base(language)}"
+
+
+def _slot(
+    video: str | os.PathLike,
+    title: str,
+    episode,
+    *,
+    resync: bool = True,
+    language: str | None = None,
+) -> str:
+    """The extension-less cache slot for (video, title, episode, size, language, mode). The real
+    download's extension is appended at store time (#237) — an ASS body no longer masquerades under
+    ``.srt`` (the lie ``_alass_ready_source`` had to unpick at the aligner seam), and the file names what
+    it holds. ``size`` invalidates the slot when the video is re-encoded under the same name.
+
+    ``language`` separates one video's subtitles per target language, so a profile switch cannot serve
+    the previous profile's language as this one's track (#495)."""
     from saitenka.app.paths import sanitize_filename
 
     video_path = Path(video)
@@ -38,7 +59,9 @@ def _slot(video: str | os.PathLike, title: str, episode, *, resync: bool = True)
     except OSError:
         size = 0
     mode = "" if resync else _RAW_MODE
-    return sanitize_filename(f"{video_path.stem}-{title}-ep{episode}-{size}{mode}")
+    return sanitize_filename(
+        f"{video_path.stem}-{title}-ep{episode}-{size}{_language_mode(language)}{mode}"
+    )
 
 
 def subs_cache_key(video: str | os.PathLike, title: str, episode, *, resync: bool = True) -> str:
@@ -72,7 +95,12 @@ def _rank(path: Path) -> tuple:
 
 
 def cached_subs(
-    video: str | os.PathLike, title: str, episode, *, resync: bool = True
+    video: str | os.PathLike,
+    title: str,
+    episode,
+    *,
+    resync: bool = True,
+    language: str | None = None,
 ) -> Path | None:
     """The best cached subtitle for this episode, or None.
 
@@ -85,10 +113,13 @@ def cached_subs(
     Ranked together by `_rank` — format first, then mtime — so this can neither serve a format a
     fresh fetch would have rejected, nor an older file than the correction made of it.
     """
-    slot = _slot(video, title, episode, resync=resync)
+    slot = _slot(video, title, episode, resync=resync, language=language)
     candidates = _slot_files(subs_cache_dir(), slot)
     if resync:
-        for other in (_slot(video, title, episode, resync=False), slot + _RETIMED_MODE):
+        for other in (
+            _slot(video, title, episode, resync=False, language=language),
+            slot + _RETIMED_MODE,
+        ):
             candidates += _slot_files(subs_cache_dir(), other)
         candidates.sort(key=_rank, reverse=True)
     if candidates:
@@ -139,10 +170,11 @@ def store_subs(
     sub_path: str | os.PathLike,
     *,
     resync: bool = True,
+    language: str | None = None,
 ) -> Path:
     destination_dir = subs_cache_dir()
     destination_dir.mkdir(parents=True, exist_ok=True)
-    slot = _slot(video, title, episode, resync=resync)
+    slot = _slot(video, title, episode, resync=resync, language=language)
     suffix = Path(sub_path).suffix.lower() or ".srt"
     destination = destination_dir / (slot + suffix)
     # One slot per (video, mode): evict any stale sibling (e.g. a prior `.srt` when this write is `.ass`,
