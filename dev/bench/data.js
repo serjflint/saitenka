@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788654875502,
+  "lastUpdate": 1788654942014,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -14477,6 +14477,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.449811,
             "range": "3 replicas; min 0.936141; max 7.32897; MAD 0.51367; worst 7.32897",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a67b120a67acee42e60e5d02215cdef95648e474",
+          "message": "Merge pull request #502 from serjflint/issue-417\n\nfix(subtitles): restore karaoke interaction",
+          "timestamp": "2026-09-06T05:34:19+05:00",
+          "tree_id": "a9cdd1917de6b6718f126d4faec5cf9f25871431",
+          "url": "https://github.com/serjflint/saitenka/commit/a67b120a67acee42e60e5d02215cdef95648e474"
+        },
+        "date": 1788654940588,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.067764,
+            "range": "3 replicas; min 4.79918; max 7.03404; MAD 0.268586",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.721716,
+            "range": "3 replicas; min 6.5596; max 9.89267; MAD 1.16211; worst 9.89267",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 15.257127,
+            "range": "3 replicas; min 13.8691; max 20.9472; MAD 1.38804",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 17.781717,
+            "range": "3 replicas; min 14.2966; max 23.1441; MAD 3.48507; worst 23.1441",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 28.161478,
+            "range": "3 replicas; min 16.7797; max 65.0004; MAD 11.3818",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.081111,
+            "range": "3 replicas; min 0.073409; max 0.123882; MAD 0.007702; worst 0.123882",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.678841,
+            "range": "3 replicas; min 34.7479; max 44.9337; MAD 0.254853; worst 44.9337",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 13.476975,
+            "range": "3 replicas; min 4.01216; max 15.4294; MAD 1.95238; worst 15.4294",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 2.697565,
+            "range": "3 replicas; min 1.50601; max 4.90293; MAD 1.19155; worst 4.90293",
             "unit": "ms"
           }
         ]
