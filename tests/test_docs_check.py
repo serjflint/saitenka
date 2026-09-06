@@ -35,6 +35,47 @@ def test_consts_clean_on_real_tree() -> None:
     assert _mod().check_consts() == []
 
 
+def test_canonical_clean_on_real_tree() -> None:
+    assert _mod().check_canonical() == []
+
+
+# --- canonical: negative controls (one planted drift each) ---------------------------------------
+# Each plant is a real published-URL failure, not a formatting nit: the live site served a 404
+# canonical from the first of them until #378.
+
+
+def test_canonical_catches_the_bare_host_root() -> None:
+    """The shipped bug: every nested page canonicalised to a path RTD does not serve."""
+    fails = _mod()._canonical_failures(
+        'site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://saitenka.readthedocs.io/"]'
+    )
+    assert any("bare host root" in f for f in fails)
+
+
+def test_canonical_catches_a_fallback_without_a_trailing_slash() -> None:
+    """urljoin against a slashless base drops its last segment, so the version prefix vanishes for
+    every page even though the base looks version-aware."""
+    fails = _mod()._canonical_failures(
+        'site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://saitenka.readthedocs.io/en/latest"]'
+    )
+    assert any("last path segment" in f for f in fails)
+
+
+def test_canonical_catches_a_hardcoded_site_url() -> None:
+    """A literal base cannot follow the version RTD is building, whatever it points at."""
+    fails = _mod()._canonical_failures("site_url: https://saitenka.readthedocs.io/en/latest/")
+    assert any("RTD-published base" in f for f in fails)
+
+
+def test_canonical_passes_an_rtd_derived_versioned_base() -> None:
+    assert (
+        _mod()._canonical_failures(
+            'site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://example.org/en/stable/"]'
+        )
+        == []
+    )
+
+
 # --- refs: negative controls (one planted drift each) --------------------------------------------
 
 

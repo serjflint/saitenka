@@ -4,7 +4,11 @@
 # (ARCHITECTURE.md, CHANGELOG.md) rather than copying them — edit the originals, the site follows.
 site_name: Saitenka
 site_description: Learn Japanese from the video you're watching — FSRS subtitle coloring, hover→multi-dict tooltip, one-key Anki mining, drawn inside mpv.
-site_url: https://saitenka.readthedocs.io/
+# Read the Docs serves every page under a version prefix (`/en/latest/…`), so the bare host root that
+# used to sit here made each nested page declare a canonical that 404s. RTD publishes the correct base
+# per build; the fallback keeps a local `poe docs` build deterministic when that variable is absent.
+# The trailing slash is load-bearing — `urljoin` against a base without one drops its last segment.
+site_url: !ENV [READTHEDOCS_CANONICAL_URL, "https://saitenka.readthedocs.io/en/latest/"]
 repo_url: https://github.com/serjflint/saitenka
 repo_name: serjflint/saitenka
 edit_uri: edit/main/docs/
