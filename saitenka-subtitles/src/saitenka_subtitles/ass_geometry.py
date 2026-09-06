@@ -11,6 +11,7 @@ from saitenka_subtitles.ass import (
     AssStyleCatalog,
     UnsupportedAssEvent,
     allocate_token_colors,
+    ass_soft_break,
     decode_ass_event,
     has_karaoke_override,
     parse_ass_event_line,
@@ -75,6 +76,7 @@ class _ParsedAssSource:
     reserved_bgr: tuple[int, ...]
     has_bom: bool
     play_res_y: int
+    soft_break: str
 
 
 def _token_faces(
@@ -180,6 +182,7 @@ def _parsed_source(source: bytes, track_id: SubtitleTrackId) -> _ParsedAssSource
         source_primary_bgr_colors(catalog, raw_events),
         source.startswith(b"\xef\xbb\xbf"),
         _play_res_y(decoded_source),
+        ass_soft_break(decoded_source),
     )
 
 
@@ -227,6 +230,7 @@ def _match_active_events(
     active_rows: str,
     track_id: SubtitleTrackId,
     signature_index: Mapping[tuple[object, ...], tuple[RawSubtitleEvent, ...]],
+    soft_break: str,
 ) -> tuple[DecodedSubtitleEvent, ...]:
     encoded_size = len(active_rows.encode("utf-8"))
     if encoded_size > MAX_ACTIVE_ROW_BYTES:
@@ -250,7 +254,7 @@ def _match_active_events(
             raise UnsupportedAssEvent("active ASS event does not match the authored source")
         selected = min(candidates, key=lambda event: event.identity.source_order)
         used.add(selected.identity.source_order)
-        matched.append(decode_ass_event(selected))
+        matched.append(decode_ass_event(selected, soft_break=soft_break))
     return tuple(matched)
 
 
@@ -294,7 +298,8 @@ def authored_ass_rows_at(
     timestamp_ms: int,
 ) -> tuple[str, str]:
     """Canonical active rows and semantic projection for instant navigation before mpv catches up."""
-    indexed_events = _parsed_source(source, track_id).indexed_events
+    parsed = _parsed_source(source, track_id)
+    indexed_events = parsed.indexed_events
     active = tuple(
         event
         for _index, event in indexed_events
@@ -307,7 +312,9 @@ def authored_ass_rows_at(
     rows = "\n".join(serialize_ass_event_line(event) for event in active)
     if len(rows.encode("utf-8")) > MAX_ACTIVE_ROW_BYTES:
         raise UnsupportedAssEvent("active ASS row byte limit exceeded")
-    return rows, "\n".join(decode_ass_event(event).text for event in active)
+    return rows, "\n".join(
+        decode_ass_event(event, soft_break=parsed.soft_break).text for event in active
+    )
 
 
 def prepare_ass_hit_map_frame(
@@ -324,7 +331,9 @@ def prepare_ass_hit_map_frame(
     parsed = _parsed_source(source, track_id)
     lines = list(parsed.lines)
     indexed_events = parsed.indexed_events
-    decoded_events = _match_active_events(active_rows, track_id, parsed.signature_index)
+    decoded_events = _match_active_events(
+        active_rows, track_id, parsed.signature_index, parsed.soft_break
+    )
     semantic_text = "\n".join(event.text for event in decoded_events)
     normalized = text.replace("\r", "").replace("\\N", "\n")
     if semantic_text != normalized:
@@ -386,9 +395,12 @@ def prepare_ass_hit_map(
     tokens: Sequence[TokenAnnotation],
 ) -> PreparedAssGeometry:
     """Compatibility wrapper after a caller has proved one uniquely matching authored event."""
-    indexed_events = _parsed_source(source, track_id).indexed_events
+    parsed = _parsed_source(source, track_id)
+    indexed_events = parsed.indexed_events
     normalized = text.replace("\r", "").replace("\\N", "\n")
-    decoded_events = (decode_ass_event(event) for _index, event in indexed_events)
+    decoded_events = (
+        decode_ass_event(event, soft_break=parsed.soft_break) for _index, event in indexed_events
+    )
     matches = [
         event
         for event in decoded_events

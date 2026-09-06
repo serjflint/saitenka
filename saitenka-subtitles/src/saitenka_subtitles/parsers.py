@@ -7,9 +7,9 @@ from pathlib import PurePath
 
 import pysubs2
 
+from saitenka_subtitles.ass import ass_soft_break, decode_ass_text
 from saitenka_subtitles.model import Cue
 
-_ASS_OVERRIDE = re.compile(r"\{[^}]*\}")
 _HTML_TAG = re.compile(r"</?[A-Za-z][^>\n]*>")
 _FORMATS = {"ass": "ass", "srt": "srt", "ssa": "ssa", "vtt": "vtt"}
 
@@ -35,11 +35,17 @@ def parse_srt(content: str) -> list[Cue]:
 
 
 def parse_ass(content: str) -> list[Cue]:
-    """Parse ASS or SSA text into cues while preserving ``\\N`` line breaks."""
+    """Parse ASS or SSA text using the same semantic projection as libass."""
+    soft_break = ass_soft_break(content)
     return [
         cue
         for event in _parse(content, "ass")
-        if (cue := _cue(event, _HTML_TAG.sub("", _ASS_OVERRIDE.sub("", event.text))))
+        if (
+            cue := _cue(
+                event,
+                _HTML_TAG.sub("", decode_ass_text(event.text, soft_break=soft_break)),
+            )
+        )
     ]
 
 
