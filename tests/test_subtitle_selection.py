@@ -196,3 +196,53 @@ def test_a_background_arrival_auto_selects_only_for_an_untouched_trackless_sessi
     assert not selects_background_japanese(
         select_if_unchanged=False, had_japanese=False, current_sid=1, initial_sid=1, jp_sid=3
     )
+
+
+def test_every_language_tag_the_provider_actually_returns_answers_its_own_profile_code():
+    """A census of 30 TsukiHime releases returned these tags. The filter is only as good as its
+    coverage of them, and a test matrix built from convenient spellings would not show that: each is
+    pinned against the profile code a user of that language would write."""
+    from saitenka.app.subtitle_selection import matches_target_language
+
+    observed = [
+        "ar",
+        "cs",
+        "da",
+        "de",
+        "el",
+        "en",
+        "es-419",
+        "es-ES",
+        "fi",
+        "fr",
+        "fr-FR",
+        "he",
+        "hr",
+        "hu",
+        "id",
+        "it",
+        "ja",
+        "ko",
+        "ms",
+        "nb",
+        "nl",
+        "pl",
+        "pt",
+        "pt-BR",
+        "pt-PT",
+        "ro",
+        "ru",
+        "sv",
+        "th",
+        "tr",
+        "uk",
+        "vi",
+        "zh-Hans",
+        "zh-Hant",
+    ]
+
+    unmatched = [tag for tag in observed if not matches_target_language(tag, tag.split("-")[0])]
+
+    assert unmatched == []
+    # `enm` is Middle English, and the same census found 50 of them on one release.
+    assert not matches_target_language("enm", "en")

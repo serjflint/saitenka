@@ -292,14 +292,23 @@ def _resolve_jimaku_subs(
 
 
 def _cached_subtitles(
-    video_path: Path, jimaku_title: str | None, episode: int | None, *, resync: bool
+    video_path: Path,
+    jimaku_title: str | None,
+    episode: int | None,
+    *,
+    resync: bool,
+    language: str | None = None,
 ) -> Path | None:
     from saitenka.app.subtitle_cache import cached_subs
 
     title, parsed_episode = parse_filename(video_path)
     title = jimaku_title or title
     episode = episode if episode is not None else parsed_episode
-    hit = cached_subs(video_path, title, episode, resync=resync) if video_path.exists() else None
+    hit = (
+        cached_subs(video_path, title, episode, resync=resync, language=language)
+        if video_path.exists()
+        else None
+    )
     if hit is not None:
         print("subtitle cache: using", hit.name)
         log.info("subtitle cache hit: %s", hit)
@@ -330,11 +339,16 @@ def _configured_subtitles(
     language: str,
 ) -> tuple[Path | None, tuple[str, ...]]:
     providers = enabled_providers_for(language, (("jimaku", jimaku), ("tsukihime", tsukihime)))
-    # Reuse a cached provider-sourced subtitle only when some provider actually serves this language —
-    # both jimaku and tsukihime are Japanese-only, so a JP srt cached from a prior run must not hijack a
-    # second-language profile's track (it would otherwise load as an external track over the French one).
+    # Reuse a cached provider-sourced subtitle only when some provider serves this language, and only
+    # from this language's own slot: a JP srt cached from a prior run must not hijack a second-language
+    # profile's track (it would otherwise load as an external track over the French one). The provider
+    # gate alone stopped being sufficient once TsukiHime began serving every language (#495).
     serves = enabled_providers_for(language, (("jimaku", True), ("tsukihime", True)))
-    cached = _cached_subtitles(video_path, jimaku_title, episode, resync=resync) if serves else None
+    cached = (
+        _cached_subtitles(video_path, jimaku_title, episode, resync=resync, language=language)
+        if serves
+        else None
+    )
     if cached is not None:
         return cached, ()
     return None, providers

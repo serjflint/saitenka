@@ -200,6 +200,7 @@ def download_tsukihime_candidate_path(
     config: dict | None = None,
     title_override: str | None = None,
     episode: int | None = None,
+    language: str | None = None,
 ) -> tuple[Path | None, str]:
     """Download ONE user-chosen TsukiHime (release, attachment) pair — no resync, like the jimaku
     picker path. ``release``/``attachment`` are TsukiHime dataclasses from ``episode_candidates``."""
@@ -226,11 +227,11 @@ def download_tsukihime_candidate_path(
     if video_path.exists():
         from saitenka.app.subtitle_cache import store_subs
 
-        # Keyed by what the file IS, not by the active profile: the slot describes its own contents,
-        # and Japanese resolves to the legacy unmarked slot either way.
-        sub_path = store_subs(
-            video_path, title, ep, sub_path, resync=False, language=attachment.language
-        )
+        # Keyed by the profile that asked for it, not by the attachment's own tag: the boundary has
+        # already established the pick is study material for this profile, and an UNTAGGED pick — the
+        # case this feature exists to allow through — would otherwise land in the unmarked Japanese
+        # slot, orphaning the user's hand pick and serving it to a Japanese session.
+        sub_path = store_subs(video_path, title, ep, sub_path, resync=False, language=language)
     return Path(sub_path), f"tsukihime: added {Path(sub_path).name}"
 
 
@@ -262,15 +263,25 @@ def _jimaku_candidates(
 
 
 def _tsukihime_download(
-    video: str, release, attachment, config: dict | None, title_override: str | None
+    video: str,
+    release,
+    attachment,
+    config: dict | None,
+    title_override: str | None,
+    language: str | None,
 ) -> Callable[[], tuple[Path | None, str]]:
     return lambda: download_tsukihime_candidate_path(
-        video, release, attachment, config=config, title_override=title_override
+        video,
+        release,
+        attachment,
+        config=config,
+        title_override=title_override,
+        language=language,
     )
 
 
 def _tsukihime_candidates(
-    video: str, config: dict | None, title_override: str | None
+    video: str, config: dict | None, title_override: str | None, language: str | None = None
 ) -> tuple[list[SubtitleCandidate], list[str]]:
     from saitenka.app.jimaku import _resolution_match
     from saitenka.app.tsukihime import (
@@ -299,7 +310,9 @@ def _tsukihime_candidates(
             name=f"{release.name}{attachment.extension}",
             size=0,  # TsukiHime attachments don't expose a size
             match=_resolution_match(video, release.name),
-            download=_tsukihime_download(video, release, attachment, config, title_override),
+            download=_tsukihime_download(
+                video, release, attachment, config, title_override, language
+            ),
             language=attachment.language,
         )
         for release, attachment in pairs
@@ -329,7 +342,7 @@ def _jimaku_provider_fetch(
 def _tsukihime_provider_candidates(
     video: str, ctx: ProviderContext
 ) -> tuple[list[SubtitleCandidate], list[str]]:
-    return _tsukihime_candidates(video, ctx.tsukihime_config, ctx.title_override)
+    return _tsukihime_candidates(video, ctx.tsukihime_config, ctx.title_override, ctx.language)
 
 
 def _tsukihime_provider_fetch(
@@ -427,7 +440,7 @@ def fetch_tsukihime_path(
     resync: bool = True,
     force: bool = False,
     dest_dir: str | Path | None = None,
-    language: str | None = None,
+    language: str | None = MAIN_LANG,
 ) -> tuple[Path | None, str]:
     """Fetch a unique TsukiHime match without touching mpv IPC. ``force`` skips the cache (see
     :func:`fetch_jimaku_path`). ``language`` narrows a release's attachments before the uniqueness
@@ -683,12 +696,11 @@ class AttachSubtitleOptions:
 def _adopt_cached_subtitle(ipc, opts: AttachSubtitleOptions) -> str:
     """Add this episode's already-cached subtitle before the fallback selection runs.
 
-    ``run`` resolves the cache before mpv launches (`launch.run._configured_subtitles`), so it never
-    shows the wrong language. Attach has to reach the same point before `select_initial` picks a
-    fallback: filing an on-disk file under the deferred providers puts a local stat behind the
-    session's first owner-thread drain, which is the whole of startup. Same language gate as the
-    deferred list — both providers are Japanese-only, so a JP file cached from a prior run must not
-    hijack a second-language profile.
+    ``run`` resolves the cache before mpv launches (`launch.run._configured_subtitles`). Attach has to
+    reach the same point before `select_initial` picks a fallback: filing an on-disk file under the
+    deferred providers puts a local stat behind the session's first owner-thread drain, which is the
+    whole of startup. Same language gate as the deferred list, and the lookup is keyed on the profile's
+    language, so a JP file cached from a prior run cannot hijack a second-language profile.
     """
     if not enabled_providers_for(opts.language, (("jimaku", True), ("tsukihime", True))):
         return ""

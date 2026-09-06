@@ -716,8 +716,8 @@ def _lang_cand(name, language):
         # Japanese is unchanged, through every spelling the API and the profile use between them.
         ("jp", ["ja.ass", "jpn.ass", "untagged.ass"]),
         ("ja", ["ja.ass", "jpn.ass", "untagged.ass"]),
-        # French: the plain and regional tags both answer, the near-miss `fra`-lookalike does not.
-        ("fr", ["fr.ass", "fr-FR.ass", "untagged.ass"]),
+        # French: plain, regional, and the ISO 639-2 spelling all answer.
+        ("fr", ["fr.ass", "fr-FR.ass", "fra.ass", "untagged.ass"]),
         # A script subtag is a suffix like any other, so `zh` answers `zh-Hans`.
         ("zh", ["zh-Hans.ass", "untagged.ass"]),
         # `enm` is Middle English — 50 real attachments on one release — and must not answer `en`.
@@ -731,7 +731,7 @@ def test_list_candidates_keeps_the_profile_language_and_every_untagged_row(
 ):
     """The boundary policy: a reported tag must match, an absent one always survives. Unknown reaching
     the picker is deliberate — a human can judge what a missing tag cannot (#495)."""
-    tags = ["ja", "jpn", "fr", "fr-FR", "zh-Hans", "en", "enm", None]
+    tags = ["ja", "jpn", "fr", "fr-FR", "fra", "zh-Hans", "en", "enm", None]
     rows = [_lang_cand(f"{tag or 'untagged'}.ass", tag) for tag in tags]
     monkeypatch.setattr(subselect, "_tsukihime_candidates", lambda *_a: (rows, []))
 
@@ -758,3 +758,37 @@ def test_list_candidates_never_drops_a_provider_that_reports_no_language(monkeyp
     )
 
     assert [candidate.name for candidate in candidates] == ["a.srt"]
+
+
+def test_an_untagged_pick_is_cached_for_the_profile_that_chose_it(monkeypatch, tmp_path):
+    """The untagged candidate is the one this feature exists to let through, so it is also the one the
+    picker is most likely to store. Keyed by the attachment's own (absent) tag it would land in the
+    unmarked Japanese slot: orphaned for the French profile that picked it, and served to a Japanese
+    one that never asked."""
+    import saitenka.app.tsukihime as th
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
+    from saitenka.app import subtitle_cache
+
+    video = tmp_path / "Show - 01.mkv"
+    video.write_bytes(b"video")
+    downloaded = tmp_path / "picked.ass"
+    downloaded.write_text("[Script Info]", encoding="utf-8")
+    attachment = th.TsukiHimeAttachment(9, ".ass", "https://x/9.xz", "Show - 01.mkv", None)
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def download_attachment(self, *_args):
+            return downloaded
+
+    monkeypatch.setattr(th, "TsukiHimeClient", Client)
+
+    release = th.TsukiHimeRelease(1, "Show - 01.mkv", imported=False)
+    path, _status = subselect.download_tsukihime_candidate_path(
+        str(video), release, attachment, language="fr"
+    )
+
+    assert subtitle_cache.cached_subs(video, "Show", 1, language="fr") == path
+    assert subtitle_cache.cached_subs(video, "Show", 1, language="jp") is None
