@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka.app.features.mining.mining_operation import LANE as MINING_OPERATION_LANE
 from saitenka.app.features.tooltip.preparation import TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS
 from saitenka.app.session.close_ledger import CloseStep
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE
@@ -43,6 +44,7 @@ WORKER_LANE_PARTICIPANTS = (
     *TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS,
     "lanes:capabilities",
     "lanes:interaction-metadata",
+    "lanes:mining-operation",
     "lanes:mined-seed",
     "lanes:episode-analysis",
     "lanes:render-pool",
@@ -103,6 +105,7 @@ def assemble_close_participants(contributions: CloseContributions) -> dict[str, 
         **contributions.tooltip_preparation,
         "lanes:capabilities": lane("capabilities"),
         "lanes:interaction-metadata": lane("interaction-metadata"),
+        "lanes:mining-operation": lane(MINING_OPERATION_LANE),
         "lanes:mined-seed": lane("mined-seed"),
         "lanes:episode-analysis": contributions.close_analysis,
         "lanes:render-pool": contributions.close_render_pool,

@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- Mining no longer blocks subtitle interaction while FFmpeg or Anki is working, and each admitted
+  card keeps the cue, timing, media, and profile snapshot from the moment the shortcut was pressed.
 - Mining audio now times out cleanly on an unresponsive source, avoids scanning unrelated Matroska
   attachments, and reports when FFmpeg exits without producing a clip.
 - A profile's configured translation language now selects that subtitle track at startup and after a

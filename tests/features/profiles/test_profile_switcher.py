@@ -15,7 +15,7 @@ from saitenka_tokenize.japanese import Token
 from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
 from saitenka_tokenize.registry import register_tokenizer
 from session_builder import TestSession, build_session
-from util import FakeIPC, keybind_registry, press, session_gateway
+from util import FakeIPC, await_ready, keybind_registry, press, session_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions
@@ -842,6 +842,11 @@ def test_profile_environment_refuses_out_of_order_dependency_publication(request
     reader.graph.cue.set_subtitle("chat")
 
     reader.command(MINE_MSG)
+    await_ready(
+        lambda: not reader.graph.mining.operation_pending,
+        "mining operation did not finish",
+        pump=reader.pump,
+    )
 
     assert anki.added[0]["deckName"] == f"Deck::{_FR.name}"
 
