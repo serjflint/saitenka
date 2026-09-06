@@ -107,6 +107,21 @@ def test_prepare_frame_matches_and_rewrites_simultaneous_events() -> None:
     assert prepared.ass.count(b"\\1c&H") >= 2
 
 
+def test_prepare_frame_marks_karaoke_for_raster_tinting() -> None:
+    source = ASS.decode().replace(",,猫を見る\n", r",,{\k20}猫を見る" + "\n").encode()
+    active_row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,{\\k20}猫を見る"
+
+    prepared = prepare_ass_hit_map_frame(
+        source,
+        SubtitleTrackId("track"),
+        active_rows=active_row,
+        text="猫を見る",
+        tokens=(TokenAnnotation(0, 0, 1),),
+    )
+
+    assert prepared.requires_coverage is True
+
+
 def test_prepare_frame_rejects_unmatched_active_event() -> None:
     with pytest.raises(UnsupportedAssEvent, match="does not match"):
         prepare_ass_hit_map_frame(

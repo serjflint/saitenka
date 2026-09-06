@@ -22,13 +22,19 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
 _DRAWING = re.compile(r"\\p(-?\d+)(?!\d)")
-_UNSAFE = re.compile(r"\\(?:t|move|fad|fade|kt|k|K|kf|ko)(?=[(\d\\}]|$)")
+_DYNAMIC = re.compile(r"\\(?:t|move|fad|fade)(?=[(\d\\}]|$)")
+_KARAOKE = re.compile(r"\\(?:kt|k|K|kf|ko)(?=[\d\\}]|$)")
 _COLOR_STATE = re.compile(
     r"\\(?:(?P<color_command>1?c)"
     r"(?:(?P<color_spec>(?:&H?|)?(?P<color>[0-9A-Fa-f]{1,8})&?|&H&?)"
     r"(?![0-9A-Fa-f])|(?=\\|$))"
     r"|r(?P<style>[^\\}]*))"
 )
+_SECONDARY_COLOR_STATE = re.compile(
+    r"\\2c(?:(?P<color_spec>(?:&H?|)?(?P<color>[0-9A-Fa-f]{1,8})&?|&H&?)"
+    r"(?![0-9A-Fa-f])|(?=\\|$))"
+)
+_SECONDARY_COLOR_COMMAND = re.compile(r"\\2c")
 _PRIMARY_COLOR_COMMAND = re.compile(r"\\1?c")
 #: Effects that spread a token's ink past its own outline. Not a color problem — libass reports the
 #: reserved color exactly either way — but a size one: `\blur4` grows a 32px glyph's image to 60px,
@@ -65,10 +71,15 @@ class AssStyle:
     #: drawn from the box alone cannot, and a guessed face is a different advance.
     font_name: str = ""
     font_size: float = 0.0
+    secondary_color: str = "0"
 
     def __post_init__(self) -> None:
-        if not self.name or not re.fullmatch(r"[0-9A-Fa-f]{1,8}", self.primary_color):
-            raise ValueError("ASS style needs a name and a 1-8 digit primary color")
+        if (
+            not self.name
+            or not re.fullmatch(r"[0-9A-Fa-f]{1,8}", self.primary_color)
+            or not re.fullmatch(r"[0-9A-Fa-f]{1,8}", self.secondary_color)
+        ):
+            raise ValueError("ASS style needs a name and 1-8 digit primary and secondary colors")
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,11 +227,18 @@ def _parse_style(fields: Sequence[str], value: str) -> AssStyle:
     color_match = re.fullmatch(r"&H([0-9A-Fa-f]{1,8})&?", row.get("primarycolour", ""))
     if not color_match or not row.get("name"):
         raise UnsupportedAssEvent("ASS style has no parseable primary color")
+    secondary = row.get("secondarycolour")
+    secondary_match = (
+        None if secondary is None else re.fullmatch(r"&H([0-9A-Fa-f]{1,8})&?", secondary)
+    )
+    if secondary is not None and secondary_match is None:
+        raise UnsupportedAssEvent("ASS style has no parseable secondary color")
     return AssStyle(
         row["name"],
         color_match.group(1),
         row.get("fontname", "").strip(),
         _style_size(row.get("fontsize", "")),
+        secondary_match.group(1) if secondary_match is not None else color_match.group(1),
     )
 
 
@@ -425,7 +443,12 @@ def _apply_color_state(
 
 def _color_override(bgr: int | str) -> str:
     value = f"{bgr:06X}" if isinstance(bgr, int) else bgr.upper()
-    return rf"{{\1c&H{value}&}}"
+    return rf"{{\1c&H{value}&\2c&H{value}&}}"
+
+
+def has_karaoke_override(source: RawSubtitleEvent) -> bool:
+    """Whether libass can sweep the event from secondary to primary color."""
+    return any(_KARAOKE.search(block.content) for block in _blocks(source.raw_text))
 
 
 def _apply_insertions(raw: str, insertions: Sequence[ColorInsertion]) -> str:
@@ -499,8 +522,8 @@ def _amount_spreads(amount: str) -> bool:
 
 
 def _validate_static_overrides(source: RawSubtitleEvent, blocks: Sequence[_OverrideBlock]) -> None:
-    if any(_UNSAFE.search(block.content) for block in blocks):
-        raise UnsupportedAssEvent("animated or karaoke overrides are not color-rewritten")
+    if any(_DYNAMIC.search(block.content) for block in blocks):
+        raise UnsupportedAssEvent("animated overrides are outside the static interactive envelope")
     if any(_spreads_ink(block.content) for block in blocks):
         raise UnsupportedAssEvent("a blurred token's extent is not the word's extent")
     if source.effect.strip():
@@ -516,6 +539,12 @@ def _validate_static_overrides(source: RawSubtitleEvent, blocks: Sequence[_Overr
             for match in _PRIMARY_COLOR_COMMAND.finditer(block.content)
         ):
             raise UnsupportedAssEvent("unparsed primary-color command is not color-rewritten")
+        secondary = {match.start() for match in _SECONDARY_COLOR_STATE.finditer(block.content)}
+        if any(
+            match.start() not in secondary
+            for match in _SECONDARY_COLOR_COMMAND.finditer(block.content)
+        ):
+            raise UnsupportedAssEvent("unparsed secondary-color command is not color-rewritten")
 
 
 def _token_insertions(
@@ -534,8 +563,11 @@ def _token_insertions(
         if not token_spans:
             raise ValueError("token annotation has no raw text spans")
         start, end = token_spans[0].start, token_spans[-1].end
-        crossing = (block for block in blocks if start < block.start and block.end < end)
-        if any(_COLOR_STATE.search(block.content) for block in crossing):
+        crossing = tuple(block for block in blocks if start < block.start and block.end < end)
+        if any(
+            _COLOR_STATE.search(block.content) or _SECONDARY_COLOR_STATE.search(block.content)
+            for block in crossing
+        ):
             raise UnsupportedAssEvent("a source color or reset override crosses a token")
         insertions.extend(
             (
@@ -582,8 +614,8 @@ def _validated_palette(maximum_color: int, reserved_colors: Iterable[int]) -> tu
     if isinstance(maximum_color, bool) or not 0 < maximum_color <= 0xFFFFFF:
         raise ValueError("maximum color must be in the 24-bit BGR range")
     reserved = set(reserved_colors)
-    if any(isinstance(color, bool) or not 0 < color <= 0xFFFFFF for color in reserved):
-        raise ValueError("reserved colors must be non-zero 24-bit BGR values")
+    if any(isinstance(color, bool) or not 0 <= color <= 0xFFFFFF for color in reserved):
+        raise ValueError("reserved colors must be 24-bit BGR values")
     return maximum_color, reserved
 
 
@@ -616,13 +648,23 @@ def source_primary_bgr_colors(
     catalog: AssStyleCatalog,
     events: Iterable[RawSubtitleEvent],
 ) -> tuple[int, ...]:
-    """All authored primary colors that character layers may legitimately use."""
-    colors = {int(style.primary_color, 16) & 0xFFFFFF for style in catalog.styles}
+    """All authored colors that character layers may legitimately use."""
+    colors = {
+        color
+        for style in catalog.styles
+        for color in (
+            int(style.primary_color, 16) & 0xFFFFFF,
+            int(style.secondary_color, 16) & 0xFFFFFF,
+        )
+    }
     for event in events:
         for block in _blocks(event.raw_text):
             for command in _COLOR_STATE.finditer(block.content):
                 if not command.group("color_command"):
                     continue
+                explicit = command.group("color")
+                colors.add((int(explicit, 16) if explicit else 0) & 0xFFFFFF)
+            for command in _SECONDARY_COLOR_STATE.finditer(block.content):
                 explicit = command.group("color")
                 colors.add((int(explicit, 16) if explicit else 0) & 0xFFFFFF)
     return tuple(sorted(colors))

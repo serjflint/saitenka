@@ -62,7 +62,9 @@ def legacy_boxes(tokens: list[Token]) -> tuple[list[WordBox], tuple[int, int]]:
     return list(rendered.boxes), (0, 0)
 
 
-def native_boxes() -> list[WordBox]:
+def native_boxes(
+    event_row: str = EVENT_ROW, *, timestamp_ms: int = 2_000, secondary: bool = True
+) -> list[WordBox]:
     """Boxes the way the measuring renderer produces them: real libass, through the real pipeline.
 
     Not a stand-in. The whole point of the comparison is that a libass layout is arrived at by a
@@ -80,12 +82,15 @@ def native_boxes() -> list[WordBox]:
 
     track = SubtitleTrackId("same-token-oracle")
     prepared = prepare_ass_hit_map_frame(
-        (HEADER + EVENT_ROW + "\n").encode(),
+        (HEADER + event_row + "\n").encode(),
         track,
-        active_rows=EVENT_ROW,
+        active_rows=event_row,
         text=CUE,
         tokens=[TokenAnnotation(index, *span) for index, span in enumerate(SPANS)],
     )
+    measured_ass = prepared.ass
+    if not secondary:
+        measured_ass = measured_ass.replace(b"\\2c", b"\\3c")
     backend = LibassGeometryBackend()
     try:
         snapshot = backend.render(
@@ -93,10 +98,10 @@ def native_boxes() -> list[WordBox]:
                 1,
                 track,
                 prepared.frame_id,
-                2_000,
+                timestamp_ms,
                 OSD,
                 OSD,
-                prepared.ass,
+                measured_ass,
                 palette=tuple(
                     GeometryPaletteEntry(
                         entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
@@ -199,6 +204,18 @@ def test_both_engines_resolve_the_same_token_under_the_same_cursor() -> None:
     # Both must actually resolve every token somewhere, or the comparison is two lists of -1.
     assert set(resolved(legacy, points)) >= {box.index for box in legacy}
     assert set(resolved(native, points)) >= {box.index for box in native}
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(30)
+def test_karaoke_resolves_the_same_token_boxes_as_static_text() -> None:
+    pytest.importorskip("libasslite")
+    karaoke_row = EVENT_ROW.replace(CUE, rf"{{\k200}}{CUE}")
+
+    static = native_boxes(timestamp_ms=1_500)
+    assert native_boxes(karaoke_row, timestamp_ms=1_500) == static
+    with pytest.raises(ValueError, match="missing libass token colors"):
+        native_boxes(karaoke_row, timestamp_ms=1_500, secondary=False)
 
 
 def test_the_same_token_oracle_can_fail() -> None:
