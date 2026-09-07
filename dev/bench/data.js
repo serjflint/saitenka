@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788723205453,
+  "lastUpdate": 1788779343768,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -16121,6 +16121,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 9.158656,
             "range": "3 replicas; min 6.63552; max 9.80582; MAD 0.647168",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "f8be59578e292f7fd2927a3575fc3c326f224c0e",
+          "message": "Merge pull request #503 from serjflint/feat/subtitle-provider-languages\n\nfeat(subtitles): serve every language TsukiHime carries, keyed by the profile",
+          "timestamp": "2026-09-06T19:31:59Z",
+          "url": "https://github.com/serjflint/saitenka/commit/f8be59578e292f7fd2927a3575fc3c326f224c0e"
+        },
+        "date": 1788779342925,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 24.318669,
+            "range": "3 replicas; min 23.5018; max 25.3368; MAD 0.816832; worst 25.3368",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 27.074871,
+            "range": "3 replicas; min 25.1874; max 31.7458; MAD 1.88742; worst 31.7458",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 9.203712,
+            "range": "3 replicas; min 9.0112; max 9.23238; MAD 0.028672",
             "unit": "MB"
           }
         ]
