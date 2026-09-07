@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788779343768,
+  "lastUpdate": 1788779369386,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15427,6 +15427,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 52.62871,
             "range": "3 replicas; min 47.2249; max 116.596; MAD 5.40386",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "f8be59578e292f7fd2927a3575fc3c326f224c0e",
+          "message": "Merge pull request #503 from serjflint/feat/subtitle-provider-languages\n\nfeat(subtitles): serve every language TsukiHime carries, keyed by the profile",
+          "timestamp": "2026-09-06T19:31:59Z",
+          "url": "https://github.com/serjflint/saitenka/commit/f8be59578e292f7fd2927a3575fc3c326f224c0e"
+        },
+        "date": 1788779368409,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 370.091196,
+            "range": "3 replicas; min 365.485; max 374.277; MAD 4.18627",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 79.069053,
+            "range": "3 replicas; min 72.8319; max 85.4968; MAD 6.23717",
             "unit": "ms"
           }
         ]
