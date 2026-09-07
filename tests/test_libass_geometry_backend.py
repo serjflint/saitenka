@@ -69,6 +69,22 @@ def request(
     )
 
 
+def probeable_request(**kwargs) -> GeometryRequest:
+    """A request whose palette carries what the anchor probe needs: text, face and size.
+
+    Separate from `request` rather than a flag on it, because "the overprint may redraw this token"
+    is what the three fields together mean — a request missing any of them is the ordinary case.
+    """
+    base = request(**kwargs)
+    return replace(
+        base,
+        palette=tuple(
+            replace(entry, font_name="Sans", font_size=40.0, text=text)
+            for entry, text in zip(base.palette, ("猫", "犬"), strict=False)
+        ),
+    )
+
+
 def test_extractor_unions_segments_and_ignores_non_character_layers() -> None:
     rendered = Result(
         (
@@ -219,14 +235,22 @@ def test_request_rejects_palette_budget_before_rendering() -> None:
 
 
 class FakeRenderer:
-    def __init__(self, result: Result, ass: bytes = b"") -> None:
+    def __init__(
+        self, result: Result, ass: bytes = b"", probe_result: Result | None = None
+    ) -> None:
         self.result = result
+        self.probe_result = probe_result or result
         self.closed = False
         self.calls: list[tuple[tuple, dict]] = []
         self.documents: list[bytes] = [ass]
 
     def render(self, *args, **kwargs) -> Result:
         self.calls.append((args, kwargs))
+        # A real renderer answers the document it was given. A fake that always returns the cue's
+        # colours would make the anchor probe — which renders its own document in its own palette —
+        # unrecoverable, and hide the probe wiring behind a swallowed exception.
+        if b"\\an7\\pos" in self.documents[-1]:
+            return self.probe_result
         return self.result
 
     def set_document(self, ass: bytes, _features=()) -> None:
@@ -245,8 +269,18 @@ def _recording_factory(created: list[FakeRenderer]):
         (Layer(1, 1, b"\xff", 0x01020300, 10, 20), Layer(1, 1, b"\xff", 0x04050600, 30, 40))
     )
 
+    # The probe draws each token alone at its own anchor, in `_probe_rgbs` colours; these land one
+    # pixel right and five below the anchors `probe_document` hands out, which is the shape of a real
+    # ascent gap.
+    probe = Result(
+        (
+            Layer(1, 1, b"\xff", (0x010000) << 8, 65, 5),
+            Layer(1, 1, b"\xff", (0x010001) << 8, 65, 49),
+        )
+    )
+
     def factory(ass, **_kwargs):
-        renderer = FakeRenderer(layers, ass)
+        renderer = FakeRenderer(layers, ass, probe)
         created.append(renderer)
         return renderer
 
@@ -485,3 +519,91 @@ def test_backend_forwards_mpv_margin_contract() -> None:
             },
         )
     ]
+
+
+# --- anchor probe -------------------------------------------------------------------------------
+# The overprint redraws a token as its own `\an7\pos` event, which anchors the line box while the
+# measured rectangle is ink. The offset between them is measured by rendering that fragmented
+# layout; these cover the wiring, since the assertion that it lands on the glyphs is `live`-tier and
+# does not run in CI.
+
+
+def test_a_probeable_token_carries_the_offset_its_redraw_needs() -> None:
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    snapshot = backend.render(probeable_request())
+    backend.close()
+
+    # The fake renders both tokens' ink at the same two places whatever document it is given, so the
+    # probe resolves a definite offset from its own anchors rather than a placeholder.
+    assert all(token.anchor_dx or token.anchor_dy for token in snapshot.tokens)
+
+
+def test_a_token_with_no_face_or_text_is_left_where_it_was() -> None:
+    """The palette carries neither for a token the overprint will not draw, and an unprobed token
+    must keep the origin it has rather than acquire someone else's offset."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    snapshot = backend.render(request())
+    backend.close()
+
+    assert [(t.anchor_dx, t.anchor_dy) for t in snapshot.tokens] == [(0, 0), (0, 0)]
+
+
+def test_the_same_words_are_measured_once_however_often_the_cue_is_drawn() -> None:
+    """The probe is a second libass render; paying it per redraw would put it on the hot path."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(probeable_request())
+    first = len(created[-1].documents)
+    backend.render(probeable_request())
+    backend.render(probeable_request())
+    backend.close()
+
+    assert len(created[-1].documents) == first, "a repeated cue re-measured its anchors"
+
+
+def test_the_probe_never_points_the_cue_renderer_at_its_own_document() -> None:
+    """A probe that swapped the shared renderer's document would leave the next cue measured against
+    the probe — the silent wrong-boxes failure the document swap exists to prevent."""
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(probeable_request())
+    cue_renderer = created[0]
+    backend.close()
+
+    assert len(created) == 2, "the probe did not build a renderer of its own"
+    assert all(b"\\an7\\pos" not in document for document in cue_renderer.documents)
+
+
+def test_every_probe_renderer_is_closed_with_the_backend() -> None:
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+
+    backend.render(probeable_request())
+    backend.close()
+
+    assert all(renderer.closed for renderer in created)
+
+
+def test_measured_anchors_are_bounded_so_a_resize_cannot_grow_them_forever() -> None:
+    """The key holds the FRAME's font size, not the document's: `_palette_in_frame_units` scales by
+    `frame_height / play_res_y`, so dragging a window edge mints a distinct float per pixel of height
+    and every one of them misses. Unbounded, a resize would leave an entry per (word, transient size)
+    for the life of the session."""
+    from saitenka_subtitles.libass_backend import ANCHOR_CACHE_MAX
+
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+    stale = {(f"word{index}", "Sans", float(index)): (1, 1) for index in range(ANCHOR_CACHE_MAX)}
+    backend._anchors.update(stale)
+
+    backend.render(probeable_request())  # two genuinely new words, over the bound
+    size = len(backend._anchors)
+    backend.close()
+
+    assert size == ANCHOR_CACHE_MAX

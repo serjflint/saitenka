@@ -482,3 +482,35 @@ def test_the_overpaint_placement_records_both_spaces_it_reconciles() -> None:
     assert recorded["token_count"] == len(boxes)
     assert recorded["boxes_top"] == min(box.y for box in boxes)
     assert recorded["boxes_bottom"] == max(box.y + box.h for box in boxes)
+
+
+def test_the_redraw_is_anchored_where_the_token_ink_lands_not_at_the_measured_origin() -> None:
+    r"""`\an7` positions the line box; a measured box is ink. Handing `\pos` the ink origin plants
+    the redraw an ascent-gap low — 39% of the colour on the glyphs and the rest on empty frame, with
+    mpv's own subtitle showing through above it. The offset is measured per token, so it is
+    subtracted per token rather than applied as one shift."""
+    from saitenka.app.subtitle_render import overprint_payload
+    from saitenka.app.subtitles import WordBox
+
+    boxes = [
+        WordBox(0, 100, 600, 50, 40, "Arial", 48.0, b"", 1, 5),
+        WordBox(1, 160, 600, 50, 40, "Arial", 48.0, b"", 3, 7),
+    ]
+    styles = [Style((255, 0, 0, 255)), Style((0, 255, 0, 255))]
+
+    lines = overprint_payload(draw_request(styles=styles, boxes=boxes)).splitlines()
+
+    assert r"\pos(99,595)" in lines[0]
+    assert r"\pos(157,593)" in lines[1]
+
+
+def test_a_token_measured_without_an_anchor_is_drawn_where_it_always_was() -> None:
+    """Zero is what an unprobed token carries — a face the probe could not render, or a probe that
+    failed — and it has to mean "leave this alone" rather than "shift by nothing in particular"."""
+    from saitenka.app.subtitle_render import overprint_payload
+
+    lines = overprint_payload(
+        draw_request(styles=[Style((255, 0, 0, 255))], boxes=measured_boxes()[:1])
+    ).splitlines()
+
+    assert r"\pos(100,600)" in lines[0]

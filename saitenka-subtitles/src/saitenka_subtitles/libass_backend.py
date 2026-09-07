@@ -92,6 +92,9 @@ class RendererFactory(Protocol):
 log = logging.getLogger(__name__)
 
 _AnchorKey = tuple[str, str, float]
+#: How many measured anchors to keep. One per distinct (word, face, frame size); a film's vocabulary
+#: is far smaller, and the bound exists for the resize case rather than the reading one.
+ANCHOR_CACHE_MAX = 4096
 #: The probe's own event identity and colour range. Distinct from anything a cue uses, because the
 #: probe document is rendered through the same token-recovery code as a real frame.
 _PROBE_RGB_BASE = 0x010000
@@ -323,9 +326,15 @@ class LibassGeometryBackend:
         #: A renderer per font environment kept for anchor probes, so pointing one at a probe
         #: document never evicts the cue document from the renderer the cue is being drawn with.
         self._probes: OrderedDict[str, NativeRenderer] = OrderedDict()
-        #: `(text, face, size) -> (dx, dy)`. The offset is a property of exactly those three, so a
-        #: repeated cue and a recurring word cost a dict lookup; only new text reaches libass.
-        self._anchors: dict[tuple[str, str, float], tuple[int, int]] = {}
+        self._probe_failed = False
+        #: `(text, face, size) -> (dx, dy)`, least-recently-used last. The offset is a property of
+        #: exactly those three, so a repeated cue and a recurring word cost a dict lookup.
+        #:
+        #: Bounded because the size is the frame's, not the document's: `_palette_in_frame_units`
+        #: multiplies by `frame_height / play_res_y`, so dragging a window edge mints a distinct
+        #: float per pixel of height and every one of them misses. Unbounded, a resize would leave
+        #: an entry per (word, transient size) for the life of the session.
+        self._anchors: OrderedDict[_AnchorKey, tuple[int, int]] = OrderedDict()
         self._closed = False
 
     @property
@@ -456,7 +465,12 @@ class LibassGeometryBackend:
         unseen = [(token, key) for token, key in keyed if key not in self._anchors]
         if unseen:
             self._measure_anchors(request, [(token, key) for token, key in unseen])
-        offsets = {token.token_index: self._anchors.get(key) for token, key in keyed}
+        offsets = {}
+        for token, key in keyed:
+            offset = self._anchors.get(key)
+            if offset is not None:
+                self._anchors.move_to_end(key)
+            offsets[token.token_index] = offset
         return tuple(
             replace(token, anchor_dx=offset[0], anchor_dy=offset[1])
             if (offset := offsets.get(token.token_index))
@@ -482,10 +496,21 @@ class LibassGeometryBackend:
         try:
             measured = self._probe_geometry(request, document, requests, frame)
         except Exception:
-            log.debug("anchor probe failed; the overprint keeps its measured origin", exc_info=True)
+            # Falling back to the measured origin is the safe answer for a layout libass cannot
+            # satisfy, and the wrong answer to silence with. The first failure is loud because a
+            # probe that never succeeds disables the correction for the whole session with nothing
+            # on screen to show it; the rest are quiet so a bad face cannot flood the log.
+            log.log(
+                logging.DEBUG if self._probe_failed else logging.WARNING,
+                "anchor probe failed; the overprint keeps its measured origin",
+                exc_info=True,
+            )
+            self._probe_failed = True
             return
         for index, fragment in fragments_from(measured, requests, anchors).items():
             self._anchors[unseen[index][1]] = (fragment.dx, fragment.dy)
+        while len(self._anchors) > ANCHOR_CACHE_MAX:
+            self._anchors.popitem(last=False)
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
