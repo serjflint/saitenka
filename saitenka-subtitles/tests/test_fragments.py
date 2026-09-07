@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from itertools import pairwise
 
+from saitenka_subtitles import TokenAnnotation
 from saitenka_subtitles.fragments import (
     Fragment,
     FragmentRequest,
@@ -71,3 +72,26 @@ def test_an_extent_that_changes_is_a_token_the_overprint_must_not_redraw() -> No
     colored smear beside the word. The raster device tints the mask instead, which cannot drift."""
     assert not Fragment(0, 1, 6, 44, 25).matches(51, 25)
     assert not Fragment(0, 1, 6, 30, 30).matches(30, 37)
+
+
+def test_a_token_after_a_literal_break_gets_its_own_characters() -> None:
+    r"""Token offsets are defined against the normalized text — ``\r`` dropped, literal ``\N`` folded
+    to one newline. Slicing the raw text instead shifts every token past the break by a character, so
+    each probes a neighbour's string and takes a correction measured for different glyphs.
+    """
+    from saitenka_subtitles.ass_geometry import _token_surface
+
+    normalized = "猫を見る\n犬も見る"
+    tokens = (
+        TokenAnnotation(0, 0, 1),
+        TokenAnnotation(1, 2, 4),
+        TokenAnnotation(2, 5, 6),
+        TokenAnnotation(3, 7, 9),
+    )
+
+    assert [_token_surface(normalized, tokens, index) for index in range(4)] == [
+        "猫",
+        "見る",
+        "犬",
+        "見る",
+    ]

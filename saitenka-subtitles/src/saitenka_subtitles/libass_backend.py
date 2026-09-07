@@ -11,7 +11,12 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
-from saitenka_subtitles.fragments import FragmentRequest, fragments_from, probe_document
+from saitenka_subtitles.fragments import (
+    ROW_PITCH,
+    FragmentRequest,
+    fragments_from,
+    probe_document,
+)
 from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometryPaletteEntry,
@@ -327,6 +332,10 @@ class LibassGeometryBackend:
         #: document never evicts the cue document from the renderer the cue is being drawn with.
         self._probes: OrderedDict[str, NativeRenderer] = OrderedDict()
         self._probe_failed = False
+        #: Keys a probe could not measure. `extract_token_geometry` refuses a palette colour that
+        #: drew nothing, so one inkless token — text the overprint would refuse anyway — fails the
+        #: whole batch; remembering them keeps that from re-rendering once per frame forever.
+        self._unprobeable: set[_AnchorKey] = set()
         #: `(text, face, size) -> (dx, dy)`, least-recently-used last. The offset is a property of
         #: exactly those three, so a repeated cue and a recurring word cost a dict lookup.
         #:
@@ -411,6 +420,7 @@ class LibassGeometryBackend:
                 _evicted_key, evicted = self._probes.popitem(last=False)
                 evicted.close()
         else:
+            self._probes.move_to_end(key)
             renderer.set_document(encoded, list(request.renderer_state.features))
         probe = replace(
             request,
@@ -428,14 +438,18 @@ class LibassGeometryBackend:
             keep_coverage=False,
         )
         result = renderer.render(
-            probe.timestamp_ms,
+            # The probe's events start at zero; rendering at the cue's timestamp would silently draw
+            # nothing once a file runs past their end.
+            0,
             frame,
             frame,
             pixel_aspect=1.0,
             margins=(0, 0, 0, 0),
             use_margins=False,
             max_bitmap_bytes=min(2 * frame[0] * frame[1], MAX_BITMAP_BYTES),
-            style=None,
+            # The cue's own style, not libass's defaults: hinting and blur change a glyph's extent,
+            # so measuring without them would return an offset for a render nobody performs.
+            style=_render_style(request.renderer_state),
         )
         return [
             (
@@ -462,7 +476,11 @@ class LibassGeometryBackend:
             for token in tokens
             if (text := texts.get((token.event_id, token.token_index)))
         ]
-        unseen = [(token, key) for token, key in keyed if key not in self._anchors]
+        unseen = [
+            (token, key)
+            for token, key in keyed
+            if key not in self._anchors and key not in self._unprobeable
+        ]
         if unseen:
             self._measure_anchors(request, [(token, key) for token, key in unseen])
         offsets = {}
@@ -470,10 +488,13 @@ class LibassGeometryBackend:
             offset = self._anchors.get(key)
             if offset is not None:
                 self._anchors.move_to_end(key)
-            offsets[token.token_index] = offset
+            # By event AND index: a frame may hold several events, and `_validate_palette` only
+            # requires the pair to be unique. Keyed on the index alone, two events whose first
+            # tokens differ would hand each other's correction over.
+            offsets[token.event_id, token.token_index] = offset
         return tuple(
             replace(token, anchor_dx=offset[0], anchor_dy=offset[1])
-            if (offset := offsets.get(token.token_index))
+            if (offset := offsets.get((token.event_id, token.token_index)))
             else token
             for token in tokens
         )
@@ -490,7 +511,7 @@ class LibassGeometryBackend:
             FragmentRequest(index, key[0], key[1], key[2])
             for index, (_token, key) in enumerate(unseen)
         ]
-        pitch = max(int(max(key[2] for _token, key in unseen)), 1) + 4
+        pitch = max(int(max(key[2] for _token, key in unseen)), 1) + ROW_PITCH
         frame = (request.frame_size[0], max(pitch * len(requests), 1))
         document, anchors = probe_document(requests, _probe_rgbs(len(requests)), frame)
         try:
@@ -506,6 +527,9 @@ class LibassGeometryBackend:
                 exc_info=True,
             )
             self._probe_failed = True
+            # Without this the batch is retried on every geometry render for the rest of the
+            # session: nothing records the attempt, so `unseen` keeps returning the same keys.
+            self._unprobeable.update(key for _token, key in unseen)
             return
         for index, fragment in fragments_from(measured, requests, anchors).items():
             self._anchors[unseen[index][1]] = (fragment.dx, fragment.dy)
@@ -567,6 +591,7 @@ class LibassGeometryBackend:
         self._closed = True
         self._documents.clear()
         self._anchors.clear()
+        self._unprobeable.clear()
         while self._probes:
             _probe_key, probe = self._probes.popitem(last=False)
             probe.close()

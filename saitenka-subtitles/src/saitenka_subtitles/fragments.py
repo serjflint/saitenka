@@ -14,9 +14,10 @@ Neither is recoverable from the measured rectangle, and libass reports no baseli
 first from. So this asks the question directly: render the fragmented layout — the exact events the
 overprint would send — and read back where each token's ink actually lands and how big it is.
 
-An offset is a correction to apply. A size difference is not: it means this token cannot be redrawn
-faithfully in isolation, and belongs on the raster device, which tints the mask it was measured from
-rather than re-rendering anything.
+An offset is a correction to apply, and that is what the overprint uses today. A size difference is
+not correctable — it means the token cannot be redrawn faithfully in isolation and would belong on
+the raster device instead — but nothing routes on it yet; `Fragment.matches` exists so that decision
+has a measurement to stand on when it is made.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 #: touch and be attributed to the wrong one. The column starts inset so a glyph with a negative left
 #: bearing still lands inside the frame and is measured rather than clipped.
 _ANCHOR_X = 64
-_ROW_PITCH = 4
+ROW_PITCH = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +77,7 @@ def probe_document(
     same ``\an7\pos`` form the overprint emits — the point is to reproduce that layout, not to
     improve on it.
     """
-    pitch = max(int(max((request.font_size for request in requests), default=0)) + _ROW_PITCH, 1)
+    pitch = max(int(max((request.font_size for request in requests), default=0)) + ROW_PITCH, 1)
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {frame[0]}\nPlayResY: {frame[1]}\nWrapStyle: 2\n\n"

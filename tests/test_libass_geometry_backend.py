@@ -607,3 +607,56 @@ def test_measured_anchors_are_bounded_so_a_resize_cannot_grow_them_forever() -> 
     backend.close()
 
     assert size == ANCHOR_CACHE_MAX
+
+
+def test_two_events_do_not_exchange_their_first_tokens_corrections() -> None:
+    """A frame holds several events and `_validate_palette` only requires the (event, index) PAIR to
+    be unique, so two events whose first tokens differ both answer to index 0. Keyed on the index
+    alone the last one measured wins, and the other word is redrawn by a correction taken from
+    different glyphs."""
+    track = SubtitleTrackId("track")
+    first = SubtitleEventId(track, 1_000, 2_000, 0, 0)
+    second = SubtitleEventId(track, 1_000, 2_000, 0, 1)
+    created: list[FakeRenderer] = []
+    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+    backend._anchors.update({("猫", "Sans", 40.0): (6, 6), ("犬", "Sans", 40.0): (0, -14)})
+    base = request()
+    shared = replace(
+        base,
+        frame_id=SubtitleFrameId(track, (first, second)),
+        palette=(
+            # BOTH at index 0 — that is the collision. `_validate_palette` requires only the
+            # (event, index) pair to be unique, and a frame with two events routinely has two
+            # first tokens.
+            GeometryPaletteEntry(first, 0, 0x010203, "Sans", 40.0, "猫"),
+            GeometryPaletteEntry(second, 0, 0x040506, "Sans", 40.0, "犬"),
+        ),
+    )
+
+    tokens = backend.render(shared).tokens
+    backend.close()
+
+    by_event = {token.event_id: (token.anchor_dx, token.anchor_dy) for token in tokens}
+    assert by_event[first] == (6, 6)
+    assert by_event[second] == (0, -14)
+
+
+def test_a_batch_the_probe_cannot_measure_is_not_re_rendered_every_frame() -> None:
+    """`extract_token_geometry` refuses a palette colour that drew nothing, so one inkless token —
+    text the overprint would refuse anyway — fails the whole batch. Nothing records the attempt, so
+    without a memo of failures the probe re-renders once per geometry render for the session."""
+    created: list[FakeRenderer] = []
+
+    def failing_factory(ass, **kwargs):
+        renderer = _recording_factory(created)(ass, **kwargs)
+        renderer.probe_result = Result(())  # the probe drew nothing at all
+        return renderer
+
+    backend = LibassGeometryBackend(renderer_factory=failing_factory)
+
+    for _ in range(3):
+        backend.render(probeable_request())
+    probes = sum(1 for renderer in created for doc in renderer.documents if b"\\an7\\pos" in doc)
+    backend.close()
+
+    assert probes == 1, f"a permanent probe failure re-rendered {probes} times"
