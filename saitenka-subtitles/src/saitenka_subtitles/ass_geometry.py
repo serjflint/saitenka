@@ -258,6 +258,20 @@ def _match_active_events(
     return tuple(matched)
 
 
+def _token_surface(normalized: str, tokens: Sequence[TokenAnnotation], token_index: int) -> str:
+    r"""The characters this token covers, for the anchor probe — see `GeometryPaletteEntry.text`.
+
+    Against the NORMALIZED text, which is what every offset in this module is defined against
+    (`_partition_tokens` validates on it). Slicing the raw text instead moves every token after a
+    literal ``\N`` by one character, so each one would probe a neighbour's string and take its
+    correction.
+    """
+    for token in tokens:
+        if token.token_index == token_index:
+            return normalized[token.text_start : token.text_end]
+    return ""
+
+
 def _partition_tokens(
     events: tuple[DecodedSubtitleEvent, ...],
     tokens: Sequence[TokenAnnotation],
@@ -376,6 +390,7 @@ def prepare_ass_hit_map_frame(
                 item.token_index,
                 _bgr_to_rgb(item.bgr),
                 *faces.get(item.event_id, ("", 0.0)),
+                _token_surface(normalized, tokens, item.token_index),
             )
             for item in colors
         ),

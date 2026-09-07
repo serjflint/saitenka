@@ -107,6 +107,11 @@ class TokenGeometry:
     #: face; tinting a mask IS the raster, so the second device costs no second render. Empty when
     #: the backend was not asked to keep it.
     coverage: bytes = b""
+    #: How far this token's ink falls from the position an ``\an7\pos`` event is given, measured by
+    #: drawing it alone. ``bounds`` is ink and ``\an7`` anchors the line box, so a redraw that does
+    #: not subtract these lands an ascent-gap low. Zero when unprobed, which keeps today's placement.
+    anchor_dx: int = 0
+    anchor_dy: int = 0
 
 
 class GeometryVariant(StrEnum):
@@ -126,6 +131,10 @@ class GeometryPaletteEntry:
     #: token uncolored rather than drawing it at a guess.
     font_name: str = ""
     font_size: float = 0.0
+    #: The token's surface text. Carried for the same reason as the face: anything that redraws this
+    #: token needs to know where its ink lands when drawn alone, and that cannot be measured without
+    #: the characters. Empty leaves the token unprobed and its redraw where it was.
+    text: str = ""
 
     def __post_init__(self) -> None:
         if self.token_index < 0 or isinstance(self.rgb, bool) or not 0 < self.rgb <= 0xFFFFFF:

@@ -2003,6 +2003,8 @@ class NativeSubtitleGeometry:
                 item.font_name,
                 item.font_size,
                 item.coverage,
+                item.anchor_dx,
+                item.anchor_dy,
             )
             for item in snapshot.tokens
         ]

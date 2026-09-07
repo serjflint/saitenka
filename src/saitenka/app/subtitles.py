@@ -53,6 +53,11 @@ class WordBox:
     #: The token's anti-aliased coverage over its own rect, one byte per pixel, kept only when the
     #: face is one the text device cannot draw — see `TokenGeometry.coverage`.
     coverage: bytes = b""
+    #: Where this token's ink falls relative to an ``\an7\pos`` anchor — see
+    #: `TokenGeometry.anchor_dx`. The overprint subtracts these; the raster device ignores them,
+    #: since it tints the coverage in place rather than redrawing anything.
+    anchor_dx: int = 0
+    anchor_dy: int = 0
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
