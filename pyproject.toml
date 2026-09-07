@@ -810,6 +810,10 @@ links-net = { shell = "lychee --cache --max-cache-age 14d --no-progress $(git ls
 # only. Planted +/- controls: tests/test_docs_check.py. See tools/docs_check.py + AGENTS.md "Documentation".
 docs-refs = { shell = "uv run --extra full python tools/docs_check.py refs" }
 docs-consts = { shell = "uv run --extra full python tools/docs_check.py consts" }
+# GATE (in `all`) — `docs-canonical`: mkdocs.yml's site_url reads Read the Docs' published base and its
+# local fallback keeps a version prefix + trailing slash, so no page ships a canonical URL that 404s
+# (#378). Config-only, so it costs nothing next to a full docs build.
+docs-canonical = { shell = "uv run python tools/docs_check.py canonical" }
 # GATE (in `all`) — skill discovery frontmatter. A per-skill smoke sees the files a procedure names,
 # but not whether the loader can discover it: name/path agreement, kebab-case, description parser limits,
 # and the repo metadata marker are one repo-wide contract. Planted controls: tool_tests/test_skill_check.py.
@@ -943,7 +947,7 @@ hygiene = ["deadcode", "dup", "types-advisory"]
 # name to type and one contract. CI splits the two halves across two jobs instead: the suite costs ~128s
 # of a 4-core runner, and running both passes in the same job made the gate the longest job in the run by
 # a wide margin. Both halves sync the same dev env, so the split changes wall-clock, not coverage.
-gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "skill-contract", "corpus-lock", "app-package-layout", "mining-ownership", "analysis-ownership", "annotation-ownership", "tooltip-ownership", "layer-independence", "docstring-refs", "port-probe", "reducer-purity"]
+gate-no-ft = ["lint", "subtitle-test", "types", "arch", "invariants", "test-lint-gate", "loop-tools-test", "complexity", "package-test", "cov", "deps", "spell", "links", "docs-refs", "docs-consts", "docs-canonical", "skill-contract", "corpus-lock", "app-package-layout", "mining-ownership", "analysis-ownership", "annotation-ownership", "tooltip-ownership", "layer-independence", "docstring-refs", "port-probe", "reducer-purity"]
 all = ["gate-no-ft", "test-ft"]
 
 # Pre-release gate — the slower must-pass superset run before tagging (`release.py` gates on this, not

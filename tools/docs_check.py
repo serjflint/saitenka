@@ -1,11 +1,14 @@
-"""Deterministic doc-to-code checker (`poe docs-refs` / `poe docs-consts`).
+"""Deterministic doc-to-code checker (`poe docs-refs` / `poe docs-consts` / `poe docs-canonical`).
 
 Enforces "text explains, checks enforce" for saitenka's agent-facing docs. AGENTS.md,
 `ARCHITECTURE.md`, and every `.agents/skills/*/SKILL.md` make concrete, checkable claims about
 the code — poe task names, `.agents/` paths, module files, and constant defaults. Prose can't be
-mechanically verified, so a rename or a retune silently rots the reference. These two zero-LLM passes
+mechanically verified, so a rename or a retune silently rots the reference. These zero-LLM passes
 bind each claim to the code, so drift fails the gate instead of misleading the next agent.
 
+  canonical — mkdocs.yml's ``site_url`` reads Read the Docs' published canonical base, and its local
+           fallback carries a version prefix and a trailing slash, so no page declares a canonical
+           URL that 404s (#378).
   refs   — every code-font ``poe <task>`` a doc names is a real poe task; every ``.agents/{skills,rules,
            hooks,sharpen,grow,mcp}/<name>`` path and every package-qualified module/tool path it
            RECOGNISES exists on disk (best-effort recall — bare filenames / prose refs are out of scope).
@@ -31,6 +34,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin, urlsplit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -286,18 +290,85 @@ def check_consts() -> list[str]:
     return _consts_failures(_doc_claims(rows), {c.ident: c for c in CONSTS})
 
 
+# --- canonical -----------------------------------------------------------------------------------
+# Read the Docs serves each version under its own prefix, so a `site_url` of the bare host root makes
+# every nested page declare a canonical that 404s (#378). MkDocs joins `site_url` with the page path
+# by `urljoin`, which is where both failure modes live: a base with no version segment, and a base
+# with no trailing slash (urljoin silently drops its last segment).
+
+_MKDOCS = _REPO / "mkdocs.yml"
+_RTD_ENV = "READTHEDOCS_CANONICAL_URL"
+#: `site_url: !ENV [READTHEDOCS_CANONICAL_URL, "<fallback>"]`, or a plain literal.
+_SITE_URL_ENV = re.compile(
+    rf"""^site_url:\s*!ENV\s*\[\s*{_RTD_ENV}\s*,\s*["']([^"']+)["']\s*\]\s*$""", re.MULTILINE
+)
+_SITE_URL_PLAIN = re.compile(r"""^site_url:\s*["']?([^"'\s#]+)["']?\s*$""", re.MULTILINE)
+#: A published RTD page path — a nested one, so a dropped prefix is visible.
+_SAMPLE_PAGE = "start/install/"
+
+
+def _canonical_failures(text: str) -> list[str]:
+    env = _SITE_URL_ENV.search(text)
+    if env is None:
+        plain = _SITE_URL_PLAIN.search(text)
+        found = f"{plain.group(1)!r}" if plain else "no site_url"
+        return [
+            (
+                f"mkdocs.yml: site_url must read the RTD-published base "
+                f"(`!ENV [{_RTD_ENV}, ...]`), else a versioned build canonicalises to an "
+                f"unversioned URL that 404s; found {found}"
+            )
+        ]
+    fallback = env.group(1)
+    parts = urlsplit(fallback)
+    fails = []
+    if parts.scheme != "https" or not parts.netloc:
+        fails.append(
+            f"mkdocs.yml: site_url fallback must be an absolute https URL; got {fallback!r}"
+        )
+    if not fallback.endswith("/"):
+        fails.append(
+            f"mkdocs.yml: site_url fallback must end in '/' — urljoin drops the last path "
+            f"segment without it; got {fallback!r}"
+        )
+    if parts.path.strip("/") == "":
+        fails.append(
+            f"mkdocs.yml: site_url fallback is the bare host root, so every page canonicalises "
+            f"without RTD's version prefix and 404s; got {fallback!r}"
+        )
+    canonical = urljoin(fallback, _SAMPLE_PAGE)
+    if not canonical.startswith(fallback) or not canonical.endswith(_SAMPLE_PAGE):
+        fails.append(
+            f"mkdocs.yml: canonical for {_SAMPLE_PAGE!r} does not preserve the base and page "
+            f"path; {fallback!r} + page -> {canonical!r}"
+        )
+    return fails
+
+
+def check_canonical() -> list[str]:
+    if not _MKDOCS.is_file():
+        return ["mkdocs.yml: not found"]
+    return _canonical_failures(_MKDOCS.read_text(encoding="utf-8"))
+
+
 # --- cli -----------------------------------------------------------------------------------------
+
+_CHECKS = {
+    "refs": ("docs-refs", check_refs),
+    "consts": ("docs-consts", check_consts),
+    "canonical": ("docs-canonical", check_canonical),
+}
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("which", choices=("refs", "consts"), help="which check to run")
+    ap.add_argument("which", choices=tuple(_CHECKS), help="which check to run")
     ns = ap.parse_args(argv)
 
-    fails = check_refs() if ns.which == "refs" else check_consts()
-    label = "docs-refs" if ns.which == "refs" else "docs-consts"
+    label, check = _CHECKS[ns.which]
+    fails = check()
     if fails:
         print(f"{label}: {len(fails)} doc-to-code drift(s):")
         for f in fails:
