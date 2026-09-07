@@ -18,6 +18,9 @@ logs.
 
 ### Fixed
 
+- Documentation pages now declare a canonical URL that resolves. Every nested page on Read the Docs
+  pointed search engines at an unversioned address that returns 404, which can cost the page its
+  ranking or drop it from the index.
 - **The TsukiHime provider could not fetch anything at all.** Its requests carried urllib's default
   user agent, which Cloudflare answers with a 403, so every search, listing and download failed.
 - Cached subtitles are now kept per target language. One video watched under two profiles kept a
