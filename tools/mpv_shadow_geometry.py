@@ -273,6 +273,61 @@ def assess_masks(
     )
 
 
+def _rejections(
+    assessment: MaskAssessment,
+    unsafe_low_delta_mask: Mask,
+    input_checks: dict[str, bool],
+    thresholds: dict[str, Any],
+    *,
+    unsafe_total_limit: int,
+    unsafe_component_limit: int,
+) -> list[str]:
+    """Every criterion this cell failed, named and quantified.
+
+    `passed` is decided by four things beyond the mask comparison, and none of them appears in the
+    serialized assessment — so a failing cell reported every visible criterion green next to
+    ``passed: false``, and each investigation had to re-derive which one bit. The verdict says what
+    it was.
+    """
+    largest = _largest_component(unsafe_low_delta_mask)
+    minimum_iou = float(thresholds["minimum_mask_iou"])
+    return [
+        *(
+            [f"mask-iou {assessment.mask_iou:.4f} < {minimum_iou}"]
+            if assessment.mask_iou < minimum_iou
+            else []
+        ),
+        *(
+            [f"outer-bounds {assessment.observed_bounds} vs {assessment.reference_bounds}"]
+            if not assessment.outer_bounds_within_maximum_distance
+            else []
+        ),
+        *(
+            [f"support-distance > {int(thresholds['maximum_chebyshev_distance_px'])}px"]
+            if not assessment.within_maximum_distance
+            else []
+        ),
+        *(
+            [f"unsafe-low-delta-pixels {len(unsafe_low_delta_mask)} > {unsafe_total_limit}"]
+            if len(unsafe_low_delta_mask) > unsafe_total_limit
+            else []
+        ),
+        *(
+            [f"unsafe-low-delta-component {largest} > {unsafe_component_limit}"]
+            if largest > unsafe_component_limit
+            else []
+        ),
+        *(f"render-input:{name}" for name, ok in sorted(input_checks.items()) if not ok),
+    ]
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return -1
+
+
 def shifted(mask: Mask, dx: int, dy: int) -> Mask:
     return frozenset((x + dx, y + dy) for x, y in mask)
 
@@ -650,6 +705,16 @@ class _MpvSession:
             diagnostic = self.log_path.read_text(encoding="utf-8", errors="replace")
             raise RuntimeError(f"mpv did not expose Gate D IPC: {error}\n{diagnostic}") from error
 
+    def diagnostic(self, *, tail_lines: int = 40) -> str:
+        """The tail of this session's mpv log, flushed so the failing command's own lines are in it."""
+        try:
+            self.log.flush()
+            text = self.log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:  # the log is diagnostics; losing it must not mask the failure
+            return f"(mpv log unavailable: {error})"
+        lines = text.splitlines()
+        return "\n".join(lines[-tail_lines:])
+
     def capture(
         self,
         ass_path: Path,
@@ -664,7 +729,16 @@ class _MpvSession:
 
         reply = self.ipc.command("sub-add", str(ass_path), "select", label, "jpn")
         if reply.get("error") != "success":
-            raise AssertionError(f"mpv rejected Gate D ASS: {reply.get('error')}")
+            # `sub-add` answers "error running command" for both of its failure paths
+            # (`cmd_track_add`, player/command.c): playback already stopping, and the file not
+            # opening. The reply cannot tell them apart; mpv's own log can, and the constructor
+            # above already reads it on the IPC path. Reporting it here is the difference between a
+            # reproducible cause and a CI run nobody can diagnose.
+            raise AssertionError(
+                f"mpv rejected Gate D ASS: {reply.get('error')}\n"
+                f"ass={ass_path} exists={ass_path.is_file()} bytes={_file_size(ass_path)}\n"
+                f"{self.diagnostic()}"
+            )
         track = _wait_for(
             lambda: _track_for_path(self.ipc, ass_path),
             timeout=5.0,
@@ -841,13 +915,15 @@ def _evaluate_cell(
             observed_size,
             video_pixel_aspect,
         )
-        assessment = replace(
+        rejections = _rejections(
             assessment,
-            passed=assessment.passed
-            and len(unsafe_low_delta_mask) <= unsafe_total_limit
-            and _largest_component(unsafe_low_delta_mask) <= unsafe_component_limit
-            and all(input_checks.values()),
+            unsafe_low_delta_mask,
+            input_checks,
+            thresholds,
+            unsafe_total_limit=unsafe_total_limit,
+            unsafe_component_limit=unsafe_component_limit,
         )
+        assessment = replace(assessment, passed=not rejections)
         return [
             {
                 "case_id": case["id"],
@@ -876,6 +952,7 @@ def _evaluate_cell(
                 ),
                 "mpv_render_inputs": render_inputs,
                 "render_input_checks": input_checks,
+                "rejected_by": rejections,
                 "assessment": asdict(assessment),
             }
             for source in sources

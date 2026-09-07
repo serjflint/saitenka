@@ -465,3 +465,76 @@ def test_live_cli_persists_failure_evidence(
         "matrix_passed": False,
         "schema": 1,
     }
+
+
+def _assessment(**over) -> oracle.MaskAssessment:
+    base = {
+        "passed": True,
+        "reference_pixels": 100,
+        "support_reference_pixels": 100,
+        "observed_pixels": 100,
+        "reference_bounds": (0, 0, 10, 10),
+        "observed_bounds": (0, 0, 10, 10),
+        "outer_bounds_equal": True,
+        "outer_bounds_within_maximum_distance": True,
+        "mask_iou": 0.99,
+        "within_maximum_distance": True,
+    }
+    return oracle.MaskAssessment(**{**base, **over})
+
+
+_THRESHOLDS = {
+    "minimum_mask_iou": 0.95,
+    "maximum_chebyshev_distance_px": 1,
+    "maximum_outer_bounds_distance_px": 1,
+}
+_CHECKS = {"screenshot-frame-size": True, "video-pixel-aspect": True}
+
+
+def test_a_cell_that_meets_every_criterion_is_rejected_by_nothing() -> None:
+    assert (
+        oracle._rejections(
+            _assessment(), frozenset(), _CHECKS, _THRESHOLDS,
+            unsafe_total_limit=64, unsafe_component_limit=23,
+        )
+        == []
+    )  # fmt: skip
+
+
+def test_the_verdict_names_the_criterion_the_assessment_does_not_carry() -> None:
+    """The regression this exists for: `passed` is decided by four things beyond the mask
+    comparison, none of them serialized, so a failing cell showed every visible criterion green
+    beside ``passed: false`` and each investigation had to re-derive which one bit.
+
+    The numbers are a real macOS failure — 67 unsafe pixels against a limit of 64, largest component
+    34 against 23, with the mask comparison passing on every count.
+    """
+    unsafe = frozenset((x, 0) for x in range(67))
+
+    rejections = oracle._rejections(
+        _assessment(), unsafe, _CHECKS, _THRESHOLDS,
+        unsafe_total_limit=64, unsafe_component_limit=23,
+    )  # fmt: skip
+
+    assert any("unsafe-low-delta-pixels 67 > 64" in line for line in rejections)
+    assert any("unsafe-low-delta-component 67 > 23" in line for line in rejections)
+
+
+def test_a_failed_render_input_check_is_named_individually() -> None:
+    """Nine checks travel in one dict; "some input check failed" would still need a bisect."""
+    rejections = oracle._rejections(
+        _assessment(), frozenset(), {**_CHECKS, "video-pixel-aspect": False}, _THRESHOLDS,
+        unsafe_total_limit=64, unsafe_component_limit=23,
+    )  # fmt: skip
+
+    assert rejections == ["render-input:video-pixel-aspect"]
+
+
+def test_a_mask_criterion_is_reported_with_the_value_that_missed() -> None:
+    rejections = oracle._rejections(
+        _assessment(mask_iou=0.90, within_maximum_distance=False), frozenset(), _CHECKS,
+        _THRESHOLDS, unsafe_total_limit=64, unsafe_component_limit=23,
+    )  # fmt: skip
+
+    assert any("mask-iou 0.9000 < 0.95" in line for line in rejections)
+    assert any("support-distance > 1px" in line for line in rejections)
