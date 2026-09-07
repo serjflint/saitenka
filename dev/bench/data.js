@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788796846886,
+  "lastUpdate": 1788798771935,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -14789,6 +14789,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.743188,
             "range": "3 replicas; min 1.11752; max 2.10285; MAD 0.359663; worst 2.10285",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4213ad33b2aa2675b6cea6aba577e0db7de26673",
+          "message": "Merge pull request #506 from serjflint/chore/gate-d-self-diagnosing\n\nchore(gate-d): make the geometry matrix report why a cell failed",
+          "timestamp": "2026-09-07T21:30:55+05:00",
+          "tree_id": "583be679def3b1b566c93b1f5245ec6aad3c1d86",
+          "url": "https://github.com/serjflint/saitenka/commit/4213ad33b2aa2675b6cea6aba577e0db7de26673"
+        },
+        "date": 1788798770859,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.955304,
+            "range": "3 replicas; min 4.28784; max 6.4744; MAD 0.667465",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.968781,
+            "range": "3 replicas; min 5.87811; max 8.84052; MAD 1.09067; worst 8.84052",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.463236,
+            "range": "3 replicas; min 12.5277; max 20.4428; MAD 1.93557",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.713463,
+            "range": "3 replicas; min 12.6596; max 21.109; MAD 2.05388; worst 21.109",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 29.26644,
+            "range": "3 replicas; min 13.738; max 98.9478; MAD 15.5284",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.069545,
+            "range": "3 replicas; min 0.063126; max 0.119924; MAD 0.006419; worst 0.119924",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 32.262344,
+            "range": "3 replicas; min 30.4887; max 44.5547; MAD 1.77366; worst 44.5547",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 5.221325,
+            "range": "3 replicas; min 2.87181; max 95.4643; MAD 2.34951; worst 95.4643",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.348103,
+            "range": "3 replicas; min 1.24707; max 85.1337; MAD 0.10103; worst 85.1337",
             "unit": "ms"
           }
         ]
