@@ -242,8 +242,18 @@ def _assign_rung(
 ) -> None:
     """Best color device this token can hold, appended to that device's list, or neither."""
     font_name = "" if font_names.key(box.font_name) in drifting else box.font_name
+    # `\an7` anchors the line box and `box` is ink, so the measured origin is not the position that
+    # puts the redraw over the word — it is an ascent-gap above it. The offset was measured by
+    # drawing this token alone through the renderer that produced the box (`saitenka_subtitles
+    # .fragments`); zero, when it was not measured, is the placement this had before.
     paint = overprint.TokenPaint(
-        text, box.x, box.y, font_name, box.font_size, color, OVERPRINT_BORDER
+        text,
+        box.x - box.anchor_dx,
+        box.y - box.anchor_dy,
+        font_name,
+        box.font_size,
+        color,
+        OVERPRINT_BORDER,
     )
     mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
     if paint.drawable:

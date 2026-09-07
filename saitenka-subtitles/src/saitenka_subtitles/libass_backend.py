@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import time
 from array import array
 from collections import OrderedDict, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
+from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+from saitenka_subtitles.fragments import FragmentRequest, fragments_from, probe_document
 from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
+    GeometryPaletteEntry,
     GeometrySnapshot,
     Rect,
     RendererState,
@@ -27,7 +31,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from saitenka_subtitles.document import SubtitleEventId
     from saitenka_subtitles.geometry import GeometryRequest
     from saitenka_subtitles.telemetry import GeometryTelemetry
 
@@ -84,6 +87,24 @@ class RendererFactory(Protocol):
         fontconfig_config: str | None,
         features: list[tuple[int, bool]],
     ) -> NativeRenderer: ...
+
+
+log = logging.getLogger(__name__)
+
+_AnchorKey = tuple[str, str, float]
+#: The probe's own event identity and colour range. Distinct from anything a cue uses, because the
+#: probe document is rendered through the same token-recovery code as a real frame.
+_PROBE_RGB_BASE = 0x010000
+
+
+def _probe_event(track_id: SubtitleTrackId) -> SubtitleEventId:
+    """The probe document's single event identity, on the track being rendered — a frame's events
+    must belong to its own track, and the probe rides the request's."""
+    return SubtitleEventId(track_id, 0, 1, 0, 0)
+
+
+def _probe_rgbs(count: int) -> list[int]:
+    return [_PROBE_RGB_BASE + index for index in range(count)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -299,6 +320,12 @@ class LibassGeometryBackend:
         #: cost more than the swap it is trying to avoid. The producer hands the same object back
         #: for a repeated render, so identity is the right test and a false miss only re-swaps.
         self._documents: dict[str, bytes] = {}
+        #: A renderer per font environment kept for anchor probes, so pointing one at a probe
+        #: document never evicts the cue document from the renderer the cue is being drawn with.
+        self._probes: OrderedDict[str, NativeRenderer] = OrderedDict()
+        #: `(text, face, size) -> (dx, dy)`. The offset is a property of exactly those three, so a
+        #: repeated cue and a recurring word cost a dict lookup; only new text reaches libass.
+        self._anchors: dict[tuple[str, str, float], tuple[int, int]] = {}
         self._closed = False
 
     @property
@@ -356,6 +383,110 @@ class LibassGeometryBackend:
             evicted.close()
         return renderer, built_ms
 
+    def _probe_geometry(
+        self,
+        request: GeometryRequest,
+        document: str,
+        requests: list[FragmentRequest],
+        frame: tuple[int, int],
+    ) -> list[tuple[int, int, int, int, int]]:
+        """Ink rectangles for the probe document, through this font environment's probe renderer."""
+        key = request.renderer_key()
+        probe_event = _probe_event(request.track_id)
+        encoded = document.encode()
+        renderer = self._probes.get(key)
+        if renderer is None:
+            renderer = self._new_renderer(replace(request, ass=encoded))
+            self._probes[key] = renderer
+            while len(self._probes) > self._cache_max:
+                _evicted_key, evicted = self._probes.popitem(last=False)
+                evicted.close()
+        else:
+            renderer.set_document(encoded, list(request.renderer_state.features))
+        probe = replace(
+            request,
+            ass=encoded,
+            frame_size=frame,
+            storage_size=frame,
+            frame_id=SubtitleFrameId(request.track_id, (probe_event,)),
+            palette=tuple(
+                GeometryPaletteEntry(
+                    probe_event, item.token_index, rgb, item.font_name, item.font_size, item.text
+                )
+                for item, rgb in zip(requests, _probe_rgbs(len(requests)), strict=True)
+            ),
+            reserved_rgb=(),
+            keep_coverage=False,
+        )
+        result = renderer.render(
+            probe.timestamp_ms,
+            frame,
+            frame,
+            pixel_aspect=1.0,
+            margins=(0, 0, 0, 0),
+            use_margins=False,
+            max_bitmap_bytes=min(2 * frame[0] * frame[1], MAX_BITMAP_BYTES),
+            style=None,
+        )
+        return [
+            (
+                token.token_index,
+                token.bounds.x,
+                token.bounds.y,
+                token.bounds.width,
+                token.bounds.height,
+            )
+            for token in extract_token_geometry(result, probe, keep_coverage=False)
+        ]
+
+    def _anchored(
+        self, request: GeometryRequest, tokens: tuple[TokenGeometry, ...]
+    ) -> tuple[TokenGeometry, ...]:
+        """`tokens` carrying the offset a redraw of each needs, measured once per text/face/size."""
+        texts = {
+            (entry.event_id, entry.token_index): entry.text
+            for entry in request.palette
+            if entry.text and entry.font_name and entry.font_size > 0
+        }
+        keyed = [
+            (token, (text, token.font_name, token.font_size))
+            for token in tokens
+            if (text := texts.get((token.event_id, token.token_index)))
+        ]
+        unseen = [(token, key) for token, key in keyed if key not in self._anchors]
+        if unseen:
+            self._measure_anchors(request, [(token, key) for token, key in unseen])
+        offsets = {token.token_index: self._anchors.get(key) for token, key in keyed}
+        return tuple(
+            replace(token, anchor_dx=offset[0], anchor_dy=offset[1])
+            if (offset := offsets.get(token.token_index))
+            else token
+            for token in tokens
+        )
+
+    def _measure_anchors(
+        self, request: GeometryRequest, unseen: list[tuple[TokenGeometry, _AnchorKey]]
+    ) -> None:
+        """Render the fragmented layout the overprint will ask for and record where its ink lands.
+
+        A probe that fails is not an error: the offsets stay unrecorded, every redraw keeps the
+        origin it used before, and the cue is drawn exactly as it is today.
+        """
+        requests = [
+            FragmentRequest(index, key[0], key[1], key[2])
+            for index, (_token, key) in enumerate(unseen)
+        ]
+        pitch = max(int(max(key[2] for _token, key in unseen)), 1) + 4
+        frame = (request.frame_size[0], max(pitch * len(requests), 1))
+        document, anchors = probe_document(requests, _probe_rgbs(len(requests)), frame)
+        try:
+            measured = self._probe_geometry(request, document, requests, frame)
+        except Exception:
+            log.debug("anchor probe failed; the overprint keeps its measured origin", exc_info=True)
+            return
+        for index, fragment in fragments_from(measured, requests, anchors).items():
+            self._anchors[unseen[index][1]] = (fragment.dx, fragment.dy)
+
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
             raise RuntimeError("libass geometry backend is closed")
@@ -388,7 +519,10 @@ class LibassGeometryBackend:
             span.set("layer_count", len(result.layers))
             self._telemetry.record(RENDER_MS, render_ms)
             started = time.perf_counter_ns()
-            tokens = extract_token_geometry(result, request, keep_coverage=request.keep_coverage)
+            tokens = self._anchored(
+                request,
+                extract_token_geometry(result, request, keep_coverage=request.keep_coverage),
+            )
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("extract_ms", extract_ms)
             span.set("found_tokens", len(tokens))
@@ -407,6 +541,10 @@ class LibassGeometryBackend:
             return
         self._closed = True
         self._documents.clear()
+        self._anchors.clear()
+        while self._probes:
+            _probe_key, probe = self._probes.popitem(last=False)
+            probe.close()
         while self._renderers:
             _key, renderer = self._renderers.popitem(last=False)
             renderer.close()

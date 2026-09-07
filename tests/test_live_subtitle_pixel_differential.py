@@ -175,8 +175,34 @@ def ink_bounds(frame: np.ndarray) -> tuple[int, int, int, int]:
     )
 
 
-def our_boxes(source: bytes, event_row: str, frame: tuple[int, int]) -> list[tuple[int, ...]]:
-    """The hit boxes Saitenka would hand the interaction layer for this cue."""
+def our_word_boxes(source: bytes, event_row: str, frame: tuple[int, int]):
+    """The snapshot as the runtime carries it — anchors included, which is what the overprint reads."""
+    from saitenka.app.subtitles import WordBox
+
+    return [
+        WordBox(
+            token.token_index,
+            token.bounds.x,
+            token.bounds.y,
+            token.bounds.width,
+            token.bounds.height,
+            token.font_name,
+            token.font_size,
+            token.coverage,
+            token.anchor_dx,
+            token.anchor_dy,
+        )
+        for token in _snapshot_tokens(source, event_row, frame)
+    ]
+
+
+def _snapshot_tokens(source: bytes, event_row: str, frame: tuple[int, int]):
+    """The geometry snapshot for this cue, with the palette the runtime builds.
+
+    The token text travels in the palette because the anchor probe needs it (`GeometryPaletteEntry
+    .text`); dropping it here would silently leave every anchor at zero and test the placement this
+    file exists to catch.
+    """
     from saitenka_subtitles.libass_backend import LibassGeometryBackend
 
     track = SubtitleTrackId("pixel-differential")
@@ -186,7 +212,12 @@ def our_boxes(source: bytes, event_row: str, frame: tuple[int, int]) -> list[tup
     scale = frame[1] / prepared.play_res_y
     palette = tuple(
         GeometryPaletteEntry(
-            entry.event_id, entry.token_index, entry.rgb, entry.font_name, entry.font_size * scale
+            entry.event_id,
+            entry.token_index,
+            entry.rgb,
+            entry.font_name,
+            entry.font_size * scale,
+            entry.text,
         )
         for entry in prepared.palette
     )
@@ -207,9 +238,14 @@ def our_boxes(source: bytes, event_row: str, frame: tuple[int, int]) -> list[tup
         )
     finally:
         backend.close()
+    return snapshot.tokens
+
+
+def our_boxes(source: bytes, event_row: str, frame: tuple[int, int]) -> list[tuple[int, ...]]:
+    """The hit boxes Saitenka would hand the interaction layer for this cue."""
     return [
         (t.bounds.x, t.bounds.y, t.bounds.x + t.bounds.width, t.bounds.y + t.bounds.height)
-        for t in snapshot.tokens
+        for t in _snapshot_tokens(source, event_row, frame)
     ]
 
 
@@ -310,13 +346,8 @@ def _overprinted(directory: Path, colour: int = 0x00FF00) -> tuple[np.ndarray, n
     what we asked for from any difference between mpv's two libass instances. A misplacement that
     survives this is ours.
     """
-    from saitenka_subtitles.overprint import TokenPaint, event_line
-
-    from saitenka.app.subtitle_render import OVERPRINT_BORDER
-
     source = document(2, TEXT)
     event_row = source.strip().splitlines()[-1]
-    boxes = our_boxes(source.encode(), event_row, (WIDTH, HEIGHT))
 
     plain = directory / "plain.ass"
     plain.write_text(source, encoding="utf-8")
@@ -324,9 +355,8 @@ def _overprinted(directory: Path, colour: int = 0x00FF00) -> tuple[np.ndarray, n
     base = np.array(_open(directory / "frame.png")).astype(int)
 
     painted = source + "".join(
-        f"Dialogue: 0,0:00:00.50,0:00:08.00,D,,0,0,0,,"
-        f"{event_line(TokenPaint(TEXT[t.text_start : t.text_end], box[0], box[1], 'sans-serif', 40.0, colour, OVERPRINT_BORDER))}\n"
-        for t, box in zip(TOKENS, boxes, strict=True)
+        f"Dialogue: 0,0:00:00.50,0:00:08.00,D,,0,0,0,,{line}\n"
+        for line in _production_payload(source, event_row, colour).splitlines()
     )
     over = directory / "painted.ass"
     over.write_text(painted, encoding="utf-8")
@@ -340,6 +370,44 @@ def _overprinted(directory: Path, colour: int = 0x00FF00) -> tuple[np.ndarray, n
         & (both[:, :, 1] > both[:, :, 2] + 40)
     )
     return ink, green
+
+
+def _production_payload(source: str, event_row: str, colour: int) -> str:
+    """The payload the runtime would send for this cue, built by the runtime's own code.
+
+    Through `overprint_payload` rather than by assembling `TokenPaint`s here: the placement being
+    checked is a decision `_assign_rung` makes, and a test that re-implements it would keep passing
+    while the shipped path was wrong.
+    """
+    from saitenka_tokenize import Token
+
+    from saitenka.app.subtitle_render import DrawRequest, overprint_payload
+
+    class _Style:
+        def __init__(self) -> None:
+            self.color = ((colour >> 16) & 0xFF, (colour >> 8) & 0xFF, colour & 0xFF, 255)
+            self.underline = None
+
+    boxes = our_word_boxes(source.encode(), event_row, (WIDTH, HEIGHT))
+    surfaces = [TEXT[token.text_start : token.text_end] for token in TOKENS]
+    return overprint_payload(
+        DrawRequest(
+            text=TEXT,
+            lines=[[Token(s, s, s, "名詞", i, i + 1) for i, s in enumerate(surfaces)]],
+            osd=(WIDTH, HEIGHT),
+            sub_size=40,
+            bg_opacity=0,
+            bottom_margin=30,
+            secondary_role=False,
+            upgrade_pending=False,
+            annotation_degraded=False,
+            annotation_visible=True,
+            hover=-1,
+            hover_span=None,
+            styles=[_Style() for _ in surfaces],
+            boxes=boxes,
+        )
+    )
 
 
 #: What share of the overprint's own ink has to land on a glyph mpv drew. Not a tolerance — the

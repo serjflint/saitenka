@@ -258,6 +258,14 @@ def _match_active_events(
     return tuple(matched)
 
 
+def _token_surface(text: str, tokens: Sequence[TokenAnnotation], token_index: int) -> str:
+    """The characters this token covers, for the anchor probe — see `GeometryPaletteEntry.text`."""
+    for token in tokens:
+        if token.token_index == token_index:
+            return text[token.text_start : token.text_end]
+    return ""
+
+
 def _partition_tokens(
     events: tuple[DecodedSubtitleEvent, ...],
     tokens: Sequence[TokenAnnotation],
@@ -376,6 +384,7 @@ def prepare_ass_hit_map_frame(
                 item.token_index,
                 _bgr_to_rgb(item.bgr),
                 *faces.get(item.event_id, ("", 0.0)),
+                _token_surface(text, tokens, item.token_index),
             )
             for item in colors
         ),
