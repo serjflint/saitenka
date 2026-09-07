@@ -295,3 +295,73 @@ def test_the_differential_catches_a_layout_that_does_not_match(workspace: Path) 
     wrong = union_of(our_boxes(source.encode(), event_row, (WIDTH, HEIGHT * 2)))
 
     assert worst_edge(wrong, theirs) > TOLERANCE
+
+
+# --- the overprint lands on the glyphs, or beside them --------------------------------------------
+# The boxes above are hit targets: a rectangle over a word, and a rectangle is right if a click in it
+# selects that word. The overprint asks a second thing of them — that redrawing the token at that
+# rectangle reproduces the glyphs mpv drew. Nothing checked it, and the two are not the same claim.
+
+
+def _overprinted(directory: Path, colour: int = 0x00FF00) -> tuple[np.ndarray, np.ndarray]:
+    """`(mpv's ink, our overprint's ink)` for one cue, drawn by ONE renderer.
+
+    Both the cue and the overprint go through mpv's subtitle leg here, so the comparison isolates
+    what we asked for from any difference between mpv's two libass instances. A misplacement that
+    survives this is ours.
+    """
+    from saitenka_subtitles.overprint import TokenPaint, event_line
+
+    from saitenka.app.subtitle_render import OVERPRINT_BORDER
+
+    source = document(2, TEXT)
+    event_row = source.strip().splitlines()[-1]
+    boxes = our_boxes(source.encode(), event_row, (WIDTH, HEIGHT))
+
+    plain = directory / "plain.ass"
+    plain.write_text(source, encoding="utf-8")
+    mpv_ink(directory, plain)
+    base = np.array(_open(directory / "frame.png")).astype(int)
+
+    painted = source + "".join(
+        f"Dialogue: 0,0:00:00.50,0:00:08.00,D,,0,0,0,,"
+        f"{event_line(TokenPaint(TEXT[t.text_start : t.text_end], box[0], box[1], 'sans-serif', 40.0, colour, OVERPRINT_BORDER))}\n"
+        for t, box in zip(TOKENS, boxes, strict=True)
+    )
+    over = directory / "painted.ass"
+    over.write_text(painted, encoding="utf-8")
+    mpv_ink(directory, over)
+    both = np.array(_open(directory / "frame.png")).astype(int)
+
+    ink = base.sum(axis=2) > 40
+    green = (
+        (both[:, :, 1] > 90)
+        & (both[:, :, 1] > both[:, :, 0] + 40)
+        & (both[:, :, 1] > both[:, :, 2] + 40)
+    )
+    return ink, green
+
+
+#: What share of the overprint's own ink has to land on a glyph mpv drew. Not a tolerance — the
+#: overprint either redraws the token where mpv put it or it does not, and the two failures this
+#: separates are whole glyph-heights apart. Anti-aliased edges and our hairline border account for
+#: the margin below 100%.
+COVERAGE_FLOOR = 0.90
+
+
+@pytest.mark.timeout(120)
+def test_the_overprint_colours_the_glyphs_and_not_the_space_around_them(workspace: Path) -> None:
+    """The product claim, measured: the colour is on the words.
+
+    A user reads this as "the colour is right" or "the colour is smeared", and no other meter in the
+    repo expresses it — the drift probe reports a number about two rectangles, and the box tests
+    assert the rectangle is over the word, which stays true while the redraw inside it is wrong.
+    """
+    ink, green = _overprinted(workspace)
+
+    on_glyphs = float((green & ink).sum()) / max(int(green.sum()), 1)
+
+    assert on_glyphs >= COVERAGE_FLOOR, (
+        f"only {on_glyphs:.0%} of the overprint landed on a glyph mpv drew — "
+        f"{int((green & ~ink).sum())} coloured pixels sit on empty frame"
+    )
