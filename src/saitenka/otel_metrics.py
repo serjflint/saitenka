@@ -127,6 +127,8 @@ subtitle_geometry_font_sources: Counter | None = None
 #: counter next door says the native path gave up, and conflating the two would make a user
 #: comparing the engines look like a regression.
 subtitle_renderer_forced: Counter | None = None
+#: Boxes withheld from a cue that has no such token — a mispairing, not a missing measurement.
+subtitle_boxes_dropped: Counter | None = None
 #: labeled reason=. The overprint stands down rather than coloring words in a substitute face. Each
 #: demotion is a device the ladder could not use, so this is where "the color went missing" stops
 #: being invisible and becomes a number a report can show.
@@ -475,7 +477,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global subtitle_geometry_font_sources, subtitle_renderer_forced
+    global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
@@ -727,6 +729,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.renderer_forced",
             description="deliberate runtime renderer switches (renderer=legacy|native)",
         )
+        subtitle_boxes_dropped = meter.create_counter(
+            "saitenka.subtitle.boxes_dropped",
+            description="boxes withheld because the cue has no token at that index",
+        )
         subtitle_overprint_demotions = meter.create_counter(
             "saitenka.subtitle.overprint_demotions",
             description="cues left uncolored because no device could draw them faithfully (reason=)",
@@ -808,7 +814,7 @@ def unregister() -> None:
     global lifecycle_timer_armed, lifecycle_timer_settled
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
-    global subtitle_geometry_font_sources, subtitle_renderer_forced
+    global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
@@ -886,6 +892,7 @@ def unregister() -> None:
         cue_settles = None
         subtitle_geometry_font_sources = None
         subtitle_renderer_forced = None
+        subtitle_boxes_dropped = None
         subtitle_overprint_demotions = None
         subtitle_overpaint_frames = None
         subtitle_layout_drift_px = None

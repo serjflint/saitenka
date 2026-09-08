@@ -239,6 +239,15 @@ def main(argv: list[str] | None = None) -> int:
     orphans = sum(item.orphan_boxes for item in shown)
     if orphans:
         print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")
+    lane = collections.Counter(
+        (event.get("args") or {}).get("outcome")
+        for event in trace.get("traceEvents", ())
+        if event.get("ph") == "X" and event.get("name") == "subtitle_geometry_lane"
+    )
+    if lane:
+        # A cue re-requested at a different instant within itself misses the result cache and
+        # re-renders, so `rendering` outnumbering `cached` across repeat visits is the signature.
+        print("  lane: " + ", ".join(f"{name} x{n}" for name, n in lane.most_common()))
     causes = collections.Counter(caused_by(trace, "subtitle_draw").values())
     if causes:
         # Why each draw happened, from `parent_id` rather than from what preceded it.

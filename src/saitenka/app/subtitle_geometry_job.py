@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from saitenka_subtitles.geometry import GeometrySnapshot
 
+from saitenka import otel_metrics
 from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
 from saitenka.runtime import EffectFinished, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, LocalJobLane, configure_lane
@@ -611,9 +612,21 @@ class SubtitleGeometryWorker:
             return
         ticket = self._coordinator.bind(reservation, request)
         if ticket is None:
+            # `bind` refuses on a moved fence, which is the one way a current request is dropped
+            # without either publishing or failing.
+            with otel_metrics.traced("subtitle_geometry_lane") as span:
+                span.set("outcome", "fence-moved")
+                span.set("timestamp_ms", request.timestamp_ms)
             self._finish_current(published=False)
             return
         cached = self._cached(ticket.request)
+        # The result cache, distinct from the prefetch map `subtitle_geometry_cache` reports. Its
+        # key includes `timestamp_ms`, so a cue re-requested at a different instant within itself
+        # misses and re-renders — invisible until this span, because a hit simply skips the render.
+        with otel_metrics.traced("subtitle_geometry_lane") as span:
+            span.set("outcome", "cached" if cached is not None else "rendering")
+            span.set("timestamp_ms", request.timestamp_ms)
+            span.set("result_cache_entries", len(self._cache))
         if cached is not None:
             published = self._coordinator.publish(ticket, cached)
             with self._condition:

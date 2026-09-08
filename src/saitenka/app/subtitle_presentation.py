@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from saitenka import otel_metrics
 from saitenka.app import geometry_refresh, native_subtitles
 from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import configure_runtime_job as configure_geometry_lane
@@ -69,8 +70,14 @@ def boxes_for(tokens: list[Token], boxes: list[WordBox]) -> list[WordBox]:
 
     An index check, not an emptiness check — three boxes against six tokens is the same defect.
     Applied on write so drawing and hit testing cannot disagree.
+
+    A drop is counted: a silent filter turns a mispaired box into a missing one, which reads in a
+    bundle as geometry that never arrived.
     """
-    return [box for box in boxes if 0 <= box.index < len(tokens)]
+    kept = [box for box in boxes if 0 <= box.index < len(tokens)]
+    if len(kept) != len(boxes) and otel_metrics.subtitle_boxes_dropped is not None:
+        otel_metrics.subtitle_boxes_dropped.add(len(boxes) - len(kept))
+    return kept
 
 
 class CueRenderStore:

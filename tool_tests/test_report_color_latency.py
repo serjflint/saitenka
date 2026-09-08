@@ -256,3 +256,33 @@ def test_any_positive_box_count_counts_as_colored(boxes: int) -> None:
     shown = read([draw(0, "aa", 0), draw(25, "aa", boxes)])
 
     assert [item.wait for item in shown] == [25.0]
+
+
+def lane(ts_ms: float, outcome: str, timestamp_ms: int = 1_001) -> dict:
+    return {
+        "ph": "X",
+        "name": "subtitle_geometry_lane",
+        "ts": ts_ms * 1000.0,
+        "args": {"outcome": outcome, "timestamp_ms": timestamp_ms},
+    }
+
+
+def test_the_result_cache_outcome_is_reported_per_lane_job(tmp_path: Path) -> None:
+    """`rendering` outnumbering `cached` across repeat visits to a cue means its key is moving."""
+    bundle = tmp_path / "lane.zip"
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr(
+            "telemetry/trace.json",
+            json.dumps(
+                {
+                    "traceEvents": [
+                        draw(0, "aa", 0),
+                        lane(1, "rendering"),
+                        draw(10, "aa", 3),
+                        lane(20, "cached"),
+                    ]
+                }
+            ),
+        )
+
+    assert latency.main([str(bundle)]) == 0
