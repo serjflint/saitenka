@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from saitenka.app.intents import DismissHover
+from saitenka.app.intents import Announce, DismissHover
 
 
 class SessionCommand(StrEnum):
@@ -30,6 +30,10 @@ class SessionInputs:
     #: overlay is hidden at the moment this is read, so that question answers False for the wrong
     #: reason and the line never comes back.
     translation_wanted: bool = False
+    #: Which engine is drawing. Read so the toggle can name the state it is moving TO — the switch
+    #: is otherwise silent, and its only visible tell is that the legacy renderer paints a
+    #: semi-transparent background box, which a user has to already know to look for.
+    legacy_forced: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +80,7 @@ type SessionEffect = (
     | ToggleRenderer
     | ReportOverlayVisibility
     | DismissHover
+    | Announce
 )
 
 
@@ -103,8 +108,9 @@ def _toggle_overlay(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
     return (*restored, ReportOverlayVisibility(visible=True))
 
 
-def _toggle_renderer(_inputs: SessionInputs) -> tuple[SessionEffect, ...]:
-    return (ToggleRenderer(),)
+def _toggle_renderer(inputs: SessionInputs) -> tuple[SessionEffect, ...]:
+    engine = "mpv's own" if inputs.legacy_forced else "legacy"
+    return (ToggleRenderer(), Announce(f"subtitles: {engine} renderer"))
 
 
 _REDUCERS = {

@@ -630,4 +630,7 @@ def test_the_draw_names_which_engine_ran(monkeypatch, owner: str, path: str) -> 
 
     attrs = _spans_named(spans, "subtitle_draw")[0]
     assert attrs["path"] == path
-    assert attrs["tokens"] == len(request.boxes)
+    # The tokenizer's count, which is populated on BOTH engines. `request.boxes` is empty on the
+    # legacy path, so keying the count off it reported 0 for every legacy draw in a field trace.
+    assert attrs["tokens"] == sum(len(line) for line in request.lines)
+    assert attrs["tokens"] > 0
