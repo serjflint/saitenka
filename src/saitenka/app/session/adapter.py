@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import saitenka.app.session.intents as session_intents
-from saitenka.app.intents import DismissHover
+from saitenka.app.intents import Announce, DismissHover
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from saitenka.app.overlay import Overlay
     from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
     from saitenka.app.subtitle_render import SubtitleTarget
+    from saitenka.app.toast_controller import NotificationSink
 
     class OverlayVisibilityReporter(Protocol):
         def __call__(self, *, visible: bool) -> None: ...
@@ -34,6 +35,7 @@ class SessionCommandPorts:
     translation: TranslationController
     translation_inputs: Callable[[], TranslationInputs]
     toggle_renderer: Callable[[], object]
+    notifications: NotificationSink
     report_overlay_visibility: OverlayVisibilityReporter
     teardown_tip: Callable[[], None]
     subtitle_target: Callable[[], SubtitleTarget]
@@ -50,6 +52,7 @@ class SessionCommandCoordinator:
         return session_intents.SessionInputs(
             overlay_visible=ports.overlay.visible,
             translation_wanted=ports.translation.wanted(ports.translation_inputs()),
+            legacy_forced=ports.subtitle_pipeline.legacy_forced,
         )
 
     def apply(self, effect: session_intents.SessionEffect, /) -> None:
@@ -69,5 +72,7 @@ class SessionCommandCoordinator:
             ports.translation.reveal(ports.translation_inputs())
         elif isinstance(effect, session_intents.ToggleRenderer):
             ports.toggle_renderer()
+        elif isinstance(effect, Announce):
+            ports.notifications.show(effect.text, effect.kind)
         elif isinstance(effect, session_intents.ReportOverlayVisibility):
             ports.report_overlay_visibility(visible=effect.visible)

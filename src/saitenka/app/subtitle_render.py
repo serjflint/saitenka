@@ -294,12 +294,22 @@ def overprint_payload(
     calibration probe, and counting at each would report two or three times the cue's tokens, by a
     factor that changes with whether either of those ran.
     """
-    ladder = color_ladder(request, drifting=drifting)
-    if census and otel_metrics.subtitle_token_device is not None:
-        for device in ladder.devices:
-            otel_metrics.subtitle_token_device.add(1, {"device": device})
-    parts = (overprint.payload(list(ladder.paints)), decoration.payload(list(ladder.rules)))
-    return "\n".join(part for part in parts if part)
+    with otel_metrics.traced("subtitle_overprint_build") as span:
+        ladder = color_ladder(request, drifting=drifting)
+        if census and otel_metrics.subtitle_token_device is not None:
+            for device in ladder.devices:
+                otel_metrics.subtitle_token_device.add(1, {"device": device})
+        parts = (overprint.payload(list(ladder.paints)), decoration.payload(list(ladder.rules)))
+        drawing = "\n".join(part for part in parts if part)
+        span.set("census", census)
+        span.set("tokens", len(ladder.devices))
+        for device in ("overprint", "overpaint", "none"):
+            span.set(device, ladder.devices.count(device))
+        span.set("rules", len(ladder.rules))
+        # Events, not tokens: a spaced token is drawn one event per glyph, so the two diverge exactly
+        # when the per-glyph path runs. Nothing else reports whether it did.
+        span.set("events", len(drawing.splitlines()) if drawing else 0)
+        return drawing
 
 
 def _token_color(request: DrawRequest, index: int) -> int | None:
@@ -336,7 +346,16 @@ def overpaint_image(
     attachment gets its dialogue colored as text and its signs colored as pixels, in one frame —
     which is the whole reason the stand-down is per family rather than per track.
     """
-    return overpaint.compose(list(color_ladder(request, drifting=drifting).masks))
+    with otel_metrics.traced("subtitle_overpaint_compose") as span:
+        masks = list(color_ladder(request, drifting=drifting).masks)
+        image = overpaint.compose(masks)
+        span.set("masks", len(masks))
+        # Device 2 composites pixels where device 1 emits text, so its cost scales with area and its
+        # sibling span's with event count. Recording both is what makes the two legs comparable
+        # rather than lumped into one cue-redraw number.
+        span.set("pixels", 0 if image is None else int(image.rgba.shape[0] * image.rgba.shape[1]))
+        span.set("outcome", "empty" if image is None else "composed")
+        return image
 
 
 def _trace_overpaint_placement(request: DrawRequest, image: overpaint.Overpaint) -> None:
@@ -1141,6 +1160,29 @@ class NativeVisibleRenderer:
         # `set_visible(False)` does not cover it: without this, any redraw after `Alt+o` repainted
         # the token colors and the JLPT rules onto a session the user had just hidden, and they
         # stayed until a cue change happened to produce an empty payload.
+        # `path` is the only per-cue signal that separates the two engines. `subtitle_renderer_forced`
+        # counts the switch, once, so a session that ran entirely on the legacy renderer and one that
+        # never touched it differ by a single event — and neither carries what the draw cost.
+        with otel_metrics.traced("subtitle_draw") as span:
+            span.set("path", self._draw_path())
+            # The tokenizer's count, not `len(request.boxes)`. Measured boxes are usually absent on
+            # the legacy path and merely often present on the native one — 6 of 36 against 25 of 48
+            # in one session — so they count what geometry happened to have landed, not what the cue
+            # holds. A field trace read `tokens=0` for all 33 legacy draws before this.
+            span.set("tokens", sum(len(line) for line in request.lines))
+            span.set("measured_boxes", len(request.boxes))
+            return self._draw(request, surfaces, ipc, on_settled=on_settled)
+
+    def _draw_path(self) -> str:
+        if self._suspended:
+            return "suspended"
+        if self._state.owner == PixelOwner.LEGACY:
+            return "legacy"
+        return "native" if self._state.owner == PixelOwner.NATIVE else "unowned"
+
+    def _draw(
+        self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
+    ) -> DrawResult | None:
         if self._suspended:
             return None
         if self._state.owner == PixelOwner.LEGACY:
@@ -1199,8 +1241,15 @@ class NativeVisibleRenderer:
             return
         families = subtitle_calibration.payload_families(payload)
 
+        # Started before the submit, not inside the callback: what this has to price is mpv's own
+        # layout on its core thread, and the queue wait ahead of it is part of what the stall costs.
+        submitted_at = time.perf_counter()
+
         def finished(completion: EffectFinished) -> None:
-            self._record_drift(completion, measured, signature, families)
+            elapsed_ms = (time.perf_counter() - submitted_at) * 1000.0
+            if otel_metrics.subtitle_calibration_ms is not None:
+                otel_metrics.subtitle_calibration_ms.record(elapsed_ms)
+            self._record_drift(completion, measured, signature, families, elapsed_ms)
 
         # Marked only once the ask is actually in flight. Marking first burns the face set for the
         # session on a refused admission, so a real substituted-face drift on it is never measured.
@@ -1232,6 +1281,7 @@ class NativeVisibleRenderer:
         measured: tuple[int, int, int, int],
         signature: str,
         families: frozenset[str],
+        elapsed_ms: float,
     ) -> None:
         """A missing answer leaves the inference standing; a disagreeing one overrides it.
 
@@ -1261,6 +1311,9 @@ class NativeVisibleRenderer:
         )
         with otel_metrics.traced("subtitle_layout_drift") as span:
             span.set("signature", signature)
+            # This span's own duration is the arithmetic below, microseconds. The number worth having
+            # is how long mpv took to answer, which happened before the callback ran.
+            span.set("calibration_ms", round(elapsed_ms, 3))
             for name, value in zip(
                 ("measured_left", "measured_top", "measured_right", "measured_bottom"),
                 measured,

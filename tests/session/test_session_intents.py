@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from saitenka.app.intents import DismissHover
+import pytest
+
+from saitenka.app.intents import Announce, DismissHover
 from saitenka.app.session.intents import (
     ReleaseSecondarySubtitles,
     ReportOverlayVisibility,
@@ -76,4 +78,16 @@ def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
 
 
 def test_renderer_toggle_is_a_typed_session_effect() -> None:
-    assert reduce(SessionCommand.TOGGLE_RENDERER, SessionInputs()) == (ToggleRenderer(),)
+    assert reduce(SessionCommand.TOGGLE_RENDERER, SessionInputs())[0] == ToggleRenderer()
+
+
+@pytest.mark.parametrize(("drawing_now", "engine"), [("native", "legacy"), ("legacy", "mpv's own")])
+def test_the_renderer_toggle_names_the_engine_it_switches_to(drawing_now: str, engine: str) -> None:
+    """The switch was silent. Its only tell on screen is that the legacy renderer paints a
+    semi-transparent background box behind the cue — which a user has to already know to look for,
+    and which says nothing at all if you were already on legacy. Every other toggle here announces."""
+    effects = reduce(
+        SessionCommand.TOGGLE_RENDERER, SessionInputs(legacy_forced=drawing_now == "legacy")
+    )
+
+    assert Announce(f"subtitles: {engine} renderer") in effects

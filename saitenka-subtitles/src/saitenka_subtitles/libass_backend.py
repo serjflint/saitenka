@@ -29,7 +29,11 @@ from saitenka_subtitles.geometry import (
     TokenGeometry,
 )
 from saitenka_subtitles.telemetry import (
+    EXTRACT_COLLECT_MS,
+    EXTRACT_COVERAGE_MS,
     EXTRACT_MS,
+    EXTRACT_OWNERS_MS,
+    EXTRACT_VALIDATE_MS,
     RENDER_MS,
     RENDERER_BUILD_MS,
     NullTelemetry,
@@ -263,13 +267,19 @@ def extract_token_geometry(
     request: GeometryRequest,
     *,
     keep_coverage: bool = False,
+    telemetry: GeometryTelemetry | None = None,
 ) -> tuple[TokenGeometry, ...]:
     """Recover every requested token from public character-image layers.
 
     `keep_coverage` also keeps the anti-aliased mask each token was measured from, which is what the
     raster device paints when the text device cannot reach the face. Off by default: a snapshot that
     carries masks nobody will tint is bytes crossing a thread for nothing.
+
+    `telemetry` splits this function's own cost four ways. It is ~99% of a geometry render — libass's
+    render is ~0.1 ms against ~12 ms here — so one number for it said only "the slow part is ours",
+    which is not an answer anyone can act on. Optional so every existing caller is unchanged.
     """
+    sink = telemetry or NullTelemetry()
     palette = {
         entry.rgb: (
             index,
@@ -288,13 +298,27 @@ def extract_token_geometry(
         for index, entry in enumerate(request.palette, start=1)
     }
     reserved = set(request.reserved_rgb)
+    # Frame-sized and zeroed on every render: 1920x1080 is ~2M entries, 4 MB, per cue. Timed apart
+    # because an allocation that scales with the FRAME rather than with the cue is a different
+    # problem from a loop that scales with the ink, and one number could not tell them apart.
+    started = time.perf_counter_ns()
     owners = array("H", [0]) * (request.frame_size[0] * request.frame_size[1])
+    sink.record(EXTRACT_OWNERS_MS, (time.perf_counter_ns() - started) / 1_000_000)
+
     bounds: dict[_TokenKey, list[int]] = {}
     segments: dict[_TokenKey, list[Rect]] = defaultdict(list)
+    started = time.perf_counter_ns()
     for layer in result.layers:
         _collect_layer(layer, palette, reserved, owners, request.frame_size, bounds, segments)
+    sink.record(EXTRACT_COLLECT_MS, (time.perf_counter_ns() - started) / 1_000_000)
+
+    started = time.perf_counter_ns()
     ordered = _validate_token_pixels(palette, bounds)
+    sink.record(EXTRACT_VALIDATE_MS, (time.perf_counter_ns() - started) / 1_000_000)
+
+    started = time.perf_counter_ns()
     masks = _token_coverage(result.layers, palette, bounds) if keep_coverage else {}
+    sink.record(EXTRACT_COVERAGE_MS, (time.perf_counter_ns() - started) / 1_000_000)
     return tuple(
         _token_geometry(key, bounds[key], segments[key], masks.get(key, b"")) for key in ordered
     )
@@ -620,7 +644,12 @@ class LibassGeometryBackend:
             started = time.perf_counter_ns()
             tokens = self._anchored(
                 request,
-                extract_token_geometry(result, request, keep_coverage=request.keep_coverage),
+                extract_token_geometry(
+                    result,
+                    request,
+                    keep_coverage=request.keep_coverage,
+                    telemetry=self._telemetry,
+                ),
             )
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("extract_ms", extract_ms)

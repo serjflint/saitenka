@@ -4376,3 +4376,36 @@ def test_boxes_are_laid_out_in_the_surface_they_are_drawn_onto(
     assert framed, "no decision reached the frame branch"
     assert {(s["frame_width"], s["frame_height"]) for s in framed} == {surface}
     result.close()
+
+
+def test_the_calibration_round_trip_is_timed_not_just_its_arithmetic(tmp_path: Path) -> None:
+    """`compute_bounds` makes mpv lay the payload out on its core thread, and that stall was the one
+    OSD-side cost with no number — the `subtitle_layout_drift` span measures the arithmetic after the
+    answer arrives, which is microseconds. Every other span in the draw path times OUR side, so
+    without this the measuring renderer looks expensive purely by being the only one instrumented."""
+    from util import record_spans
+
+    import saitenka.otel_metrics as om
+
+    with pytest.MonkeyPatch.context() as patch:
+        spans = record_spans(patch)
+        recorded: list[float] = []
+        patch.setattr(
+            om,
+            "subtitle_calibration_ms",
+            type("H", (), {"record": lambda _s, v: recorded.append(v)})(),
+        )
+        result, ipc, _backend = reader(
+            tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+        )
+        ipc.props["pause"] = True
+        ipc.osd_bounds = osd_box(right=10.0)
+
+        result.graph.cue.set_subtitle("猫を見る")
+        settle_jobs(result, ipc)
+
+        drift = [s["attrs"] for s in spans if s["name"] == "subtitle_layout_drift"]
+        assert drift, "the calibration never completed"
+        assert drift[0]["calibration_ms"] >= 0.0
+        assert recorded, "the histogram was never recorded"
+        result.close()
