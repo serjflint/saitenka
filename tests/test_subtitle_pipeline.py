@@ -493,6 +493,48 @@ def test_a_render_identity_change_still_discards_the_lookahead() -> None:
     worker.close()
 
 
+def test_a_current_result_dropped_mid_render_leaves_the_cue_with_no_retry() -> None:
+    """The reproduction for a cue that stays unscannable for its whole life.
+
+    `bind` and `publish` both refuse once the generation has moved, so a result finished while the
+    fence moved underneath is discarded — counted as superseded, reported as no failure, and
+    nothing re-drives it. The drop window is exactly the render's own duration, which is why the
+    field showed the same cue failing and succeeding on different showings: the showing that
+    *worked* was answered from cache and never entered the window at all.
+
+    This asserts the behaviour as it stands. It is not the contract we want; see the wait-to-color
+    readout, where a cue was drawn six times over 1.2 s and never once carried a box.
+    """
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+
+    assert worker.submit(request(coordinator.generation, 1_300))
+    assert backend.entered.wait(1)
+    coordinator.invalidate()  # a reconcile lands while libass is still running
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert coordinator.current is None  # the finished render went nowhere
+    assert (worker.stats.superseded, worker.stats.failures) == (1, 0)
+    worker.close()
+
+
+def test_a_cached_answer_never_enters_the_drop_window() -> None:
+    """The other half of the same comparison: served from the cache, the publish is synchronous
+    with the submit, so no fence can move between them."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    assert worker.submit(request(coordinator.generation, 1_300)) and worker.wait_idle()
+    coordinator.invalidate()
+
+    assert worker.submit(request(coordinator.generation, 1_300)) and worker.wait_idle()
+
+    assert coordinator.current is not None
+    assert worker.stats.cache_hits == 1
+    worker.close()
+
+
 def test_worker_drops_prefetch_invalidated_during_backend_render() -> None:
     backend = BlockingBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
