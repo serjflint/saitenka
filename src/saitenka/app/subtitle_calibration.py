@@ -51,10 +51,18 @@ if TYPE_CHECKING:
 
     from saitenka.app.subtitles import WordBox
 
-#: The face and size of each drawn token, which is what decides whether the two renderers can agree.
-#: Positions are deliberately excluded: they are ours in both renders, so a cue that moved but kept
-#: its faces is the same question and must not pay for a second stall.
-_FACE = re.compile(r"\\fn(?P<family>[^\\}]*)\\fs(?P<size>[0-9.]+)")
+#: The face and size of each drawn token, which is what decides whether the two renderers can agree —
+#: plus the run tags that follow, because weight and slant SELECT A DIFFERENT FONT FILE. A payload
+#: whose only change is `\b1` asks a genuinely different question, and without them here a cached
+#: "agrees" earned by the regular run suppresses the check on the bold one, whose substituted bold
+#: face is exactly what this module exists to catch.
+#:
+#: Positions are still excluded: they are ours in both renders, so a cue that moved but kept its
+#: faces is the same question and must not pay for a second stall.
+_FACE = re.compile(
+    r"\\fn(?P<family>[^\\}]*)\\fs(?P<size>[0-9.]+)"
+    r"(?P<run>(?:\\(?:fsp-?[0-9.]+|fscx[0-9.]+|b1|i1))*)"
+)
 
 #: Frame pixels on any one edge. A separator between the two measured classes (0 and 29), not a
 #: tolerance derived from one of them — see the module docstring for why the exact value does not
@@ -67,17 +75,31 @@ DRIFT_EPSILON_PX = 4.0
 #: `mask = (1 << tile_order) - 1`) while leaving its origin exact, so the reported box overshoots our
 #: ink union on the right and bottom by up to one tile and never on the left or top.
 #:
-#: One tile is 16 px: `ass_bitmap_engine.c` picks `tile_order = 5` only under `CONFIG_LARGE_TILES`,
-#: which both meson and autoconf default OFF. Measured across 45 run×size combinations (5 runs,
-#: sizes 20–145) against the installed mpv: worst right 15, worst bottom 16, and single-glyph boxes
-#: come back as exact multiples of 16.
+#: `ass_bitmap_engine.c` picks `tile_order = 5` only under `CONFIG_LARGE_TILES`, which both meson and
+#: autoconf default OFF, putting a tile at 16 px. Treat that as the mechanism, not the bound: two
+#: sweeps measured the overshoot directly and the larger one exceeds a tile. Against the installed
+#: mpv, 45 run×size combinations: worst right 15, worst bottom 16. Against libasslite on the pinned
+#: face, 5760 unclipped bitmaps over sizes 12–299 and four run shapes: worst right 17, worst bottom
+#: 17, worst left and top 1.
 #:
-#: This bound must stay well under the substituted-face signal it has to let through (~29 px, below),
-#: which a full 32 swallowed whole: every positive drift up to 36 px read as agreement, disabling the
+#: So what has to hold is a band, not this constant alone: `TILE_PADDING_PX + DRIFT_EPSILON_PX` is
+#: what a padded edge actually accepts — 20 px, covering the measured 17 with 3 to spare — and it
+#: has to stay clear of the substituted-face signal at 29. `ACCEPT_BAND_PX` pins both ends, because
+#: 24 here would leave the band one pixel from that class and every test still passed.
+#:
+#: A full 32 swallowed it whole: every positive drift up to 36 px read as agreement, disabling the
 #: verdict for the case it exists to catch. Erring tight is the safe direction — an over-tight bound
 #: demotes a cue to a device that colors it correctly and more plainly, while an over-loose one
 #: leaves the color on substitute glyph shapes, which no user can report.
 TILE_PADDING_PX = 16.0
+
+#: The largest right/bottom overshoot either sweep above produced. The accept band must cover it, or
+#: cues the two renderers agree on demote for allocation they cannot help.
+MEASURED_PADDING_CEILING_PX = 17.0
+
+#: The 29 px class this must never reach. Not a tolerance — the separator argument in the module
+#: docstring rests on the band staying below it by a margin, not merely under it.
+SUBSTITUTED_FACE_DRIFT_PX = 29.0
 
 
 def _edge_error(delta: float, *, padded: bool) -> float:

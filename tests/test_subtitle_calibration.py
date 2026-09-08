@@ -45,6 +45,21 @@ def test_a_different_face_or_size_is_a_different_question() -> None:
         ) != subtitle_calibration.payload_signature(PAYLOAD, (1920, 1080))  # fmt: skip
 
 
+def test_weight_and_slant_make_it_a_different_question() -> None:
+    r"""`\b1` selects a different font FILE, so a payload that differs only by it is asking whether
+    a face the first payload never used lays out the same — which is the substitution this module
+    exists to catch. Keyed on face and size alone, the cached "agrees" from the regular run
+    suppressed the check on the bold one entirely."""
+    plain = PAYLOAD.replace("\\fs48", "\\fs48")
+    styled = PAYLOAD.replace("\\fs48", "\\fs48\\fscx50\\b1\\i1")
+
+    assert subtitle_calibration.payload_signature(
+        styled, (1920, 1080)
+    ) != subtitle_calibration.payload_signature(plain, (1920, 1080))  # fmt: skip
+    # The families still resolve out of the widened match, or every verdict would name nothing.
+    assert subtitle_calibration.payload_families(styled) == {"arial"}
+
+
 def test_a_payload_with_no_text_asks_nothing() -> None:
     """The focus highlight alone is a vector drawing with no face in it — nothing to calibrate, and
     a call that stalled mpv to measure a rectangle we drew ourselves would be pure cost."""
@@ -137,14 +152,21 @@ def test_a_substituted_face_demotes_whichever_way_it_moved_the_far_edge(
     assert drift.agrees is False
 
 
-def test_the_padding_allowance_cannot_swallow_the_signal_it_sits_next_to() -> None:
-    """The allowance and the class it must let through are one argument, not two constants.
+def test_the_accept_band_on_a_padded_edge_covers_the_measured_padding_and_stays_clear_of_the_signal() -> (
+    None
+):
+    """What a padded edge accepts is `TILE_PADDING_PX + DRIFT_EPSILON_PX`, and it is squeezed from
+    both sides — so pin both, not just one.
 
-    A tile of padding is discounted on the far edges; a substituted face reads 29 px. If the
-    allowance ever grows to within an epsilon of that, the discount silently eats the signal — so
-    the gap between them is asserted here rather than left to whoever next edits either number.
+    Below the measured overshoot, cues the two renderers agree on demote for allocation they cannot
+    help. Near the substituted-face class, the discount eats the signal the module exists to catch.
+    A one-sided `band < 29` is not enough: it passes at 24 + 4 = 28, one pixel from that class, and
+    the whole suite stayed green there.
     """
-    assert subtitle_calibration.TILE_PADDING_PX + subtitle_calibration.DRIFT_EPSILON_PX < 29.0
+    band = subtitle_calibration.TILE_PADDING_PX + subtitle_calibration.DRIFT_EPSILON_PX
+
+    assert band >= subtitle_calibration.MEASURED_PADDING_CEILING_PX
+    assert subtitle_calibration.SUBSTITUTED_FACE_DRIFT_PX - band >= 7.0
 
 
 def test_the_two_readings_a_real_session_produced_land_on_opposite_verdicts() -> None:

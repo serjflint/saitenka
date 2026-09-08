@@ -159,23 +159,27 @@ def test_a_glyph_offset_is_where_it_sits_in_the_run_minus_where_it_sits_alone() 
 
     A glyph 80px into its token that lands 2px right of its own anchor when drawn by itself must be
     anchored at +78, so its ink lands back at +80.
+
+    The y offsets differ per glyph and differ between the two rows on purpose. Giving every glyph the
+    same y made `glyph_dy` come out `(0, 0, 0)` whichever way the subtraction ran, so the vertical
+    arithmetic was unpinned while the horizontal one looked tested.
     """
     layout = probe_document(_SPACED, range(0x010000, 0x010010), (640, 360))
     row = next(slot.anchor for slot in layout.slots if not slot.alone)
     alone = [slot.anchor for slot in layout.slots if slot.alone]
     measured = [
         (0, row[0] + 0, row[1] + 5, 30, 30),
-        (1, row[0] + 40, row[1] + 5, 30, 30),
-        (2, row[0] + 80, row[1] + 5, 30, 30),
+        (1, row[0] + 40, row[1] + 7, 30, 30),
+        (2, row[0] + 80, row[1] + 4, 30, 30),
         (3, alone[0][0] + 0, alone[0][1] + 5, 30, 30),
-        (4, alone[1][0] + 1, alone[1][1] + 5, 30, 30),
-        (5, alone[2][0] + 2, alone[2][1] + 5, 30, 30),
+        (4, alone[1][0] + 1, alone[1][1] + 2, 30, 30),
+        (5, alone[2][0] + 2, alone[2][1] + 9, 30, 30),
     ]
 
     fragment = fragments_from(measured, _SPACED, layout)[0]
 
     assert fragment.glyph_dx == (0, 39, 78)
-    assert fragment.glyph_dy == (0, 0, 0)
+    assert fragment.glyph_dy == (0, 5, -5)
 
 
 def test_a_spaced_token_missing_one_glyph_is_dropped_whole() -> None:

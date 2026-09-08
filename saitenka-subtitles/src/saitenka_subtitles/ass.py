@@ -517,34 +517,48 @@ def _effective_run_style(
     blocks: Sequence[_OverrideBlock],
     raw_offset: int,
 ) -> tuple[float, float, bool, bool]:
-    spacing, scale_x, bold, italic = catalog.run_style(source.style)
+    active_style = source.style
+    spacing, scale_x, bold, italic = catalog.run_style(active_style)
     for block in blocks:
         if block.start >= raw_offset:
             break
         for command in _RUN_STATE.finditer(block.content):
             if command.group("reset"):
-                spacing, scale_x, bold, italic = catalog.run_style(
-                    command.group("style").strip() or source.style
-                )
+                # `\rStyle` re-bases the run on that style, so a later bare `\b` resets to IT and
+                # not to the event's own. Reading the event's style here made `{\rBolded\b}` come
+                # back regular while libass drew it bold.
+                active_style = command.group("style").strip() or source.style
+                spacing, scale_x, bold, italic = catalog.run_style(active_style)
                 continue
             field = command.group("field")
             raw_value = command.group("value")
-            authored = catalog.run_style(source.style)
+            authored = catalog.run_style(active_style)
             if field == "fsp":
                 spacing = float(raw_value) if raw_value is not None else authored[0]
             elif field == "fscx":
                 scale_x = float(raw_value) if raw_value is not None else authored[1]
             elif field == "b":
-                # `\b1` is bold and `\b700` is a weight; libass treats anything from 600 up as bold
-                # and a bare `\b` as a reset to the style.
-                bold = (
-                    authored[2]
-                    if raw_value is None
-                    else (float(raw_value) == 1 or float(raw_value) >= 600)
-                )
+                bold = _bold_from_tag(raw_value, authored=authored[2])
             else:
-                italic = authored[3] if raw_value is None else float(raw_value) != 0
+                # `ass_parse.c`: any value but 0 or 1 — and a bare tag — resets to the style.
+                italic = authored[3] if raw_value not in {"0", "1"} else raw_value == "1"
     return spacing, scale_x, bold, italic
+
+
+def _bold_from_tag(raw_value: str | None, *, authored: bool) -> bool:
+    r"""What `\b<value>` leaves the run's weight as, following libass rather than approximating it.
+
+    `ass_parse.c`: `if (!nargs || !(val == 0 || val == 1 || val >= 100)) val = style->Bold;` — so a
+    bare tag, and any value between 2 and 99, reset to the style rather than reading as a weight.
+    Treating those as "not bold" made `\b2` on a bold style come back regular. Above 100 the value
+    is a real weight, and 600 is where it starts selecting a bold face.
+    """
+    if raw_value is None:
+        return authored
+    value = float(raw_value)
+    if value in {0.0, 1.0}:
+        return value == 1.0
+    return value >= 600 if value >= 100 else authored
 
 
 def _effective_color(
