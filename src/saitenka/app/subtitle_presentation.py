@@ -59,21 +59,24 @@ class CueRenderState:
     origin: tuple[int, int] = (0, 0)
 
 
-def paintable_boxes(state: CueRenderState) -> list[WordBox]:
-    """``state``'s boxes, or none when there are no tokens to put them on.
+def boxes_for(tokens: list[Token], boxes: list[WordBox]) -> list[WordBox]:
+    """Only the boxes that index a token ``tokens`` actually has.
 
-    A `DrawRequest` takes its identity from `playback.cue.text` and its content from this store, and
-    the two are written by different owners at different times: mpv's `sub-text` property lands on
-    playback state as soon as it is observed, while this store is rewritten by `set_subtitle`. In
-    the gap -- reliably reached by a `sub-seek`, where mpv re-reports a transient mid-seek value
-    before the real cue -- a draw pairs one cue's text with another cue's boxes.
+    A box exists because a token was measured, so the pairing is the invariant — and it is the one
+    `TooltipController.hit` depends on: it indexes `tokens` by whatever box answers a click, so a
+    box pointing past the list is a crash, or a hit region over another cue's word.
 
-    The field trace shows the result: a draw carrying `tokens=0, measured_boxes=3`, the three boxes
-    belonging to the cue that had just left. Boxes with no tokens can never paint anything, so
-    withholding them costs nothing and removes the incoherent pair. It is a guard, not the repair:
-    the two owners still need one clock, and until they have one this keeps the mismatch off screen.
+    It gets violated because a `DrawRequest` takes its identity from `playback.cue.text`, written
+    the moment mpv's `sub-text` is observed, and its content from this store, rewritten by
+    `set_subtitle`. A `sub-seek` lands between them — mpv re-reports a transient mid-seek value —
+    and geometry measured for the cue that left is published against the one that arrived. The
+    field trace caught it as `tokens=0` beside `measured_boxes=3`.
+
+    Applied where the state is written rather than where it is read, so hit testing and drawing get
+    one answer instead of each having to remember to ask. An emptiness check would not do: three
+    boxes against six tokens is the same defect with nothing empty about it.
     """
-    return state.boxes if state.lines else []
+    return [box for box in boxes if 0 <= box.index < len(tokens)]
 
 
 class CueRenderStore:
@@ -99,7 +102,7 @@ class CueRenderStore:
             lines=cue.lines,
             tokens=cue.tokens,
             styles=cue.styles,
-            boxes=state.boxes,
+            boxes=boxes_for(cue.tokens, state.boxes),
             origin=state.origin,
         )
 
@@ -112,13 +115,14 @@ class CueRenderStore:
     ) -> None:
         """Replace selected derived cue facts while preserving one atomic state value."""
         state = self._current
+        replaced = state.tokens if tokens is _UNCHANGED else cast("list[Token]", tokens)
         self._current = CueRenderState(
             lines=state.lines if lines is _UNCHANGED else cast("list[list[Token]]", lines),
-            tokens=state.tokens if tokens is _UNCHANGED else cast("list[Token]", tokens),
+            tokens=replaced,
             styles=(
                 state.styles if styles is _UNCHANGED else cast("list[TokenStyle] | None", styles)
             ),
-            boxes=state.boxes,
+            boxes=boxes_for(replaced, state.boxes),
             origin=state.origin,
         )
 
@@ -128,7 +132,9 @@ class CueRenderStore:
 
     def publish_geometry(self, boxes: list[WordBox], origin: tuple[int, int]) -> None:
         state = self._current
-        self._current = CueRenderState(state.lines, state.tokens, state.styles, boxes, origin)
+        self._current = CueRenderState(
+            state.lines, state.tokens, state.styles, boxes_for(state.tokens, boxes), origin
+        )
 
     def replace_geometry(
         self,
@@ -142,7 +148,10 @@ class CueRenderStore:
             state.lines,
             state.tokens,
             state.styles,
-            state.boxes if boxes is _UNCHANGED else cast("list[WordBox]", boxes),
+            boxes_for(
+                state.tokens,
+                state.boxes if boxes is _UNCHANGED else cast("list[WordBox]", boxes),
+            ),
             state.origin if origin is _UNCHANGED else cast("tuple[int, int]", origin),
         )
 

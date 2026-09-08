@@ -10,12 +10,7 @@ from typing import TYPE_CHECKING
 from saitenka_tokenize.languages import SECOND_LANG
 
 from saitenka import otel_metrics
-from saitenka.app import (
-    native_subtitles,
-    subtitle_modes,
-    subtitle_presentation,
-    subtitle_raster,
-)
+from saitenka.app import native_subtitles, subtitle_modes, subtitle_raster
 from saitenka.app.features.annotation.annotation_controller import AnnotationInputs
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.runtime import CueCommandState
@@ -298,7 +293,7 @@ class CueCoordinator:
             hover=tooltip.selected,
             hover_span=tooltip.metadata.span,
             styles=o.presentation.cue.current.styles,
-            boxes=subtitle_presentation.paintable_boxes(o.presentation.cue.current),
+            boxes=o.presentation.cue.current.boxes,
             paused=bool(o.playback.value("pause")),
         )
 

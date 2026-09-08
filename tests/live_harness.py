@@ -47,7 +47,31 @@ class MiniDS:
         return
 
 
-def make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
+#: One cue for the whole clip is the wrong shape for anything about *transitions*, and this harness
+#: only had that. Every cue-boundary defect chased through report bundles -- geometry landing after
+#: its cue left, a lookahead that never held the target, boxes drawn against the successor -- needs
+#: at least two cues, and needs their boundaries to touch, because that is the case where the
+#: successor arrives in the frame the predecessor ends.
+#:
+#: Taken from the field: the middle cue is the one that came back unscannable, and the two around it
+#: are the ones whose tokens the tokenizer skips entirely, so they own no box and can never explain
+#: away a missing one.
+BOUNDARY_CUES: tuple[tuple[float, float, str], ...] = (
+    (0.5, 2.5, "♬～"),
+    (2.5, 5.0, "犬…　かな？"),
+    (5.0, 7.5, "♬～"),
+)
+
+
+def _srt_timestamp(seconds: float) -> str:
+    whole = int(seconds)
+    return f"{whole // 3600:02d}:{whole // 60 % 60:02d}:{whole % 60:02d},{round(seconds % 1 * 1000):03d}"
+
+
+def make_clip_and_sub(
+    tmp: Path, cues: tuple[tuple[float, float, str], ...] | None = None
+) -> tuple[Path, Path]:
+    """A navy clip and a subtitle file. ``cues`` overrides the single demo line with real timings."""
     clip = tmp / "clip.mp4"
     subprocess.run(
         [
@@ -65,12 +89,27 @@ def make_clip_and_sub(tmp: Path) -> tuple[Path, Path]:
         capture_output=True,
     )
     srt = tmp / "line.srt"
-    srt.write_text(f"1\n00:00:00,000 --> 00:00:08,000\n{DEMO_LINE}\n", encoding="utf-8")
+    if cues is None:
+        srt.write_text(f"1\n00:00:00,000 --> 00:00:08,000\n{DEMO_LINE}\n", encoding="utf-8")
+        return clip, srt
+    srt.write_text(
+        "\n".join(
+            f"{index}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{text}\n"
+            for index, (start, end, text) in enumerate(cues, start=1)
+        ),
+        encoding="utf-8",
+    )
     return clip, srt
 
 
 @contextmanager
-def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None = None):
+def live_reader(
+    *,
+    paused: bool = True,
+    dict_set=None,
+    config_dir: Path | None = None,
+    cues: tuple[tuple[float, float, str], ...] | None = None,
+):
     """A live mpv window with the demo cue loaded and a :class:`SessionController` observing it. ``paused=False``
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
     ``frame-drop-count`` / ``vo-delayed-frame-count`` movement (the smoke tests keep it paused).
@@ -91,7 +130,7 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
         pytest.skip("mpv not found")
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-live-"))
-    clip, srt = make_clip_and_sub(tmp)
+    clip, srt = make_clip_and_sub(tmp, cues)
     sock = default_ipc_path(tmp.name)
     proc = subprocess.Popen(
         [
@@ -120,6 +159,10 @@ def live_reader(*, paused: bool = True, dict_set=None, config_dir: Path | None =
         )
         reader.start()
         reader.graph.subtitle_navigation.load_index(srt)
+        if cues is not None:
+            # A multi-cue file starts before its first cue, so nothing is on screen yet and the wait
+            # below would time out on an empty overlay rather than on a real failure.
+            ipc.command("seek", str(cues[0][0] + 0.1), "absolute")
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
             reader.pump()

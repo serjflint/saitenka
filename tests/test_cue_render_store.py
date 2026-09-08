@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from saitenka_tokenize.japanese import Token
 
-from saitenka.app.subtitle_presentation import CueRenderStore, paintable_boxes
+from saitenka.app.subtitle_presentation import CueRenderStore
 from saitenka.app.subtitles import WordBox
 from saitenka.app.token_cache import TokenizedCue
 
@@ -58,17 +58,18 @@ def box(index: int) -> WordBox:
     return WordBox(index, 10 * index, 20, 30, 40)
 
 
-def test_boxes_do_not_reach_a_draw_of_a_cue_with_no_tokens() -> None:
-    """`♬～` is two characters the tokenizer skips entirely, so it has no token to carry a box.
-    Three boxes against it are `犬… かな？`'s, and painting them would put hit regions over a cue
-    that does not own them."""
+def test_a_box_cannot_survive_the_tokens_it_indexes() -> None:
+    """`TooltipController.hit` indexes `tokens` by whatever box answers a click, so a box pointing
+    past the list is a crash or a hit region over another cue's word. Enforced where the state is
+    written, so hit-testing and drawing get one answer rather than each remembering to ask."""
     store = CueRenderStore()
     store.install_tokenized(tokenized("犬", "かな"))
-    store.publish_geometry([box(0), box(1), box(2)], (0, 0))
+    store.publish_geometry([box(0), box(1)], (0, 0))
+    assert store.current.boxes == [box(0), box(1)]
+
     store.replace_tokenized(lines=[], tokens=[])  # the successor arrives with nothing to annotate
 
-    assert store.current.boxes, "the store still holds them; only the draw is denied"
-    assert paintable_boxes(store.current) == []
+    assert store.current.boxes == []
 
 
 def test_boxes_reach_the_draw_of_the_cue_that_owns_them() -> None:
@@ -78,7 +79,19 @@ def test_boxes_reach_the_draw_of_the_cue_that_owns_them() -> None:
     store.install_tokenized(tokenized("犬", "かな"))
     store.publish_geometry([box(0), box(1)], (0, 0))
 
-    assert paintable_boxes(store.current) == [box(0), box(1)]
+    assert store.current.boxes == [box(0), box(1)]
+
+
+def test_a_box_indexing_past_the_current_tokens_is_dropped_at_publish() -> None:
+    """Geometry measured for a longer cue, published against a shorter one. The index guard is the
+    general form: the field case had zero tokens, but three tokens against six is the same defect
+    and no emptiness check would see it."""
+    store = CueRenderStore()
+    store.install_tokenized(tokenized("犬"))
+
+    store.publish_geometry([box(0), box(1), box(2)], (0, 0))
+
+    assert store.current.boxes == [box(0)]
 
 
 def test_a_cue_with_tokens_and_no_geometry_yet_is_simply_uncoloured() -> None:
@@ -86,7 +99,7 @@ def test_a_cue_with_tokens_and_no_geometry_yet_is_simply_uncoloured() -> None:
     store = CueRenderStore()
     store.install_tokenized(tokenized("犬", "かな"))
 
-    assert paintable_boxes(store.current) == []
+    assert store.current.boxes == []
 
 
 def test_the_reset_a_cue_change_runs_clears_both_halves_together() -> None:

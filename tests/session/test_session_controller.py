@@ -3083,8 +3083,10 @@ def test_panel_cache_lru_eviction_not_wholesale_clear(make_session):
     for i in range(r.graph.tooltip.cache_limit):
         r.graph.tooltip.surface_state().panel_cache.setdefault(f"key_{i}", sentinel)
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    # Tokens first: a box exists because a token was measured, and the store drops a box that
+    # indexes a token the cue does not have. Reversed, this builds a state the runtime never reaches.
     r.graph.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
+    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
     Driver(r).move_to_word(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
     assert (
