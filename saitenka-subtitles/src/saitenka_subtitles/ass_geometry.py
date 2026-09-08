@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_subtitles.ass import (
     AssStyleCatalog,
+    TokenColor,
     UnsupportedAssEvent,
     allocate_token_colors,
     ass_soft_break,
@@ -19,6 +20,7 @@ from saitenka_subtitles.ass import (
     rewrite_ass_event,
     serialize_ass_event_line,
     source_primary_bgr_colors,
+    token_run_styles,
 )
 from saitenka_subtitles.document import (
     AnnotatedSubtitleEvent,
@@ -98,6 +100,45 @@ def _token_faces(
         style = by_name.get(source.style)
         faces[source.identity] = ("", 0.0) if style is None else (style.font_name, style.font_size)
     return faces
+
+
+def _token_run_styles(
+    events: Sequence[AnnotatedSubtitleEvent], catalog: AssStyleCatalog
+) -> dict[tuple[SubtitleEventId, int], tuple[float, float, bool, bool]]:
+    r"""``(spacing, scale_x, bold, italic)`` per token, spacing in the document's script units.
+
+    Keyed by token and not by event, unlike the face: ``\fscx`` and ``\fsp`` are ordinary inline
+    tags, and a cue that alternates them between its words and its punctuation is normal typesetting
+    rather than a refusal.
+    """
+    resolved: dict[tuple[SubtitleEventId, int], tuple[float, float, bool, bool]] = {}
+    for event in events:
+        identity = event.decoded.source.identity
+        for token_index, run in token_run_styles(event, catalog).items():
+            resolved[identity, token_index] = run
+    return resolved
+
+
+def _palette_entry(
+    item: TokenColor,
+    face: tuple[str, float],
+    text: str,
+    run: tuple[float, float, bool, bool] | None,
+) -> GeometryPaletteEntry:
+    """One palette entry, with libass's own defaults for a token that resolved no run style."""
+    spacing, scale_x, bold, italic = (0.0, 100.0, False, False) if run is None else run
+    return GeometryPaletteEntry(
+        item.event_id,
+        item.token_index,
+        _bgr_to_rgb(item.bgr),
+        face[0],
+        face[1],
+        text,
+        spacing,
+        scale_x,
+        bold=bold,
+        italic=italic,
+    )
 
 
 def _bgr_to_rgb(color: int) -> int:
@@ -379,18 +420,18 @@ def prepare_ass_hit_map_frame(
         track_id, tuple(event.decoded.source.identity for event in annotated)
     )
     faces = _token_faces(annotated, parsed.catalog)
+    runs = _token_run_styles(annotated, parsed.catalog)
     return PreparedAssFrame(
         encoded,
         frame_id,
         annotated,
         semantic_text,
         tuple(
-            GeometryPaletteEntry(
-                item.event_id,
-                item.token_index,
-                _bgr_to_rgb(item.bgr),
-                *faces.get(item.event_id, ("", 0.0)),
+            _palette_entry(
+                item,
+                faces.get(item.event_id, ("", 0.0)),
                 _token_surface(normalized, tokens, item.token_index),
+                runs.get((item.event_id, item.token_index)),
             )
             for item in colors
         ),

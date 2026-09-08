@@ -14,8 +14,11 @@ from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, Subtit
 from saitenka_subtitles.fragments import (
     ROW_PITCH,
     FragmentRequest,
+    ProbeLayout,
     fragments_from,
+    probe_colour_count,
     probe_document,
+    probe_rows,
 )
 from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
@@ -96,7 +99,22 @@ class RendererFactory(Protocol):
 
 log = logging.getLogger(__name__)
 
-_AnchorKey = tuple[str, str, float]
+#: Text, face, size, letter spacing, horizontal scale — every input to the probe render. Two tokens
+#: with one word and one face but different run metrics land differently, so they must not share a
+#: measured anchor.
+_AnchorKey = tuple[str, str, float, float, float, bool, bool]
+
+
+@dataclass(frozen=True, slots=True)
+class _Anchor:
+    """A measured correction: the token's own origin, plus its glyphs' when it is drawn per glyph."""
+
+    dx: int
+    dy: int
+    glyph_dx: tuple[int, ...] = ()
+    glyph_dy: tuple[int, ...] = ()
+
+
 #: How many measured anchors to keep. One per distinct (word, face, frame size); a film's vocabulary
 #: is far smaller, and the bound exists for the resize case rather than the reading one.
 ANCHOR_CACHE_MAX = 4096
@@ -122,6 +140,10 @@ class _TokenKey:
     rgb: int
     font_name: str = ""
     font_size: float = 0.0
+    spacing: float = 0.0
+    scale_x: float = 100.0
+    bold: bool = False
+    italic: bool = False
 
 
 def _collect_layer(
@@ -191,6 +213,10 @@ def _token_geometry(
         key.font_name,
         key.font_size,
         coverage,
+        spacing=key.spacing,
+        scale_x=key.scale_x,
+        bold=key.bold,
+        italic=key.italic,
     )
 
 
@@ -248,7 +274,15 @@ def extract_token_geometry(
         entry.rgb: (
             index,
             _TokenKey(
-                entry.event_id, entry.token_index, entry.rgb, entry.font_name, entry.font_size
+                entry.event_id,
+                entry.token_index,
+                entry.rgb,
+                entry.font_name,
+                entry.font_size,
+                entry.spacing,
+                entry.scale_x,
+                entry.bold,
+                entry.italic,
             ),
         )
         for index, entry in enumerate(request.palette, start=1)
@@ -343,7 +377,7 @@ class LibassGeometryBackend:
         #: multiplies by `frame_height / play_res_y`, so dragging a window edge mints a distinct
         #: float per pixel of height and every one of them misses. Unbounded, a resize would leave
         #: an entry per (word, transient size) for the life of the session.
-        self._anchors: OrderedDict[_AnchorKey, tuple[int, int]] = OrderedDict()
+        self._anchors: OrderedDict[_AnchorKey, _Anchor] = OrderedDict()
         self._closed = False
 
     @property
@@ -404,14 +438,13 @@ class LibassGeometryBackend:
     def _probe_geometry(
         self,
         request: GeometryRequest,
-        document: str,
-        requests: list[FragmentRequest],
+        layout: ProbeLayout,
         frame: tuple[int, int],
     ) -> list[tuple[int, int, int, int, int]]:
         """Ink rectangles for the probe document, through this font environment's probe renderer."""
         key = request.renderer_key()
         probe_event = _probe_event(request.track_id)
-        encoded = document.encode()
+        encoded = layout.document.encode()
         renderer = self._probes.get(key)
         if renderer is None:
             renderer = self._new_renderer(replace(request, ass=encoded))
@@ -429,10 +462,8 @@ class LibassGeometryBackend:
             storage_size=frame,
             frame_id=SubtitleFrameId(request.track_id, (probe_event,)),
             palette=tuple(
-                GeometryPaletteEntry(
-                    probe_event, item.token_index, rgb, item.font_name, item.font_size, item.text
-                )
-                for item, rgb in zip(requests, _probe_rgbs(len(requests)), strict=True)
+                GeometryPaletteEntry(probe_event, ordinal, rgb, "", 0.0, "")
+                for ordinal, rgb in enumerate(_probe_rgbs(len(layout.slots)))
             ),
             reserved_rgb=(),
             keep_coverage=False,
@@ -472,7 +503,18 @@ class LibassGeometryBackend:
             if entry.text and entry.font_name and entry.font_size > 0
         }
         keyed = [
-            (token, (text, token.font_name, token.font_size))
+            (
+                token,
+                (
+                    text,
+                    token.font_name,
+                    token.font_size,
+                    token.spacing,
+                    token.scale_x,
+                    token.bold,
+                    token.italic,
+                ),
+            )
             for token in tokens
             if (text := texts.get((token.event_id, token.token_index)))
         ]
@@ -493,8 +535,14 @@ class LibassGeometryBackend:
             # tokens differ would hand each other's correction over.
             offsets[token.event_id, token.token_index] = offset
         return tuple(
-            replace(token, anchor_dx=offset[0], anchor_dy=offset[1])
-            if (offset := offsets.get((token.event_id, token.token_index)))
+            replace(
+                token,
+                anchor_dx=anchor.dx,
+                anchor_dy=anchor.dy,
+                glyph_dx=anchor.glyph_dx,
+                glyph_dy=anchor.glyph_dy,
+            )
+            if (anchor := offsets.get((token.event_id, token.token_index)))
             else token
             for token in tokens
         )
@@ -508,14 +556,14 @@ class LibassGeometryBackend:
         origin it used before, and the cue is drawn exactly as it is today.
         """
         requests = [
-            FragmentRequest(index, key[0], key[1], key[2])
+            FragmentRequest(index, key[0], key[1], key[2], key[3], key[4], key[5], key[6])
             for index, (_token, key) in enumerate(unseen)
         ]
         pitch = max(int(max(key[2] for _token, key in unseen)), 1) + ROW_PITCH
-        frame = (request.frame_size[0], max(pitch * len(requests), 1))
-        document, anchors = probe_document(requests, _probe_rgbs(len(requests)), frame)
+        frame = (request.frame_size[0], max(pitch * probe_rows(requests), 1))
+        layout = probe_document(requests, _probe_rgbs(probe_colour_count(requests)), frame)
         try:
-            measured = self._probe_geometry(request, document, requests, frame)
+            measured = self._probe_geometry(request, layout, frame)
         except Exception:
             # Falling back to the measured origin is the safe answer for a layout libass cannot
             # satisfy, and the wrong answer to silence with. The first failure is loud because a
@@ -531,8 +579,10 @@ class LibassGeometryBackend:
             # session: nothing records the attempt, so `unseen` keeps returning the same keys.
             self._unprobeable.update(key for _token, key in unseen)
             return
-        for index, fragment in fragments_from(measured, requests, anchors).items():
-            self._anchors[unseen[index][1]] = (fragment.dx, fragment.dy)
+        for index, fragment in fragments_from(measured, requests, layout).items():
+            self._anchors[unseen[index][1]] = _Anchor(
+                fragment.dx, fragment.dy, fragment.glyph_dx, fragment.glyph_dy
+            )
         while len(self._anchors) > ANCHOR_CACHE_MAX:
             self._anchors.popitem(last=False)
 

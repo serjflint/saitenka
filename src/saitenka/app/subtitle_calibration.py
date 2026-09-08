@@ -11,9 +11,22 @@ measured is a direct check of the only claim device 1 makes.
 
 It measures **and now decides**, on an epsilon chosen as a separator rather than as a tolerance. Two
 classes have been measured: renderers that agree read exactly 0, and the substituted-face case reads
-−29 px. Any boundary strictly inside that gap classifies both the same way, so the verdict does not
-turn on the exact number — which is what makes acting on a two-point sample defensible where a
-tolerance pulled from the air would not be.
+29 px on one edge. Any boundary strictly inside that gap classifies both the same way, so the verdict
+does not turn on the exact number — which is what makes acting on a two-point sample defensible where
+a tolerance pulled from the air would not be.
+
+Its **sign** is not settled: the commit that introduced the class wrote −29 in prose and +29 in the
+two tests it added. So neither direction may be assumed. The edge scoring below is deliberately
+built to reach the same verdict either way, and both are pinned by tests, which retires the question
+rather than answering it.
+
+The four edges are not equally readable, and reading them as if they were stood device 1 down on
+every cue of every session. mpv answers with a union of libass BITMAP rectangles, and libass rounds
+each bitmap out to a tile on its right and bottom while leaving its origin exact — so those two
+edges carry allocation on top of layout, and a positive reading there is uninformative until it
+exceeds one tile (`TILE_PADDING_PX`). A live session bears this out on both sides: with the overprint
+misanchored the origin edges read +13/+20, and with it fixed they read exactly 0/0 while the right
+and bottom still read +10/+15.
 
 The asymmetry is the other half of the argument. Demoting wrongly costs appearance: the token falls
 to a device that colors it correctly and more plainly. Clearing wrongly costs correctness: the
@@ -38,16 +51,62 @@ if TYPE_CHECKING:
 
     from saitenka.app.subtitles import WordBox
 
-#: The face and size of each drawn token, which is what decides whether the two renderers can agree.
-#: Positions are deliberately excluded: they are ours in both renders, so a cue that moved but kept
-#: its faces is the same question and must not pay for a second stall.
-_FACE = re.compile(r"\\fn(?P<family>[^\\}]*)\\fs(?P<size>[0-9.]+)")
+#: The face and size of each drawn token, which is what decides whether the two renderers can agree —
+#: plus the run tags that follow, because weight and slant SELECT A DIFFERENT FONT FILE. A payload
+#: whose only change is `\b1` asks a genuinely different question, and without them here a cached
+#: "agrees" earned by the regular run suppresses the check on the bold one, whose substituted bold
+#: face is exactly what this module exists to catch.
+#:
+#: Positions are still excluded: they are ours in both renders, so a cue that moved but kept its
+#: faces is the same question and must not pay for a second stall.
+_FACE = re.compile(
+    r"\\fn(?P<family>[^\\}]*)\\fs(?P<size>[0-9.]+)"
+    r"(?P<run>(?:\\(?:fsp-?[0-9.]+|fscx[0-9.]+|b1|i1))*)"
+)
 
 #: Frame pixels on any one edge. A separator between the two measured classes (0 and 29), not a
 #: tolerance derived from one of them — see the module docstring for why the exact value does not
 #: carry the verdict. Well above what whole-pixel rounding on each edge can contribute, and far
 #: below a substituted face's error, which is a layout difference and grows with the run.
 DRIFT_EPSILON_PX = 4.0
+
+#: `mp_ass_get_bb` unions `dst_x + img->w` — bitmap RECTANGLES, not ink. libass rounds each bitmap's
+#: width and height up to a tile (`ass_bitmap.c`: `tile_w = (w + mask) & ~mask`, with
+#: `mask = (1 << tile_order) - 1`) while leaving its origin exact, so the reported box overshoots our
+#: ink union on the right and bottom by up to one tile and never on the left or top.
+#:
+#: `ass_bitmap_engine.c` picks `tile_order = 5` only under `CONFIG_LARGE_TILES`, which both meson and
+#: autoconf default OFF, putting a tile at 16 px. Treat that as the mechanism, not the bound: two
+#: sweeps measured the overshoot directly and the larger one exceeds a tile. Against the installed
+#: mpv, 45 run×size combinations: worst right 15, worst bottom 16. Against libasslite on the pinned
+#: face, 5760 unclipped bitmaps over sizes 12–299 and four run shapes: worst right 17, worst bottom
+#: 17, worst left and top 1.
+#:
+#: So what has to hold is a band, not this constant alone: `TILE_PADDING_PX + DRIFT_EPSILON_PX` is
+#: what a padded edge actually accepts — 20 px, covering the measured 17 with 3 to spare — and it
+#: has to stay clear of the substituted-face signal at 29. `ACCEPT_BAND_PX` pins both ends, because
+#: 24 here would leave the band one pixel from that class and every test still passed.
+#:
+#: A full 32 swallowed it whole: every positive drift up to 36 px read as agreement, disabling the
+#: verdict for the case it exists to catch. Erring tight is the safe direction — an over-tight bound
+#: demotes a cue to a device that colors it correctly and more plainly, while an over-loose one
+#: leaves the color on substitute glyph shapes, which no user can report.
+TILE_PADDING_PX = 16.0
+
+#: The largest right/bottom overshoot either sweep above produced. The accept band must cover it, or
+#: cues the two renderers agree on demote for allocation they cannot help.
+MEASURED_PADDING_CEILING_PX = 17.0
+
+#: The 29 px class this must never reach. Not a tolerance — the separator argument in the module
+#: docstring rests on the band staying below it by a margin, not merely under it.
+SUBSTITUTED_FACE_DRIFT_PX = 29.0
+
+
+def _edge_error(delta: float, *, padded: bool) -> float:
+    """How far one edge disagrees, discounting padding libass may have added to it."""
+    if not padded:
+        return abs(delta)
+    return max(-delta, delta - TILE_PADDING_PX, 0.0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +120,18 @@ class Drift:
 
     @property
     def worst(self) -> float:
-        return max(abs(self.left), abs(self.top), abs(self.right), abs(self.bottom))
+        """The largest disagreement a difference in LAYOUT can explain.
+
+        All four edges are reported, but they are not equally readable: the right and bottom carry
+        libass's tile padding on top of the layout, so a positive reading there is uninformative
+        until it exceeds a tile. Scoring them at face value stood device 1 down on every cue.
+        """
+        return max(
+            _edge_error(self.left, padded=False),
+            _edge_error(self.top, padded=False),
+            _edge_error(self.right, padded=True),
+            _edge_error(self.bottom, padded=True),
+        )
 
     @property
     def agrees(self) -> bool:

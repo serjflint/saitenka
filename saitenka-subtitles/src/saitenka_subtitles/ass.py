@@ -35,6 +35,13 @@ _SECONDARY_COLOR_STATE = re.compile(
     r"(?![0-9A-Fa-f])|(?=\\|$))"
 )
 _SECONDARY_COLOR_COMMAND = re.compile(r"\\2c")
+#: The inline twins of the four style fields a redraw has to reproduce: `\fscx`, `\fsp`, `\b`, `\i`.
+#: A bare tag resets to the style's value, so the value group is optional — and the trailing letter
+#: guard is what keeps `\b` off `\bord`, `\be` and `\blur`, and `\i` off `\iclip`.
+_RUN_STATE = re.compile(
+    r"\\(?P<field>fscx|fsp|b|i)(?P<value>-?\d*\.?\d+)?(?![\d.A-Za-z])"
+    r"|\\(?P<reset>r)(?P<style>[^\\}]*)"
+)
 _PRIMARY_COLOR_COMMAND = re.compile(r"\\1?c")
 #: Effects that spread a token's ink past its own outline. Not a color problem — libass reports the
 #: reserved color exactly either way — but a size one: `\blur4` grows a 32px glyph's image to 60px,
@@ -72,6 +79,17 @@ class AssStyle:
     font_name: str = ""
     font_size: float = 0.0
     secondary_color: str = "0"
+    #: `Spacing` and `ScaleX`, the two style fields that change where a glyph lands WITHOUT changing
+    #: the face or the size. A redraw that omits them reproduces the first glyph of a token and
+    #: walks left across the rest — 79% of a shipped cue's colour landed on its glyphs until these
+    #: were carried. In script units and percent respectively, as the document declares them.
+    spacing: float = 0.0
+    scale_x: float = 100.0
+    #: Weight and slant. libass resolves a bold run to a different FACE (`Helvetica-Bold`, not
+    #: Helvetica), so a redraw that omits them asks for different glyphs, not merely different
+    #: metrics — 74% coverage on a bold cue whose spacing and scale were already carried.
+    bold: bool = False
+    italic: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -96,6 +114,17 @@ class AssStyleCatalog:
         if match is None:
             raise UnsupportedAssEvent(f"unknown ASS style: {name}")
         return match.primary_color.upper()
+
+    def run_style(self, name: str) -> tuple[float, float, bool, bool]:
+        """This style's `(Spacing, ScaleX, Bold, Italic)` — every field a redraw has to reproduce.
+
+        An unknown style is not an error the way it is for a colour: a token that falls back to
+        libass's defaults is drawn the way every cue was before these were carried at all, whereas a
+        token with no colour cannot be found in the hit map."""
+        match = next((style for style in self.styles if style.name == name), None)
+        if match is None:
+            return (0.0, 100.0, False, False)
+        return (match.spacing, match.scale_x, match.bold, match.italic)
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -261,7 +290,31 @@ def _parse_style(fields: Sequence[str], value: str) -> AssStyle:
         row.get("fontname", "").strip(),
         _style_size(row.get("fontsize", "")),
         secondary_match.group(1) if secondary_match is not None else color_match.group(1),
+        _style_number(row.get("spacing", ""), 0.0),
+        _style_number(row.get("scalex", ""), 100.0),
+        _style_flag(row.get("bold", "")),
+        _style_flag(row.get("italic", "")),
     )
+
+
+def _style_flag(value: str) -> bool:
+    """An ASS boolean style field. `-1` is the authored true; libass takes any non-zero."""
+    try:
+        return float(value.strip()) != 0
+    except ValueError:
+        return False
+
+
+def _style_number(value: str, fallback: float) -> float:
+    """A numeric style field, or *fallback* when the document omits or mangles it.
+
+    The fallback is libass's own default for the field, so a style row that predates the field
+    lays out exactly as it did before rather than collapsing to zero.
+    """
+    try:
+        return float(value.strip())
+    except ValueError:
+        return fallback
 
 
 def _style_size(value: str) -> float:
@@ -430,6 +483,82 @@ def _blocks(raw: str) -> tuple[_OverrideBlock, ...]:
         blocks.append(block)
         index = block.end
     return tuple(blocks)
+
+
+def token_run_styles(
+    annotated: AnnotatedSubtitleEvent, catalog: AssStyleCatalog
+) -> dict[int, tuple[float, float, bool, bool]]:
+    r"""``(spacing, scale_x, bold, italic)`` in force at each token's first character.
+
+    Per token rather than per event because these are ordinary inline tags — the cue that exposed
+    this alternates ``\fscx50`` and ``\fscx100`` between its punctuation and its words. Read at the
+    token's start and held for the whole token: an override landing *inside* one is refused upstream
+    by the same envelope rule that refuses a colour crossing a token.
+    """
+    decoded = annotated.decoded
+    raw_spans = decoded.raw_spans
+    if raw_spans is None:
+        raise UnsupportedAssEvent("ASS run styles require exact raw text spans")
+    blocks = _blocks(decoded.source.raw_text)
+    styles: dict[int, tuple[float, float, bool, bool]] = {}
+    for token in annotated.tokens:
+        token_spans = raw_spans[token.text_start : token.text_end]
+        if not token_spans:
+            raise ValueError("token annotation has no raw text spans")
+        styles[token.token_index] = _effective_run_style(
+            decoded.source, catalog, blocks, token_spans[0].start
+        )
+    return styles
+
+
+def _effective_run_style(
+    source: RawSubtitleEvent,
+    catalog: AssStyleCatalog,
+    blocks: Sequence[_OverrideBlock],
+    raw_offset: int,
+) -> tuple[float, float, bool, bool]:
+    active_style = source.style
+    spacing, scale_x, bold, italic = catalog.run_style(active_style)
+    for block in blocks:
+        if block.start >= raw_offset:
+            break
+        for command in _RUN_STATE.finditer(block.content):
+            if command.group("reset"):
+                # `\rStyle` re-bases the run on that style, so a later bare `\b` resets to IT and
+                # not to the event's own. Reading the event's style here made `{\rBolded\b}` come
+                # back regular while libass drew it bold.
+                active_style = command.group("style").strip() or source.style
+                spacing, scale_x, bold, italic = catalog.run_style(active_style)
+                continue
+            field = command.group("field")
+            raw_value = command.group("value")
+            authored = catalog.run_style(active_style)
+            if field == "fsp":
+                spacing = float(raw_value) if raw_value is not None else authored[0]
+            elif field == "fscx":
+                scale_x = float(raw_value) if raw_value is not None else authored[1]
+            elif field == "b":
+                bold = _bold_from_tag(raw_value, authored=authored[2])
+            else:
+                # `ass_parse.c`: any value but 0 or 1 — and a bare tag — resets to the style.
+                italic = authored[3] if raw_value not in {"0", "1"} else raw_value == "1"
+    return spacing, scale_x, bold, italic
+
+
+def _bold_from_tag(raw_value: str | None, *, authored: bool) -> bool:
+    r"""What `\b<value>` leaves the run's weight as, following libass rather than approximating it.
+
+    `ass_parse.c`: `if (!nargs || !(val == 0 || val == 1 || val >= 100)) val = style->Bold;` — so a
+    bare tag, and any value between 2 and 99, reset to the style rather than reading as a weight.
+    Treating those as "not bold" made `\b2` on a bold style come back regular. Above 100 the value
+    is a real weight, and 600 is where it starts selecting a bold face.
+    """
+    if raw_value is None:
+        return authored
+    value = float(raw_value)
+    if value in {0.0, 1.0}:
+        return value == 1.0
+    return value >= 600 if value >= 100 else authored
 
 
 def _effective_color(

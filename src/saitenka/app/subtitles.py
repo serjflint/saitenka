@@ -58,6 +58,15 @@ class WordBox:
     #: since it tints the coverage in place rather than redrawing anything.
     anchor_dx: int = 0
     anchor_dy: int = 0
+    #: The run metrics this token was laid out with — see `TokenGeometry.spacing`. Like the anchors,
+    #: only the overprint reads them: the raster device tints coverage in place and redraws nothing.
+    spacing: float = 0.0
+    scale_x: float = 100.0
+    bold: bool = False
+    italic: bool = False
+    #: See `TokenGeometry.glyph_dx` — the overprint draws a spaced token one event per glyph.
+    glyph_dx: tuple[int, ...] = ()
+    glyph_dy: tuple[int, ...] = ()
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h

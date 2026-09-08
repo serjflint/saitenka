@@ -19,7 +19,9 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
+from dataclasses import fields
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -33,6 +35,11 @@ from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
 
 from saitenka.mpvio.discover import find_mpv
 from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from saitenka_subtitles.geometry import TokenGeometry
 
 pytestmark = [
     pytest.mark.live,
@@ -175,28 +182,51 @@ def ink_bounds(frame: np.ndarray) -> tuple[int, int, int, int]:
     )
 
 
-def our_word_boxes(source: bytes, event_row: str, frame: tuple[int, int]):
-    """The snapshot as the runtime carries it — anchors included, which is what the overprint reads."""
+def our_word_boxes(
+    source: bytes,
+    event_row: str,
+    frame: tuple[int, int],
+    text: str = TEXT,
+    tokens: Sequence[TokenAnnotation] = TOKENS,
+):
+    """The snapshot as the runtime carries it — anchors included, which is what the overprint reads.
+
+    Built by field NAME, not position. Every `WordBox` field past the rect has a default, so the
+    positional form this replaced accepted a short argument list silently — and dropped a newly
+    added field three times (`text`, then the run metrics, then `glyph_dx`). Each time the token
+    reached the assertion carrying a default the runtime would never have produced, and it read as a
+    product bug whose traceback pointed nowhere near here. `getattr` now raises instead.
+    """
     from saitenka.app.subtitles import WordBox
 
+    #: The only fields whose names differ from the geometry's: the index, and the rect it carries as
+    #: a `bounds` object rather than four scalars.
+    def carried(token: TokenGeometry) -> dict[str, Any]:
+        renamed = {
+            "index": token.token_index,
+            "x": token.bounds.x,
+            "y": token.bounds.y,
+            "w": token.bounds.width,
+            "h": token.bounds.height,
+        }
+        return {
+            field.name: renamed[field.name] if field.name in renamed else getattr(token, field.name)
+            for field in fields(WordBox)
+        }
+
     return [
-        WordBox(
-            token.token_index,
-            token.bounds.x,
-            token.bounds.y,
-            token.bounds.width,
-            token.bounds.height,
-            token.font_name,
-            token.font_size,
-            token.coverage,
-            token.anchor_dx,
-            token.anchor_dy,
-        )
-        for token in _snapshot_tokens(source, event_row, frame)
+        WordBox(**carried(token))
+        for token in _snapshot_tokens(source, event_row, frame, text, tokens)
     ]
 
 
-def _snapshot_tokens(source: bytes, event_row: str, frame: tuple[int, int]):
+def _snapshot_tokens(
+    source: bytes,
+    event_row: str,
+    frame: tuple[int, int],
+    text: str = TEXT,
+    tokens: Sequence[TokenAnnotation] = TOKENS,
+):
     """The geometry snapshot for this cue, with the palette the runtime builds.
 
     The token text travels in the palette because the anchor probe needs it (`GeometryPaletteEntry
@@ -207,7 +237,7 @@ def _snapshot_tokens(source: bytes, event_row: str, frame: tuple[int, int]):
 
     track = SubtitleTrackId("pixel-differential")
     prepared = prepare_ass_hit_map_frame(
-        source, track, active_rows=event_row, text=TEXT, tokens=TOKENS
+        source, track, active_rows=event_row, text=text, tokens=tokens
     )
     scale = frame[1] / prepared.play_res_y
     palette = tuple(
@@ -218,6 +248,10 @@ def _snapshot_tokens(source: bytes, event_row: str, frame: tuple[int, int]):
             entry.font_name,
             entry.font_size * scale,
             entry.text,
+            entry.spacing * scale,
+            entry.scale_x,
+            entry.bold,
+            entry.italic,
         )
         for entry in prepared.palette
     )
@@ -426,6 +460,126 @@ def test_the_overprint_colours_the_glyphs_and_not_the_space_around_them(workspac
     assert the rectangle is over the word, which stays true while the redraw inside it is wrong.
     """
     ink, green = _overprinted(workspace)
+
+    on_glyphs = float((green & ink).sum()) / max(int(green.sum()), 1)
+
+    assert on_glyphs >= COVERAGE_FLOOR, (
+        f"only {on_glyphs:.0%} of the overprint landed on a glyph mpv drew — "
+        f"{int((green & ~ink).sum())} coloured pixels sit on empty frame"
+    )
+
+
+#: A cue typeset the way shipped subtitles are, rather than the way a fixture is: letter spacing on
+#: the style and `\fscx` alternating between the words and the punctuation. Both move every glyph
+#: after a token's first, and the overprint reproduced neither until they were carried through the
+#: palette — 79% of a real cue's colour sat beside its glyphs while every other meter read green.
+STYLED_TEXT = "（児童）雨すごいね。"
+STYLED_TOKENS = tuple(
+    TokenAnnotation(index, start, end)
+    for index, (start, end) in enumerate(((0, 1), (1, 3), (3, 4), (4, 5), (5, 8), (8, 9), (9, 10)))
+)
+STYLED_BODY = r"{\fscx50}（{\fscx100}児童{\fscx50}）{\fscx100}雨すごいね{\fscx50}。"
+
+
+def styled_document(spacing: float) -> str:
+    """The fixture cue restyled with `Spacing` and inline `\fscx`, at the shipped style's shape."""
+    return (
+        "[Script Info]\nScriptType: v4.00+\n"
+        f"PlayResX: {WIDTH}\nPlayResY: {HEIGHT}\nScaledBorderAndShadow: Yes\nWrapStyle: 2\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+        "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: D,sans-serif,40,&H00FFFFFF,&H000000FF,&H00000000,&H7F000000,1,0,0,0,100,100,"
+        f"{spacing:g},0,1,2,2,7,0,0,0,1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        f"Dialogue: 0,0:00:00.50,0:00:08.00,D,,0,0,0,,{{\\pos(60,200)}}{STYLED_BODY}\n"
+    )
+
+
+def _styled_overprint(directory: Path, spacing: float) -> tuple[np.ndarray, np.ndarray]:
+    """`(mpv's ink, our overprint's ink)` for the styled cue, both through the subtitle leg."""
+    source = styled_document(spacing)
+    event_row = source.strip().splitlines()[-1]
+
+    plain = directory / "styled.ass"
+    plain.write_text(source, encoding="utf-8")
+    mpv_ink(directory, plain)
+    base = np.array(_open(directory / "frame.png")).astype(int)
+
+    boxes = our_word_boxes(source.encode(), event_row, (WIDTH, HEIGHT), STYLED_TEXT, STYLED_TOKENS)
+    payload = _styled_payload(boxes)
+    # The payload is in FRAME units; `osd-overlay` is handed the frame as its resolution, so the
+    # document that stands in for it must declare the same and carry none of the cue's own style.
+    overlay = (
+        "[Script Info]\nScriptType: v4.00+\n"
+        f"PlayResX: {WIDTH}\nPlayResY: {HEIGHT}\nWrapStyle: 2\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, "
+        "BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, "
+        "MarginV, Encoding\n"
+        "Style: O,sans-serif,20,&H00FFFFFF,&H00000000,&H00000000,0,0,1,0,0,7,0,0,0,1\n\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    ) + "".join(
+        f"Dialogue: 0,0:00:00.50,0:00:08.00,O,,0,0,0,,{line}\n" for line in payload.splitlines()
+    )
+    over = directory / "styled-painted.ass"
+    over.write_text(overlay, encoding="utf-8")
+    mpv_ink(directory, over)
+    both = np.array(_open(directory / "frame.png")).astype(int)
+
+    ink = base.sum(axis=2) > 40
+    green = (
+        (both[:, :, 1] > 90)
+        & (both[:, :, 1] > both[:, :, 0] + 40)
+        & (both[:, :, 1] > both[:, :, 2] + 40)
+    )
+    return ink, green
+
+
+def _styled_payload(boxes) -> str:
+    """The runtime's own payload for the styled cue, through `overprint_payload` as production does."""
+    from saitenka_tokenize import Token
+
+    from saitenka.app.subtitle_render import DrawRequest, overprint_payload
+
+    class _Style:
+        def __init__(self) -> None:
+            self.color = (0, 255, 0, 255)
+            self.underline = None
+
+    surfaces = [STYLED_TEXT[token.text_start : token.text_end] for token in STYLED_TOKENS]
+    return overprint_payload(
+        DrawRequest(
+            text=STYLED_TEXT,
+            lines=[[Token(s, s, s, "名詞", i, i + 1) for i, s in enumerate(surfaces)]],
+            osd=(WIDTH, HEIGHT),
+            sub_size=40,
+            bg_opacity=0,
+            bottom_margin=30,
+            secondary_role=False,
+            upgrade_pending=False,
+            annotation_degraded=False,
+            annotation_visible=True,
+            hover=-1,
+            hover_span=None,
+            styles=[_Style() for _ in surfaces],
+            boxes=boxes,
+        )
+    )
+
+
+@pytest.mark.timeout(120)
+def test_the_overprint_follows_a_cue_that_is_typeset_rather_than_plain(workspace: Path) -> None:
+    """The same product claim on a cue with the tags real subtitles carry.
+
+    The plain fixture above cannot see this class: with `Spacing` and `\fscx` dropped from the
+    redraw the colour still starts on the first glyph of every token and walks left across the rest,
+    so a per-token box test and the OSD drift probe both stay green while a fifth of the colour
+    misses. Measured at 79% before the palette carried them.
+    """
+    ink, green = _styled_overprint(workspace, spacing=4)
 
     on_glyphs = float((green & ink).sum()) / max(int(green.sum()), 1)
 

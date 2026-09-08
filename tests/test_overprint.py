@@ -514,3 +514,25 @@ def test_a_token_measured_without_an_anchor_is_drawn_where_it_always_was() -> No
     ).splitlines()
 
     assert r"\pos(100,600)" in lines[0]
+
+
+def test_the_device_census_counts_each_token_once_per_drawn_cue() -> None:
+    """The ladder is built three times for one drawn cue — the overpaint image, the payload, and the
+    calibration probe all ask for it — so counting inside it reported two or three times the cue's
+    tokens, by a factor that moved with whether the calibration ran. The census is taken at the one
+    call site that means "this cue was drawn"."""
+    from saitenka import otel_metrics
+    from saitenka.app.subtitle_render import color_ladder, overprint_payload
+    from saitenka.app.subtitles import WordBox
+
+    boxes = [
+        WordBox(0, 100, 600, 50, 40, "Arial", 48.0),
+        WordBox(1, 160, 600, 50, 40, "Arial", 48.0),
+    ]
+    request = draw_request(styles=[Style((255, 0, 0, 255))] * 2, boxes=boxes)
+
+    assert color_ladder(request).devices == ("overprint", "overprint")
+    # Off by default: the two ladders a draw builds for other reasons must not add to the census.
+    assert otel_metrics.subtitle_token_device is None
+    overprint_payload(request)
+    overprint_payload(request, census=True)

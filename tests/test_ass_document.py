@@ -22,6 +22,7 @@ from saitenka_subtitles import (
     rewrite_ass_event,
     serialize_ass_event_line,
 )
+from saitenka_subtitles.ass import token_run_styles
 from util import PINNED_FAMILY, pinned_ass_renderer, requires_libass
 
 TRACK = SubtitleTrackId("external:/tmp/example.ass:1")
@@ -200,6 +201,23 @@ def test_a_style_without_a_usable_size_still_parses() -> None:
 
     assert catalog.styles[0].font_size == 0.0
     assert catalog.styles[0].font_name == "Arial"
+
+
+def test_every_run_field_is_read_from_the_style_row_and_not_defaulted() -> None:
+    r"""All four at values that differ from their fallbacks (`0`, `100`, off, off).
+
+    A fixture whose `ScaleX` is 100 or whose `Italic` is 0 cannot tell "read correctly" from "not
+    read at all" — point the lookup at a nonexistent column and it still passes. These values can.
+    """
+    extradata = (
+        b"[V4+ Styles]\n"
+        b"Format: Name, PrimaryColour, Fontname, Fontsize, Spacing, ScaleX, Bold, Italic\n"
+        b"Style: Default,&H00ABCDEF,Arial,48,7,50,-1,-1\n"
+    )
+
+    style = parse_ass_styles(extradata).styles[0]
+
+    assert (style.spacing, style.scale_x, style.bold, style.italic) == (7.0, 50.0, True, True)
 
 
 def test_a_styles_face_and_size_are_read_for_the_overprint() -> None:
@@ -696,3 +714,153 @@ def test_black_is_a_valid_authored_reserved_color() -> None:
     source = annotated("猫", (0, 1))
 
     assert allocate_token_colors((source,), reserved_colors=(0,))[0].bgr == 1
+
+
+@pytest.mark.parametrize(
+    ("override", "bold"),
+    [
+        (r"{\bord4}", "regular"),  # outline width, not weight
+        (r"{\blur2}", "regular"),
+        (r"{\be1}", "regular"),
+        (r"{\b1}", "bold"),
+        (r"{\b700}", "bold"),
+        (r"{\b400}", "regular"),  # a weight below libass's bold threshold
+        (r"{\b0}", "regular"),
+    ],
+)
+def test_only_a_weight_tag_makes_a_run_bold(override: str, bold: str) -> None:
+    r"""`\b` is a prefix of `\bord`, `\blur` and `\be`, and reading one as the other would redraw
+    every outlined cue in the wrong face."""
+    catalog = AssStyleCatalog((AssStyle("Default", "00FFFFFF"),))
+    line = f"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{override}猫"
+    event = parse_ass_event_line(line, SubtitleTrackId("t"), 0)
+    annotated = AnnotatedSubtitleEvent(decode_ass_event(event), (TokenAnnotation(0, 0, 1),))
+
+    run = token_run_styles(annotated, catalog)[0]
+
+    assert ("bold" if run[2] else "regular") == bold
+
+
+def test_an_outline_tag_after_a_weight_tag_does_not_cancel_the_weight() -> None:
+    r"""The negative control for the `\b` prefix guard, which the case above cannot supply.
+
+    On a regular style, mis-reading `\bord4` as a bare `\b` resets to the style and yields regular —
+    the same answer as parsing it correctly, so that test passes with the guard deleted. Starting the
+    run bold is what separates them: a spurious reset shows up as the second token losing its weight.
+    """
+    catalog = AssStyleCatalog((AssStyle("Default", "00FFFFFF"),))
+    line = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\b1}猫{\\bord4}犬"
+    event = parse_ass_event_line(line, SubtitleTrackId("t"), 0)
+    annotated = AnnotatedSubtitleEvent(
+        decode_ass_event(event), (TokenAnnotation(0, 0, 1), TokenAnnotation(1, 1, 2))
+    )
+
+    runs = token_run_styles(annotated, catalog)
+
+    assert [runs[0][2], runs[1][2]] == [True, True]
+
+
+def test_a_reset_to_a_named_style_re_bases_the_bare_tags_that_follow_it() -> None:
+    r"""`\rStyle` makes THAT style the run's base, so a later bare `\b` or `\fsp` resets to it and
+    not to the event's own style. Reading the event's style there drew `{\rBolded\b}` regular while
+    libass drew it bold — and weight selects a different font file, which is the one class the
+    calibration cannot see."""
+    catalog = AssStyleCatalog(
+        (
+            AssStyle("Plain", "00FFFFFF", bold=False, spacing=7.0),
+            AssStyle("Bolded", "00FFFFFF", bold=True, spacing=0.0),
+        )
+    )
+    line = "Dialogue: 0,0:00:01.00,0:00:03.00,Plain,,0,0,0,,{\\rBolded\\b\\fsp}猫"
+    event = parse_ass_event_line(line, SubtitleTrackId("t"), 0)
+    annotated = AnnotatedSubtitleEvent(decode_ass_event(event), (TokenAnnotation(0, 0, 1),))
+
+    spacing, _scale_x, bold, _italic = token_run_styles(annotated, catalog)[0]
+
+    assert (bold, spacing) == (True, 0.0)
+
+
+@pytest.mark.parametrize(
+    ("override", "weight"),
+    [(r"{\b2}", "bold"), (r"{\b99}", "bold"), (r"{\b0}", "regular"), (r"{\b900}", "bold")],
+)
+def test_a_weight_libass_refuses_falls_back_to_the_style_not_to_regular(
+    override: str, weight: str
+) -> None:
+    r"""`ass_parse.c`: `if (!nargs || !(val == 0 || val == 1 || val >= 100)) val = style->Bold;`.
+
+    So 2 and 99 are not weights and not "off" — they reset to the style, which here is bold. Reading
+    them as "anything that is not 1 or ≥600 is regular" un-bolded a bold run.
+    """
+    catalog = AssStyleCatalog((AssStyle("Default", "00FFFFFF", bold=True),))
+    line = f"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{override}猫"
+    event = parse_ass_event_line(line, SubtitleTrackId("t"), 0)
+    annotated = AnnotatedSubtitleEvent(decode_ass_event(event), (TokenAnnotation(0, 0, 1),))
+
+    assert ("bold" if token_run_styles(annotated, catalog)[0][2] else "regular") == weight
+
+
+def test_a_spaced_token_is_drawn_one_event_per_glyph() -> None:
+    r"""mpv's OSD renderer shapes a whole run where its subtitle renderer shapes each glyph alone
+    (the style `Encoding` decides it), and the two put the glyphs in slightly different places. A
+    lone glyph is one shaping run in either, so splitting the token is what makes them agree — and
+    the spacing then lives in the positions, so re-emitting `\fsp` would apply it twice."""
+    from saitenka_subtitles.overprint import TokenPaint, event_lines
+
+    paint = TokenPaint(
+        "すごい",
+        100,
+        200,
+        "Yu Gothic",
+        40.0,
+        0x00FF00,
+        1.0,
+        8.0,
+        glyph_dx=(0, 48, 97),
+        glyph_dy=(0, 1, 0),
+    )
+
+    lines = event_lines(paint)
+
+    assert [line[-1] for line in lines] == ["す", "ご", "い"]
+    assert r"\pos(100,200)" in lines[0]
+    assert r"\pos(148,201)" in lines[1]
+    assert r"\pos(197,200)" in lines[2]
+    assert all(r"\fsp" not in line for line in lines)
+
+
+@pytest.mark.parametrize("text", ["すごいね", "す"])
+def test_offsets_that_do_not_count_the_texts_glyphs_make_the_token_undrawable(text: str) -> None:
+    """The offsets are measured against the prepared ASS surface; the text comes from the tokenizer's
+    surfaces for whatever cue is current. A snapshot that outlived its cue pairs the two up wrong,
+    and nothing downstream compares them: longer text indexes past the offsets and raises inside the
+    draw, shorter text silently drops the glyphs past its end. Refusing routes the token to the
+    raster device, which colors it without needing them."""
+    from saitenka_subtitles.overprint import TokenPaint
+
+    paint = TokenPaint(
+        text,
+        100,
+        200,
+        "Yu Gothic",
+        40.0,
+        0x00FF00,
+        1.0,
+        8.0,
+        glyph_dx=(0, 48, 97),
+        glyph_dy=(0, 1, 0),
+    )
+
+    assert paint.drawable is False
+
+
+def test_a_token_without_spacing_stays_one_event() -> None:
+    """The split costs an event per glyph, so a run the two renderers already agree on keeps the
+    single event — and the payload bytes it always had."""
+    from saitenka_subtitles.overprint import TokenPaint, event_lines
+
+    paint = TokenPaint("すごい", 100, 200, "Yu Gothic", 40.0, 0x00FF00, 1.0)
+
+    assert event_lines(paint) == [
+        r"{\an7\pos(100,200)\fnYu Gothic\fs40\1c&H00FF00&\bord1\shad0}すごい"
+    ]

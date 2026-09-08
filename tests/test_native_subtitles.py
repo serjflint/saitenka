@@ -2852,7 +2852,9 @@ def osd_box(*, right: float) -> dict[str, float]:
     """What mpv reports for the fake's three 50x40 boxes at x=100/160/220, `right` px wider.
 
     Inflated by the hairline border on every edge, because `mp_ass_get_bb` unions the outline images
-    — so a reply that did NOT carry it would understate the drift by two pixels.
+    — so a reply that did NOT carry it would understate the drift by two pixels. A NEGATIVE `right`
+    is the substituted-face direction: libass pads that edge outwards, so only a box that came back
+    narrower than our ink is a layout difference (`subtitle_calibration.TILE_PADDING_PX`).
     """
     return {"x0": 99.0, "y0": 599.0, "x1": 271.0 + right, "y1": 641.0}
 
@@ -2868,7 +2870,7 @@ def test_a_measured_drift_stands_the_text_device_down_on_the_cue_already_showing
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
     )
     ipc.props["pause"] = True
-    ipc.osd_bounds = osd_box(right=29.0)
+    ipc.osd_bounds = osd_box(right=-29.0)
 
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
@@ -2916,7 +2918,7 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
     )
     ipc.props["pause"] = True
-    ipc.osd_bounds = osd_box(right=29.0)
+    ipc.osd_bounds = osd_box(right=-29.0)
 
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)

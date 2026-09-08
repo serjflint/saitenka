@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from saitenka_subtitles.fragments import run_tags
+
 #: Placement is top-left (`\\an7`) at the token's measured origin, so the payload never depends on
 #: the OSD track's own alignment or margins.
 _PREAMBLE = r"\an7"
@@ -37,6 +39,20 @@ class TokenPaint:
     #: antialiased fringe of the glyph underneath, which would otherwise show as a colored halo's
     #: negative. Sized by the caller; zero disables it.
     border: float = 0.0
+    #: The run's letter spacing (same units as `font_size`) and horizontal scale (percent). The face
+    #: and size place the token; these place every glyph after its first, and dropping them walks the
+    #: colour left across the token — 79% coverage on a shipped `Spacing: 4` cue.
+    spacing: float = 0.0
+    scale_x: float = 100.0
+    #: Weight and slant. Not metrics: libass resolves these to a different FACE, so omitting them
+    #: draws the right word in the wrong glyphs.
+    bold: bool = False
+    italic: bool = False
+    #: Per-glyph offsets from `x`/`y`. Non-empty means this token is emitted one event per glyph,
+    #: because mpv's OSD renderer would otherwise shape the whole run and place its glyphs a little
+    #: differently from the subtitle renderer that drew the cue — see `saitenka_subtitles.fragments`.
+    glyph_dx: tuple[int, ...] = ()
+    glyph_dy: tuple[int, ...] = ()
 
     @property
     def drawable(self) -> bool:
@@ -49,12 +65,21 @@ class TokenPaint:
         Text containing ASS syntax is refused for the same reason rather than escaped. `{` opens an
         override block, and a backslash begins a tag: escaping either changes what libass lays out,
         and an overprint whose advances differ from mpv's is a colored smear beside the word.
+
+        The offsets must also count the same glyphs as the text. They are measured against the
+        prepared ASS surface and reach the paint alongside a surface the tokenizer produced for
+        whatever cue is current, and nothing downstream ties the two: a snapshot that outlived its
+        cue pairs offsets with a different token. Longer text indexes past the offsets and raises in
+        the draw path; shorter text silently drops the glyphs past its end. Refusing sends the token
+        to the raster device, which colors it correctly without needing them.
         """
         return (
             bool(self.text.strip())
             and bool(self.font_name)
             and self.font_size > 0
             and not (set(self.text) & set("{}\\\n"))
+            and len(self.glyph_dx) == len(self.glyph_dy)
+            and len(self.glyph_dx) in {0, len(self.text)}
         )
 
 
@@ -63,12 +88,40 @@ def _ass_color(rgb: int) -> str:
     return f"&H{(rgb & 0xFF) << 16 | (rgb & 0x00FF00) | (rgb >> 16) & 0xFF:06X}&"
 
 
-def event_line(paint: TokenPaint) -> str:
+def _one_event(paint: TokenPaint, text: str, x: int, y: int, *, spacing: float) -> str:
     return (
-        f"{{{_PREAMBLE}\\pos({paint.x},{paint.y})"
+        f"{{{_PREAMBLE}\\pos({x},{y})"
         f"\\fn{paint.font_name}\\fs{paint.font_size:g}"
-        f"\\1c{_ass_color(paint.rgb)}\\bord{paint.border:g}\\shad0}}{paint.text}"
+        f"{run_tags(spacing, paint.scale_x, bold=paint.bold, italic=paint.italic)}"
+        f"\\1c{_ass_color(paint.rgb)}\\bord{paint.border:g}\\shad0}}{text}"
     )
+
+
+def event_lines(paint: TokenPaint) -> list[str]:
+    r"""The events that draw this token — one, or one per glyph.
+
+    Per glyph when the measurement supplied offsets, which happens exactly when the run carries
+    letter spacing. A lone glyph is a single shaping run in both of mpv's libass instances, so
+    splitting the token is what makes the redraw agree with the cue; the spacing then lives in the
+    positions rather than in `\fsp`, and re-emitting it would apply it twice.
+    """
+    if not paint.glyph_dx:
+        return [_one_event(paint, paint.text, paint.x, paint.y, spacing=paint.spacing)]
+    return [
+        _one_event(
+            paint,
+            character,
+            paint.x + paint.glyph_dx[index],
+            paint.y + paint.glyph_dy[index],
+            spacing=0.0,
+        )
+        for index, character in enumerate(paint.text)
+    ]
+
+
+def event_line(paint: TokenPaint) -> str:
+    """Every event for this token as one payload fragment."""
+    return "\n".join(event_lines(paint))
 
 
 def payload(paints: list[TokenPaint]) -> str:

@@ -8,6 +8,8 @@ separator between the two measured classes — 0 px when they agree, 29 px when 
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from saitenka.app import subtitle_calibration
@@ -41,6 +43,21 @@ def test_a_different_face_or_size_is_a_different_question() -> None:
         assert subtitle_calibration.payload_signature(
             PAYLOAD.replace(*changed), (1920, 1080)
         ) != subtitle_calibration.payload_signature(PAYLOAD, (1920, 1080))  # fmt: skip
+
+
+def test_weight_and_slant_make_it_a_different_question() -> None:
+    r"""`\b1` selects a different font FILE, so a payload that differs only by it is asking whether
+    a face the first payload never used lays out the same — which is the substitution this module
+    exists to catch. Keyed on face and size alone, the cached "agrees" from the regular run
+    suppressed the check on the bold one entirely."""
+    plain = PAYLOAD.replace("\\fs48", "\\fs48")
+    styled = PAYLOAD.replace("\\fs48", "\\fs48\\fscx50\\b1\\i1")
+
+    assert subtitle_calibration.payload_signature(
+        styled, (1920, 1080)
+    ) != subtitle_calibration.payload_signature(plain, (1920, 1080))  # fmt: skip
+    # The families still resolve out of the widened match, or every verdict would name nothing.
+    assert subtitle_calibration.payload_families(styled) == {"arial"}
 
 
 def test_a_payload_with_no_text_asks_nothing() -> None:
@@ -83,14 +100,16 @@ def test_our_own_border_is_taken_back_out_before_the_comparison() -> None:
 
 
 def test_drift_is_reported_per_edge_and_summarised_by_the_worst() -> None:
-    """Per edge because the two failures look different: a substituted face is wider (the right edge
-    moves), a different size moves top and bottom too."""
+    """Per edge because the two failures look different: a substituted face lays the run out to a
+    different width, a different size moves top and bottom too."""
     drift = subtitle_calibration.drift_of(
-        (100, 600, 210, 640), {"x0": 101.0, "y0": 601.0, "x1": 240.0, "y1": 641.0}, border=1.0
+        (100, 600, 210, 640), {"x0": 101.0, "y0": 601.0, "x1": 182.0, "y1": 641.0}, border=1.0
     )
 
     assert drift is not None
-    assert drift.right == 29.0  # the -29px case the probe measured, from the other side
+    assert (
+        drift.right == -29.0
+    )  # the box came back narrower than our ink by a substituted face's run
     assert drift.worst == 29.0
 
 
@@ -108,11 +127,85 @@ def test_the_verdict_does_not_turn_on_the_exact_epsilon() -> None:
     way by any boundary strictly inside the gap between them. A regression that moved the epsilon
     onto either class would change a verdict, and this is what would catch it."""
     agreeing = subtitle_calibration.Drift(0.0, 0.0, 0.0, 0.0)
-    substituted = subtitle_calibration.Drift(0.0, 0.0, 29.0, 0.0)
+    substituted = subtitle_calibration.Drift(0.0, 0.0, -29.0, 0.0)
 
     assert 0.0 < subtitle_calibration.DRIFT_EPSILON_PX < 29.0
     assert agreeing.agrees is True
     assert substituted.agrees is False
+
+
+@pytest.mark.parametrize("sign", [1.0, -1.0])
+@pytest.mark.parametrize("edge", ["right", "bottom"])
+def test_a_substituted_face_demotes_whichever_way_it_moved_the_far_edge(
+    edge: str, sign: float
+) -> None:
+    r"""The 29 px class must demote on a padded edge in BOTH directions.
+
+    Its sign is unsettled — the commit that introduced the class wrote −29 in prose and +29 in the
+    two tests it added (`0e13cca4`) — so the verdict is built not to need the answer. This is the
+    regression guard for having assumed one: with the padding allowance at a full 32 px, a +29
+    scored 0 and every positive drift up to 36 px read as agreement, which switched the rule off
+    for the exact case it exists to catch while every gate stayed green.
+    """
+    drift = replace(subtitle_calibration.Drift(0.0, 0.0, 0.0, 0.0), **{edge: 29.0 * sign})
+
+    assert drift.agrees is False
+
+
+def test_the_accept_band_on_a_padded_edge_covers_the_measured_padding_and_stays_clear_of_the_signal() -> (
+    None
+):
+    """What a padded edge accepts is `TILE_PADDING_PX + DRIFT_EPSILON_PX`, and it is squeezed from
+    both sides — so pin both, not just one.
+
+    Below the measured overshoot, cues the two renderers agree on demote for allocation they cannot
+    help. Near the substituted-face class, the discount eats the signal the module exists to catch.
+    A one-sided `band < 29` is not enough: it passes at 24 + 4 = 28, one pixel from that class, and
+    the whole suite stayed green there.
+    """
+    band = subtitle_calibration.TILE_PADDING_PX + subtitle_calibration.DRIFT_EPSILON_PX
+
+    assert band >= subtitle_calibration.MEASURED_PADDING_CEILING_PX
+    assert subtitle_calibration.SUBSTITUTED_FACE_DRIFT_PX - band >= 7.0
+
+
+def test_the_two_readings_a_real_session_produced_land_on_opposite_verdicts() -> None:
+    """The oracle's calibration against the field, from one episode measured twice.
+
+    With the overprint misanchored the origin edges read +13/+20; with it fixed they read exactly
+    0/0 while the right and bottom still read +10/+15 — the tile padding, which is present in both.
+    A rule that cannot separate these two is either blind to a real defect or vetoes the fix for it,
+    and this repo has now shipped both mistakes.
+    """
+    misanchored = subtitle_calibration.Drift(13.0, 20.0, -41.0, 34.0)
+    anchored = subtitle_calibration.Drift(0.0, 0.0, 10.0, 15.0)
+
+    assert misanchored.agrees is False
+    assert anchored.agrees is True
+
+
+def test_padding_is_only_ever_added_to_the_right_and_bottom() -> None:
+    """`mp_ass_get_bb` unions bitmap rectangles, and libass rounds each one out to a tile on those
+    two edges alone. So the same magnitude is a layout difference on an origin edge and an
+    allocation detail on a far one, and the verdict has to read them differently."""
+    on_origin = subtitle_calibration.Drift(15.0, 0.0, 0.0, 0.0)
+    on_far_edge = subtitle_calibration.Drift(0.0, 0.0, 15.0, 0.0)
+
+    assert on_origin.agrees is False
+    assert on_far_edge.agrees is True
+
+
+def test_a_far_edge_still_bites_when_it_cannot_be_padding() -> None:
+    """The negative control for the allowance: padding only ever grows the box, and never by more
+    than one tile. Both directions outside that stay disagreements, or the allowance would be a
+    blanket amnesty on half the box."""
+    beyond_a_tile = subtitle_calibration.Drift(
+        0.0, 0.0, subtitle_calibration.TILE_PADDING_PX + 9, 0
+    )
+    shrunk = subtitle_calibration.Drift(0.0, 0.0, 0.0, -9.0)
+
+    assert beyond_a_tile.agrees is False
+    assert shrunk.agrees is False
 
 
 def test_every_family_in_the_payload_is_named_by_the_verdict() -> None:
