@@ -595,11 +595,14 @@ def test_measured_anchors_are_bounded_so_a_resize_cannot_grow_them_forever() -> 
     `frame_height / play_res_y`, so dragging a window edge mints a distinct float per pixel of height
     and every one of them misses. Unbounded, a resize would leave an entry per (word, transient size)
     for the life of the session."""
-    from saitenka_subtitles.libass_backend import ANCHOR_CACHE_MAX
+    from saitenka_subtitles.libass_backend import ANCHOR_CACHE_MAX, _Anchor
 
     created: list[FakeRenderer] = []
     backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-    stale = {(f"word{index}", "Sans", float(index)): (1, 1) for index in range(ANCHOR_CACHE_MAX)}
+    stale = {
+        (f"word{index}", "Sans", float(index), 0.0, 100.0, False, False): _Anchor(1, 1)
+        for index in range(ANCHOR_CACHE_MAX)
+    }
     backend._anchors.update(stale)
 
     backend.render(probeable_request())  # two genuinely new words, over the bound
@@ -619,7 +622,14 @@ def test_two_events_do_not_exchange_their_first_tokens_corrections() -> None:
     second = SubtitleEventId(track, 1_000, 2_000, 0, 1)
     created: list[FakeRenderer] = []
     backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-    backend._anchors.update({("猫", "Sans", 40.0): (6, 6), ("犬", "Sans", 40.0): (0, -14)})
+    from saitenka_subtitles.libass_backend import _Anchor
+
+    backend._anchors.update(
+        {
+            ("猫", "Sans", 40.0, 0.0, 100.0, False, False): _Anchor(6, 6),
+            ("犬", "Sans", 40.0, 0.0, 100.0, False, False): _Anchor(0, -14),
+        }
+    )
     base = request()
     shared = replace(
         base,

@@ -112,6 +112,15 @@ class TokenGeometry:
     #: not subtract these lands an ascent-gap low. Zero when unprobed, which keeps today's placement.
     anchor_dx: int = 0
     anchor_dy: int = 0
+    #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
+    spacing: float = 0.0
+    scale_x: float = 100.0
+    bold: bool = False
+    italic: bool = False
+    #: Per-glyph offsets from this token's anchor, when the token has to be redrawn one event per
+    #: glyph — see `saitenka_subtitles.fragments`. Empty means one event for the whole token.
+    glyph_dx: tuple[int, ...] = ()
+    glyph_dy: tuple[int, ...] = ()
 
 
 class GeometryVariant(StrEnum):
@@ -135,6 +144,14 @@ class GeometryPaletteEntry:
     #: token needs to know where its ink lands when drawn alone, and that cannot be measured without
     #: the characters. Empty leaves the token unprobed and its redraw where it was.
     text: str = ""
+    #: Letter spacing (frame units, like `font_size`) and horizontal scale (percent) in force on this
+    #: token. The face and size alone do not place a glyph: these two move every glyph after the
+    #: first, so a redraw that drops them walks left across the token. `bold`/`italic` go further
+    #: and change which FACE libass resolves, so they are part of the same answer.
+    spacing: float = 0.0
+    scale_x: float = 100.0
+    bold: bool = False
+    italic: bool = False
 
     def __post_init__(self) -> None:
         if self.token_index < 0 or isinstance(self.rgb, bool) or not 0 < self.rgb <= 0xFFFFFF:

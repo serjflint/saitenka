@@ -22,6 +22,7 @@ from saitenka_subtitles import (
     rewrite_ass_event,
     serialize_ass_event_line,
 )
+from saitenka_subtitles.ass import token_run_styles
 from util import PINNED_FAMILY, pinned_ass_renderer, requires_libass
 
 TRACK = SubtitleTrackId("external:/tmp/example.ass:1")
@@ -696,3 +697,69 @@ def test_black_is_a_valid_authored_reserved_color() -> None:
     source = annotated("猫", (0, 1))
 
     assert allocate_token_colors((source,), reserved_colors=(0,))[0].bgr == 1
+
+
+@pytest.mark.parametrize(
+    ("override", "bold"),
+    [
+        (r"{\bord4}", "regular"),  # outline width, not weight
+        (r"{\blur2}", "regular"),
+        (r"{\be1}", "regular"),
+        (r"{\b1}", "bold"),
+        (r"{\b700}", "bold"),
+        (r"{\b400}", "regular"),  # a weight below libass's bold threshold
+        (r"{\b0}", "regular"),
+    ],
+)
+def test_only_a_weight_tag_makes_a_run_bold(override: str, bold: str) -> None:
+    r"""`\b` is a prefix of `\bord`, `\blur` and `\be`, and reading one as the other would redraw
+    every outlined cue in the wrong face."""
+    catalog = AssStyleCatalog((AssStyle("Default", "00FFFFFF"),))
+    line = f"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{override}猫"
+    event = parse_ass_event_line(line, SubtitleTrackId("t"), 0)
+    annotated = AnnotatedSubtitleEvent(decode_ass_event(event), (TokenAnnotation(0, 0, 1),))
+
+    run = token_run_styles(annotated, catalog)[0]
+
+    assert ("bold" if run[2] else "regular") == bold
+
+
+def test_a_spaced_token_is_drawn_one_event_per_glyph() -> None:
+    r"""mpv's OSD renderer shapes a whole run where its subtitle renderer shapes each glyph alone
+    (the style `Encoding` decides it), and the two put the glyphs in slightly different places. A
+    lone glyph is one shaping run in either, so splitting the token is what makes them agree — and
+    the spacing then lives in the positions, so re-emitting `\fsp` would apply it twice."""
+    from saitenka_subtitles.overprint import TokenPaint, event_lines
+
+    paint = TokenPaint(
+        "すごい",
+        100,
+        200,
+        "Yu Gothic",
+        40.0,
+        0x00FF00,
+        1.0,
+        8.0,
+        glyph_dx=(0, 48, 97),
+        glyph_dy=(0, 1, 0),
+    )
+
+    lines = event_lines(paint)
+
+    assert [line[-1] for line in lines] == ["す", "ご", "い"]
+    assert r"\pos(100,200)" in lines[0]
+    assert r"\pos(148,201)" in lines[1]
+    assert r"\pos(197,200)" in lines[2]
+    assert all(r"\fsp" not in line for line in lines)
+
+
+def test_a_token_without_spacing_stays_one_event() -> None:
+    """The split costs an event per glyph, so a run the two renderers already agree on keeps the
+    single event — and the payload bytes it always had."""
+    from saitenka_subtitles.overprint import TokenPaint, event_lines
+
+    paint = TokenPaint("すごい", 100, 200, "Yu Gothic", 40.0, 0x00FF00, 1.0)
+
+    assert event_lines(paint) == [
+        r"{\an7\pos(100,200)\fnYu Gothic\fs40\1c&H00FF00&\bord1\shad0}すごい"
+    ]

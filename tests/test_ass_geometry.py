@@ -212,3 +212,64 @@ def test_prepare_frame_accepts_active_row_byte_limit_and_rejects_one_more() -> N
             text=text + "a",
             tokens=(),
         )
+
+
+#: A style that typesets rather than merely picks a face: letter spacing, and a weight that resolves
+#: to a different font file. The event alternates `\fscx` the way shipped subtitles do.
+TYPESET = """[Script Info]
+ScriptType: v4.00+
+PlayResX: 1280
+PlayResY: 720
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,-1,0,0,0,100,100,4,0,1,2,1,2,10,10,30,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\fscx50}猫{\\fscx100}を見る
+""".encode()
+
+
+def test_the_palette_carries_what_a_redraw_needs_beyond_the_face() -> None:
+    r"""Face and size do not place a glyph on their own.
+
+    `Spacing` moves every glyph after a token's first, `Bold` resolves a different font file, and
+    `\fscx` is read per token because it is routinely toggled mid-line. A palette carrying only the
+    face redraws the first glyph of each token correctly and walks left across the rest.
+    """
+    prepared = prepare_ass_hit_map_frame(
+        TYPESET,
+        SubtitleTrackId("track"),
+        active_rows=TYPESET.decode().splitlines()[-1],
+        text="猫を見る",
+        tokens=(TokenAnnotation(0, 0, 1), TokenAnnotation(1, 1, 4)),
+    )
+
+    by_index = {entry.token_index: entry for entry in prepared.palette}
+
+    assert by_index[0].spacing == 4
+    assert by_index[0].bold is True
+    # Per token, not per event: the first is inside `\fscx50` and the second after `\fscx100`.
+    assert by_index[0].scale_x == 50
+    assert by_index[1].scale_x == 100
+
+
+def test_a_style_that_typesets_nothing_reports_libass_own_defaults() -> None:
+    """The `ASS` fixture declares `Spacing: 0`, `ScaleX: 100` and no weight, and a redraw of it must
+    stay byte-identical to what it was before these were carried."""
+    prepared = prepare_ass_hit_map_frame(
+        ASS,
+        SubtitleTrackId("track"),
+        active_rows=ASS.decode().splitlines()[-2],
+        text="猫を見る",
+        tokens=(TokenAnnotation(0, 0, 1), TokenAnnotation(1, 2, 4)),
+    )
+
+    for entry in prepared.palette:
+        assert (entry.spacing, entry.scale_x, entry.bold, entry.italic) == (
+            0.0,
+            100.0,
+            False,
+            False,
+        )

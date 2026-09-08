@@ -322,7 +322,9 @@ def _palette_in_frame_units(
     return tuple(
         replace(entry, font_name="", font_size=0.0)
         if (entry.event_id, entry.token_index) in blanked
-        else replace(entry, font_size=entry.font_size * scale)
+        # `spacing` rides the same scale as the size — libass reads both in script units and applies
+        # `frame_height / PlayResY` to each. `scale_x` is a percentage and is already unit-free.
+        else replace(entry, font_size=entry.font_size * scale, spacing=entry.spacing * scale)
         for entry in prepared.palette
     )
 
@@ -2005,6 +2007,12 @@ class NativeSubtitleGeometry:
                 item.coverage,
                 item.anchor_dx,
                 item.anchor_dy,
+                item.spacing,
+                item.scale_x,
+                item.bold,
+                item.italic,
+                item.glyph_dx,
+                item.glyph_dy,
             )
             for item in snapshot.tokens
         ]
