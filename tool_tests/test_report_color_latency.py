@@ -52,14 +52,48 @@ def test_a_cue_that_was_never_colored_is_reported_apart_from_the_durations() -> 
     """It contributes no duration, so a summary built from durations alone reports the session as
     fast by omitting exactly the failures — which is the shape of the bug being chased."""
     spans = latency.draws(
-        {"traceEvents": [draw(0, "aa", 0), draw(40, "aa", 0), draw(80, "bb", 0), draw(90, "bb", 3)]}
+        {
+            "traceEvents": [
+                draw(0, "aa", 0),
+                draw(40, "aa", 0),
+                draw(800, "bb", 0),
+                draw(810, "bb", 3),
+            ]
+        }
     )
 
     measured, never, cues = latency.waits(spans)
 
     assert measured == [10.0]
-    assert never == ["aa"]
+    assert never == [("aa", 800.0)]
     assert len(cues) == 2
+
+
+def test_a_never_colored_cue_carries_how_long_it_held_the_screen() -> None:
+    """Screen time is the gap to the next cue, and it is what separates a real miss from a flash.
+
+    Without it the headline overstates badly: a field session read 6 of 18 cues uncolored, and four
+    of those six had been on screen for 60-92 ms — gone before anyone could read them, let alone
+    notice the color was absent. Reported as one number that is 33%; split, it is 11%.
+    """
+    spans = latency.draws(
+        {"traceEvents": [draw(0, "flash", 0), draw(70, "held", 0), draw(900, "next", 1)]}
+    )
+
+    _measured, never, _cues = latency.waits(spans)
+
+    assert never == [("flash", 70.0), ("held", 830.0)]
+    assert [held < latency.GLIMPSE_MS for _cue, held in never] == [True, False]
+
+
+def test_the_last_cue_of_a_session_is_not_given_an_invented_screen_time() -> None:
+    """It has no successor to bound it. Treating that as zero would file every session's final cue
+    as a flash, which is the one place the heuristic would silently hide a real miss."""
+    spans = latency.draws({"traceEvents": [draw(0, "only", 0)]})
+
+    _measured, never, _cues = latency.waits(spans)
+
+    assert never == [("only", float("inf"))]
 
 
 def test_legacy_draws_are_not_counted_as_uncolored_native_ones() -> None:

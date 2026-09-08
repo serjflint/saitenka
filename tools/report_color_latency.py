@@ -33,27 +33,43 @@ def draws(trace: dict) -> list[dict]:
     ]
 
 
-def waits(spans: list[dict]) -> tuple[list[float], list[str], list[str]]:
-    """Per cue: the wait in ms, or the cue's handle when its color never arrived.
+#: A cue this short is gone before anyone reads it, so its color never arriving is not a defect —
+#: mpv shows the line for less time than a slow blink. Measured against the gap to the NEXT cue,
+#: which is how long this one held the screen. Cues below this are reported apart rather than
+#: dropped: they are still evidence, just not evidence of the thing being chased.
+GLIMPSE_MS = 250.0
+
+
+def waits(spans: list[dict]) -> tuple[list[float], list[tuple[str, float]], list[str]]:
+    """Per cue: the wait in ms, or the cue's handle and screen time when its color never arrived.
 
     A cue that is never colored contributes NO duration, so a summary built only from the durations
     reports the session as fast by omitting exactly the failures. It is returned separately.
+
+    Screen time comes from the gap to the next cue's first draw. Without it the headline overstates:
+    a session read 6 of 18 cues uncolored, and 4 of those six had held the screen for 60-92 ms.
     """
     by_cue: dict[str, list[dict]] = {}
     for span in spans:
         cue = span.get("cue")
         if cue is not None and span.get("path") == "native":
             by_cue.setdefault(cue, []).append(span)
-    measured: list[float] = []
-    never: list[str] = []
-    for cue, group in by_cue.items():
+    for group in by_cue.values():
         group.sort(key=lambda item: item["ts"])
+    order = sorted(by_cue, key=lambda cue: by_cue[cue][0]["ts"])
+    measured: list[float] = []
+    never: list[tuple[str, float]] = []
+    for index, cue in enumerate(order):
+        group = by_cue[cue]
         colored = next((item for item in group if item.get("measured_boxes")), None)
-        if colored is None:
-            never.append(cue)
-        else:
+        if colored is not None:
             measured.append(colored["ts"] - group[0]["ts"])
-    return measured, never, list(by_cue)
+            continue
+        # The last cue has no successor to bound it; treat it as long-lived rather than invent one.
+        following = by_cue[order[index + 1]][0]["ts"] if index + 1 < len(order) else None
+        held = float("inf") if following is None else following - group[0]["ts"]
+        never.append((cue, held))
+    return measured, never, order
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,9 +98,18 @@ def main(argv: list[str] | None = None) -> int:
         )
     if never:
         # The headline the durations cannot carry: a cue nobody ever colored is not a slow cue.
+        # Split by screen time, because counting a 60 ms flash beside a cue held for half a second
+        # reports one number for two different things and inflates the one that matters.
+        missed = [item for item in never if item[1] >= GLIMPSE_MS]
+        glimpsed = len(never) - len(missed)
         print(
-            f"  NEVER colored:  {len(never)} of {len(cues)} ({100 * len(never) / len(cues):.0f}%)"
+            f"  NEVER colored:  {len(missed)} of {len(cues)} ({100 * len(missed) / len(cues):.0f}%)"
         )
+        for cue, held in sorted(missed, key=lambda item: -item[1]):
+            held_text = "to end of session" if held == float("inf") else f"{held:.0f} ms on screen"
+            print(f"      {cue}  {held_text}")
+        if glimpsed:
+            print(f"  (+{glimpsed} cue(s) gone in under {GLIMPSE_MS:.0f} ms — too brief to read)")
     return 0
 
 
