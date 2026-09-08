@@ -71,6 +71,7 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-ass-full-unsupported",
         "subtitle-geometry-cache-miss",
         "subtitle-observation-pending",
+        "subtitle-hint-text-mismatch",
         "subtitle-frame-unsupported",
         "subtitle-font-environment-stale",
     }
@@ -79,6 +80,7 @@ _PENDING_REASONS = frozenset(
     {
         "subtitle-ass-full-unavailable",
         "subtitle-geometry-cache-miss",
+        "subtitle-hint-text-mismatch",
         "subtitle-observation-pending",
         "subtitle-timing-unavailable",
     }
@@ -1659,7 +1661,11 @@ class NativeSubtitleGeometry:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
             if semantic_text != seen.normalise(seen.text):
-                self._degrade_geometry("subtitle-observation-pending")
+                # Distinct from waiting on mpv: the document WAS read, at the cue we navigated to,
+                # and its semantic text disagreed with the cue we are drawing. Filed under the same
+                # reason as "mpv has not caught up", the two were indistinguishable in a bundle —
+                # and they have different fixes, because this one never resolves by waiting.
+                self._degrade_geometry("subtitle-hint-text-mismatch")
                 return None
             return hint.start, hint.end, timestamp_ms, rows
         if not isinstance(active_rows, str) or not active_rows.strip():
@@ -1871,6 +1877,12 @@ class NativeSubtitleGeometry:
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
             span.set("coverage_trimmed", stats.coverage_trimmed)
+            # A finished render discarded by a moved fence reached no span at all, so from a bundle
+            # it was indistinguishable from one never requested — which is why a cue that stayed
+            # unscannable for its whole life took a backwards seek to notice.
+            span.set("superseded", stats.superseded)
+            span.set("failures", stats.failures)
+            span.set("completed", stats.completed)
         if cache_hit:
             # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
             # a cached cue would sit unapplied until some later miss happened to land.
@@ -2041,25 +2053,43 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
 
     def _apply(self, seen: GeometryObservation) -> bool:
-        snapshot = self._ports.pipeline.current
-        if snapshot is None:
-            self._consume_failure()
-            return False
-        if snapshot is self._last_snapshot:
-            return False
-        if not self._snapshot_identities_are_valid(snapshot, len(seen.tokens)):
-            self._degrade_geometry("geometry-token-identity-invalid")
-            return False
-        self._ports.publish(self._install_snapshot(snapshot), (0, 0))
-        self._record_ready_latency(snapshot.generation)
-        if not self._ports.use_native():
-            if self._ports.ownership_undecided():
-                return False  # the assertion's terminal re-drives the refresh
-            self._set_fallback("mpv-sub-visibility-rejected")
-            return False
-        self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
-        self._ports.redraw()
-        return True
+        """Turn the published snapshot into boxes on screen, or say why not.
+
+        Five ways to answer no, and every one of them used to be silent. A published render that
+        got this far and left through one of them was indistinguishable in a bundle from a render
+        that never ran — which is how a cue stayed unscannable for its whole life without anything
+        recording that a result for it existed.
+        """
+        with otel_metrics.traced("subtitle_geometry_apply") as span:
+            snapshot = self._ports.pipeline.current
+            span.set("has_snapshot", snapshot is not None)
+            if snapshot is None:
+                span.set("outcome", "no-snapshot")
+                self._consume_failure()
+                return False
+            span.set("generation", snapshot.generation)
+            span.set("snapshot_tokens", len(snapshot.tokens))
+            span.set("observed_tokens", len(seen.tokens))
+            if snapshot is self._last_snapshot:
+                span.set("outcome", "already-installed")
+                return False
+            if not self._snapshot_identities_are_valid(snapshot, len(seen.tokens)):
+                span.set("outcome", "identity-invalid")
+                self._degrade_geometry("geometry-token-identity-invalid")
+                return False
+            self._ports.publish(self._install_snapshot(snapshot), (0, 0))
+            self._record_ready_latency(snapshot.generation)
+            if not self._ports.use_native():
+                if self._ports.ownership_undecided():
+                    span.set("outcome", "ownership-undecided")
+                    return False  # the assertion's terminal re-drives the refresh
+                span.set("outcome", "sub-visibility-rejected")
+                self._set_fallback("mpv-sub-visibility-rejected")
+                return False
+            self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
+            self._ports.redraw()
+            span.set("outcome", "applied")
+            return True
 
     def close(self) -> None:
         self.worker.close()

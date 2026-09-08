@@ -92,6 +92,9 @@ class Appearance:
     #: Tokens the settled geometry decision owed a box. `None` when no decision was recorded in
     #: this window, which is not the same as zero and must not be read as one.
     eligible: int | None
+    #: Draws that carried boxes with no tokens to put them on — geometry published against a cue
+    #: that cannot use it. Never a paint; always a defect.
+    orphan_boxes: int
 
     @property
     def held(self) -> float:
@@ -127,7 +130,13 @@ def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Ap
     for index, run in enumerate(runs):
         start = run[0]["ts"]
         end = runs[index + 1][0]["ts"] if index + 1 < len(runs) else None
-        colored = next((span for span in run if span.get("measured_boxes")), None)
+        # Boxes AND tokens to put them on. A draw carrying boxes with zero tokens is geometry
+        # published against a cue that cannot use it — the field showed three boxes belonging to
+        # one cue filed against another — and scoring that as colored reports a paint that never
+        # happened. Counted separately below rather than dropped.
+        colored = next(
+            (span for span in run if span.get("measured_boxes") and span.get("tokens")), None
+        )
         result.append(
             Appearance(
                 cue=run[0].get("cue", ""),
@@ -136,6 +145,9 @@ def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Ap
                 draws=len(run),
                 wait=None if colored is None else colored["ts"] - start,
                 eligible=_eligible_in(settled, start, end),
+                orphan_boxes=sum(
+                    1 for span in run if span.get("measured_boxes") and not span.get("tokens")
+                ),
             )
         )
     return result
@@ -191,6 +203,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     if unpaintable:
         print(f"  no color owed:  {unpaintable} (geometry settled on 0 eligible tokens)")
+    orphans = sum(item.orphan_boxes for item in shown)
+    if orphans:
+        print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")
     unsettled = settling(settled)
     if unsettled:
         # The one a viewer complains about, and the one the per-appearance durations cannot carry.

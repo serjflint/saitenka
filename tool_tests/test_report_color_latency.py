@@ -20,12 +20,12 @@ sys.modules["report_color_latency"] = latency
 _spec.loader.exec_module(latency)
 
 
-def draw(ts_ms: float, cue: str, boxes: int, path: str = "native") -> dict:
+def draw(ts_ms: float, cue: str, boxes: int, path: str = "native", *, tokens: int = 6) -> dict:
     return {
         "ph": "X",
         "name": "subtitle_draw",
         "ts": ts_ms * 1000.0,
-        "args": {"cue": cue, "measured_boxes": boxes, "path": path},
+        "args": {"cue": cue, "measured_boxes": boxes, "path": path, "tokens": tokens},
     }
 
 
@@ -134,6 +134,23 @@ def test_legacy_draws_are_not_counted_as_uncolored_native_ones() -> None:
     shown = read([draw(0, "aa", 0, path="legacy"), draw(10, "aa", 0, "legacy")])
 
     assert shown == []
+
+
+def test_boxes_with_no_tokens_to_put_them_on_are_not_a_paint() -> None:
+    """Geometry published against a cue that cannot use it. The field showed three boxes belonging
+    to `1535aaa2` filed against `36e9d246`, a cue with zero tokens — and this readout scored it as
+    a success, which is how a cue that painted nothing read as coloured for two sessions."""
+    shown = read([draw(0, "orphan", 3, tokens=0), draw(10, "orphan", 3, tokens=0)])
+
+    assert shown[0].wait is None
+    assert shown[0].orphan_boxes == 2
+
+
+def test_boxes_with_tokens_are_still_a_paint() -> None:
+    """The negative half — the guard must not swallow a real colouring."""
+    shown = read([draw(0, "real", 0, tokens=6), draw(10, "real", 3, tokens=6)])
+
+    assert (shown[0].wait, shown[0].orphan_boxes) == (10.0, 0)
 
 
 def test_the_wait_a_viewer_lives_spans_two_cue_handles() -> None:
