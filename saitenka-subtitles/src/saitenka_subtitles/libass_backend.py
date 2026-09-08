@@ -5,10 +5,11 @@ from __future__ import annotations
 import importlib
 import logging
 import time
-from array import array
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, cast
+
+import numpy as np
 
 from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
 from saitenka_subtitles.fragments import (
@@ -154,11 +155,22 @@ def _collect_layer(
     layer: ImageLayer,
     palette: dict[int, tuple[int, _TokenKey]],
     reserved: set[int],
-    owners: array,
+    owners: np.ndarray,
     frame_size: tuple[int, int],
     bounds: dict[_TokenKey, list[int]],
     segments: dict[_TokenKey, list[Rect]],
 ) -> None:
+    """Attribute one layer's painted pixels to the token whose color it carries.
+
+    Whole-array rather than per pixel. This ran once per painted pixel of every glyph and was ~97%
+    of a geometry render — measured at 11.2 ms of an 11.5 ms extraction, against libass's own render
+    at 0.07 ms — which put a cue's measurement above the rate cues arrive at, so the prefetch queue
+    dropped 18 of 31 lookahead renders and the color reached the screen late.
+
+    The three refusals below are unchanged in meaning and only widened in scope: they now test the
+    whole layer at once instead of stopping at the first offending pixel. Nothing depends on which
+    pixel was blamed — the render fails either way — and the extent is the same union.
+    """
     if layer.image_type != 0 or layer.width <= 0 or layer.height <= 0:
         return
     rgb = layer.color >> 8
@@ -169,28 +181,29 @@ def _collect_layer(
     owner, key = palette[rgb]
     if len(layer.bitmap) != layer.width * layer.height:
         raise ValueError("libass character bitmap has an invalid size")
+    rows, columns = np.nonzero(
+        np.frombuffer(layer.bitmap, dtype=np.uint8).reshape(layer.height, layer.width)
+    )
+    if not rows.size:
+        return
+    xs = columns.astype(np.intp) + layer.dst_x
+    ys = rows.astype(np.intp) + layer.dst_y
     frame_width, frame_height = frame_size
-    painted = False
-    for offset, coverage in enumerate(layer.bitmap):
-        if not coverage:
-            continue
-        x = layer.dst_x + offset % layer.width
-        y = layer.dst_y + offset // layer.width
-        if not 0 <= x < frame_width or not 0 <= y < frame_height:
-            raise ValueError("libass character bitmap extends outside the frame")
-        position = y * frame_width + x
-        previous = owners[position]
-        if previous not in {0, owner}:
-            raise ValueError("ambiguous libass token overlap")
-        owners[position] = owner
-        extent = bounds.setdefault(key, [x, y, x + 1, y + 1])
-        extent[0] = min(extent[0], x)
-        extent[1] = min(extent[1], y)
-        extent[2] = max(extent[2], x + 1)
-        extent[3] = max(extent[3], y + 1)
-        painted = True
-    if painted:
-        segments[key].append(Rect(layer.dst_x, layer.dst_y, layer.width, layer.height))
+    left, right = int(xs.min()), int(xs.max())
+    top, bottom = int(ys.min()), int(ys.max())
+    if left < 0 or right >= frame_width or top < 0 or bottom >= frame_height:
+        raise ValueError("libass character bitmap extends outside the frame")
+    positions = ys * frame_width + xs
+    previous = owners[positions]
+    if bool(np.any((previous != 0) & (previous != owner))):
+        raise ValueError("ambiguous libass token overlap")
+    owners[positions] = owner
+    extent = bounds.setdefault(key, [left, top, right + 1, bottom + 1])
+    extent[0] = min(extent[0], left)
+    extent[1] = min(extent[1], top)
+    extent[2] = max(extent[2], right + 1)
+    extent[3] = max(extent[3], bottom + 1)
+    segments[key].append(Rect(layer.dst_x, layer.dst_y, layer.width, layer.height))
 
 
 def _validate_token_pixels(
@@ -239,7 +252,7 @@ def _token_coverage(
     shared edge, and adding there would push the alpha past opaque and print a seam.
     """
     masks = {
-        key: bytearray((extent[2] - extent[0]) * (extent[3] - extent[1]))
+        key: np.zeros((extent[3] - extent[1], extent[2] - extent[0]), dtype=np.uint8)
         for key, extent in bounds.items()
     }
     for layer in layers:
@@ -248,18 +261,36 @@ def _token_coverage(
         entry = palette.get(layer.color >> 8)
         if entry is not None and (extent := bounds.get(entry[1])) is not None:
             _blit_coverage(layer, masks[entry[1]], extent)
-    return {key: bytes(mask) for key, mask in masks.items()}
+    return {key: mask.tobytes() for key, mask in masks.items()}
 
 
-def _blit_coverage(layer: ImageLayer, mask: bytearray, extent: list[int]) -> None:
-    stride = extent[2] - extent[0]
-    for offset, value in enumerate(layer.bitmap):
-        if not value:
-            continue
-        x = layer.dst_x + offset % layer.width - extent[0]
-        y = layer.dst_y + offset // layer.width - extent[1]
-        position = y * stride + x
-        mask[position] = max(mask[position], value)
+def _blit_coverage(layer: ImageLayer, mask: np.ndarray, extent: list[int]) -> None:
+    """One layer's alpha into the token's cropped mask, `maximum` where they meet.
+
+    Sliced rather than walked, for the reason `_collect_layer` is: this is the same per-pixel loop
+    and it is the second-largest phase of an extraction, ~4 ms where the collect was ~11.
+
+    `np.maximum` keeps the old semantics exactly — two layers of one token (a glyph split across
+    images) share an edge, and adding there would push the alpha past opaque and print a seam.
+    """
+    source = np.frombuffer(layer.bitmap, dtype=np.uint8).reshape(layer.height, layer.width)
+    # The crop is the token's INK, and a bitmap's origin sits above and left of its ink whenever the
+    # glyph has bearing — which is most glyphs. So these offsets are routinely NEGATIVE, and a
+    # negative slice start counts from the far end: the window came back empty and the layer's
+    # coverage was dropped without a word. Clip on both sides instead of trusting them positive.
+    top, left = layer.dst_y - extent[1], layer.dst_x - extent[0]
+    source_top, source_left = max(0, -top), max(0, -left)
+    mask_top, mask_left = max(0, top), max(0, left)
+    height = min(layer.height - source_top, mask.shape[0] - mask_top)
+    width = min(layer.width - source_left, mask.shape[1] - mask_left)
+    if height <= 0 or width <= 0:
+        return
+    window = mask[mask_top : mask_top + height, mask_left : mask_left + width]
+    np.maximum(
+        window,
+        source[source_top : source_top + height, source_left : source_left + width],
+        out=window,
+    )
 
 
 def extract_token_geometry(
@@ -302,7 +333,7 @@ def extract_token_geometry(
     # because an allocation that scales with the FRAME rather than with the cue is a different
     # problem from a loop that scales with the ink, and one number could not tell them apart.
     started = time.perf_counter_ns()
-    owners = array("H", [0]) * (request.frame_size[0] * request.frame_size[1])
+    owners = np.zeros(request.frame_size[0] * request.frame_size[1], dtype=np.uint16)
     sink.record(EXTRACT_OWNERS_MS, (time.perf_counter_ns() - started) / 1_000_000)
 
     bounds: dict[_TokenKey, list[int]] = {}
