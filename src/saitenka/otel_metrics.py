@@ -126,6 +126,11 @@ subtitle_renderer_forced: Counter | None = None
 subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
 subtitle_layout_drift_px: Histogram | None = None
+#: The `compute_bounds` round trip, which is the only OSD-side cost we can time: mpv lays the payload
+#: out on its core thread and answers. Every other span in the draw path measures OUR side, so
+#: without this the leg that actually draws has no number and the measuring renderer looks expensive
+#: by comparison purely because it is the only one instrumented.
+subtitle_calibration_ms: Histogram | None = None
 #: labeled device=overprint|overpaint|none. The demotion counter next door only reports the negative,
 #: so a session with none of them is indistinguishable from one where the text device silently drew
 #: nothing — and the raster device below it colors the cue correctly either way.
@@ -455,6 +460,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_geometry_font_sources, subtitle_renderer_forced
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
+    global subtitle_calibration_ms
 
     with _lock:
         _reader = reader
@@ -704,6 +710,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.token_device",
             description="color device each token was drawn by (device=overprint|overpaint|none)",
         )
+        subtitle_calibration_ms = meter.create_histogram(
+            "saitenka.subtitle.calibration_ms",
+            unit="ms",
+            description="compute_bounds round trip — mpv's OSD renderer laying out our payload",
+        )
         hover_target_outcomes = meter.create_counter(
             "saitenka.hover.target_outcomes",
             description="what each hover poll found (outcome=word|no-word|no-geometry|popup|outside)",
@@ -760,6 +771,7 @@ def unregister() -> None:
     global subtitle_geometry_font_sources, subtitle_renderer_forced
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
+    global subtitle_calibration_ms
 
     with _lock:
         _reader = None
@@ -834,6 +846,7 @@ def unregister() -> None:
         subtitle_overpaint_frames = None
         subtitle_layout_drift_px = None
         subtitle_token_device = None
+        subtitle_calibration_ms = None
         hover_target_outcomes = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None

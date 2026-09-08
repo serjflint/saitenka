@@ -536,3 +536,98 @@ def test_the_device_census_counts_each_token_once_per_drawn_cue() -> None:
     assert otel_metrics.subtitle_token_device is None
     overprint_payload(request)
     overprint_payload(request, census=True)
+
+
+def _spans_named(spans: list[dict], name: str) -> list[dict]:
+    return [s["attrs"] for s in spans if s["name"] == name]
+
+
+def test_the_ladder_reports_its_device_split_and_its_event_count(monkeypatch) -> None:
+    """The two legs of a cue cost different things — device 1 emits events, device 2 composites
+    pixels — and `cue_redraw` lumped both into one number. Spanning them apart is what makes the
+    question "which renderer is expensive" answerable from a report."""
+    from util import record_spans
+
+    from saitenka.app.subtitle_render import overprint_payload
+    from saitenka.app.subtitles import WordBox
+
+    spans = record_spans(monkeypatch)
+    boxes = [
+        WordBox(0, 100, 600, 50, 40, "Arial", 48.0),
+        WordBox(1, 160, 600, 50, 40, "Arial", 48.0),
+    ]
+
+    overprint_payload(draw_request(styles=[Style((255, 0, 0, 255))] * 2, boxes=boxes), census=True)
+
+    attrs = _spans_named(spans, "subtitle_overprint_build")[0]
+    assert (attrs["tokens"], attrs["overprint"], attrs["overpaint"], attrs["none"]) == (2, 2, 0, 0)
+    assert attrs["events"] == 2
+    assert attrs["census"] is True
+
+
+def test_a_split_token_shows_up_as_more_events_than_tokens(monkeypatch) -> None:
+    r"""The only signal that says whether the per-glyph path ran.
+
+    A spaced token is drawn one event per glyph, so `events` exceeds `tokens` exactly when it split.
+    Nothing else reports it — the payload's `\fsp` disappears on the split events, so a signature
+    cannot distinguish "split" from "never had spacing".
+    """
+    from util import record_spans
+
+    from saitenka.app.subtitle_render import overprint_payload
+    from saitenka.app.subtitles import WordBox
+
+    spans = record_spans(monkeypatch)
+    # Token 2 of the fixture cue is 見る — two glyphs, so a spaced run splits it into two events.
+    split = WordBox(
+        2, 100, 600, 50, 40, "Arial", 48.0, b"", 0, 0, 4.0, 100.0, glyph_dx=(0, 20), glyph_dy=(0, 0)
+    )
+    request = draw_request(styles=[Style((255, 0, 0, 255))] * 3, boxes=[split])
+
+    overprint_payload(request, census=True)
+
+    attrs = _spans_named(spans, "subtitle_overprint_build")[0]
+    assert attrs["tokens"] == 1
+    assert attrs["events"] == 2
+
+
+def test_the_raster_leg_reports_the_area_it_composited(monkeypatch) -> None:
+    """Device 2's cost scales with pixels where device 1's scales with events, so the raster leg
+    records area — otherwise the two are compared on a number only one of them is driven by."""
+    from util import record_spans
+
+    from saitenka.app.subtitle_render import overpaint_image
+
+    spans = record_spans(monkeypatch)
+
+    overpaint_image(draw_request(styles=[Style((255, 0, 0, 255))], boxes=[]))
+
+    attrs = _spans_named(spans, "subtitle_overpaint_compose")[0]
+    assert (attrs["masks"], attrs["pixels"], attrs["outcome"]) == (0, 0, "empty")
+
+
+@pytest.mark.parametrize(
+    ("owner", "path"),
+    [("NATIVE", "native"), ("LEGACY", "legacy"), ("UNKNOWN", "unowned")],
+)
+def test_the_draw_names_which_engine_ran(monkeypatch, owner: str, path: str) -> None:
+    """`subtitle_renderer_forced` counts the SWITCH, once. So a session that ran every cue on the
+    legacy renderer and one that never touched it differed by a single event, and neither carried
+    what a draw cost — which is why the two engines could not be compared at all."""
+    from dataclasses import replace as _replace
+
+    from util import record_spans
+
+    from saitenka.app.subtitle_ownership import PixelOwner
+
+    spans = record_spans(monkeypatch)
+    renderer, _target, surfaces, ipc, request = _native_renderer_and_target()
+    renderer._state = _replace(renderer._state, owner=getattr(PixelOwner, owner))
+    # The legacy engine's own draw is not what is under test — the dispatch's attribution of it is.
+    monkeypatch.setattr(renderer._fallback, "draw", lambda *_a, **_k: None)
+
+    renderer.draw(request, surfaces, ipc)
+
+    attrs = _spans_named(spans, "subtitle_draw")[0]
+    assert attrs["path"] == path
+    assert attrs["tokens"] == len(request.boxes)
