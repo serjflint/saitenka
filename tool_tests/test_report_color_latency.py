@@ -29,12 +29,12 @@ def draw(ts_ms: float, cue: str, boxes: int, path: str = "native") -> dict:
     }
 
 
-def decision(ts_ms: float, outcome: str, eligible: int) -> dict:
+def decision(ts_ms: float, outcome: str, eligible: int, reason: str = "ready") -> dict:
     return {
         "ph": "X",
         "name": "subtitle_geometry_decision",
         "ts": ts_ms * 1000.0,
-        "args": {"outcome": outcome, "eligible_tokens": eligible},
+        "args": {"outcome": outcome, "eligible_tokens": eligible, "reason": reason},
     }
 
 
@@ -134,6 +134,44 @@ def test_legacy_draws_are_not_counted_as_uncolored_native_ones() -> None:
     shown = read([draw(0, "aa", 0, path="legacy"), draw(10, "aa", 0, "legacy")])
 
     assert shown == []
+
+
+def test_the_wait_a_viewer_lives_spans_two_cue_handles() -> None:
+    """A `sub-seek` redraws optimistically with text whose rows have not arrived, so the
+    provisional draw and the settled one carry *different* text and hash to different handles.
+    Per appearance each half looks fast — the provisional is a sub-100 ms flash, the settled colors
+    in 0.0 ms — and the 70 ms between them belongs to neither. Derived from the decisions instead,
+    which need no grouping at all.
+    """
+    events = [
+        draw(0, "provisional", 0),
+        decision(1, "pending", 0, reason="subtitle-observation-pending"),
+        decision(70, "ready", 6),
+        draw(71, "settled", 6),
+    ]
+    shown = read(events)
+    assert [item.wait for item in shown] == [None, 0.0]  # neither half sees the interval
+
+    assert latency.settling(latency.decisions({"traceEvents": events})) == [69.0]
+
+
+def test_a_cache_miss_pending_is_not_an_unsettled_observation() -> None:
+    """`pending` has more than one reason. Only `subtitle-observation-pending` means the text is up
+    without its rows; a cache miss means the rows are known and the render is queued, which is the
+    interval the per-appearance wait already measures."""
+    events = [
+        decision(0, "pending", 6, reason="subtitle-geometry-cache-miss"),
+        decision(9, "ready", 6),
+    ]
+
+    assert latency.settling(latency.decisions({"traceEvents": events})) == []
+
+
+def test_an_observation_that_never_settled_contributes_no_interval() -> None:
+    """Better to report one fewer sample than to bound it with a `ready` that never came."""
+    events = [decision(0, "pending", 0, reason="subtitle-observation-pending")]
+
+    assert latency.settling(latency.decisions({"traceEvents": events})) == []
 
 
 def test_a_bundle_without_the_cue_handle_is_refused_rather_than_summarised(tmp_path: Path) -> None:

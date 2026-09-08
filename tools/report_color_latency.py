@@ -52,6 +52,32 @@ def decisions(trace: dict) -> list[dict]:
 GLIMPSE_MS = 250.0
 
 
+def settling(settled: list[dict]) -> list[float]:
+    """How long each provisional draw sat on screen before the cue's own rows arrived.
+
+    This is the interval a viewer actually experiences, and no per-cue grouping can recover it: a
+    `sub-seek` redraws optimistically with text that has not settled, so the provisional draw and
+    the settled one carry *different* text and hash to different cue handles. Measured per
+    appearance, each half looks fast — the provisional one is a sub-100 ms flash, the settled one
+    colors in 0.0 ms — and the wait between them belongs to neither.
+
+    Derived instead from the decision either side of it, which needs no grouping at all:
+
+        pending / subtitle-observation-pending  -> text is up, its rows are not
+        the next `ready`                        -> the rows landed, color goes on
+    """
+    waits = []
+    for index, span in enumerate(settled):
+        if span.get("reason") != "subtitle-observation-pending":
+            continue
+        ready = next(
+            (later["ts"] for later in settled[index + 1 :] if later.get("outcome") == "ready"), None
+        )
+        if ready is not None:
+            waits.append(ready - span["ts"])
+    return waits
+
+
 @dataclass(frozen=True)
 class Appearance:
     """One time a cue was on screen. NOT one cue handle — see :func:`appearances`."""
@@ -146,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
         print("subtitle_draw spans carry no cue handle — the bundle predates it")
         return 1
 
-    shown = appearances(spans, decisions(trace))
+    settled = decisions(trace)
+    shown = appearances(spans, settled)
     # An appearance the geometry settled as owing no box is not a failure to color it, and counting
     # it as one is how this readout twice reported a healthy session as broken. It leaves the
     # denominator entirely rather than moving to the numerator's other side.
@@ -164,6 +191,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     if unpaintable:
         print(f"  no color owed:  {unpaintable} (geometry settled on 0 eligible tokens)")
+    unsettled = settling(settled)
+    if unsettled:
+        # The one a viewer complains about, and the one the per-appearance durations cannot carry.
+        ordered = sorted(unsettled)
+        print(
+            f"  text before rows: {len(ordered)} draw(s)"
+            f"   p50 {statistics.median(ordered):6.1f} ms   max {ordered[-1]:6.1f} ms"
+        )
     if never:
         missed = [item for item in never if item.held >= GLIMPSE_MS]
         glimpsed = len(never) - len(missed)
