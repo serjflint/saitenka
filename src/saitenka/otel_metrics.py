@@ -49,6 +49,13 @@ subtitle_geometry_prepare_ms: Histogram | None = None
 subtitle_geometry_render_ms: Histogram | None = None
 subtitle_geometry_renderer_build_ms: Histogram | None = None
 subtitle_geometry_extract_ms: Histogram | None = None
+#: The four phases inside `subtitle_geometry_extract_ms`, which is ~99% of a geometry render — the
+#: collect loop is ~97% of THAT, and the frame-sized owner allocation only ~1%, which its size
+#: argues against. Split so a perf answer names a function rather than "the extraction".
+subtitle_geometry_extract_owners_ms: Histogram | None = None
+subtitle_geometry_extract_collect_ms: Histogram | None = None
+subtitle_geometry_extract_validate_ms: Histogram | None = None
+subtitle_geometry_extract_coverage_ms: Histogram | None = None
 subtitle_geometry_active_events: Histogram | None = None
 subtitle_geometry_eligible_tokens: Histogram | None = None
 subtitle_geometry_skipped_tokens: Histogram | None = None
@@ -326,7 +333,16 @@ class _GeometryTelemetry:
             "renderer_build_ms": subtitle_geometry_renderer_build_ms,
             "render_ms": subtitle_geometry_render_ms,
             "extract_ms": subtitle_geometry_extract_ms,
+            # The four phases inside `extract_ms`, which is ~99% of a render.
+            "extract_owners_ms": subtitle_geometry_extract_owners_ms,
+            "extract_collect_ms": subtitle_geometry_extract_collect_ms,
+            "extract_validate_ms": subtitle_geometry_extract_validate_ms,
+            "extract_coverage_ms": subtitle_geometry_extract_coverage_ms,
         }
+        # Raising is deliberate — a typo here would otherwise vanish. The cost is that this map is
+        # load-bearing for RENDERING: a name the subtitle core records and this does not know kills
+        # the render, and with it every hit box on screen. `GEOMETRY_METRICS` is the enumerable other
+        # half, and `test_geometry_telemetry_contract` binds the two so the gap cannot ship again.
         if metric not in histograms:
             raise ValueError(f"unknown geometry metric: {metric}")
         histogram = histograms[metric]
@@ -436,6 +452,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
     global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_extract_owners_ms, subtitle_geometry_extract_collect_ms
+    global subtitle_geometry_extract_validate_ms, subtitle_geometry_extract_coverage_ms
     global subtitle_geometry_renderer_build_ms
     global subtitle_geometry_active_events
     global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
@@ -522,6 +540,26 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle_geometry.extract_ms",
             unit="ms",
             description="ID-layer geometry extraction time",
+        )
+        subtitle_geometry_extract_owners_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.extract_owners_ms",
+            unit="ms",
+            description="zeroing the frame-sized pixel-owner map",
+        )
+        subtitle_geometry_extract_collect_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.extract_collect_ms",
+            unit="ms",
+            description="attributing each layer's pixels to a token color",
+        )
+        subtitle_geometry_extract_validate_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.extract_validate_ms",
+            unit="ms",
+            description="rejecting partial or ambiguous tokens",
+        )
+        subtitle_geometry_extract_coverage_ms = meter.create_histogram(
+            "saitenka.subtitle_geometry.extract_coverage_ms",
+            unit="ms",
+            description="re-reading the masks the raster device paints",
         )
         subtitle_geometry_active_events = meter.create_histogram(
             "saitenka.subtitle_geometry.active_events",
@@ -747,6 +785,8 @@ def unregister() -> None:
     global cue_redraw_duration_ms, subtitle_render_duration_ms, sub_text_reconcile_duration_ms
     global subtitle_geometry_ready_ms, subtitle_geometry_prepare_ms
     global subtitle_geometry_render_ms, subtitle_geometry_extract_ms
+    global subtitle_geometry_extract_owners_ms, subtitle_geometry_extract_collect_ms
+    global subtitle_geometry_extract_validate_ms, subtitle_geometry_extract_coverage_ms
     global subtitle_geometry_renderer_build_ms
     global subtitle_geometry_active_events
     global subtitle_geometry_eligible_tokens, subtitle_geometry_skipped_tokens
@@ -789,6 +829,10 @@ def unregister() -> None:
         subtitle_geometry_render_ms = None
         subtitle_geometry_renderer_build_ms = None
         subtitle_geometry_extract_ms = None
+        subtitle_geometry_extract_owners_ms = None
+        subtitle_geometry_extract_collect_ms = None
+        subtitle_geometry_extract_validate_ms = None
+        subtitle_geometry_extract_coverage_ms = None
         subtitle_geometry_active_events = None
         subtitle_geometry_eligible_tokens = None
         subtitle_geometry_skipped_tokens = None

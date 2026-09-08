@@ -31,6 +31,25 @@ EXTRACT_COLLECT_MS = "extract_collect_ms"  # attributing each layer's pixels to 
 EXTRACT_VALIDATE_MS = "extract_validate_ms"  # rejecting partial/ambiguous tokens
 EXTRACT_COVERAGE_MS = "extract_coverage_ms"  # re-reading the masks the raster device paints
 
+#: Every metric a sink must accept — the contract's ENUMERABLE half.
+#:
+#: A sink is free to reject an unknown name, and the application's does, by raising. That turns this
+#: list into a hard dependency of rendering at all: adding a metric here without teaching the sink
+#: made every geometry render fail with `provider-error`, so a live session had no hit boxes, no
+#: color and no scanning — from four timing calls. Both `NullTelemetry` and the tests' collectors
+#: accept anything, so nothing caught it until it shipped.
+GEOMETRY_METRICS = frozenset(
+    {
+        RENDERER_BUILD_MS,
+        RENDER_MS,
+        EXTRACT_MS,
+        EXTRACT_OWNERS_MS,
+        EXTRACT_COLLECT_MS,
+        EXTRACT_VALIDATE_MS,
+        EXTRACT_COVERAGE_MS,
+    }
+)
+
 
 class Span(Protocol):
     def set(self, key: str, value: object) -> None: ...

@@ -225,6 +225,63 @@ def benchmark_legacy(config: DeviceBenchmarkConfig) -> dict[str, float]:
     }
 
 
+def benchmark_engines(config: DeviceBenchmarkConfig) -> dict[str, float] | None:
+    """The two engines head to head on ONE cue — what a mid-session `Ctrl+Shift+L` would show.
+
+    A live toggle is the honest way to compare them and it is awkward: two sessions cannot be
+    compared at all, because extraction cost scales with painted ink, so a different episode moves
+    the number for reasons that have nothing to do with the engine. One field trace read
+    `subtitle_geometry_libass` at p50 1.4 ms where another read 31.7 ms, on the same code.
+
+    Same cue, same machine, both engines, is what settles it. What each has to do before pixels can
+    reach mpv:
+
+    * **legacy** — `render_subtitle`: lay out and rasterise the whole cue, colors included. Done.
+    * **native** — measure the cue through libass, classify the ladder, and emit the payload. mpv's
+      OSD then draws it, OUT OF PROCESS and not counted here.
+
+    So the native total is an **understatement** and the comparison is "what saitenka spends", not
+    "what the frame costs". `None` when libass is unavailable, for the same reason as above: a
+    missing leg must not read as a fast one.
+    """
+    from saitenka_subtitles.libass_backend import LibassGeometryBackend
+    from saitenka_tokenize.japanese import Token
+
+    from saitenka.app.subtitle_render import overprint_payload
+    from saitenka.app.subtitles import render_subtitle
+
+    surfaces = [CUE_TOKENS[index % len(CUE_TOKENS)] for index in range(config.tokens)]
+    lines = [[Token(s, s, s, "名詞", index, index + 1) for index, s in enumerate(surfaces)]]
+    styles = [_Style((255, 0, 0, 255)) for _ in range(config.tokens)]
+    drawn = _draw_request(config.tokens, underlines=False)
+
+    legacy = _timed(lambda: render_subtitle(lines, FRAME[0], 44, styles=styles), config.reps)
+
+    backend = LibassGeometryBackend()
+    try:
+        request = _geometry_request(config.tokens)
+        try:
+            if not backend.render(request).tokens:
+                return None
+        except Exception:
+            return None
+
+        def native() -> None:
+            backend.render(request)
+            overprint_payload(drawn)
+
+        native_samples = _timed(native, config.reps)
+    finally:
+        backend.close()
+
+    legacy_p50, native_p50 = statistics.median(legacy), statistics.median(native_samples)
+    return {
+        "engine_legacy_p50_ms": legacy_p50,
+        "engine_native_in_process_p50_ms": native_p50,
+        "engine_native_over_legacy": native_p50 / max(legacy_p50, 1e-9),
+    }
+
+
 def _geometry_request(tokens: int):
     from saitenka_subtitles import SubtitleTrackId, TokenAnnotation
     from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
@@ -337,6 +394,7 @@ def run(config: DeviceBenchmarkConfig, output: Path) -> list[dict[str, Any]]:
     devices = benchmark_devices(config)
     legacy = benchmark_legacy(config)
     geometry = benchmark_libasslite(config)
+    engines = benchmark_engines(config)
 
     result = [
         _entry("ladder: classify one cue", "ms", devices["ladder_p50_ms"]),
@@ -368,6 +426,14 @@ def run(config: DeviceBenchmarkConfig, output: Path) -> list[dict[str, Any]]:
                 ("coverage masks", "libasslite_coverage_p50_ms"),
             )
             if key in geometry
+        ]
+    if engines is not None:
+        result += [
+            _entry("engine: legacy, whole cue", "ms", engines["engine_legacy_p50_ms"]),
+            _entry(
+                "engine: native, in-process only", "ms", engines["engine_native_in_process_p50_ms"]
+            ),
+            _entry("engine: native / legacy", "x", engines["engine_native_over_legacy"]),
         ]
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
