@@ -1,16 +1,10 @@
-"""How long each cue waited for its color, read out of a report bundle's trace.
-
-The wait a viewer sees runs from mpv putting a cue up to our color landing on it. No instrument
-measures that interval, and one was nearly added — a histogram plus three fields of renderer state —
-before it was clear the trace already holds both ends. `subtitle_draw` fires per draw carrying
-`measured_boxes` and a `cue` handle, so the answer is a group-by and a subtraction:
+"""How long each cue waited for its color, derived from a report bundle's trace.
 
     first draw of an appearance           -> the cue is on screen
     first of that appearance with boxes   -> the color is on screen
 
-Deriving it here rather than recording it keeps the renderer stateless and leaves every other
-interval in the same trace derivable later, instead of only the one somebody thought to instrument.
-What it costs: the number needs a bundle. `saitenka doctor` cannot print it live.
+Derived rather than recorded, which keeps the renderer stateless and leaves the trace's other
+intervals derivable too. The cost: it needs a bundle, so `saitenka doctor` cannot print it live.
 
     uv run python tools/report_color_latency.py <report.zip>
 """
@@ -45,18 +39,13 @@ def decisions(trace: dict) -> list[dict]:
 
 
 def caused_by(trace: dict, name: str) -> dict[str, str]:
-    """For each span of ``name``, the nearest ancestor's name — why it happened, not when.
+    """For each span of ``name``, its parent's name — why it happened, not what preceded it.
 
-    The trace has carried `parent_id` all along, with every parent resolving, and this readout
-    ignored it for its whole life: it correlated by timestamp window, which is the technique that
-    produced three confident wrong mechanisms in one session. The edge that settled the `犬` bug was
-    one lookup:
+        subtitle_draw <- cue_redraw <- sub_seek     the cue arrived, we drew it
+        subtitle_draw <- subtitle_geometry_apply    the geometry side triggered this redraw
 
-        subtitle_draw <- cue_redraw <- sub_seek           the cue arrived, we drew it
-        subtitle_draw <- subtitle_geometry_apply          the GEOMETRY caused this draw
-
-    A draw whose parent is the apply is a redraw the geometry side triggered, which is exactly the
-    moment the cue side may have moved on. No amount of adjacency says that; the edge does.
+    The second is where the cue side may have moved on underneath. Adjacency cannot distinguish
+    them; the edge can.
     """
     spans = {
         (event.get("args") or {}).get("span_id"): event
@@ -72,22 +61,50 @@ def caused_by(trace: dict, name: str) -> dict[str, str]:
     return causes
 
 
-#: An appearance this short is gone before anyone reads it, so its color never arriving is not a
-#: defect — mpv shows the line for less time than a slow blink. Reported apart rather than dropped:
-#: still evidence, just not evidence of the thing being chased.
+def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
+    """Per navigation, how long the cue it landed on waited for color.
+
+    Measured against *that* cue, not the next one to color. A seek often lands on a cue owing no
+    color at all, and running on to the next colorable one turns a correct 0 ms into a reading of
+    seconds — which is how a session whose per-seek wait was falling read as one that was growing.
+    """
+    events = sorted(
+        (
+            event
+            for event in trace.get("traceEvents", ())
+            if event.get("ph") == "X" and event.get("name") in {"sub_nav_identity", "subtitle_draw"}
+        ),
+        key=lambda event: event["ts"],
+    )
+    result: list[tuple[float | None, str]] = []
+    landed: list[dict] = []
+    for event in events:
+        args = event.get("args") or {}
+        if event["name"] == "sub_nav_identity":
+            landed = []
+            result.append((None, ""))
+            continue
+        if not result or args.get("path") != "native":
+            continue
+        if landed and args.get("cue") != landed[0].get("cue"):
+            continue
+        landed.append({"ts": event["ts"] / 1000.0, **args})
+        if args.get("measured_boxes") and args.get("tokens") and result[-1][0] is None:
+            result[-1] = (landed[-1]["ts"] - landed[0]["ts"], args.get("cue", ""))
+    return result
+
+
+#: Below this an appearance is gone before anyone reads it, so a missing color is not a defect.
+#: Reported apart rather than dropped — still evidence, just not of the thing being chased.
 GLIMPSE_MS = 250.0
 
 
 def settling(settled: list[dict]) -> list[float]:
     """How long each provisional draw sat on screen before the cue's own rows arrived.
 
-    This is the interval a viewer actually experiences, and no per-cue grouping can recover it: a
-    `sub-seek` redraws optimistically with text that has not settled, so the provisional draw and
-    the settled one carry *different* text and hash to different cue handles. Measured per
-    appearance, each half looks fast — the provisional one is a sub-100 ms flash, the settled one
-    colors in 0.0 ms — and the wait between them belongs to neither.
-
-    Derived instead from the decision either side of it, which needs no grouping at all:
+    No per-cue grouping recovers this: a `sub-seek` redraws with unsettled text, so the provisional
+    draw and the settled one hash to different handles and each half looks fast alone. Taken from
+    the decisions either side instead:
 
         pending / subtitle-observation-pending  -> text is up, its rows are not
         the next `ready`                        -> the rows landed, color goes on
@@ -115,11 +132,9 @@ class Appearance:
     draws: int
     #: Milliseconds from the first draw to the first carrying boxes; `None` if none ever did.
     wait: float | None
-    #: Tokens the settled geometry decision owed a box. `None` when no decision was recorded in
-    #: this window, which is not the same as zero and must not be read as one.
+    #: Tokens the settled decision owed a box. `None` when none was recorded — not the same as zero.
     eligible: int | None
-    #: Draws that carried boxes with no tokens to put them on — geometry published against a cue
-    #: that cannot use it. Never a paint; always a defect.
+    #: Draws carrying boxes with no tokens to put them on. Never a paint; always a defect.
     orphan_boxes: int
 
     @property
@@ -135,12 +150,9 @@ class Appearance:
 def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Appearance]:
     """Split native draws into on-screen appearances, in order.
 
-    The `cue` handle is a digest of the cue's *content*, so a line that recurs — a two-character
-    interjection, a repeated name — comes back under the handle it had 17 seconds ago. Grouping by
-    handle alone welds those into one appearance and computes a screen time spanning the gap.
-
-    An appearance therefore ends when a *different* cue is drawn: mpv shows one at a time, so that
-    is exact and needs no gap threshold to tune.
+    The handle digests *content*, so a recurring line returns under the one it had earlier and
+    grouping by handle welds separate showings together. An appearance ends when a different cue is
+    drawn: mpv shows one at a time, so that is exact and needs no gap threshold.
     """
     ordered = sorted(
         (span for span in spans if span.get("path") == "native"), key=lambda span: span["ts"]
@@ -239,6 +251,17 @@ def main(argv: list[str] | None = None) -> int:
     orphans = sum(item.orphan_boxes for item in shown)
     if orphans:
         print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")
+    navigated = seek_waits(trace)
+    if navigated:
+        landed = [wait for wait, _cue in navigated if wait is not None]
+        blank = len(navigated) - len(landed)
+        if landed:
+            print(
+                f"  after a seek:   n={len(landed)}"
+                f"   p50 {statistics.median(sorted(landed)):6.1f} ms"
+                f"   max {max(landed):6.1f} ms"
+                + (f"   (+{blank} landed on a cue owing no color)" if blank else "")
+            )
     lane = collections.Counter(
         (event.get("args") or {}).get("outcome")
         for event in trace.get("traceEvents", ())
