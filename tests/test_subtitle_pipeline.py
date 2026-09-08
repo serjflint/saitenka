@@ -493,6 +493,51 @@ def test_a_render_identity_change_still_discards_the_lookahead() -> None:
     worker.close()
 
 
+def test_the_fence_holds_when_the_same_cue_is_observed_again() -> None:
+    """mpv re-publishes `sub-text` for a line already on screen. That is not a new cue, and moving
+    the fence for it is what churned generation 1 to 56 across 22 appearances."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    identity = ("猫を見る", 1.0, 3.0, 1)
+    first = coordinator.invalidate(identity)
+
+    assert coordinator.invalidate(identity) == first
+    assert coordinator.generation == first
+
+
+@pytest.mark.parametrize(
+    "moved",
+    [
+        pytest.param(("犬も見る", 1.0, 3.0, 1), id="text"),
+        pytest.param(("猫を見る", 4.0, 3.0, 1), id="start"),
+        pytest.param(("猫を見る", 1.0, 6.0, 1), id="end"),
+        pytest.param(("猫を見る", 1.0, 3.0, 2), id="track"),
+        pytest.param(("", 1.0, 3.0, 1), id="cue-cleared"),
+    ],
+)
+def test_the_fence_moves_for_every_component_of_cue_identity(moved: tuple) -> None:
+    """The evasion, not the example. A repeat with the *same text* at different timing is a
+    different cue -- a repeated line, a looped sign -- and geometry published for the first would
+    be painted onto the second. Every gate written during this investigation matched a name rather
+    than a meaning on its first cut; this one is parametrised over each component so a comparison
+    that quietly drops one fails here.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    before = coordinator.invalidate(("猫を見る", 1.0, 3.0, 1))
+
+    assert coordinator.invalidate(moved) > before
+
+
+def test_a_caller_with_no_cue_identity_always_moves_the_fence() -> None:
+    """A source or font change means whatever is published is wrong regardless of the cue, and
+    `None` is a real identity -- no cue on screen -- so it cannot be the sentinel for "always"."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    first = coordinator.invalidate()
+
+    assert coordinator.invalidate() > first
+    assert coordinator.invalidate(None) > first + 1
+    assert coordinator.invalidate(None) == first + 2  # None compares equal to itself
+
+
 def test_a_current_result_dropped_mid_render_leaves_the_cue_with_no_retry() -> None:
     """The reproduction for a cue that stays unscannable for its whole life.
 

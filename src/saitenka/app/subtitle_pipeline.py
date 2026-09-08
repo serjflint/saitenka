@@ -102,6 +102,12 @@ class GeometryPrefetchResolution:
     error: Exception | None = None
 
 
+#: Passed by a caller that means "whatever is published is now wrong" regardless of the cue --
+#: a source change, a font change, a close. Distinct from `None`, which is a real cue identity
+#: (no cue on screen) and must compare equal to itself.
+_ALWAYS_NEW = object()
+
+
 class SubtitleModeCoordinator:
     """Reject obsolete geometry while keeping provider ownership out of ``SessionController``."""
 
@@ -118,6 +124,7 @@ class SubtitleModeCoordinator:
         self._state_lock = threading.Lock()
         self._backend_lock = threading.Lock()
         self._generation = 0
+        self._cue_identity: object = _ALWAYS_NEW
         self._request_sequence = 0
         self._current: GeometrySnapshot | None = None
         self._last_error: str | None = None
@@ -220,10 +227,25 @@ class SubtitleModeCoordinator:
             self._last_error = None
             return error
 
-    def invalidate(self) -> int:
+    def invalidate(self, identity: object = _ALWAYS_NEW) -> int:
+        """Retire the published geometry and move the fence.
+
+        The fence orders publishes against *the live cue*, so it should move when the live cue's
+        identity moves and not otherwise. It used to move unconditionally -- nothing was compared --
+        and `_set_subtitle_inner` calls this as its first statement, ahead of the empty-text early
+        return, so the blank gap between two cues moved it as surely as the cue did. A field session
+        ran generation 1 to 56 across 22 cue appearances, and every speculation and every in-flight
+        render was fenced against that churn.
+
+        Callers that genuinely mean "whatever is published is now wrong" -- a source change, a font
+        change -- pass no identity and always move it.
+        """
         with self._state_lock:
             if self._closed:
                 return self._generation
+            if identity is not _ALWAYS_NEW and identity == self._cue_identity:
+                return self._generation
+            self._cue_identity = identity
             self._generation += 1
             self._current = None
             self._last_error = None

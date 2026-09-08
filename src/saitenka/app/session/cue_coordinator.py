@@ -137,7 +137,17 @@ class CueCoordinator:
         provisional_navigation: bool,
     ) -> None:
         o = self._o
-        o.presentation.pipeline.invalidate()
+        # Identity, not an unconditional bump: mpv publishes `sub-text` for the blank gap between
+        # cues and re-publishes an unchanged line, and each one used to move the fence that every
+        # speculation and in-flight render is checked against.
+        o.presentation.pipeline.invalidate(
+            (
+                text,
+                o.playback.value("sub-start"),
+                o.playback.value("sub-end"),
+                o.playback.value("sid"),
+            )
+        )
         o.presentation.pipeline.cue_changed(o.presentation.target(), nonempty=bool(text.strip()))
         with otel_metrics.traced("teardown_tip"):
             o.tooltip.teardown()
