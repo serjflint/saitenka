@@ -1165,9 +1165,10 @@ class NativeVisibleRenderer:
         # never touched it differ by a single event — and neither carries what the draw cost.
         with otel_metrics.traced("subtitle_draw") as span:
             span.set("path", self._draw_path())
-            # The tokenizer's count, not `len(request.boxes)`. The legacy renderer produces its own
-            # boxes rather than consuming measured ones, so the boxes are empty on exactly the path
-            # this span exists to make visible — a field trace read `tokens=0` for all 33 of them.
+            # The tokenizer's count, not `len(request.boxes)`. Measured boxes are usually absent on
+            # the legacy path and merely often present on the native one — 6 of 36 against 25 of 48
+            # in one session — so they count what geometry happened to have landed, not what the cue
+            # holds. A field trace read `tokens=0` for all 33 legacy draws before this.
             span.set("tokens", sum(len(line) for line in request.lines))
             span.set("measured_boxes", len(request.boxes))
             return self._draw(request, surfaces, ipc, on_settled=on_settled)

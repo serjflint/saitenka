@@ -71,3 +71,36 @@ def test_an_absent_libass_is_reported_as_absent_not_as_zero(monkeypatch, tmp_pat
     )
 
     assert not any(item["name"].startswith("libasslite") for item in result)
+
+
+def test_the_engine_comparison_measures_both_engines_on_one_cue() -> None:
+    """Two sessions cannot be compared — extraction cost scales with painted ink, so a different
+    episode moves the number for reasons that are not the engine. One field trace read
+    `subtitle_geometry_libass` at p50 1.4 ms where another read 31.7 ms, on identical code.
+
+    Same cue, same process, both engines is what settles it. The ratio is reported so a reader
+    cannot take the native total for the whole frame cost: mpv's OSD draw is out of process and
+    uncounted, so native is understated by construction.
+    """
+    result = bench.benchmark_engines(bench.DeviceBenchmarkConfig(reps=2, tokens=4, mask_side=8))
+
+    if result is None:
+        pytest.skip("libass unavailable — the native leg cannot be measured here")
+    assert result["engine_legacy_p50_ms"] > 0
+    assert result["engine_native_in_process_p50_ms"] > 0
+    ratio = result["engine_native_in_process_p50_ms"] / result["engine_legacy_p50_ms"]
+    assert result["engine_native_over_legacy"] == pytest.approx(ratio)
+
+
+def test_an_absent_libass_makes_the_engine_comparison_absent_too(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Reporting only the legacy half would read as "legacy is the whole story", which is the
+    opposite of what a missing native measurement means."""
+    monkeypatch.setattr(bench, "benchmark_engines", lambda _config: None)
+
+    result = bench.run(
+        bench.DeviceBenchmarkConfig(reps=2, tokens=3, mask_side=8), tmp_path / "b.json"
+    )
+
+    assert not any(item["name"].startswith("engine") for item in result)
