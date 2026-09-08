@@ -1222,16 +1222,25 @@ class NativeSubtitleGeometry:
         *,
         live: bool = False,
         cause: GeometryCacheReason = GeometryCacheReason.RENDER_INPUT_CHANGED,
+        keep_lookahead: bool = False,
     ) -> None:
         """Drop the cached geometry. `live` retires the interaction it was backing — see
-        `set_source`."""
+        `set_source`.
+
+        `keep_lookahead` separates the two things this used to conflate: the cue on screen being
+        replaced, and what future cues render *from* having changed. Only the second invalidates
+        speculation.
+        """
         if live:
             self._consume_failure()
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
-        self.worker.invalidate(cause=cause)
+        if keep_lookahead:
+            self.worker.retire_live()
+        else:
+            self.worker.invalidate(cause=cause)
         if live:
             self._ports.clear_interaction()
 
@@ -1250,7 +1259,10 @@ class NativeSubtitleGeometry:
             else:
                 self._set_ready(active_events=active_events)
             return
-        self.invalidate(live=True)
+        # The cue moved, not the document it renders from — so the lookahead built for the cues
+        # after this one survives. It used to be cleared here, on every cue, which discarded the
+        # speculation at exactly the moment it became useful.
+        self.invalidate(live=True, keep_lookahead=True)
         if seen.text.strip():
             self.schedule(seen)
 
@@ -1606,7 +1618,7 @@ class NativeSubtitleGeometry:
                     unreachable,
                 )
 
-            self.worker.prefetch(key, generation, build)
+            self.worker.prefetch(key, build)
             if len(queued_keys) >= self.lookahead:
                 break
 

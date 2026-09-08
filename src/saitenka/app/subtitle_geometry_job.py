@@ -68,7 +68,7 @@ class GeometryJob:
 
     worker: SubtitleGeometryWorker
     current: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None
-    prefetch: tuple[str, tuple[int, GeometryRequestBuilder]] | None
+    prefetch: tuple[str, int, GeometryRequestBuilder] | None
 
 
 class _Prefetched(NamedTuple):
@@ -120,9 +120,14 @@ class SubtitleGeometryWorker:
         self._cache: OrderedDict[str, GeometrySnapshot] = OrderedDict()
         self._condition = threading.Condition()
         self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
-        self._prefetch_pending: OrderedDict[str, tuple[int, GeometryRequestBuilder]] = OrderedDict()
+        self._prefetch_pending: OrderedDict[str, GeometryRequestBuilder] = OrderedDict()
         self._prefetched: OrderedDict[str, _Prefetched] = OrderedDict()
         self._prefetch_inflight_key: str | None = None
+        #: Speculation's own fence. The live generation moves on every cue — which is the arrival a
+        #: prefetch exists for — so it cannot say whether a speculation is still wanted. This moves
+        #: only when the document, fonts or source it renders from change, which is the only thing
+        #: that can make a filed result wrong rather than merely early.
+        self._prefetch_epoch = 0
         self._prefetch_waiters: dict[str, GeometryReservation] = {}
         self._provenance: OrderedDict[str, GeometryCacheReason] = OrderedDict()
         self._history_lossy = False
@@ -203,14 +208,22 @@ class SubtitleGeometryWorker:
         elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
         self._max_submit_us = max(self._max_submit_us, elapsed_us)
 
-    def prefetch(self, key: str, generation: int, build: GeometryRequestBuilder) -> bool:
-        if generation != self._coordinator.generation:
-            return False
+    def prefetch(self, key: str, build: GeometryRequestBuilder) -> bool:
+        """Queue one speculation. Deliberately *not* fenced by the live generation.
+
+        A prefetch is work about a cue that has not arrived. Gating it on the generation gated it on
+        the arrival it was built for: the fence moves two or three times per cue, so a speculation
+        was near-certain to be refused, dropped mid-render, or have its result discarded before
+        anything could want it. What decides whether it is still valid is render identity — the
+        document, fonts and frame it was built from — and a change to any of those already clears
+        these maps through `invalidate_cache`. `publish_prefetched` rebinds the generation, so a
+        result outliving the fence it was built under is the design, not a leak.
+        """
         with self._condition:
             if self._closed or key in self._prefetched:
                 return False
             self._prefetch_pending.pop(key, None)
-            self._prefetch_pending[key] = (generation, build)
+            self._prefetch_pending[key] = build
             while len(self._prefetch_pending) > self._cache_max:
                 dropped, _item = self._prefetch_pending.popitem(last=False)
                 self._prefetch_dropped += 1
@@ -256,9 +269,9 @@ class SubtitleGeometryWorker:
                     self._settling.append(self._pending_settled)
                 self._pending_settled = None
             elif self._prefetch_pending:
-                entry = self._prefetch_pending.popitem(last=False)
-                self._prefetch_inflight_key = entry[0]
-                job = GeometryJob(self, None, entry)
+                key, build = self._prefetch_pending.popitem(last=False)
+                self._prefetch_inflight_key = key
+                job = GeometryJob(self, None, (key, self._prefetch_epoch, build))
             else:
                 return None
             self._inflight = True
@@ -371,6 +384,7 @@ class SubtitleGeometryWorker:
 
     def invalidate_cache(self, *, cause: GeometryCacheReason | None = None) -> None:
         with self._condition:
+            self._prefetch_epoch += 1
             self._superseded += len(self._prefetch_waiters)
             self._cache.clear()
             self._prefetched.clear()
@@ -385,6 +399,16 @@ class SubtitleGeometryWorker:
         generation = self._coordinator.invalidate()
         self.invalidate_cache(cause=cause)
         return generation
+
+    def retire_live(self) -> int:
+        """Move the publish fence without discarding what was rendered for cues still to come.
+
+        The cue on screen changing retires *that* cue's result; it says nothing about the document
+        the next one renders from. Clearing the lookahead here is how the queue came to throw away
+        most of its work — the speculation was discarded by the very arrival it was built for. A
+        change to render identity still goes through `invalidate`.
+        """
+        return self._coordinator.invalidate()
 
     def _cached(self, request: GeometryRequest) -> GeometrySnapshot | None:
         key = request.cache_key()
@@ -495,18 +519,15 @@ class SubtitleGeometryWorker:
                     self._superseded += 1
             self._idle()
 
-    def _process_prefetch(self, item: tuple[str, tuple[int, GeometryRequestBuilder]]) -> None:
-        key, (generation, build) = item
+    def _process_prefetch(self, item: tuple[str, int, GeometryRequestBuilder]) -> None:
+        key, epoch, build = item
         try:
             request = build()
         except Exception as error:  # noqa: BLE001 -- a promoted waiter turns this into a failure
             self._drop_prefetch(key, error)
             return
-        if generation != self._coordinator.generation:
-            self._drop_prefetch(key)
-            return
         outcome = self._coordinator.render_prefetch_outcome(request)
-        waiter = self._cache_prefetch_outcome(key, generation, request, outcome.snapshot)
+        waiter = self._cache_prefetch_outcome(key, epoch, request, outcome.snapshot)
         published, failure_recorded = self._resolve_prefetch_waiter(waiter, request, outcome)
         with self._condition:
             if waiter is not None:
@@ -522,14 +543,16 @@ class SubtitleGeometryWorker:
     def _cache_prefetch_outcome(
         self,
         key: str,
-        generation: int,
+        epoch: int,
         request: GeometryRequest,
         result: GeometrySnapshot | None,
     ) -> GeometryReservation | None:
         with self._condition:
             waiter = self._prefetch_waiters.pop(key, None)
             self._prefetch_inflight_key = None
-            if result is None or generation != self._coordinator.generation:
+            # The epoch, not the generation: a source or font change while this rendered means it
+            # was built from a document that is gone, and filing it would resurrect a cleared cache.
+            if result is None or epoch != self._prefetch_epoch:
                 self._prefetch_dropped += 1
                 return waiter
             cache_key = request.cache_key()

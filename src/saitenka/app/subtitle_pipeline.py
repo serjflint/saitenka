@@ -330,7 +330,10 @@ class SubtitleModeCoordinator:
     def render_prefetch_outcome(self, request: GeometryRequest) -> GeometryPrefetchResolution:
         with self._backend_lock:
             with self._state_lock:
-                if self._closed or request.generation != self._generation:
+                # Deliberately not fenced by the generation: this renders from the request's own
+                # document and never reads or writes `_current`, so a speculation outliving the cue
+                # it was queued behind is the point. `publish` still holds the fence.
+                if self._closed:
                     return GeometryPrefetchResolution(None)
             if self._backend is None:
                 return GeometryPrefetchResolution(None)

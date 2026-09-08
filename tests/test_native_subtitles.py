@@ -1310,6 +1310,43 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     result.close()
 
 
+def test_the_lookahead_survives_the_cue_arriving_that_it_was_built_for(tmp_path: Path) -> None:
+    """A cue change retired the whole speculative cache, so the lookahead was discarded by exactly
+    the event that made it useful. A field session filed 11 drops against 3 hits: the fence moves
+    two or three times per cue, and every prefetch was built between two of those moves.
+
+    Render identity — the source, the fonts, the frame — is what can make a filed result *wrong*,
+    and that still clears it; see `test_a_render_identity_change_still_discards_the_lookahead`.
+    """
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    native.set_source(source)
+    result.graph.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る"))
+    )
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert native.worker.filed_keys(), "the second cue should have been rendered speculatively"
+    rendered = len(backend.requests)
+    # The next cue's rows, with the first cue still the published one: the observation no longer
+    # identifies what is on screen, which is the branch a cue change takes through `refresh`.
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,\u72ac\u3082\u898b\u308b"
+    )
+    result.graph.playback.install_seed(ipc.props)
+
+    native.refresh(result.graph.cue.geometry_observation())
+    settle_jobs(result, ipc)
+
+    # Counting renders, not filed keys: `refresh` re-queues the lookahead it just discarded, so the
+    # key set recovers either way and only the backend can say whether the work was redone.
+    assert len(backend.requests) == rendered
+    result.close()
+
+
 def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
