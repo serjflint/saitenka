@@ -2,7 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 from enum import StrEnum
+
+
+def cue_digest(text: str) -> str:
+    """A short stable handle for one cue's text — the join key across cue and geometry spans.
+
+    Every span in this chain used to carry a different identity, or none: the draw a content digest,
+    the decision a `generation`, the reconcile a `cue_revision`, the libass render a `timestamp_ms`,
+    and the cache lookup nothing at all. With no shared key the only way to relate them was a
+    timestamp window, which is how three separate mechanisms were confidently mis-diagnosed while
+    the deciding pair of attributes sat on a span nobody could join to.
+
+    A digest rather than the text: a span attribute has no cardinality limit, but a subtitle line is
+    the user's content and does not belong in a bundle that gets shared. It identifies the cue's
+    *content*, so a repeated line returns under the handle it had before -- see the readout, which
+    splits appearances by intervening draws rather than trusting the handle alone.
+
+    Lives here rather than beside the renderer so the geometry side can reach it: this module is the
+    leaf both halves of the chain already import, and routing it through the renderer would make the
+    geometry owner depend on the thing it feeds.
+    """
+    return hashlib.blake2s(text.encode(), digest_size=4).hexdigest()
 
 
 class GeometryOutcome(StrEnum):

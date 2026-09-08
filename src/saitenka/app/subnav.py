@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from saitenka import otel_metrics
 from saitenka.app import subnav_policy, subnav_settle
 from saitenka.app.sub_index import load_index
+from saitenka.app.subtitle_geometry_diagnostics import cue_digest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -127,6 +128,7 @@ def sub_nav(ports: NavPorts, delta: int) -> bool:
         # A step measured inside an overlap and one measured from a lone cue land the user in
         # different places, and only the trace can tell them apart afterwards.
         span.set("overlapping", target.overlapping)
+        span.set("cue", cue_digest(target.cue.text))
         # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
         # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
         # before landing on the real target; reconcile below must not mistake that for a correction.
@@ -176,7 +178,7 @@ def reconcile_sub_text(ports: NavPorts, text: str) -> None:
     # process has for "mpv-observed sub-text change → overlay drawn" — it can't see when the seek
     # command itself was issued (that's mpv-internal / lua-side).
     with otel_metrics.instrumented(
-        otel_metrics.sub_text_reconcile_duration_ms, "sub_text_reconcile"
+        otel_metrics.sub_text_reconcile_duration_ms, "sub_text_reconcile", cue=cue_digest(text)
     ):
         nav_idx = episode.nav_idx
         if identity_reinstall and window.open and episode.nav_provisional_cue_counted:

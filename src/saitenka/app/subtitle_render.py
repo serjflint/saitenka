@@ -8,7 +8,6 @@ pattern the other app modules use.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -19,6 +18,7 @@ from saitenka_subtitles import decoration, font_names, overpaint, overprint
 from saitenka import otel_metrics
 from saitenka.app import subtitle_calibration, subtitle_raster
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.subtitle_geometry_diagnostics import cue_digest
 from saitenka.app.subtitle_ownership import (
     ASK_MPV,
     ActionKind,
@@ -276,11 +276,6 @@ def _assign_rung(
         masks.append(mask)
         return "overpaint"
     return "none"
-
-
-def _cue_digest(text: str) -> str:
-    """A short stable handle for one cue's text, for grouping spans without carrying the text."""
-    return hashlib.blake2s(text.encode(), digest_size=4).hexdigest()
 
 
 def overprint_payload(
@@ -1182,7 +1177,7 @@ class NativeVisibleRenderer:
             # draws are an undifferentiated stream and the pair cannot be found. A digest rather than
             # the text — a span attribute has no cardinality limit, but a subtitle line is the user's
             # content and does not belong in a bundle that gets shared.
-            span.set("cue", _cue_digest(request.text))
+            span.set("cue", cue_digest(request.text))
             return self._draw(request, surfaces, ipc, on_settled=on_settled)
 
     def _draw_path(self) -> str:

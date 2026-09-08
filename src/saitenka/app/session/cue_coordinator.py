@@ -19,6 +19,7 @@ from saitenka.app import (
 from saitenka.app.features.annotation.annotation_controller import AnnotationInputs
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.runtime import CueCommandState
+from saitenka.app.subtitle_geometry_diagnostics import cue_digest
 from saitenka.app.subtitle_render import DrawRequest, SubtitleTarget
 from saitenka.app.token_cache import cue_key
 from saitenka.runtime import events, playback
@@ -109,7 +110,9 @@ class CueCoordinator:
             otel_metrics.record_cue_settle("no-observation")
             return
         before = o.playback.cue.text
-        with otel_metrics.traced("cue_reconcile", cue_revision=str(self.revision)) as span:
+        with otel_metrics.traced(
+            "cue_reconcile", cue_revision=str(self.revision), cue=cue_digest(cue.text)
+        ) as span:
             o.navigation.reconcile(cue.text)
             settled = "adopted" if o.playback.cue.text != before else "reinstalled"
             otel_metrics.record_cue_settle(settled, span)
@@ -127,7 +130,9 @@ class CueCoordinator:
         log.debug(
             "sub-text change: %d chars, paused=%s", len(text.strip()), o.playback.value("pause")
         )
-        with otel_metrics.instrumented(otel_metrics.cue_redraw_duration_ms, "cue_redraw"):
+        with otel_metrics.instrumented(
+            otel_metrics.cue_redraw_duration_ms, "cue_redraw", cue=cue_digest(text)
+        ):
             self._set_subtitle_inner(
                 text,
                 revise_session_cue=revise_session_cue,

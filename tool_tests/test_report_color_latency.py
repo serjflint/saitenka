@@ -153,6 +153,66 @@ def test_boxes_with_tokens_are_still_a_paint() -> None:
     assert (shown[0].wait, shown[0].orphan_boxes) == (10.0, 0)
 
 
+def test_a_draw_reports_what_caused_it_not_what_preceded_it() -> None:
+    """`parent_id` was in every bundle from the start and this readout ignored it, correlating by
+    timestamp window instead — the technique that produced three confident wrong mechanisms in one
+    session. A draw parented to `subtitle_geometry_apply` is a redraw the geometry side triggered,
+    which is exactly the moment the cue side may have moved on. Adjacency cannot say that.
+    """
+    trace = {
+        "traceEvents": [
+            {"ph": "X", "name": "cue_redraw", "ts": 0, "args": {"span_id": "a"}},
+            {
+                "ph": "X",
+                "name": "subtitle_draw",
+                "ts": 1,
+                "args": {"span_id": "b", "parent_id": "a"},
+            },
+            {"ph": "X", "name": "subtitle_geometry_apply", "ts": 2, "args": {"span_id": "c"}},
+            {
+                "ph": "X",
+                "name": "subtitle_draw",
+                "ts": 3,
+                "args": {"span_id": "d", "parent_id": "c"},
+            },
+        ]
+    }
+
+    assert latency.caused_by(trace, "subtitle_draw") == {
+        "b": "cue_redraw",
+        "d": "subtitle_geometry_apply",
+    }
+
+
+def test_a_draw_with_no_parent_is_reported_as_rooted_not_guessed() -> None:
+    """Absent causation is not the nearest earlier span. Filling it in from adjacency is the exact
+    error this replaces."""
+    trace = {
+        "traceEvents": [
+            {"ph": "X", "name": "cue_redraw", "ts": 0, "args": {"span_id": "a"}},
+            {"ph": "X", "name": "subtitle_draw", "ts": 1, "args": {"span_id": "b"}},
+        ]
+    }
+
+    assert latency.caused_by(trace, "subtitle_draw") == {"b": "root"}
+
+
+def test_a_decision_for_a_different_cue_is_not_borrowed_by_handle() -> None:
+    """The window alone let an adjacent cue's decision answer for this one. With the handle on both
+    sides the join is exact, and a bundle predating the handle still falls back to the window."""
+    events = [
+        draw(0, "mine", 0, tokens=6),
+        {
+            "ph": "X",
+            "name": "subtitle_geometry_decision",
+            "ts": 5_000.0,
+            "args": {"outcome": "ready", "eligible_tokens": 0, "reason": "ready", "cue": "theirs"},
+        },
+    ]
+
+    assert read(events)[0].eligible is None, "a decision naming another cue must not answer here"
+
+
 def test_the_wait_a_viewer_lives_spans_two_cue_handles() -> None:
     """A `sub-seek` redraws optimistically with text whose rows have not arrived, so the
     provisional draw and the settled one carry *different* text and hash to different handles.

@@ -33,6 +33,7 @@ from saitenka.app import subtitle_fonts
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
+    cue_digest,
     geometry_error_code,
     geometry_failure_reason,
 )
@@ -797,6 +798,10 @@ class NativeSubtitleGeometry:
         self.ass_full_capability = AssFullCapability.UNKNOWN
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        #: Which cue the decisions being traced are about. The join key across this chain: every
+        #: span in it used to carry a different identity or none, so relating them meant a timestamp
+        #: window, and that is how three mechanisms were confidently mis-diagnosed.
+        self._cue = cue_digest("")
         self._last_decision: tuple[GeometryOutcome, str] | None = None
         self._owner = "unknown"
         self._submitted_at: tuple[int, float] | None = None
@@ -893,6 +898,7 @@ class NativeSubtitleGeometry:
         active_events: int,
     ) -> None:
         with otel_metrics.traced("subtitle_geometry_decision") as span:
+            span.set("cue", self._cue)
             span.set("outcome", outcome)
             span.set("reason", reason)
             span.set("generation", self.worker.generation)
@@ -1860,10 +1866,12 @@ class NativeSubtitleGeometry:
     def _schedule(self, seen: GeometryObservation) -> bool:
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        self._cue = cue_digest(seen.text)
         inputs = self._resolve_schedule_inputs(seen)
         if inputs is None:
             return False
         with otel_metrics.traced("subtitle_geometry_cache") as span:
+            span.set("cue", cue_digest(seen.text))
             cache_hit = self._publish_cached(seen, inputs)
             stats = self.worker.stats
             span.set("outcome", "hit" if cache_hit else "miss")
@@ -2061,6 +2069,8 @@ class NativeSubtitleGeometry:
         recording that a result for it existed.
         """
         with otel_metrics.traced("subtitle_geometry_apply") as span:
+            self._cue = cue_digest(seen.text)
+            span.set("cue", self._cue)
             snapshot = self._ports.pipeline.current
             span.set("has_snapshot", snapshot is not None)
             if snapshot is None:

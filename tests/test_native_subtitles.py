@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -1344,6 +1345,58 @@ def test_the_lookahead_survives_the_cue_arriving_that_it_was_built_for(tmp_path:
     # Counting renders, not filed keys: `refresh` re-queues the lookahead it just discarded, so the
     # key set recovers either way and only the backend can say whether the work was redone.
     assert len(backend.requests) == rendered
+    result.close()
+
+
+#: Spans a per-cue query has to be able to join. Deliberately not "every span": `dict_sql` and
+#: `prefetch_decode` are dictionary work that outlives the cue that triggered it, and stamping them
+#: would claim an ownership they do not have.
+JOINABLE_SPANS = frozenset(
+    {
+        "cue_redraw",
+        "cue_reconcile",
+        "sub_text_reconcile",
+        "subtitle_draw",
+        "subtitle_geometry_apply",
+        "subtitle_geometry_cache",
+        "subtitle_geometry_decision",
+    }
+)
+
+
+def test_every_span_a_per_cue_query_needs_carries_the_cue_handle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """One join key across the chain, gated because the failure is silent: a span that stops
+    setting `cue` still traces, still parents, and simply drops out of every per-cue query.
+
+    The coverage assertion is the point. A version of this that only reached `cue_redraw` and
+    `subtitle_draw` passed while five of the seven never fired -- the same shape as every other
+    gate written during this investigation, each of which matched a name rather than a meaning on
+    its first cut.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_source(source)
+
+    spans = record_spans(monkeypatch)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    # A *changed* text, so the reconcile adopts rather than returning early — that early return is
+    # why an earlier draft never exercised `sub_text_reconcile` and passed anyway.
+    result.graph.cue.observe(replace(result.graph.playback.state.cue, text="犬…　かな？"))
+    result.graph.cue.settle()
+
+    covered = {span["name"] for span in spans} & JOINABLE_SPANS
+    assert covered == JOINABLE_SPANS, f"never exercised: {sorted(JOINABLE_SPANS - covered)}"
+    unjoinable = sorted(
+        span["name"]
+        for span in spans
+        if span["name"] in JOINABLE_SPANS and "cue" not in span["attrs"]
+    )
+    assert not unjoinable, f"joinable spans with no cue handle: {unjoinable}"
     result.close()
 
 

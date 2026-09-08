@@ -18,6 +18,7 @@ What it costs: the number needs a bundle. `saitenka doctor` cannot print it live
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import statistics
 import sys
@@ -35,15 +36,40 @@ def draws(trace: dict) -> list[dict]:
 
 
 def decisions(trace: dict) -> list[dict]:
-    """`subtitle_geometry_decision` spans, which carry how many tokens were owed a box.
-
-    They have no cue handle, so they are matched to an appearance by falling inside its window.
-    """
+    """`subtitle_geometry_decision` spans, which carry how many tokens were owed a box."""
     return [
         {"ts": event["ts"] / 1000.0, **(event.get("args") or {})}
         for event in trace.get("traceEvents", ())
         if event.get("ph") == "X" and event.get("name") == "subtitle_geometry_decision"
     ]
+
+
+def caused_by(trace: dict, name: str) -> dict[str, str]:
+    """For each span of ``name``, the nearest ancestor's name — why it happened, not when.
+
+    The trace has carried `parent_id` all along, with every parent resolving, and this readout
+    ignored it for its whole life: it correlated by timestamp window, which is the technique that
+    produced three confident wrong mechanisms in one session. The edge that settled the `犬` bug was
+    one lookup:
+
+        subtitle_draw <- cue_redraw <- sub_seek           the cue arrived, we drew it
+        subtitle_draw <- subtitle_geometry_apply          the GEOMETRY caused this draw
+
+    A draw whose parent is the apply is a redraw the geometry side triggered, which is exactly the
+    moment the cue side may have moved on. No amount of adjacency says that; the edge does.
+    """
+    spans = {
+        (event.get("args") or {}).get("span_id"): event
+        for event in trace.get("traceEvents", ())
+        if event.get("ph") == "X"
+    }
+    causes: dict[str, str] = {}
+    for span_id, event in spans.items():
+        if event.get("name") != name or span_id is None:
+            continue
+        parent = spans.get((event.get("args") or {}).get("parent_id"))
+        causes[span_id] = "root" if parent is None else parent["name"]
+    return causes
 
 
 #: An appearance this short is gone before anyone reads it, so its color never arriving is not a
@@ -144,7 +170,7 @@ def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Ap
                 end=end,
                 draws=len(run),
                 wait=None if colored is None else colored["ts"] - start,
-                eligible=_eligible_in(settled, start, end),
+                eligible=_eligible_in(settled, start, end, run[0].get("cue")),
                 orphan_boxes=sum(
                     1 for span in run if span.get("measured_boxes") and not span.get("tokens")
                 ),
@@ -153,8 +179,15 @@ def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Ap
     return result
 
 
-def _eligible_in(settled: list[dict], start: float, end: float | None) -> int | None:
-    """How many tokens the last *settled* decision in this window owed a box.
+def _eligible_in(
+    settled: list[dict], start: float, end: float | None, cue: str | None = None
+) -> int | None:
+    """How many tokens the last *settled* decision for this appearance owed a box.
+
+    Matched on the cue handle when the bundle carries one, and only then narrowed by the window --
+    the handle identifies content, so a repeated line needs both. A bundle predating the handle
+    falls back to the window alone, which is what this did for every appearance and is why a
+    decision belonging to an adjacent cue could be read as this one's.
 
     Only a `ready` decision answers: a `pending` one is the question, not the answer, and reading its
     zero as "nothing to paint" would file every slow cue as one that wanted no color.
@@ -165,6 +198,7 @@ def _eligible_in(settled: list[dict], start: float, end: float | None) -> int | 
         if span.get("outcome") == "ready"
         and start <= span["ts"]
         and (end is None or span["ts"] < end)
+        and (cue is None or span.get("cue") is None or span.get("cue") == cue)
     ]
     return ready[-1].get("eligible_tokens") if ready else None
 
@@ -206,6 +240,11 @@ def main(argv: list[str] | None = None) -> int:
     orphans = sum(item.orphan_boxes for item in shown)
     if orphans:
         print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")
+    causes = collections.Counter(caused_by(trace, "subtitle_draw").values())
+    if causes:
+        # Why each draw happened, from `parent_id`. A draw parented to the geometry apply is a
+        # redraw the geometry side triggered, and that is the moment the cue side may have moved on.
+        print("  draws caused by: " + ", ".join(f"{name} x{n}" for name, n in causes.most_common()))
     unsettled = settling(settled)
     if unsettled:
         # The one a viewer complains about, and the one the per-appearance durations cannot carry.
