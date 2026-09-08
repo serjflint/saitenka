@@ -670,3 +670,58 @@ def test_a_batch_the_probe_cannot_measure_is_not_re_rendered_every_frame() -> No
     backend.close()
 
     assert probes == 1, f"a permanent probe failure re-rendered {probes} times"
+
+
+def test_the_extraction_reports_the_four_phases_it_spends_its_time_in() -> None:
+    """`extract_ms` is ~99% of a geometry render — libass's own render is ~0.1 ms against ~12 ms
+    here — so one number for it said only "the slow part is ours", which nobody can act on.
+
+    Split four ways it names a function instead: the owner map scales with the FRAME, the collect
+    loop with the INK, and those are different problems. Measured, the collect loop is 97% of it and
+    the frame-sized allocation is 1% — the opposite of what the allocation's size suggests.
+    """
+    from saitenka_subtitles.telemetry import (
+        EXTRACT_COLLECT_MS,
+        EXTRACT_COVERAGE_MS,
+        EXTRACT_OWNERS_MS,
+        EXTRACT_VALIDATE_MS,
+    )
+
+    class Collector:
+        def __init__(self) -> None:
+            self.samples: dict[str, list[float]] = {}
+
+        @contextmanager
+        def span(self, name: str):
+            del name
+            yield SimpleNamespace(set=lambda *_a: None)
+
+        def record(self, metric: str, milliseconds: float) -> None:
+            self.samples.setdefault(metric, []).append(milliseconds)
+
+    rendered = Result(
+        (Layer(2, 1, b"\xff\x00", 0x01020300, 10, 20), Layer(1, 1, b"\xff", 0x04050600, 30, 40))
+    )
+    collector = Collector()
+
+    extract_token_geometry(
+        rendered, request(keep_coverage=True), keep_coverage=True, telemetry=collector
+    )
+
+    assert set(collector.samples) == {
+        EXTRACT_OWNERS_MS,
+        EXTRACT_COLLECT_MS,
+        EXTRACT_VALIDATE_MS,
+        EXTRACT_COVERAGE_MS,
+    }
+    assert all(value >= 0 for values in collector.samples.values() for value in values)
+
+
+def test_the_extraction_still_works_for_a_caller_that_passes_no_telemetry() -> None:
+    """The port is optional so every existing call site — and the package's own public API — is
+    unchanged by the split."""
+    rendered = Result((Layer(2, 1, b"\xff\x00", 0x01020300, 10, 20),))
+
+    geometry = extract_token_geometry(rendered, request(palette_size=1))
+
+    assert len(geometry) == 1

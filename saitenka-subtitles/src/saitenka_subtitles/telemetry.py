@@ -23,6 +23,14 @@ RENDERER_BUILD_MS = "renderer_build_ms"
 RENDER_MS = "render_ms"
 EXTRACT_MS = "extract_ms"
 
+#: The four phases inside `EXTRACT_MS`, which is ~99% of a geometry render and was one opaque number.
+#: `libass` itself costs ~0.1 ms; everything else measured is ours, so this is where a perf answer
+#: has to come from — and "the extraction is slow" is not one.
+EXTRACT_OWNERS_MS = "extract_owners_ms"  # zeroing the frame-sized pixel-owner map
+EXTRACT_COLLECT_MS = "extract_collect_ms"  # attributing each layer's pixels to a token color
+EXTRACT_VALIDATE_MS = "extract_validate_ms"  # rejecting partial/ambiguous tokens
+EXTRACT_COVERAGE_MS = "extract_coverage_ms"  # re-reading the masks the raster device paints
+
 
 class Span(Protocol):
     def set(self, key: str, value: object) -> None: ...

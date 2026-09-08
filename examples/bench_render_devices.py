@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import json
 import statistics
 import time
@@ -269,7 +270,14 @@ def benchmark_libasslite(config: DeviceBenchmarkConfig) -> dict[str, float] | No
     a benchmark that silently reported 0 for it would read as "free" rather than "not measured".
     """
     from saitenka_subtitles.libass_backend import LibassGeometryBackend
-    from saitenka_subtitles.telemetry import EXTRACT_MS, RENDER_MS
+    from saitenka_subtitles.telemetry import (
+        EXTRACT_COLLECT_MS,
+        EXTRACT_COVERAGE_MS,
+        EXTRACT_MS,
+        EXTRACT_OWNERS_MS,
+        EXTRACT_VALIDATE_MS,
+        RENDER_MS,
+    )
 
     collector = _Collector()
     backend = LibassGeometryBackend(telemetry=collector)
@@ -281,6 +289,15 @@ def benchmark_libasslite(config: DeviceBenchmarkConfig) -> dict[str, float] | No
         except Exception:
             return None
         samples = _timed(lambda: backend.render(request), config.reps)
+        # The coverage phase reads 0 unless the snapshot is asked to keep the masks, which happens
+        # only once a face is demoted to the raster device. Measured on its own request so the
+        # number is "what feeding device 2 costs upstream" rather than "not exercised".
+        covered = _Collector()
+        backend._telemetry = covered
+        _timed(
+            lambda: backend.render(dataclasses.replace(request, keep_coverage=True)), config.reps
+        )
+        collector.samples[EXTRACT_COVERAGE_MS] = covered.samples.get(EXTRACT_COVERAGE_MS, [])
     finally:
         backend.close()
 
@@ -289,7 +306,18 @@ def benchmark_libasslite(config: DeviceBenchmarkConfig) -> dict[str, float] | No
     if not render_ms or not extract_ms:
         return None
     total = statistics.median(samples)
+    phases = {
+        f"libasslite_{label}_p50_ms": statistics.median(collector.samples[metric])
+        for label, metric in (
+            ("owners", EXTRACT_OWNERS_MS),
+            ("collect", EXTRACT_COLLECT_MS),
+            ("validate", EXTRACT_VALIDATE_MS),
+            ("coverage", EXTRACT_COVERAGE_MS),
+        )
+        if collector.samples.get(metric)
+    }
     return {
+        **phases,
         "libasslite_p50_ms": total,
         "libasslite_p95_ms": _percentile(samples, 0.95),
         "libasslite_render_p50_ms": statistics.median(render_ms),
@@ -329,6 +357,17 @@ def run(config: DeviceBenchmarkConfig, output: Path) -> list[dict[str, Any]]:
             _entry("libasslite: our extraction p50", "ms", geometry["libasslite_extract_p50_ms"]),
             _entry("libasslite: extraction share", "pct", geometry["libasslite_extract_share_pct"]),
             _entry("libasslite: per token", "us", geometry["libasslite_per_token_us"]),
+        ]
+        # The four phases inside that extraction, which was the number with no answer in it.
+        result += [
+            _entry(f"libasslite extract: {label}", "ms", geometry[key])
+            for label, key in (
+                ("owners map alloc", "libasslite_owners_p50_ms"),
+                ("collect layers", "libasslite_collect_p50_ms"),
+                ("validate tokens", "libasslite_validate_p50_ms"),
+                ("coverage masks", "libasslite_coverage_p50_ms"),
+            )
+            if key in geometry
         ]
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result
