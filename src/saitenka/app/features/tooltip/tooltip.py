@@ -148,6 +148,27 @@ def _dwell_elapsed(ports: TipPorts, actions: HoverActions, intent: hover_machine
     route_hover(ports, actions, events.HoverDwellElapsed(intent, ports.tip.nest.tail))
 
 
+def _target_outcome(
+    *, tokens: bool, boxes: bool, inside: bool, over_word: int, over_popup: bool
+) -> str:
+    """Why this poll found no word, when it found none.
+
+    `no-geometry` is the one that matters: the cue had words but no measured boxes, so the hit test
+    could not have hit anything however carefully the user aimed. Split from `no-tokens` (no cue at
+    all) and from `no-word` (a real miss) because only the first is a defect. Popups are checked
+    first: an occluded word is a deliberate lease, not a miss.
+    """
+    if not inside:
+        return "outside"
+    if over_popup:
+        return "popup"
+    if over_word >= 0:
+        return "word"
+    if not tokens:
+        return "no-tokens"
+    return "no-word" if boxes else "no-geometry"
+
+
 def observe_hover(ports: TipPorts, inputs: HoverInputs, mx: float, my: float, *, inside: bool):
     """What the cursor is over, as the machine's input. Returns the observation and the raw target
     triple, which the instrumented path labels its span with.
@@ -166,6 +187,15 @@ def observe_hover(ports: TipPorts, inputs: HoverInputs, mx: float, my: float, *,
     scan = scan_hit(ports.tip, ports.scale.raster, mx, my) if (over_tip and not over_nest) else None
     if scan is not None and link_hit_at(ports.tip, ports.scale.raster, mx, my, nested=False):
         scan = None
+    if otel_metrics.hover_target_outcomes is not None:
+        outcome = _target_outcome(
+            tokens=bool(inputs.tokens),
+            boxes=bool(inputs.boxes),
+            inside=inside,
+            over_word=over_word,
+            over_popup=over_tip or over_nest,
+        )
+        otel_metrics.hover_target_outcomes.add(1, {"outcome": outcome})
     return (
         hover_machine.HoverObservation(
             hover=inputs.hover(),

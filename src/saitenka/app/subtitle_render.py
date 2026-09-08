@@ -254,12 +254,24 @@ def _assign_rung(
         box.font_size,
         color,
         OVERPRINT_BORDER,
+        box.spacing,
+        box.scale_x,
+        box.bold,
+        box.italic,
+        box.glyph_dx,
+        box.glyph_dy,
     )
     mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
     if paint.drawable:
         paints.append(paint)
+        device = "overprint"
     elif mask.usable:
         masks.append(mask)
+        device = "overpaint"
+    else:
+        device = "none"
+    if otel_metrics.subtitle_token_device is not None:
+        otel_metrics.subtitle_token_device.add(1, {"device": device})
 
 
 def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> str:

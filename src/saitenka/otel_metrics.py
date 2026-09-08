@@ -126,6 +126,14 @@ subtitle_renderer_forced: Counter | None = None
 subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
 subtitle_layout_drift_px: Histogram | None = None
+#: labeled device=overprint|overpaint|none. The demotion counter next door only reports the negative,
+#: so a session with none of them is indistinguishable from one where the text device silently drew
+#: nothing — and the raster device below it colors the cue correctly either way.
+subtitle_token_device: Counter | None = None
+#: labeled outcome=word|no-word|no-geometry|popup|outside. `hover_route_decisions` counts what the
+#: machine decided, and a `Cancel` reads the same whether the cursor was off the words or the cue had
+#: no geometry to test against — which is the difference between working and unusable.
+hover_target_outcomes: Counter | None = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -446,7 +454,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced
     global subtitle_overprint_demotions, subtitle_overpaint_frames
-    global subtitle_layout_drift_px
+    global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
 
     with _lock:
         _reader = reader
@@ -688,6 +696,14 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             unit="px",
             description="worst edge disagreement between mpv's OSD layout and our measurement",
         )
+        subtitle_token_device = meter.create_counter(
+            "saitenka.subtitle.token_device",
+            description="color device each token was drawn by (device=overprint|overpaint|none)",
+        )
+        hover_target_outcomes = meter.create_counter(
+            "saitenka.hover.target_outcomes",
+            description="what each hover poll found (outcome=word|no-word|no-geometry|popup|outside)",
+        )
         mpv_effect_apply_ms = meter.create_histogram(
             "saitenka.mpv_effect.apply_ms",
             unit="ms",
@@ -739,7 +755,7 @@ def unregister() -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced
     global subtitle_overprint_demotions, subtitle_overpaint_frames
-    global subtitle_layout_drift_px
+    global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
 
     with _lock:
         _reader = None
@@ -813,6 +829,8 @@ def unregister() -> None:
         subtitle_overprint_demotions = None
         subtitle_overpaint_frames = None
         subtitle_layout_drift_px = None
+        subtitle_token_device = None
+        hover_target_outcomes = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None
         prefetch_queue_depth = None
