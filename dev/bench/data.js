@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788896112971,
+  "lastUpdate": 1788899613147,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15101,6 +15101,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.28132,
             "range": "3 replicas; min 1.27585; max 23.026; MAD 0.005465; worst 23.026",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "100f37a624cff61910b196a35bc68ad11b2a2d8a",
+          "message": "Merge pull request #509 from serjflint/perf/vectorise-geometry-extraction\n\nperf(subtitles): vectorise the geometry extraction's two per-pixel loops",
+          "timestamp": "2026-09-09T01:32:01+05:00",
+          "tree_id": "912c8fc4aea6e14fa3abcf1bdfcefe341dde84cd",
+          "url": "https://github.com/serjflint/saitenka/commit/100f37a624cff61910b196a35bc68ad11b2a2d8a"
+        },
+        "date": 1788899611191,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.354244,
+            "range": "3 replicas; min 6.34942; max 6.52963; MAD 0.004824",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.358602,
+            "range": "3 replicas; min 8.88149; max 9.56071; MAD 0.202112; worst 9.56071",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.421913,
+            "range": "3 replicas; min 20.4094; max 20.6153; MAD 0.012467",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.709182,
+            "range": "3 replicas; min 20.648; max 20.7531; MAD 0.043929; worst 20.7531",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.389976,
+            "range": "3 replicas; min 14.4765; max 17.0737; MAD 0.913499",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.12319,
+            "range": "3 replicas; min 0.121759; max 0.124182; MAD 0.000992; worst 0.124182",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.877803,
+            "range": "3 replicas; min 43.2569; max 44.7738; MAD 0.620885; worst 44.7738",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.187151,
+            "range": "3 replicas; min 2.94202; max 3.23842; MAD 0.051268; worst 3.23842",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.282152,
+            "range": "3 replicas; min 1.24398; max 1.30122; MAD 0.019071; worst 1.30122",
             "unit": "ms"
           }
         ]
