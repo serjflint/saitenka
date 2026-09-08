@@ -798,9 +798,7 @@ class NativeSubtitleGeometry:
         self.ass_full_capability = AssFullCapability.UNKNOWN
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
-        #: Which cue the decisions being traced are about. The join key across this chain: every
-        #: span in it used to carry a different identity or none, so relating them meant a timestamp
-        #: window, and that is how three mechanisms were confidently mis-diagnosed.
+        #: Which cue the traced decisions are about — the join key across this chain.
         self._cue = cue_digest("")
         self._last_decision: tuple[GeometryOutcome, str] | None = None
         self._owner = "unknown"
@@ -1233,11 +1231,8 @@ class NativeSubtitleGeometry:
         keep_lookahead: bool = False,
     ) -> None:
         """Drop the cached geometry. `live` retires the interaction it was backing — see
-        `set_source`.
-
-        `keep_lookahead` separates the two things this used to conflate: the cue on screen being
-        replaced, and what future cues render *from* having changed. Only the second invalidates
-        speculation.
+        `set_source`. `keep_lookahead` distinguishes the cue on screen being replaced from what
+        future cues render *from* changing; only the latter invalidates speculation.
         """
         if live:
             self._consume_failure()
@@ -1267,9 +1262,7 @@ class NativeSubtitleGeometry:
             else:
                 self._set_ready(active_events=active_events)
             return
-        # The cue moved, not the document it renders from — so the lookahead built for the cues
-        # after this one survives. It used to be cleared here, on every cue, which discarded the
-        # speculation at exactly the moment it became useful.
+        # The cue moved, not the document it renders from, so the lookahead for later cues survives.
         self.invalidate(live=True, keep_lookahead=True)
         if seen.text.strip():
             self.schedule(seen)
@@ -1667,10 +1660,8 @@ class NativeSubtitleGeometry:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
             if semantic_text != seen.normalise(seen.text):
-                # Distinct from waiting on mpv: the document WAS read, at the cue we navigated to,
-                # and its semantic text disagreed with the cue we are drawing. Filed under the same
-                # reason as "mpv has not caught up", the two were indistinguishable in a bundle —
-                # and they have different fixes, because this one never resolves by waiting.
+                # Not `subtitle-observation-pending`: the document WAS read at the navigated cue
+                # and disagreed with the one being drawn. That never resolves by waiting.
                 self._degrade_geometry("subtitle-hint-text-mismatch")
                 return None
             return hint.start, hint.end, timestamp_ms, rows
@@ -1695,6 +1686,14 @@ class NativeSubtitleGeometry:
                 indexed = seen.index.cues[position]
                 if indexed.text == seen.text:
                     start, end = indexed.start, indexed.end
+                    # The cue's own start, not the playhead inside it. `timestamp_ms` reaches the
+                    # cache key, so a playhead-derived one gives every entry point to the same cue a
+                    # different key: the lookahead files at cue starts, a navigation hint renders at
+                    # one, and a reconcile lands wherever the clock happens to be. Only the indexed
+                    # start can serve, being in the document's own timeline as `_subtitle_clock`'s
+                    # output is and `sub-start` is not. An animated cue would render differently
+                    # across its span, and those are refused as `typesetting-unsupported`.
+                    timestamp_ms = round(indexed.start * 1_000) + 1
         return start, end, timestamp_ms, active_rows
 
     def _render_space(self, render: _RenderInputs) -> converted.RenderSpace:
@@ -1885,9 +1884,8 @@ class NativeSubtitleGeometry:
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
             span.set("coverage_trimmed", stats.coverage_trimmed)
-            # A finished render discarded by a moved fence reached no span at all, so from a bundle
-            # it was indistinguishable from one never requested — which is why a cue that stayed
-            # unscannable for its whole life took a backwards seek to notice.
+            # A finished render discarded by a moved fence is otherwise indistinguishable from one
+            # never requested.
             span.set("superseded", stats.superseded)
             span.set("failures", stats.failures)
             span.set("completed", stats.completed)
@@ -2061,12 +2059,10 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
 
     def _apply(self, seen: GeometryObservation) -> bool:
-        """Turn the published snapshot into boxes on screen, or say why not.
+        """Turn the published snapshot into boxes on screen, or trace why not.
 
-        Five ways to answer no, and every one of them used to be silent. A published render that
-        got this far and left through one of them was indistinguishable in a bundle from a render
-        that never ran — which is how a cue stayed unscannable for its whole life without anything
-        recording that a result for it existed.
+        Five ways to answer no. Untraced, a published render leaving through one is
+        indistinguishable from a render that never ran.
         """
         with otel_metrics.traced("subtitle_geometry_apply") as span:
             self._cue = cue_digest(seen.text)

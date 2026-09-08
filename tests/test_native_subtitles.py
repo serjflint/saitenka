@@ -1312,13 +1312,9 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
 
 
 def test_the_lookahead_survives_the_cue_arriving_that_it_was_built_for(tmp_path: Path) -> None:
-    """A cue change retired the whole speculative cache, so the lookahead was discarded by exactly
-    the event that made it useful. A field session filed 11 drops against 3 hits: the fence moves
-    two or three times per cue, and every prefetch was built between two of those moves.
-
-    Render identity — the source, the fonts, the frame — is what can make a filed result *wrong*,
-    and that still clears it; see `test_a_render_identity_change_still_discards_the_lookahead`.
-    """
+    """A cue change retired the whole speculative cache, discarding the lookahead by the event that
+    made it useful. Render identity still clears it — see
+    `test_a_render_identity_change_still_discards_the_lookahead`."""
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS_TWO)
@@ -1367,13 +1363,11 @@ JOINABLE_SPANS = frozenset(
 def test_every_span_a_per_cue_query_needs_carries_the_cue_handle(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """One join key across the chain, gated because the failure is silent: a span that stops
-    setting `cue` still traces, still parents, and simply drops out of every per-cue query.
+    """Gated because the failure is silent: a span that stops setting `cue` still traces, still
+    parents, and simply drops out of every per-cue query.
 
-    The coverage assertion is the point. A version of this that only reached `cue_redraw` and
-    `subtitle_draw` passed while five of the seven never fired -- the same shape as every other
-    gate written during this investigation, each of which matched a name rather than a meaning on
-    its first cut.
+    The coverage assertion is load-bearing — without it this passes while most of the set never
+    fires.
     """
     result, ipc, _backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
@@ -1400,15 +1394,37 @@ def test_every_span_a_per_cue_query_needs_carries_the_cue_handle(
     result.close()
 
 
-def test_a_draw_request_never_carries_boxes_without_tokens(tmp_path: Path) -> None:
-    """The wiring, not the helper: `draw_request` is the one place the two owners meet.
+def test_one_cue_renders_at_one_timestamp_however_it_was_reached(tmp_path: Path) -> None:
+    """`timestamp_ms` reaches the cache key, so a cue reached two ways must produce one key.
 
-    `text` comes from `playback.cue.text`, written the moment mpv's `sub-text` is observed; `lines`
-    and `boxes` come from the cue store, rewritten by `set_subtitle`. A `sub-seek` lands between
-    them, and the field trace caught the result on `犬… かな？` -- a cue whose three boxes were drawn
-    against the `♬～` that follows it with a touching boundary, two characters the tokenizer skips
-    entirely. `tests/test_cue_render_store.py` owns the invariant; this owns the connection.
+    The lookahead files at cue starts and a navigation hint renders at one, while a reconcile lands
+    wherever the playhead is. With the playhead in the key those never match, and a cue re-requested
+    a few tens of milliseconds into itself re-renders instead of hitting the result it just filed.
     """
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_source(source)
+    result.graph.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る"))
+    )
+
+    for playhead in (1.05, 1.4, 2.9):  # the same cue, observed at three different moments
+        ipc.props["time-pos"] = playhead
+        result.graph.playback.install_seed(ipc.props)
+        result.graph.subtitle_presentation.native.invalidate()
+        result.graph.cue.set_subtitle("猫を見る")
+        settle_jobs(result, ipc)
+
+    stamps = {request.timestamp_ms for request in backend.requests if request.timestamp_ms < 4_000}
+    assert stamps == {1_001}, f"one cue rendered at {len(stamps)} timestamps: {sorted(stamps)}"
+    result.close()
+
+
+def test_a_draw_request_never_carries_boxes_without_tokens(tmp_path: Path) -> None:
+    """The wiring, not the invariant — `draw_request` is where the two owners meet.
+    `tests/test_cue_render_store.py` owns the invariant itself."""
     result, ipc, _backend = reader(tmp_path)
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)

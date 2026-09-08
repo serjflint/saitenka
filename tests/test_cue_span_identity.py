@@ -1,14 +1,5 @@
-"""The cue handle is the join key across cue and geometry spans.
-
-Before this, exactly one span in the chain carried a cue identity. The rest used `generation`,
-`cue_revision`, `timestamp_ms`, or nothing — four vocabularies with no shared key — so relating a
-draw to the decision that produced it meant a timestamp window. That technique produced three
-confident wrong mechanisms in one session while `tokens=0, measured_boxes=3`, the pair that named
-the actual defect, sat on a span nobody could join to.
-
-The gate that every joinable span carries it lives in `test_native_subtitles.py`, where the harness
-actually drives geometry; these are the handle's own properties.
-"""
+"""The cue handle's own properties. The gate that every joinable span carries it is in
+`test_native_subtitles.py`, where the harness drives geometry."""
 
 from __future__ import annotations
 

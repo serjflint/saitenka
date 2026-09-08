@@ -424,14 +424,9 @@ def test_worker_prefetch_publishes_synchronously_after_generation_change() -> No
 
 
 def test_a_queued_prefetch_survives_the_cue_arrival_it_was_built_for() -> None:
-    """The fence moves two or three times per cue — mpv publishes `sub-text` for the blank gap as
-    well as the line — and speculation used to be stamped with it at admission, checked again
-    before rendering, and checked a third time before its result was filed. Every one of those was
-    the arrival the speculation existed for, so the lookahead discarded most of its own work.
-
-    Contrast `test_worker_drops_prefetch_invalidated_during_backend_render`: these two differ only
-    in *which* invalidation happened, and that is the whole distinction being drawn.
-    """
+    """The fence moves on the arrival a speculation exists for, so it cannot fence one. Contrast
+    `test_worker_drops_prefetch_invalidated_during_backend_render`: the two differ only in which
+    invalidation happened, which is the whole distinction."""
     backend = BlockingBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
@@ -449,8 +444,8 @@ def test_a_queued_prefetch_survives_the_cue_arrival_it_was_built_for() -> None:
 
 
 def test_a_prefetch_is_admitted_after_the_fence_has_already_moved() -> None:
-    """Admission asked whether the *current* cue had changed since the speculation was built, which
-    is not a question about a cue that has not arrived."""
+    """Admission asked whether the current cue had changed — not a question about one that has not
+    arrived."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
@@ -464,8 +459,8 @@ def test_a_prefetch_is_admitted_after_the_fence_has_already_moved() -> None:
 
 
 def test_retiring_the_live_cue_keeps_the_lookahead_that_was_filed() -> None:
-    """`retire_live` and `invalidate` are the two halves the old single call conflated: what is on
-    screen being replaced, versus what future cues render *from* having changed."""
+    """`retire_live` retires what is on screen; `invalidate` says what future cues render *from*
+    changed."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     assert worker.prefetch("future", lambda: request(coordinator.generation, 1_300))
@@ -479,8 +474,8 @@ def test_retiring_the_live_cue_keeps_the_lookahead_that_was_filed() -> None:
 
 
 def test_a_render_identity_change_still_discards_the_lookahead() -> None:
-    """The negative half of the split above. A new source or font environment means the filed
-    speculation was rendered from a document that is gone."""
+    """A new source or font environment means the filed speculation renders from a document that is
+    gone."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     assert worker.prefetch("future", lambda: request(coordinator.generation, 1_300))
@@ -494,8 +489,7 @@ def test_a_render_identity_change_still_discards_the_lookahead() -> None:
 
 
 def test_the_fence_holds_when_the_same_cue_is_observed_again() -> None:
-    """mpv re-publishes `sub-text` for a line already on screen. That is not a new cue, and moving
-    the fence for it is what churned generation 1 to 56 across 22 appearances."""
+    """mpv re-publishes `sub-text` for a line already on screen. That is not a new cue."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     identity = ("猫を見る", 1.0, 3.0, 1)
     first = coordinator.invalidate(identity)
@@ -515,12 +509,9 @@ def test_the_fence_holds_when_the_same_cue_is_observed_again() -> None:
     ],
 )
 def test_the_fence_moves_for_every_component_of_cue_identity(moved: tuple) -> None:
-    """The evasion, not the example. A repeat with the *same text* at different timing is a
-    different cue -- a repeated line, a looped sign -- and geometry published for the first would
-    be painted onto the second. Every gate written during this investigation matched a name rather
-    than a meaning on its first cut; this one is parametrised over each component so a comparison
-    that quietly drops one fails here.
-    """
+    """The evasion, not the example: a repeat with the same text at different timing is a different
+    cue, and geometry published for the first would be painted onto the second. Parametrised so a
+    comparison quietly dropping a component fails here."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     before = coordinator.invalidate(("猫を見る", 1.0, 3.0, 1))
 
@@ -528,8 +519,8 @@ def test_the_fence_moves_for_every_component_of_cue_identity(moved: tuple) -> No
 
 
 def test_a_caller_with_no_cue_identity_always_moves_the_fence() -> None:
-    """A source or font change means whatever is published is wrong regardless of the cue, and
-    `None` is a real identity -- no cue on screen -- so it cannot be the sentinel for "always"."""
+    """A source or font change invalidates regardless of the cue. `None` is a real identity — no
+    cue on screen — so it cannot serve as that sentinel."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     first = coordinator.invalidate()
 
@@ -539,16 +530,11 @@ def test_a_caller_with_no_cue_identity_always_moves_the_fence() -> None:
 
 
 def test_a_current_result_dropped_mid_render_leaves_the_cue_with_no_retry() -> None:
-    """The reproduction for a cue that stays unscannable for its whole life.
+    """Characterization: `bind` and `publish` both refuse once the generation has moved, so a
+    result finished while the fence moved underneath is discarded — superseded, reported as no
+    failure, and never re-driven. The drop window is the render's own duration.
 
-    `bind` and `publish` both refuse once the generation has moved, so a result finished while the
-    fence moved underneath is discarded — counted as superseded, reported as no failure, and
-    nothing re-drives it. The drop window is exactly the render's own duration, which is why the
-    field showed the same cue failing and succeeding on different showings: the showing that
-    *worked* was answered from cache and never entered the window at all.
-
-    This asserts the behaviour as it stands. It is not the contract we want; see the wait-to-color
-    readout, where a cue was drawn six times over 1.2 s and never once carried a box.
+    Asserts what the code does, not the contract wanted, so that fixing it fails loudly.
     """
     backend = BlockingBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
@@ -566,8 +552,8 @@ def test_a_current_result_dropped_mid_render_leaves_the_cue_with_no_retry() -> N
 
 
 def test_a_cached_answer_never_enters_the_drop_window() -> None:
-    """The other half of the same comparison: served from the cache, the publish is synchronous
-    with the submit, so no fence can move between them."""
+    """Served from the cache the publish is synchronous with the submit, so no fence moves between
+    them."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     assert worker.submit(request(coordinator.generation, 1_300)) and worker.wait_idle()

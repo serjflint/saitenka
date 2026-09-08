@@ -230,15 +230,13 @@ class SubtitleModeCoordinator:
     def invalidate(self, identity: object = _ALWAYS_NEW) -> int:
         """Retire the published geometry and move the fence.
 
-        The fence orders publishes against *the live cue*, so it should move when the live cue's
-        identity moves and not otherwise. It used to move unconditionally -- nothing was compared --
-        and `_set_subtitle_inner` calls this as its first statement, ahead of the empty-text early
-        return, so the blank gap between two cues moved it as surely as the cue did. A field session
-        ran generation 1 to 56 across 22 cue appearances, and every speculation and every in-flight
-        render was fenced against that churn.
+        The fence orders publishes against the *live cue*, so it moves on cue identity and holds
+        otherwise. mpv publishes `sub-text` for the blank gap between cues and re-publishes an
+        unchanged line; each of those moving the fence retires every speculation and in-flight
+        render behind it.
 
-        Callers that genuinely mean "whatever is published is now wrong" -- a source change, a font
-        change -- pass no identity and always move it.
+        Callers meaning "whatever is published is now wrong" — a source or font change — pass no
+        identity.
         """
         with self._state_lock:
             if self._closed:

@@ -1,17 +1,7 @@
 """Real mpv, real cue boundaries: a cue you navigate to must end up scannable.
 
-Every defect in the cue-boundary family was found by a human watching an episode and sending a
-report bundle. That is a terrible oracle -- it needs a person, an episode, and luck -- and it was
-the only one available, because the live harness loaded a single cue spanning the whole clip and so
-could not reach a *transition* at all.
-
-The shape is from the field (`Ame to Kimi to` ep1): a cue whose neighbours' boundaries touch it, so
-the successor arrives in the frame the predecessor ends, and whose neighbours are lines the
-tokenizer skips entirely -- they own no box, so they can never explain away a missing one.
-
-    0.5 - 2.5  ♬～
-    2.5 - 5.0  犬…　かな？     <- the one that kept coming back unscannable
-    5.0 - 7.5  ♬～
+The fixture's boundaries touch, so the successor arrives in the frame the predecessor ends — the
+transition every cue-boundary defect lives in, and one a single-cue clip cannot reach.
 
 Opt-in: ``SAITENKA_LIVE=1`` — `uv run poe smoke-live`.
 """
@@ -42,11 +32,8 @@ def _boxes(reader) -> list:
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_a_cue_navigated_to_across_a_touching_boundary_becomes_scannable() -> None:
-    """The whole family in one assertion: after stepping onto it, the cue carries boxes.
-
-    Deliberately not "carries them immediately". The wait is a separate question with its own
-    readout; this asks the one a viewer asks, which is whether the words are ever clickable at all.
-    """
+    """Deliberately not "carries them immediately" — the wait is a separate question with its own
+    readout. This asks whether the words are ever clickable at all."""
     with live_reader(cues=BOUNDARY_CUES) as (_tmp, reader, _ipc):
         reader.graph.subtitle_navigation.navigate(1)  # ♬～ -> 犬…　かな？, boundaries touching
 
@@ -65,9 +52,8 @@ def test_a_cue_navigated_to_across_a_touching_boundary_becomes_scannable() -> No
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_stepping_back_onto_a_cue_leaves_it_scannable() -> None:
-    """The move a viewer makes *because* a cue was not scannable. It found the defect in the field
-    and nothing automated covered it: the lookahead only ever read forward, so a backward step is
-    the case with the coldest cache and the most to go wrong."""
+    """The move a viewer makes *because* a cue was not scannable. The lookahead only reads forward,
+    so a backward step is the coldest cache this can reach."""
     with live_reader(cues=BOUNDARY_CUES) as (_tmp, reader, _ipc):
         reader.graph.subtitle_navigation.navigate(1)
         poll_until(reader, lambda: _cue_text(reader) == SCANNABLE, "forward step never landed")
@@ -91,20 +77,13 @@ def test_stepping_back_onto_a_cue_leaves_it_scannable() -> None:
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_no_box_survives_onto_a_cue_that_has_no_such_token() -> None:
-    """The negative control, and the reason to trust the two above.
+    """The negative control for the two above, which an implementation that never cleared a box
+    would also satisfy.
 
-    Both of those assert boxes *appear*, which an implementation that simply never cleared them
-    would also satisfy. This asserts the pairing instead: every box indexes a token the current cue
-    actually has.
-
-    Not "the next cue owns no box" -- an earlier draft asserted that, on the assumption that `♬～`
-    tokenizes to nothing. It tokenizes to two tokens and is measured into two boxes; they are
-    skippable for *lookup*, which is a different question. The premise was wrong and the live run
-    said so on its first execution.
-
-    This is the condition `TooltipController.hit` depends on: it indexes `tokens` by whatever box
-    answers a click, so a box pointing past the list is a crash or a hit region on another cue's
-    word -- the `tokens=0` beside `measured_boxes=3` the field trace caught.
+    Asserts the pairing `TooltipController.hit` depends on: it indexes `tokens` by whatever box
+    answers a click, so a box past the end is a crash or a hit region on another cue's word. Not
+    "the neighbour owns no box" — `♬～` tokenizes to two tokens and measures into two boxes; being
+    skippable for *lookup* is a different question.
     """
     with live_reader(cues=BOUNDARY_CUES) as (_tmp, reader, _ipc):
         reader.graph.subtitle_navigation.navigate(1)

@@ -60,21 +60,15 @@ class CueRenderState:
 
 
 def boxes_for(tokens: list[Token], boxes: list[WordBox]) -> list[WordBox]:
-    """Only the boxes that index a token ``tokens`` actually has.
+    """Only the boxes indexing a token ``tokens`` has.
 
-    A box exists because a token was measured, so the pairing is the invariant — and it is the one
-    `TooltipController.hit` depends on: it indexes `tokens` by whatever box answers a click, so a
-    box pointing past the list is a crash, or a hit region over another cue's word.
+    `TooltipController.hit` indexes `tokens` by whatever box answers a click, so a box past the end
+    is a crash or a hit region on another cue's word. Geometry measured for the cue that left can
+    reach the one that arrived: a `DrawRequest` takes its text from `playback.cue.text`, written
+    when mpv observes `sub-text`, and its content from this store, written by `set_subtitle`.
 
-    It gets violated because a `DrawRequest` takes its identity from `playback.cue.text`, written
-    the moment mpv's `sub-text` is observed, and its content from this store, rewritten by
-    `set_subtitle`. A `sub-seek` lands between them — mpv re-reports a transient mid-seek value —
-    and geometry measured for the cue that left is published against the one that arrived. The
-    field trace caught it as `tokens=0` beside `measured_boxes=3`.
-
-    Applied where the state is written rather than where it is read, so hit testing and drawing get
-    one answer instead of each having to remember to ask. An emptiness check would not do: three
-    boxes against six tokens is the same defect with nothing empty about it.
+    An index check, not an emptiness check — three boxes against six tokens is the same defect.
+    Applied on write so drawing and hit testing cannot disagree.
     """
     return [box for box in boxes if 0 <= box.index < len(tokens)]
 

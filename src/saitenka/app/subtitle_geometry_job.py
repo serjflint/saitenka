@@ -123,10 +123,9 @@ class SubtitleGeometryWorker:
         self._prefetch_pending: OrderedDict[str, GeometryRequestBuilder] = OrderedDict()
         self._prefetched: OrderedDict[str, _Prefetched] = OrderedDict()
         self._prefetch_inflight_key: str | None = None
-        #: Speculation's own fence. The live generation moves on every cue — which is the arrival a
-        #: prefetch exists for — so it cannot say whether a speculation is still wanted. This moves
-        #: only when the document, fonts or source it renders from change, which is the only thing
-        #: that can make a filed result wrong rather than merely early.
+        #: Speculation's own fence. The live generation moves on the arrival a prefetch exists for,
+        #: so it cannot answer for one. This moves only when the document, fonts or source change —
+        #: the only thing making a filed result wrong rather than merely early.
         self._prefetch_epoch = 0
         self._prefetch_waiters: dict[str, GeometryReservation] = {}
         self._provenance: OrderedDict[str, GeometryCacheReason] = OrderedDict()
@@ -401,12 +400,10 @@ class SubtitleGeometryWorker:
         return generation
 
     def retire_live(self) -> int:
-        """Move the publish fence without discarding what was rendered for cues still to come.
+        """Move the publish fence, keeping what was rendered for cues still to come.
 
-        The cue on screen changing retires *that* cue's result; it says nothing about the document
-        the next one renders from. Clearing the lookahead here is how the queue came to throw away
-        most of its work — the speculation was discarded by the very arrival it was built for. A
-        change to render identity still goes through `invalidate`.
+        The cue on screen changing retires that cue's result and says nothing about the document the
+        next one renders from. Render identity still goes through `invalidate`.
         """
         return self._coordinator.invalidate()
 
@@ -550,8 +547,8 @@ class SubtitleGeometryWorker:
         with self._condition:
             waiter = self._prefetch_waiters.pop(key, None)
             self._prefetch_inflight_key = None
-            # The epoch, not the generation: a source or font change while this rendered means it
-            # was built from a document that is gone, and filing it would resurrect a cleared cache.
+            # The epoch, not the generation: a source or font change mid-render means this was
+            # built from a document that is gone, and filing it would resurrect a cleared cache.
             if result is None or epoch != self._prefetch_epoch:
                 self._prefetch_dropped += 1
                 return waiter

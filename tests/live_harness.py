@@ -47,15 +47,9 @@ class MiniDS:
         return
 
 
-#: One cue for the whole clip is the wrong shape for anything about *transitions*, and this harness
-#: only had that. Every cue-boundary defect chased through report bundles -- geometry landing after
-#: its cue left, a lookahead that never held the target, boxes drawn against the successor -- needs
-#: at least two cues, and needs their boundaries to touch, because that is the case where the
-#: successor arrives in the frame the predecessor ends.
-#:
-#: Taken from the field: the middle cue is the one that came back unscannable, and the two around it
-#: are the ones whose tokens the tokenizer skips entirely, so they own no box and can never explain
-#: away a missing one.
+#: Touching boundaries, so the successor arrives in the frame the predecessor ends — the shape
+#: every cue-boundary defect lives in, and one a single cue spanning the clip cannot reach. The
+#: neighbours are lines whose tokens the tokenizer skips, so they cannot explain away a missing box.
 BOUNDARY_CUES: tuple[tuple[float, float, str], ...] = (
     (0.5, 2.5, "♬～"),
     (2.5, 5.0, "犬…　かな？"),
@@ -160,8 +154,8 @@ def live_reader(
         reader.start()
         reader.graph.subtitle_navigation.load_index(srt)
         if cues is not None:
-            # A multi-cue file starts before its first cue, so nothing is on screen yet and the wait
-            # below would time out on an empty overlay rather than on a real failure.
+            # A multi-cue file starts before its first cue, so the wait below would time out on an
+            # empty overlay rather than on a real failure.
             ipc.command("seek", str(cues[0][0] + 0.1), "absolute")
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes

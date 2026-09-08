@@ -220,9 +220,8 @@ def main(argv: list[str] | None = None) -> int:
 
     settled = decisions(trace)
     shown = appearances(spans, settled)
-    # An appearance the geometry settled as owing no box is not a failure to color it, and counting
-    # it as one is how this readout twice reported a healthy session as broken. It leaves the
-    # denominator entirely rather than moving to the numerator's other side.
+    # An appearance owed no box is not a failure to color it: it leaves the denominator rather than
+    # moving to the numerator's other side.
     owed = [item for item in shown if item.owed_color]
     unpaintable = len(shown) - len(owed)
     measured = sorted(item.wait for item in owed if item.wait is not None)
@@ -242,8 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")
     causes = collections.Counter(caused_by(trace, "subtitle_draw").values())
     if causes:
-        # Why each draw happened, from `parent_id`. A draw parented to the geometry apply is a
-        # redraw the geometry side triggered, and that is the moment the cue side may have moved on.
+        # Why each draw happened, from `parent_id` rather than from what preceded it.
         print("  draws caused by: " + ", ".join(f"{name} x{n}" for name, n in causes.most_common()))
     unsettled = settling(settled)
     if unsettled:

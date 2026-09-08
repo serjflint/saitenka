@@ -1,25 +1,8 @@
-"""A cue's boxes and the tokens they attach to must reach a draw together, or not at all.
+"""A box and the token it indexes reach a draw together, or not at all.
 
-A `DrawRequest` takes its identity (`text`) from `playback.cue.text` and its content (`lines`,
-`boxes`) from `CueRenderStore`. Those are two owners on two clocks: mpv's `sub-text` property lands
-on playback state the moment it is observed, while the store is rewritten by `set_subtitle`. A
-`sub-seek` reliably lands between them, because mpv re-reports a transient mid-seek value before the
-real cue.
-
-The field case, from `Ame to Kimi to` ep1 (`20260909-014125`) -- and note the boundaries touch, so
-the successor begins in the same frame the predecessor ends:
-
-    0:01:57.12 -> 0:02:11.10  ♬～            (2 chars, both tokenizer-skipped, 0 eligible)
-    0:02:11.10 -> 0:02:15.13  犬… かな？        (3 eligible tokens)   <-- unscannable
-    0:02:15.13 -> 0:02:25.11  ♬～
-
-    17484.4  draw cue=犬… かな？  tokens=6  measured_boxes=0
-    17499.2  apply APPLIED     generation=60  snapshot_tokens=3  observed_tokens=6
-    17499.4  draw cue=♬～       tokens=0  measured_boxes=3    <-- 犬's three boxes
-    17533.3  draw cue=犬… かな？  tokens=6  measured_boxes=0    <-- and gone again
-
-The geometry pipeline is correct throughout: one generation, an observation matching the snapshot,
-and an identity guard that rightly passes. Only the draw pairs the wrong two halves.
+`CueRenderStore` holds a cue's tokens and boxes; `playback.cue.text` names the cue. The two are
+written by different owners at different times, so geometry measured for the cue that left can be
+published against the one that arrived.
 """
 
 from __future__ import annotations
