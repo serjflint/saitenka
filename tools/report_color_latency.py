@@ -5,8 +5,8 @@ measures that interval, and one was nearly added — a histogram plus three fiel
 before it was clear the trace already holds both ends. `subtitle_draw` fires per draw carrying
 `measured_boxes` and a `cue` handle, so the answer is a group-by and a subtraction:
 
-    first draw of a cue           -> the cue is on screen
-    first of that cue with boxes  -> the color is on screen
+    first draw of an appearance           -> the cue is on screen
+    first of that appearance with boxes   -> the color is on screen
 
 Deriving it here rather than recording it keeps the renderer stateless and leaves every other
 interval in the same trace derivable later, instead of only the one somebody thought to instrument.
@@ -22,6 +22,7 @@ import json
 import statistics
 import sys
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -33,43 +34,101 @@ def draws(trace: dict) -> list[dict]:
     ]
 
 
-#: A cue this short is gone before anyone reads it, so its color never arriving is not a defect —
-#: mpv shows the line for less time than a slow blink. Measured against the gap to the NEXT cue,
-#: which is how long this one held the screen. Cues below this are reported apart rather than
-#: dropped: they are still evidence, just not evidence of the thing being chased.
+def decisions(trace: dict) -> list[dict]:
+    """`subtitle_geometry_decision` spans, which carry how many tokens were owed a box.
+
+    They have no cue handle, so they are matched to an appearance by falling inside its window.
+    """
+    return [
+        {"ts": event["ts"] / 1000.0, **(event.get("args") or {})}
+        for event in trace.get("traceEvents", ())
+        if event.get("ph") == "X" and event.get("name") == "subtitle_geometry_decision"
+    ]
+
+
+#: An appearance this short is gone before anyone reads it, so its color never arriving is not a
+#: defect — mpv shows the line for less time than a slow blink. Reported apart rather than dropped:
+#: still evidence, just not evidence of the thing being chased.
 GLIMPSE_MS = 250.0
 
 
-def waits(spans: list[dict]) -> tuple[list[float], list[tuple[str, float]], list[str]]:
-    """Per cue: the wait in ms, or the cue's handle and screen time when its color never arrived.
+@dataclass(frozen=True)
+class Appearance:
+    """One time a cue was on screen. NOT one cue handle — see :func:`appearances`."""
 
-    A cue that is never colored contributes NO duration, so a summary built only from the durations
-    reports the session as fast by omitting exactly the failures. It is returned separately.
+    cue: str
+    start: float
+    #: The next appearance's first draw. `None` for the last one, which nothing bounds.
+    end: float | None
+    draws: int
+    #: Milliseconds from the first draw to the first carrying boxes; `None` if none ever did.
+    wait: float | None
+    #: Tokens the settled geometry decision owed a box. `None` when no decision was recorded in
+    #: this window, which is not the same as zero and must not be read as one.
+    eligible: int | None
 
-    Screen time comes from the gap to the next cue's first draw. Without it the headline overstates:
-    a session read 6 of 18 cues uncolored, and 4 of those six had held the screen for 60-92 ms.
+    @property
+    def held(self) -> float:
+        return float("inf") if self.end is None else self.end - self.start
+
+    @property
+    def owed_color(self) -> bool:
+        """False only when the geometry positively settled on nothing to paint."""
+        return self.eligible != 0
+
+
+def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Appearance]:
+    """Split native draws into on-screen appearances, in order.
+
+    The `cue` handle is a digest of the cue's *content*, so a line that recurs — a two-character
+    interjection, a repeated name — comes back under the handle it had 17 seconds ago. Grouping by
+    handle alone welds those into one appearance and computes a screen time spanning the gap.
+
+    An appearance therefore ends when a *different* cue is drawn: mpv shows one at a time, so that
+    is exact and needs no gap threshold to tune.
     """
-    by_cue: dict[str, list[dict]] = {}
-    for span in spans:
-        cue = span.get("cue")
-        if cue is not None and span.get("path") == "native":
-            by_cue.setdefault(cue, []).append(span)
-    for group in by_cue.values():
-        group.sort(key=lambda item: item["ts"])
-    order = sorted(by_cue, key=lambda cue: by_cue[cue][0]["ts"])
-    measured: list[float] = []
-    never: list[tuple[str, float]] = []
-    for index, cue in enumerate(order):
-        group = by_cue[cue]
-        colored = next((item for item in group if item.get("measured_boxes")), None)
-        if colored is not None:
-            measured.append(colored["ts"] - group[0]["ts"])
-            continue
-        # The last cue has no successor to bound it; treat it as long-lived rather than invent one.
-        following = by_cue[order[index + 1]][0]["ts"] if index + 1 < len(order) else None
-        held = float("inf") if following is None else following - group[0]["ts"]
-        never.append((cue, held))
-    return measured, never, order
+    ordered = sorted(
+        (span for span in spans if span.get("path") == "native"), key=lambda span: span["ts"]
+    )
+    runs: list[list[dict]] = []
+    for span in ordered:
+        if runs and runs[-1][0].get("cue") == span.get("cue"):
+            runs[-1].append(span)
+        else:
+            runs.append([span])
+    settled = settled or []
+    result: list[Appearance] = []
+    for index, run in enumerate(runs):
+        start = run[0]["ts"]
+        end = runs[index + 1][0]["ts"] if index + 1 < len(runs) else None
+        colored = next((span for span in run if span.get("measured_boxes")), None)
+        result.append(
+            Appearance(
+                cue=run[0].get("cue", ""),
+                start=start,
+                end=end,
+                draws=len(run),
+                wait=None if colored is None else colored["ts"] - start,
+                eligible=_eligible_in(settled, start, end),
+            )
+        )
+    return result
+
+
+def _eligible_in(settled: list[dict], start: float, end: float | None) -> int | None:
+    """How many tokens the last *settled* decision in this window owed a box.
+
+    Only a `ready` decision answers: a `pending` one is the question, not the answer, and reading its
+    zero as "nothing to paint" would file every slow cue as one that wanted no color.
+    """
+    ready = [
+        span
+        for span in settled
+        if span.get("outcome") == "ready"
+        and start <= span["ts"]
+        and (end is None or span["ts"] < end)
+    ]
+    return ready[-1].get("eligible_tokens") if ready else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -87,29 +146,37 @@ def main(argv: list[str] | None = None) -> int:
         print("subtitle_draw spans carry no cue handle — the bundle predates it")
         return 1
 
-    measured, never, cues = waits(spans)
-    print(f"{len(cues)} native cues, {len(measured)} colored, {len(never)} never colored")
+    shown = appearances(spans, decisions(trace))
+    # An appearance the geometry settled as owing no box is not a failure to color it, and counting
+    # it as one is how this readout twice reported a healthy session as broken. It leaves the
+    # denominator entirely rather than moving to the numerator's other side.
+    owed = [item for item in shown if item.owed_color]
+    unpaintable = len(shown) - len(owed)
+    measured = sorted(item.wait for item in owed if item.wait is not None)
+    never = [item for item in owed if item.wait is None]
+
+    print(f"{len(shown)} native appearances, {len(owed)} owed color, {len(measured)} colored")
     if measured:
-        ordered = sorted(measured)
         print(
-            f"  wait to color:  p50 {statistics.median(ordered):7.1f} ms"
-            f"   p95 {ordered[int(len(ordered) * 0.95)]:7.1f} ms"
-            f"   max {ordered[-1]:7.1f} ms"
+            f"  wait to color:  p50 {statistics.median(measured):7.1f} ms"
+            f"   p95 {measured[int(len(measured) * 0.95)]:7.1f} ms"
+            f"   max {measured[-1]:7.1f} ms"
         )
+    if unpaintable:
+        print(f"  no color owed:  {unpaintable} (geometry settled on 0 eligible tokens)")
     if never:
-        # The headline the durations cannot carry: a cue nobody ever colored is not a slow cue.
-        # Split by screen time, because counting a 60 ms flash beside a cue held for half a second
-        # reports one number for two different things and inflates the one that matters.
-        missed = [item for item in never if item[1] >= GLIMPSE_MS]
+        missed = [item for item in never if item.held >= GLIMPSE_MS]
         glimpsed = len(never) - len(missed)
-        print(
-            f"  NEVER colored:  {len(missed)} of {len(cues)} ({100 * len(missed) / len(cues):.0f}%)"
-        )
-        for cue, held in sorted(missed, key=lambda item: -item[1]):
-            held_text = "to end of session" if held == float("inf") else f"{held:.0f} ms on screen"
-            print(f"      {cue}  {held_text}")
+        share = f"{100 * len(missed) / len(owed):.0f}%" if owed else "n/a"
+        print(f"  NEVER colored:  {len(missed)} of {len(owed)} ({share})")
+        for item in sorted(missed, key=lambda item: -item.held):
+            held = "to end of session" if item.end is None else f"{item.held:.0f} ms on screen"
+            # No decision in the window means the reason is unrecorded, not that none existed —
+            # the argument for carrying eligible_tokens on the draw itself.
+            why = "no geometry decision recorded" if item.eligible is None else "geometry settled"
+            print(f"      {item.cue}  {held}, {item.draws} draw(s), {why}")
         if glimpsed:
-            print(f"  (+{glimpsed} cue(s) gone in under {GLIMPSE_MS:.0f} ms — too brief to read)")
+            print(f"  (+{glimpsed} gone in under {GLIMPSE_MS:.0f} ms — too brief to read)")
     return 0
 
 
