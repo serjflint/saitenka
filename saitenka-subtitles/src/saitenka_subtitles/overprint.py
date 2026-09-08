@@ -65,12 +65,21 @@ class TokenPaint:
         Text containing ASS syntax is refused for the same reason rather than escaped. `{` opens an
         override block, and a backslash begins a tag: escaping either changes what libass lays out,
         and an overprint whose advances differ from mpv's is a colored smear beside the word.
+
+        The offsets must also count the same glyphs as the text. They are measured against the
+        prepared ASS surface and reach the paint alongside a surface the tokenizer produced for
+        whatever cue is current, and nothing downstream ties the two: a snapshot that outlived its
+        cue pairs offsets with a different token. Longer text indexes past the offsets and raises in
+        the draw path; shorter text silently drops the glyphs past its end. Refusing sends the token
+        to the raster device, which colors it correctly without needing them.
         """
         return (
             bool(self.text.strip())
             and bool(self.font_name)
             and self.font_size > 0
             and not (set(self.text) & set("{}\\\n"))
+            and len(self.glyph_dx) == len(self.glyph_dy)
+            and len(self.glyph_dx) in {0, len(self.text)}
         )
 
 

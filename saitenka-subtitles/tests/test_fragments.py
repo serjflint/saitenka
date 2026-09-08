@@ -131,6 +131,14 @@ def test_only_a_spaced_run_is_probed_glyph_by_glyph() -> None:
     assert not FragmentRequest(0, "猫", "sans-serif", 40.0, spacing=4.0).per_glyph  # one glyph
 
 
+def test_negative_spacing_is_not_split_although_libass_would_still_resegment_it() -> None:
+    """Tight typesetting overlaps its glyphs, and the probe tells them apart by color — so the
+    per-glyph rows would collide, and the backend refuses an ambiguous pixel for the whole render
+    rather than the one token. One negative-spacing cue would cost every token in the batch its
+    anchor. Drawn whole, the token is where it was before any of this instead."""
+    assert not FragmentRequest(0, "すごい", "sans-serif", 40.0, spacing=-2.0).per_glyph
+
+
 def test_a_spaced_token_is_measured_inside_its_run_and_again_alone() -> None:
     r"""Both are needed and neither alone is enough: where the glyph sits *within* the token is what
     the redraw has to reproduce, and where it sits when drawn by itself is what ``\pos`` will give

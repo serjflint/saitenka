@@ -115,8 +115,15 @@ class FragmentRequest:
         Only a multi-glyph run with letter spacing: that is the one condition under which mpv's two
         libass instances segment shaping runs differently. Without it they agree, and the token
         stays a single event — which keeps both the payload and this probe as cheap as they were.
+
+        Positive spacing only, though libass's own condition (`info->hspacing`) is truthy either
+        way. Negative spacing pulls glyphs into each other, and the probe measures each one by
+        drawing it in its own color: overlapping ink makes a pixel ambiguous, which the backend
+        refuses for the whole render rather than the one token. Tight typesetting would therefore
+        cost every token in the batch its anchor. Taking the single-event path leaves such a token
+        where it was before any of this, which is a fraction of a pixel out, not uncorrected.
         """
-        return bool(self.spacing) and len(self.text) > 1
+        return self.spacing > 0 and len(self.text) > 1
 
 
 @dataclass(frozen=True, slots=True)

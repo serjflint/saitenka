@@ -196,6 +196,11 @@ class ColorLadder:
     paints: tuple[overprint.TokenPaint, ...] = ()
     masks: tuple[overpaint.TokenMask, ...] = ()
     rules: tuple[decoration.TokenRule, ...] = ()
+    #: Which device took each colored token, in box order. Carried rather than counted in place: the
+    #: ladder is built more than once per drawn cue (the overpaint image, the payload, and the
+    #: calibration probe all ask for it), so incrementing a counter here would report a multiple of
+    #: the cue's token count that moves with the calibration cadence.
+    devices: tuple[str, ...] = ()
 
 
 def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> ColorLadder:
@@ -220,16 +225,17 @@ def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()
     paints: list[overprint.TokenPaint] = []
     masks: list[overpaint.TokenMask] = []
     rules: list[decoration.TokenRule] = []
+    devices: list[str] = []
     for box in request.boxes:
         if box.index >= len(surfaces) or not surfaces[box.index].strip():
             continue
         color = _token_color(request, box.index)
         if color is not None:
-            _assign_rung(box, surfaces[box.index], color, drifting, paints, masks)
+            devices.append(_assign_rung(box, surfaces[box.index], color, drifting, paints, masks))
         underline = _token_underline(request, box.index)
         if underline is not None:
             rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, underline))
-    return ColorLadder(tuple(paints), tuple(masks), tuple(rules))
+    return ColorLadder(tuple(paints), tuple(masks), tuple(rules), tuple(devices))
 
 
 def _assign_rung(
@@ -239,7 +245,7 @@ def _assign_rung(
     drifting: frozenset[str],
     paints: list[overprint.TokenPaint],
     masks: list[overpaint.TokenMask],
-) -> None:
+) -> str:
     """Best color device this token can hold, appended to that device's list, or neither."""
     font_name = "" if font_names.key(box.font_name) in drifting else box.font_name
     # `\an7` anchors the line box and `box` is ink, so the measured origin is not the position that
@@ -264,17 +270,16 @@ def _assign_rung(
     mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
     if paint.drawable:
         paints.append(paint)
-        device = "overprint"
-    elif mask.usable:
+        return "overprint"
+    if mask.usable:
         masks.append(mask)
-        device = "overpaint"
-    else:
-        device = "none"
-    if otel_metrics.subtitle_token_device is not None:
-        otel_metrics.subtitle_token_device.add(1, {"device": device})
+        return "overpaint"
+    return "none"
 
 
-def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> str:
+def overprint_payload(
+    request: DrawRequest, *, drifting: frozenset[str] = frozenset(), census: bool = False
+) -> str:
     """Everything the cue draws through mpv's OSD renderer: devices 1 and 3 of the ladder.
 
     Both travel in one `ass-events` payload because both are ASS events. Device 2 does not: it is a
@@ -283,8 +288,16 @@ def overprint_payload(request: DrawRequest, *, drifting: frozenset[str] = frozen
     Empty when there is nothing to color — no measured faces (the legacy renderer produces none),
     or no styles. Empty is a real answer and the caller sends it: it clears the slot, which is what
     "this cue has no overprint" has to look like, or the previous cue's colors stay on screen.
+
+    `census` records the device each token landed on. It is off by default and set at exactly one
+    call site — the draw — because the ladder is also built for the overpaint image and for the
+    calibration probe, and counting at each would report two or three times the cue's tokens, by a
+    factor that changes with whether either of those ran.
     """
     ladder = color_ladder(request, drifting=drifting)
+    if census and otel_metrics.subtitle_token_device is not None:
+        for device in ladder.devices:
+            otel_metrics.subtitle_token_device.add(1, {"device": device})
     parts = (overprint.payload(list(ladder.paints)), decoration.payload(list(ladder.rules)))
     return "\n".join(part for part in parts if part)
 
@@ -1142,7 +1155,7 @@ class NativeVisibleRenderer:
             else None
         )
         self._publish_overpaint(request, surfaces)
-        drawing = overprint_payload(request, drifting=self._drifting)
+        drawing = overprint_payload(request, drifting=self._drifting, census=True)
         if rect is not None:
             # One slot, one payload: the highlight and the color are drawn together so a repaint
             # can never leave one of them showing the previous cue.

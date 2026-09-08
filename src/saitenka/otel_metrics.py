@@ -694,7 +694,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         subtitle_layout_drift_px = meter.create_histogram(
             "saitenka.subtitle.layout_drift_px",
             unit="px",
-            description="worst edge disagreement between mpv's OSD layout and our measurement",
+            description=(
+                "worst edge disagreement between mpv's OSD layout and our measurement, after "
+                "discounting the tile libass pads the right and bottom by — not comparable with a "
+                "series recorded before that discount existed"
+            ),
         )
         subtitle_token_device = meter.create_counter(
             "saitenka.subtitle.token_device",

@@ -753,6 +753,31 @@ def test_a_spaced_token_is_drawn_one_event_per_glyph() -> None:
     assert all(r"\fsp" not in line for line in lines)
 
 
+@pytest.mark.parametrize("text", ["すごいね", "す"])
+def test_offsets_that_do_not_count_the_texts_glyphs_make_the_token_undrawable(text: str) -> None:
+    """The offsets are measured against the prepared ASS surface; the text comes from the tokenizer's
+    surfaces for whatever cue is current. A snapshot that outlived its cue pairs the two up wrong,
+    and nothing downstream compares them: longer text indexes past the offsets and raises inside the
+    draw, shorter text silently drops the glyphs past its end. Refusing routes the token to the
+    raster device, which colors it without needing them."""
+    from saitenka_subtitles.overprint import TokenPaint
+
+    paint = TokenPaint(
+        text,
+        100,
+        200,
+        "Yu Gothic",
+        40.0,
+        0x00FF00,
+        1.0,
+        8.0,
+        glyph_dx=(0, 48, 97),
+        glyph_dy=(0, 1, 0),
+    )
+
+    assert paint.drawable is False
+
+
 def test_a_token_without_spacing_stays_one_event() -> None:
     """The split costs an event per glyph, so a run the two renderers already agree on keeps the
     single event — and the payload bytes it always had."""
