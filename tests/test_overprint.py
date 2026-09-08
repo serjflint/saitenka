@@ -634,3 +634,29 @@ def test_the_draw_names_which_engine_ran(monkeypatch, owner: str, path: str) -> 
     # legacy path, so keying the count off it reported 0 for every legacy draw in a field trace.
     assert attrs["tokens"] == sum(len(line) for line in request.lines)
     assert attrs["tokens"] > 0
+
+
+def test_the_draw_span_carries_a_cue_handle_that_groups_its_draws(monkeypatch) -> None:
+    """The wait a viewer sees is derivable from the trace alone — first draw of a cue, first draw of
+    that cue carrying boxes, subtract — but only if the draws can be grouped. Without this the spans
+    are an undifferentiated stream and the pair cannot be found.
+
+    The text itself is not carried: a bundle gets shared, and a subtitle line is the user's content.
+    """
+    import dataclasses as dc
+
+    from util import record_spans
+
+    spans = record_spans(monkeypatch)
+    renderer, _target, surfaces, ipc, request = _native_renderer_and_target()
+
+    renderer.draw(dc.replace(request, boxes=[]), surfaces, ipc)
+    renderer.draw(request, surfaces, ipc)
+    renderer.draw(dc.replace(request, text="a different cue"), surfaces, ipc)
+
+    drawn = _spans_named(spans, "subtitle_draw")
+    assert drawn[0]["cue"] == drawn[1]["cue"], "one cue's draws must share a handle"
+    assert drawn[2]["cue"] != drawn[0]["cue"], "a new cue must start a new group"
+    assert request.text not in str(drawn), "the cue's text must not reach the bundle"
+    # The pair the diff needs: same handle, one without boxes then one with.
+    assert (drawn[0]["measured_boxes"], drawn[1]["measured_boxes"]) == (0, len(request.boxes))

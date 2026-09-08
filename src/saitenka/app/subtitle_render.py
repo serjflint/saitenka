@@ -8,6 +8,7 @@ pattern the other app modules use.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
@@ -275,6 +276,11 @@ def _assign_rung(
         masks.append(mask)
         return "overpaint"
     return "none"
+
+
+def _cue_digest(text: str) -> str:
+    """A short stable handle for one cue's text, for grouping spans without carrying the text."""
+    return hashlib.blake2s(text.encode(), digest_size=4).hexdigest()
 
 
 def overprint_payload(
@@ -1171,6 +1177,12 @@ class NativeVisibleRenderer:
             # holds. A field trace read `tokens=0` for all 33 legacy draws before this.
             span.set("tokens", sum(len(line) for line in request.lines))
             span.set("measured_boxes", len(request.boxes))
+            # The one attribute that makes the wait a viewer sees derivable from the trace alone:
+            # group draws by cue, take the first, take the first with boxes, subtract. Without it the
+            # draws are an undifferentiated stream and the pair cannot be found. A digest rather than
+            # the text — a span attribute has no cardinality limit, but a subtitle line is the user's
+            # content and does not belong in a bundle that gets shared.
+            span.set("cue", _cue_digest(request.text))
             return self._draw(request, surfaces, ipc, on_settled=on_settled)
 
     def _draw_path(self) -> str:
