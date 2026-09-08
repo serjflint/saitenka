@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
+from saitenka_tokenize.japanese import Token
 from session_behavior_trace import SessionTrace, _visible_surfaces
 from util import FakeIPC, await_ready, bare_gateway
 
@@ -15,7 +16,12 @@ from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
+from saitenka.app.token_cache import TokenizedCue
 from saitenka.mpvio.ipc import IPCRequest
+
+
+def _token(surface: str) -> Token:
+    return Token(surface=surface, lemma=surface, reading="", pos="名詞", start=0, end=len(surface))
 
 
 class _VisibilityIPC(FakeIPC):
@@ -118,6 +124,13 @@ def test_changed_cue_retires_interaction_before_later_batch_command(
     )
     reader.graph.playback.start_session()
     reader.graph.cue.set_subtitle("old")
+    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
+    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
+    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
+    # assertion below then rests on it.
+    reader.graph.subtitle_presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     copied: list[str] = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
@@ -198,6 +211,13 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
     trace = SessionTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
+    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
+    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
+    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
+    # assertion below then rests on it.
+    reader.graph.subtitle_presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     renderer.use_native(reader.graph.subtitle_presentation.target())
     reader.graph.tooltip.select(0)
@@ -218,6 +238,13 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
         pump=reader.pump,
     )
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
+    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
+    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
+    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
+    # assertion below then rests on it.
+    reader.graph.subtitle_presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     renderer.use_native(reader.graph.subtitle_presentation.target())
     reader.graph.subtitle_presentation.pipeline.draw_current(

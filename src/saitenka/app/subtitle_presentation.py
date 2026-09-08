@@ -59,6 +59,23 @@ class CueRenderState:
     origin: tuple[int, int] = (0, 0)
 
 
+def paintable_boxes(state: CueRenderState) -> list[WordBox]:
+    """``state``'s boxes, or none when there are no tokens to put them on.
+
+    A `DrawRequest` takes its identity from `playback.cue.text` and its content from this store, and
+    the two are written by different owners at different times: mpv's `sub-text` property lands on
+    playback state as soon as it is observed, while this store is rewritten by `set_subtitle`. In
+    the gap -- reliably reached by a `sub-seek`, where mpv re-reports a transient mid-seek value
+    before the real cue -- a draw pairs one cue's text with another cue's boxes.
+
+    The field trace shows the result: a draw carrying `tokens=0, measured_boxes=3`, the three boxes
+    belonging to the cue that had just left. Boxes with no tokens can never paint anything, so
+    withholding them costs nothing and removes the incoherent pair. It is a guard, not the repair:
+    the two owners still need one clock, and until they have one this keeps the mismatch off screen.
+    """
+    return state.boxes if state.lines else []
+
+
 class CueRenderStore:
     """Single writer for the current cue's derived render facts."""
 

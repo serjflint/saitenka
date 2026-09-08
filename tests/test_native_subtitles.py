@@ -1347,6 +1347,27 @@ def test_the_lookahead_survives_the_cue_arriving_that_it_was_built_for(tmp_path:
     result.close()
 
 
+def test_a_draw_request_never_carries_boxes_without_tokens(tmp_path: Path) -> None:
+    """The wiring, not the helper: `draw_request` is the one place the two owners meet.
+
+    `text` comes from `playback.cue.text`, written the moment mpv's `sub-text` is observed; `lines`
+    and `boxes` come from the cue store, rewritten by `set_subtitle`. A `sub-seek` lands between
+    them, and the field trace caught the result on `犬… かな？` -- a cue whose three boxes were drawn
+    against the `♬～` that follows it with a touching boundary, two characters the tokenizer skips
+    entirely. `tests/test_cue_render_store.py` owns the invariant; this owns the connection.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert result.graph.cue.draw_request().boxes, "the cue that owns them still gets them"
+
+    # The successor's tokenization lands while the predecessor's geometry is still filed.
+    result.graph.subtitle_presentation.cue.replace_tokenized(lines=[], tokens=[])
+
+    assert result.graph.cue.draw_request().boxes == []
+    result.close()
+
+
 def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
