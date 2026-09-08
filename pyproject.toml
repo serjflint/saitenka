@@ -630,6 +630,9 @@ bench = "uv run --extra full python examples/bench_responsiveness.py --pathologi
 # --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
 synth-bench = "uv run --extra full python examples/bench_responsiveness.py --synth --reps 5 --loops 5"
 continuous-bench = "uv run --extra full python examples/bench_core.py --reps 5"
+# Per-device and per-renderer cost, apart rather than as one `cue_redraw`. Dict-free and headless;
+# mpv's OSD leg is out of process and NOT covered here (`saitenka.subtitle.calibration_ms` has it).
+bench-devices = "uv run --extra full python examples/bench_render_devices.py --reps 40"
 # Local perf rot-guard (#33): ratchet the --synth render throughput against perf-baseline.json, failing
 # only on GROSS regression (per-metric tolerance: median +50%, tail-noisy p99 +100% → catches a 2-4x
 # rot, never micro-drift). LOCAL/OPT-IN, wall-clock + machine-specific → deliberately NOT in `all` (like
