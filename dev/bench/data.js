@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788806154569,
+  "lastUpdate": 1788889842509,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -14945,6 +14945,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.178763,
             "range": "3 replicas; min 0.962307; max 1.71507; MAD 0.216456; worst 1.71507",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3cbb0e922551529b41163573c3faeb409147757f",
+          "message": "Merge pull request #507 from serjflint/fix/overprint-osd-leg-run-style\n\nfix(subtitles): make the overprint land on the OSD leg it is actually drawn on",
+          "timestamp": "2026-09-08T22:46:21+05:00",
+          "tree_id": "20e62244d8c6033627c5d61e862258f7c71d1dab",
+          "url": "https://github.com/serjflint/saitenka/commit/3cbb0e922551529b41163573c3faeb409147757f"
+        },
+        "date": 1788889840936,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.422834,
+            "range": "3 replicas; min 4.98192; max 6.55927; MAD 0.136439",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.186586,
+            "range": "3 replicas; min 6.69427; max 9.26528; MAD 0.078695; worst 9.26528",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.436911,
+            "range": "3 replicas; min 14.7387; max 20.3382; MAD 1.90129",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.759355,
+            "range": "3 replicas; min 14.9571; max 20.5673; MAD 1.80792; worst 20.5673",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.88183,
+            "range": "3 replicas; min 11.8815; max 14.8753; MAD 0.993501",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.089134,
+            "range": "3 replicas; min 0.073075; max 0.121026; MAD 0.016059; worst 0.121026",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.404115,
+            "range": "3 replicas; min 36.1035; max 44.8168; MAD 3.30059; worst 44.8168",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.266771,
+            "range": "3 replicas; min 2.50807; max 4.5118; MAD 0.7587; worst 4.5118",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.306314,
+            "range": "3 replicas; min 1.02334; max 1.68976; MAD 0.282975; worst 1.68976",
             "unit": "ms"
           }
         ]
