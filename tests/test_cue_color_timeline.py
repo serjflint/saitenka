@@ -254,3 +254,26 @@ def test_navigating_onto_a_lone_cue_is_unchanged_by_the_frame(timeline) -> None:
 
     assert result.graph.playback.cue.text == TIMELINE[1].text
     assert "subtitle-hint-text-mismatch" not in _refusals(spans[mark:])
+
+
+def test_boxes_in_an_overlap_name_the_event_each_word_was_measured_in(overlapped) -> None:
+    """Two speakers on screen are two authored events and one flat token list, so a token index
+    alone cannot say whose word was clicked. Geometry never lost that — `TokenGeometry.event_id`
+    carries it — and the cue layer used to drop it on the way to `WordBox`.
+
+    Asserts the partition, not merely that the field is populated: one event answering for every
+    box is exactly the state the drop produced, and it is not distinguishable from "populated".
+    """
+    result, ipc, _backend, spans = overlapped
+    _show(result, ipc, CO_TIMED[0])
+
+    assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+
+    boxes = result.graph.subtitle_presentation.cue.current.boxes
+    assert boxes
+    assert len({box.event_id for box in boxes}) == 2, (
+        "every box named one event, but two are on screen"
+    )
+    assert all(box.event_id is not None for box in boxes)
+    drawn = [span for span in spans if span["name"] == "subtitle_draw"]
+    assert drawn[-1]["attrs"]["box_events"] == 2

@@ -21,6 +21,7 @@ from saitenka.render.layout import NO_START, Block
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from saitenka_subtitles import SubtitleEventId
     from saitenka_tokenize.japanese import Token
 
 WHITE = (255, 255, 255, 255)
@@ -67,6 +68,10 @@ class WordBox:
     #: See `TokenGeometry.glyph_dx` — the overprint draws a spaced token one event per glyph.
     glyph_dx: tuple[int, ...] = ()
     glyph_dy: tuple[int, ...] = ()
+    #: Which authored event this token was measured in. Two speakers on screen are two events and
+    #: one flat token list, so the index alone cannot say whose word was clicked. `None` from the
+    #: legacy renderer, which lays the text out itself and has no document to attribute to.
+    event_id: SubtitleEventId | None = None
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h

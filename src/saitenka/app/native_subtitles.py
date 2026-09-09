@@ -2043,6 +2043,7 @@ class NativeSubtitleGeometry:
                 item.italic,
                 item.glyph_dx,
                 item.glyph_dy,
+                item.event_id,
             )
             for item in snapshot.tokens
         ]

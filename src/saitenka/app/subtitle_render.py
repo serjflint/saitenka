@@ -1178,6 +1178,11 @@ class NativeVisibleRenderer:
             # the text — a span attribute has no cardinality limit, but a subtitle line is the user's
             # content and does not belong in a bundle that gets shared.
             span.set("cue", cue_digest(request.text))
+            # How many authored events the drawn boxes came from. `active_events` on the geometry
+            # side says how many the snapshot was measured against; this says how many reached the
+            # screen, and a bundle where they disagree is a frame drawn with another frame's boxes
+            # — the mispairing that reads as "geometry that never arrived".
+            span.set("box_events", len({box.event_id for box in request.boxes if box.event_id}))
             return self._draw(request, surfaces, ipc, on_settled=on_settled)
 
     def _draw_path(self) -> str:
