@@ -1043,9 +1043,9 @@ def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> N
 class SplitLane(DeferredLane):
     """A lane that runs a job's body and delivers its terminal as two separate steps.
 
-    Every other fake does both at once, which is exactly the interleaving that cannot go wrong. The
-    slot is released when the body ends but settlement hangs off the terminal, so the two disagree
-    for a window that only a fake separating them can enter.
+    Every other fake does both at once, which is exactly the interleaving that cannot go wrong —
+    settlement and the next admission both hang off the terminal, so a fake that never separates it
+    from the body cannot show what the claim slot means in between.
     """
 
     def run_body(self, index: int = 0) -> None:
@@ -1055,6 +1055,44 @@ class SplitLane(DeferredLane):
     def deliver(self, owner, index: int = 0) -> None:
         _job, identity, on_finished = self.held.pop(index)
         on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_the_claim_slot_is_held_until_the_terminal_not_until_the_body_ends() -> None:
+    """The field defect: a cue drawn plain for its whole life, colored only after a seek back.
+
+    Releasing the slot when the body finished made it mean "a render is running" while settlement
+    and the next admission both hang off the terminal. The next cue was claimed inside that gap and
+    inherited the previous job's completion — settled before its own render existed, against the
+    earlier cue's geometry, leaving the render that did arrive with nobody to publish it. Nothing
+    retried, because from the worker's side that cue had been settled.
+    """
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
+    settled: list[str] = []
+
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 1_000),
+        work_key="cue-a",
+        on_settled=lambda: settled.append("a"),
+    )
+    lane.run_body()
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 2_000),
+        work_key="cue-b",
+        on_settled=lambda: settled.append("b"),
+    )
+    assert len(lane.held) == 1, "the second cue was admitted while the first still held the slot"
+
+    lane.deliver(Owner.SUBTITLE)
+
+    assert settled == ["a"], "the second cue was settled before its own job had run"
+    lane.run_body()
+    lane.deliver(Owner.SUBTITLE)
+    assert settled == ["a", "b"], "the second cue's result reached nobody"
+    worker.close()
 
 
 def test_a_terminal_pays_only_the_job_it_names() -> None:

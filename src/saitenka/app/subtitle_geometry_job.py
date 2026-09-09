@@ -345,15 +345,18 @@ class SubtitleGeometryWorker:
         """The lane terminal. Admission of the next job happens here rather than at the end of the
         handler, so work enters from the thread that consumes terminals.
 
-        It also pays out the settlements this job owed, which is how a result reaches the host. The
-        completion's identity says which job that is; the terminal arriving is not proof that the
-        job it carries is the only one issued.
+        It also releases the claim slot and pays out the settlements this job owed, which is how a
+        result reaches the host. The completion's identity says which job that is — jobs stay
+        addressed by identity even though the slot now admits one at a time, because a refusal and a
+        close both retire jobs whose terminals never arrive in that order.
         """
         _lane, issue = cast("tuple[str, int]", completion.identity)
         with self._condition:
+            self._inflight = False
             settling = self._owed.pop(issue, [])
             if issue == self._inflight_issue:
                 self._inflight_issue = None
+            self._condition.notify_all()
         for settle in settling:
             settle()
         self._pump()
@@ -529,7 +532,19 @@ class SubtitleGeometryWorker:
                 self._prefetched[cue] = entry._replace(snapshot=stripped)
 
     def _idle(self) -> None:
-        self._inflight = False
+        """The body is done. The claim slot is NOT released here — its terminal releases it.
+
+        Clearing `_inflight` here made the slot mean "a render is running" while settlement and the
+        next admission both hang off the terminal. The next cue was claimed in the gap between the
+        two and inherited the previous job's completion: settled before its own render existed,
+        against the earlier cue's geometry, leaving the render that did arrive with nobody to
+        publish it. Releasing on the terminal makes the two agree, so the gap has no states to leak
+        through.
+
+        Safe against wedging because a completion is delivered exactly once for every admitted job:
+        `_Lane` completes a handler that raised as FAILED and everything still pending as CANCELLED
+        on close, and a refused admission never occupies the slot at all.
+        """
         self._condition.notify_all()
 
     def _drop_prefetch(self, key: str, error: Exception | None = None) -> None:

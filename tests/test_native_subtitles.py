@@ -432,17 +432,18 @@ def reader(
 
 
 def settle_jobs(result: TestSession, ipc: FakeIPC) -> None:
-    """Let the geometry lane finish and deliver its terminals.
+    """Deliver the geometry lane's terminals and let it come to rest.
 
-    Two steps because they are two facts: the work completing, and the host being told. The broker
-    publishes a completion to the mailbox, so the host learns on a later drain — which is why a cue
-    can be scheduled and not yet published, and why this is not folded into `wait_idle`. A legacy
-    session has no lane at all, so there is nothing to settle.
+    Two steps because they are two facts: the host being told, and the lane having no work left.
+    The broker publishes a completion to the mailbox, so the host learns on a later drain — which is
+    why a cue can be scheduled and not yet published. Delivery comes first because the lane's claim
+    slot is held until the terminal is consumed, so waiting for idle before draining waits for a
+    completion this harness is itself holding. A legacy session has no lane at all.
     """
     if result.graph.subtitle_presentation.native is None:
         return
-    assert result.graph.subtitle_presentation.native.worker.wait_idle()
     ipc.deliver_runtime_jobs()
+    assert result.graph.subtitle_presentation.native.worker.wait_idle()
 
 
 def toasts(ipc: FakeIPC) -> list[tuple]:
