@@ -1209,11 +1209,12 @@ class NativeVisibleRenderer:
             else None
         )
         self._publish_overpaint(request, surfaces)
-        drawing = overprint_payload(request, drifting=self._drifting, census=True)
+        overprint = overprint_payload(request, drifting=self._drifting, census=True)
+        drawing = overprint
         if rect is not None:
             # One slot, one payload: the highlight and the color are drawn together so a repaint
             # can never leave one of them showing the previous cue.
-            drawing = f"{focus_drawing(rect)}\n{drawing}" if drawing else focus_drawing(rect)
+            drawing = f"{focus_drawing(rect)}\n{overprint}" if overprint else focus_drawing(rect)
         if not drawing:
             self._hide_focus(ipc)
             return None
@@ -1229,10 +1230,10 @@ class NativeVisibleRenderer:
                 1,
             ),
         )
-        self._calibrate(request, ipc)
+        self._calibrate(request, ipc, overprint)
         return None
 
-    def _calibrate(self, request: DrawRequest, ipc) -> None:
+    def _calibrate(self, request: DrawRequest, ipc, payload: str) -> None:
         """Ask mpv where its OSD renderer actually put the overprint, and act on the difference.
 
         It runs on the payload the cue is already drawing rather than a synthetic probe, so what is
@@ -1244,9 +1245,13 @@ class NativeVisibleRenderer:
         anything at all. So a track load spends one unpaused check: the load is already stalling for
         a subprocess and a font resolution, and a stutter there is one nobody sees.
         """
-        payload = overprint_payload(request, drifting=self._drifting)
+        # The payload the cue is drawing, handed in rather than rebuilt. Building it again here
+        # was an identical second pass on every draw — and it ran ahead of the guards below, which
+        # decline the check on most of them.
+        if not (request.paused or self._calibrate_unpaused) or ipc is None:
+            return
         signature = subtitle_calibration.payload_signature(payload, request.osd)
-        if not (request.paused or self._calibrate_unpaused) or ipc is None or signature is None:
+        if signature is None:
             return
         measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)
         if measured is None or signature in self._calibrated:
