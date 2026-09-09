@@ -6,6 +6,7 @@ import re
 from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
+from heapq import heappop, heappush
 from itertools import islice
 from typing import TYPE_CHECKING
 
@@ -40,14 +41,63 @@ class CueIndex:
     """A sorted cue list with lookup and navigation operations."""
 
     def __init__(self, cues: list[Cue]):
+        # Stable, and on `start` alone, so co-timed cues keep the order the document gave them —
+        # `frame_text` joins in this order and the renderer reads the document in that same order,
+        # so a different tie-break here would make the two disagree about a line no one moved.
         self.cues = sorted(cues, key=lambda cue: cue.start)
+        self._frames = self._compute_frames()
         by_text: defaultdict[str, list[int]] = defaultdict(list)
         for position, cue in enumerate(self.cues):
             by_text[_normalize(cue.text)].append(position)
-        self._by_text = dict(by_text)
+        # A frame's joined text under every position in it. After a navigation the drawn line is
+        # the frame, not the event, so a lookup by what is on screen has to find its way back —
+        # without this, next/next/next stops chaining the moment it steps into an overlap.
+        for position, frame in enumerate(self._frames):
+            if len(frame) > 1:
+                by_text[_normalize(self.frame_text(position))].append(position)
+        self._by_text = {text: sorted(set(hits)) for text, hits in by_text.items()}
         self._boundaries = tuple(
             sorted({point for cue in self.cues for point in (cue.start, cue.end)})
         )
+
+    def _compute_frames(self) -> tuple[tuple[int, ...], ...]:
+        """For each cue, every cue on screen at the instant it appears — itself included.
+
+        The instant is the renderer's, not a fresh choice: `authored_ass_rows_at` is asked at
+        ``round(start * 1000) + 1`` ms, so anything else here would build a set the document
+        disagrees with, which is the whole defect this exists to close.
+
+        One sweep with a heap of open ends rather than a scan per cue, because a sign held over a
+        scene makes the scan quadratic exactly where the overlap it is looking for lives.
+        """
+        frames: list[tuple[int, ...]] = []
+        opened: list[tuple[float, int]] = []
+        cursor = 0
+        for cue in self.cues:
+            instant = (round(cue.start * 1_000) + 1) / 1_000
+            while cursor < len(self.cues) and self.cues[cursor].start <= instant:
+                heappush(opened, (self.cues[cursor].end, cursor))
+                cursor += 1
+            while opened and opened[0][0] <= instant:
+                heappop(opened)
+            frames.append(tuple(sorted(position for _end, position in opened)))
+        return tuple(frames)
+
+    def frame_at_position(self, position: int) -> tuple[int, ...]:
+        """The cues drawn together with ``position``, in document order."""
+        if not 0 <= position < len(self._frames):
+            return ()
+        return self._frames[position]
+
+    def frame_text(self, position: int) -> str:
+        """What is actually on screen when ``position`` is: every co-timed cue, joined.
+
+        mpv draws the set active at an instant; a cue is one authored event. Navigating to the
+        event and drawing only its text hands the geometry a line the document does not have at
+        that timestamp, which it refuses (`subtitle-hint-text-mismatch`) — so color waits for mpv
+        instead of painting from the index.
+        """
+        return "\n".join(self.cues[index].text for index in self.frame_at_position(position))
 
     def __len__(self) -> int:
         return len(self.cues)

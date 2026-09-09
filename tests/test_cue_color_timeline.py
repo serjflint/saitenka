@@ -95,15 +95,37 @@ def _settle(result: TestSession, ipc: FakeIPC) -> None:
     result.pump()
 
 
-@pytest.fixture
-def timeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cues: tuple[Cue, ...]):
     spans = record_spans(monkeypatch)
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "timeline.ass"
-    source.write_bytes(_source(TIMELINE))
+    source.write_bytes(_source(cues))
     assert result.graph.subtitle_presentation.native is not None
     result.graph.subtitle_presentation.native.set_source(source)
-    result.graph.track_commands.navigation.current.sub_index = CueIndex(list(TIMELINE))
+    result.graph.track_commands.navigation.current.sub_index = CueIndex(list(cues))
+    return result, ipc, backend, spans
+
+
+@pytest.fixture
+def timeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    result, ipc, backend, spans = _session(tmp_path, monkeypatch, TIMELINE)
+    yield result, ipc, backend, spans
+    result.close()
+
+
+#: Two speakers authored as two events with one span — the shape 38 times in one real episode, and
+#: the shape that refused geometry on six seeks in every field bundle.
+CO_TIMED: tuple[Cue, ...] = (
+    Cue(1.0, 3.0, "猫を見る"),
+    Cue(3.0, 5.0, "犬も見る"),
+    Cue(3.0, 5.0, "鳥を見た"),
+    Cue(5.0, 7.0, "帰ろうか"),
+)
+
+
+@pytest.fixture
+def overlapped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    result, ipc, backend, spans = _session(tmp_path, monkeypatch, CO_TIMED)
     yield result, ipc, backend, spans
     result.close()
 
@@ -187,3 +209,48 @@ def test_a_navigated_cue_lands_scannable_with_boxes_its_tokens_own(timeline) -> 
     assert cue.boxes, "the navigated cue is on screen with no hit boxes"
     assert all(0 <= box.index < len(cue.tokens) for box in cue.boxes)
     assert sum(item.orphan_boxes for item in _appearances(spans)) == 0
+
+
+def _refusals(spans: list[dict]) -> list[str]:
+    return [
+        span["attrs"].get("reason")
+        for span in spans
+        if span["name"] == "subtitle_geometry_decision" and span["attrs"].get("outcome") != "ready"
+    ]
+
+
+def test_navigating_into_an_overlap_paints_without_waiting_for_mpv(overlapped) -> None:
+    """The seek a viewer feels as a delay.
+
+    Navigation steps to an authored event; mpv draws the *set* active at that instant. Drawing only
+    the event handed geometry a line the document does not have there, so it refused
+    (`subtitle-hint-text-mismatch`) and color could not appear until mpv's own `sub-text` arrived
+    tens of milliseconds later. Six such seeks in every field bundle, ~50 ms each.
+
+    So: the frame is what gets drawn, and geometry paints it from the index with no round trip.
+    """
+    result, ipc, _backend, spans = overlapped
+    _show(result, ipc, CO_TIMED[0])
+    mark = len(spans)
+
+    assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+
+    assert result.graph.playback.cue.text == "犬も見る\n鳥を見た"
+    assert "subtitle-hint-text-mismatch" not in _refusals(spans[mark:])
+    cue = result.graph.subtitle_presentation.cue.current
+    assert cue.boxes, "the navigated frame is on screen with no hit boxes"
+    assert all(0 <= box.index < len(cue.tokens) for box in cue.boxes)
+
+
+def test_navigating_onto_a_lone_cue_is_unchanged_by_the_frame(timeline) -> None:
+    """The negative control, on a track with no overlap at all. A cue sharing its span with nobody
+    draws exactly what it drew before — a frame-aware path that quietly widened every cue would
+    satisfy the test above and fail here."""
+    result, ipc, _backend, spans = timeline
+    _show(result, ipc, TIMELINE[0])
+    mark = len(spans)
+
+    assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+
+    assert result.graph.playback.cue.text == TIMELINE[1].text
+    assert "subtitle-hint-text-mismatch" not in _refusals(spans[mark:])

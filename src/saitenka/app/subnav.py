@@ -128,7 +128,9 @@ def sub_nav(ports: NavPorts, delta: int) -> bool:
         # A step measured inside an overlap and one measured from a lone cue land the user in
         # different places, and only the trace can tell them apart afterwards.
         span.set("overlapping", target.overlapping)
-        span.set("cue", cue_digest(target.cue.text))
+        # The digest of what gets DRAWN, so this span joins the draw it causes. Digesting the
+        # stepped-to event instead gave an overlap two identities and split one wait across them.
+        span.set("cue", cue_digest(target.drawn_text))
         # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
         # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
         # before landing on the real target; reconcile below must not mistake that for a correction.
@@ -136,7 +138,7 @@ def sub_nav(ports: NavPorts, delta: int) -> bool:
         ports.geometry_hint(target.cue)
         try:
             ports.draw_cue(
-                target.cue.text,
+                target.drawn_text,
                 provisional_navigation=True,
             )  # instant overlay render (also resets nav_idx)
         finally:
