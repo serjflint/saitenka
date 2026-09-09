@@ -316,3 +316,76 @@ def test_a_cue_under_a_held_sign_draws_both_and_paints(
         assert result.graph.subtitle_presentation.cue.current.boxes
     finally:
         result.close()
+
+
+#: A run of music markers between two spoken lines. Three, because the lookahead window is two: a
+#: run longer than the window is what makes it matter that a frame with nothing to paint still
+#: spends a slot. `♬～` tokenizes, but every token is one the tokenizer skips, so the frame owes no
+#: color — the commonest such cue in anime, held 14 s and 19 s in the episode this was traced
+#: against.
+SILENCE: tuple[Cue, ...] = (
+    Cue(1.0, 3.0, "猫を見る"),
+    Cue(3.0, 5.0, "♬～"),
+    Cue(5.0, 7.0, "♬～"),
+    Cue(7.0, 9.0, "♬～"),
+    Cue(9.0, 11.0, "犬も見る"),
+)
+
+
+def _prefetched_timestamps(spans: list[dict]) -> list[int]:
+    return [
+        span["attrs"]["timestamp_ms"]
+        for span in spans
+        if span["name"] == "subtitle_geometry_prepare"
+    ]
+
+
+def test_the_line_behind_a_silent_stretch_is_ready_when_it_arrives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The viewer-visible claim, and the one the field bundle failed.
+
+    Whether a frame has anything to paint is only known after tokenizing it, on the worker — so the
+    queuer counts one against its window and finds out later that it built nothing. Two markers in
+    a row is the whole window, and the spoken line behind them was never speculated: `completed`
+    frozen across the entire silent stretch, then the next line missing `first-seen` and paying a
+    full render.
+    """
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, SILENCE)
+    try:
+        for cue in SILENCE[:4]:
+            _show(result, ipc, cue)
+        mark = len(spans)
+
+        _show(result, ipc, SILENCE[4])  # the spoken line, arriving after the silence
+
+        assert [
+            span["attrs"]["outcome"]
+            for span in spans[mark:]
+            if span["name"] == "subtitle_geometry_cache"
+        ] == ["hit"], "the line behind a run of silent cues rendered cold"
+    finally:
+        result.close()
+
+
+def test_a_cue_owed_no_color_still_reads_ahead_for_the_ones_that_are(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half, and a separate gap: standing on a silent cue used to speculate nothing at
+    all — the eligibility check returned before the lookahead ran. Whether *this* frame has
+    anything to paint says nothing about its successors.
+
+    Asserted while a marker holds the screen, which is where the old path did nothing.
+    """
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, SILENCE)
+    try:
+        _show(result, ipc, SILENCE[0])
+        mark = len(spans)
+
+        _show(result, ipc, SILENCE[1])  # a marker takes the screen
+
+        assert _prefetched_timestamps(spans[mark:]), (
+            "nothing was read ahead while a silent cue was on screen"
+        )
+    finally:
+        result.close()

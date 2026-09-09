@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from saitenka_subtitles.geometry import GeometrySnapshot
 
 from saitenka import otel_metrics
-from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
+from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason, UnpaintableFrame
 from saitenka.runtime import EffectFinished, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, LocalJobLane, configure_lane
 
@@ -123,6 +123,12 @@ class SubtitleGeometryWorker:
         self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
         self._prefetch_pending: OrderedDict[str, GeometryRequestBuilder] = OrderedDict()
         self._prefetched: OrderedDict[str, _Prefetched] = OrderedDict()
+        #: Frames whose build reported they have nothing to paint — a music marker, a lone sign.
+        #: Whether one is paintable is only known on the worker, after tokenizing, so the queuer
+        #: cannot tell them apart up front and spends its whole window on them. Two silent cues in
+        #: a row were enough: the spoken line after them was never speculated and always rendered
+        #: cold. Remembering the verdict makes the second pass over the same stretch skip them.
+        self._unpaintable: OrderedDict[str, None] = OrderedDict()
         self._prefetch_inflight_key: str | None = None
         #: Speculation's own fence. The live generation moves on the arrival a prefetch exists for,
         #: so it cannot answer for one. This moves only when the document, fonts or source change —
@@ -207,6 +213,16 @@ class SubtitleGeometryWorker:
     def _record_submit_latency(self, started: int) -> None:
         elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
         self._max_submit_us = max(self._max_submit_us, elapsed_us)
+
+    def is_unpaintable(self, key: str) -> bool:
+        """Whether a build already reported this frame has nothing to paint.
+
+        Asked before a boundary spends the caller's lookahead window, which is the whole point: two
+        music markers in a row consumed a window of two and the spoken line behind them was never
+        speculated.
+        """
+        with self._condition:
+            return key in self._unpaintable
 
     def prefetch(self, key: str, build: GeometryRequestBuilder) -> bool:
         """Queue one speculation. Deliberately *not* fenced by the live generation.
@@ -386,6 +402,10 @@ class SubtitleGeometryWorker:
         with self._condition:
             self._prefetch_epoch += 1
             self._superseded += len(self._prefetch_waiters)
+            # Eligibility is a fact about the frame's text, but the key is not: it carries the
+            # render inputs, so a verdict kept across an epoch would be filed under a key nothing
+            # asks for again. Cheaper to re-earn than to reason about.
+            self._unpaintable.clear()
             self._cache.clear()
             self._prefetched.clear()
             self._prefetch_pending.clear()
@@ -504,6 +524,11 @@ class SubtitleGeometryWorker:
             waiter = self._prefetch_waiters.pop(key, None)
             self._prefetch_inflight_key = None
             self._prefetch_dropped += 1
+            if isinstance(error, UnpaintableFrame):
+                self._unpaintable.pop(key, None)
+                self._unpaintable[key] = None
+                while len(self._unpaintable) > self._cache_max:
+                    self._unpaintable.popitem(last=False)
         failure_recorded = bool(
             waiter is not None
             and error is not None

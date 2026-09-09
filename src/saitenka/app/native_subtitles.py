@@ -33,6 +33,7 @@ from saitenka.app import subtitle_fonts
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
+    UnpaintableFrame,
     cue_digest,
     geometry_error_code,
     geometry_failure_reason,
@@ -1584,7 +1585,10 @@ class NativeSubtitleGeometry:
             if inputs is None:
                 continue
             key = self._key(path, inputs)
-            if key in queued_keys:
+            # A frame already found to have nothing to paint must not spend the window. Two music
+            # markers in a row are enough to swallow it whole, and the spoken line behind them then
+            # renders cold every time — which is what a viewer reports as the delay.
+            if key in queued_keys or self.worker.is_unpaintable(key):
                 continue
             queued_keys.add(key)
             # Per cue, not once for the track: a converted document is rebuilt around this cue's own
@@ -1607,7 +1611,7 @@ class NativeSubtitleGeometry:
                     seen.is_skippable,
                 )
                 if not selection.annotations:
-                    raise ValueError("prefetched frame has no interaction-eligible tokens")
+                    raise UnpaintableFrame("prefetched frame has no interaction-eligible tokens")
                 return self._build(
                     document,
                     track_id,
@@ -1913,6 +1917,17 @@ class NativeSubtitleGeometry:
             if self._ports.use_native():
                 self._published_key = inputs.observation_key
                 self._set_ready()
+                # A cue with nothing to paint still has successors that do. Tying speculation to
+                # this cue's eligibility made every music marker a dead zone — one holds the screen
+                # for twenty seconds in the episode this was traced against.
+                self._prefetch(
+                    seen,
+                    inputs.path,
+                    inputs.track_id,
+                    inputs.generation,
+                    inputs.render,
+                    inputs.cue.timestamp_ms,
+                )
                 return True
             if self._ports.ownership_undecided():
                 return False  # the assertion's terminal re-drives the refresh

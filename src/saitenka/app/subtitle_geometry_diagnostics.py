@@ -115,3 +115,12 @@ def geometry_failure_reason(error: BaseException | str) -> tuple[str, GeometryEr
         "subtitle-frame-unsupported" if code in _UNSUPPORTED_CODES else "geometry-provider-failed"
     )
     return reason, code
+
+
+class UnpaintableFrame(ValueError):
+    """A speculated frame with no interaction-eligible tokens — a music marker, a lone sign.
+
+    Its own type because the queuer has to tell it from a transient build failure: this verdict is
+    stable for that frame and worth remembering, and a retryable one is not. Lives in this leaf so
+    the broker can raise on it without depending on the feature that raises it.
+    """
