@@ -82,6 +82,31 @@ def _scorer():
     )
 
 
+def _describe_colors(reader, scorer) -> int:
+    """Print what stage 2 is supposed to change, word by word, and return how many words move.
+
+    Printed rather than assumed: the base color (#cad3f5) is a near-white over text that is already
+    near-white, so most of a line changes by an amount nobody can see. Without this the honest
+    report "1 and 2 look the same" cannot be told apart from a rendering bug — with it, a word the
+    terminal calls green and the screen does not is a finding.
+    """
+    cue = reader.graph.subtitle_presentation.cue.current
+    base = scorer.palette.base
+    moved = 0
+    print("what stage 2 should change:")
+    for token, style in zip(cue.tokens, scorer.score_line(list(cue.tokens)), strict=True):
+        mark = "  " if style.color == base else "->"
+        moved += style.color != base
+        print(
+            f"  {mark} {token.surface:8} #{style.color[0]:02x}{style.color[1]:02x}{style.color[2]:02x}"
+        )
+    print(
+        f"\n{moved} of {len(cue.tokens)} words should visibly change; the rest are the base color, "
+        "which is near-white over near-white text.\n"
+    )
+    return moved
+
+
 def _draw(reader) -> None:
     presentation = reader.graph.subtitle_presentation
     presentation.pipeline.draw_current(presentation.target())
@@ -119,10 +144,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {index}. {stage.name:11} {stage.span}")
     print()
 
-    with live_reader(scorer=_scorer()) as (_tmp, reader, _ipc):
+    scorer = _scorer()
+    with live_reader(scorer=scorer) as (_tmp, reader, _ipc):
         boxes = list(reader.graph.subtitle_presentation.cue.current.boxes)
         if not boxes:
             print("the cue produced no hit boxes — nothing to color; is the geometry mode on?")
+            return 1
+        if not _describe_colors(reader, scorer):
+            print("no word on this line changes color — stages 1 and 2 would look identical")
             return 1
         line = reader.graph.playback.cue.text
         for loop in range(1, args.loops + 1):
