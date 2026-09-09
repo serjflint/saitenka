@@ -121,15 +121,39 @@ _FALLBACK_ACTIONS = {
 }
 
 
+#: Longest diagnostic a toast will carry. This is a line over video, not a log: one detail arrived
+#: as the repr of two option tuples and covered the screen edge to edge, truncated mid-word.
+_NOTICE_DETAIL_MAX = 60
+
+
 def _fallback_notice(reason: str, diagnostic: str | None) -> str:
     """One line naming the loss, the cause, and — when mpv named the options — which ones.
 
     The detail is what makes it actionable: the reason alone sends a user to the source, while the
-    same line carrying the option names mpv reported sends them to their own mpv.conf.
+    same line carrying the option names mpv reported sends them to their own mpv.conf. Bounded,
+    because a detail that overflows the video says less than no detail at all.
     """
     cause = _FALLBACK_ACTIONS.get(reason, reason)
+    if diagnostic and len(diagnostic) > _NOTICE_DETAIL_MAX:
+        diagnostic = diagnostic[: _NOTICE_DETAIL_MAX - 1] + "…"
     detail = f" ({diagnostic})" if diagnostic else ""
     return f"no word scanning: {cause}{detail}"
+
+
+def _font_option_delta(
+    ours: tuple[tuple[str, str], ...], theirs: tuple[tuple[str, str], ...]
+) -> str:
+    """The option NAMES whose values moved — what the notice's docstring promises.
+
+    Not both tuples' repr, which is what it used to be: a dozen `(name, value)` pairs twice over,
+    unreadable on screen and telling the user nothing they could act on. The names alone are the
+    actionable half; the values are in the log.
+    """
+    before, after = dict(ours), dict(theirs)
+    moved = sorted(
+        name for name in before.keys() | after.keys() if before.get(name) != after.get(name)
+    )
+    return ", ".join(moved)
 
 
 #: The demuxer codecs whose libavcodec-to-ASS conversion `subtitles.converted` reproduces. Only
@@ -1798,7 +1822,7 @@ class NativeSubtitleGeometry:
             self.worker.mark_not_ready()
             self._set_fallback(
                 "subtitle-font-environment-stale",
-                log_detail=f"{self._fonts.options} != {render.font_options}",
+                log_detail=_font_option_delta(self._fonts.options, render.font_options),
             )
             self._ports.degrade()
             return None

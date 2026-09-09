@@ -4536,3 +4536,68 @@ def test_the_calibration_round_trip_is_timed_not_just_its_arithmetic(tmp_path: P
         assert drift[0]["calibration_ms"] >= 0.0
         assert recorded, "the histogram was never recorded"
         result.close()
+
+
+def test_a_font_change_notice_names_the_options_and_fits_on_screen() -> None:
+    """The notice is a line drawn over video, not a log entry.
+
+    Its detail arrived as the repr of two option tuples — a dozen `(name, value)` pairs twice over —
+    and covered the screen edge to edge, truncated mid-word by the display rather than by anything
+    that knew where to cut. The names that MOVED are the actionable half and are what the notice's
+    own docstring promises; the values stay in the log.
+    """
+    from saitenka.app.native_subtitles import _fallback_notice, _font_option_delta
+
+    before = (("embeddedfonts", "True"), ("sub-font", "'sans-serif'"), ("sub-fonts-dir", "''"))
+    after = (("embeddedfonts", "True"), ("sub-font", "'Yu Gothic'"), ("sub-fonts-dir", "'/x'"))
+
+    delta = _font_option_delta(before, after)
+
+    assert delta == "sub-font, sub-fonts-dir"
+    assert "embeddedfonts" not in delta  # unchanged options are not the user's problem
+    notice = _fallback_notice("subtitle-font-environment-stale", delta)
+    assert "sub-font" in notice
+    assert len(notice) < 140
+
+
+def test_a_notices_length_does_not_grow_with_its_detail() -> None:
+    """A bound on the class, not on the one detail that overflowed: the next diagnostic to grow
+    would otherwise repeat this, and nothing between here and the screen would stop it.
+
+    The property, not a number — the cause strings are fixed and reviewed, so what has to hold is
+    that an unbounded input cannot lengthen the line.
+    """
+    from saitenka.app.native_subtitles import _fallback_notice
+
+    hundred = _fallback_notice("subtitle-font-environment-stale", "x" * 100)
+    four_thousand = _fallback_notice("subtitle-font-environment-stale", "x" * 4000)
+
+    assert hundred == four_thousand
+    assert four_thousand.endswith("…)")
+    assert len(four_thousand) < 140
+
+
+def test_a_mid_track_font_change_reports_option_names_not_a_tuple_dump(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The call site, not just the helper. A test that only exercised `_font_option_delta` stayed
+    green while the caller went on formatting both option tuples into the diagnostic — the field
+    screenshot that started this was a toast reading `(('embeddedfonts', 'True'), ('osd-font-…`
+    stretched across the video and cut off mid-word.
+
+    Asserted on the log because the notice and the log take the SAME diagnostic string, and the
+    toast renders to a bitmap — its text is not in the command stream to read back.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
+        ipc.props["options/sub-font"] = "Yu Gothic"  # the font environment moves under the track
+        assert result.graph.subtitle_presentation.native is not None
+        result.graph.subtitle_presentation.native.schedule(result.graph.cue.geometry_observation())
+
+    assert "subtitle-font-environment-stale" in caplog.text
+    assert "detail=sub-font" in caplog.text
+    assert "((" not in caplog.text, "the diagnostic carries a raw tuple repr"
+    result.close()
