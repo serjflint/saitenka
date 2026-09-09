@@ -77,11 +77,16 @@ def caused_by(trace: dict, name: str) -> dict[str, str]:
 
 
 def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
-    """Per navigation, how long the cue it landed on waited for color.
+    """Per navigation, how long until color was on screen — across cue identity, not within it.
 
-    Measured against *that* cue, not the next one to color. A seek often lands on a cue owing no
-    color at all, and running on to the next colorable one turns a correct 0 ms into a reading of
-    seconds — which is how a session whose per-seek wait was falling read as one that was growing.
+    A seek draws a navigation *hint* from the cue index, and mpv's own `sub-text` follows tens of
+    milliseconds later under a different digest. Ending the measurement at that change reports the
+    hint's 0 ms and calls the rest somebody else's appearance, so the wait a viewer actually sits
+    through — the whole point of this file — falls in the gap between two green numbers. It read
+    `p50 0.0 ms` against a measured 48.6.
+
+    Bounded by the next navigation, so a seek whose color never arrives stays `None` instead of
+    borrowing the next one's.
     """
     events = sorted(
         (
@@ -92,20 +97,17 @@ def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
         key=lambda event: event["ts"],
     )
     result: list[tuple[float | None, str]] = []
-    landed: list[dict] = []
+    started: float | None = None
     for event in events:
         args = event.get("args") or {}
         if event["name"] == "sub_nav_identity":
-            landed = []
+            started = event["ts"] / 1000.0
             result.append((None, ""))
             continue
-        if not result or args.get("path") != "native":
+        if started is None or args.get("path") != "native" or result[-1][0] is not None:
             continue
-        if landed and args.get("cue") != landed[0].get("cue"):
-            continue
-        landed.append({"ts": event["ts"] / 1000.0, **args})
-        if args.get("measured_boxes") and args.get("tokens") and result[-1][0] is None:
-            result[-1] = (landed[-1]["ts"] - landed[0]["ts"], args.get("cue", ""))
+        if args.get("measured_boxes") and args.get("tokens"):
+            result[-1] = (event["ts"] / 1000.0 - started, args.get("cue", ""))
     return result
 
 
@@ -275,8 +277,15 @@ def main(argv: list[str] | None = None) -> int:
                 f"  after a seek:   n={len(landed)}"
                 f"   p50 {statistics.median(sorted(landed)):6.1f} ms"
                 f"   max {max(landed):6.1f} ms"
-                + (f"   (+{blank} landed on a cue owing no color)" if blank else "")
+                + (f"   (+{blank} never colored before the next seek)" if blank else "")
             )
+    refused = collections.Counter(
+        span.get("reason") for span in settled if span.get("outcome") == "pending"
+    )
+    if refused:
+        # What splits a 2 ms seek from a 50 ms one. `subtitle-hint-text-mismatch` is the expensive
+        # one: the hint cannot be painted, so color waits for mpv's own `sub-text` to arrive.
+        print("  refused: " + ", ".join(f"{name} x{n}" for name, n in refused.most_common()))
     lane = collections.Counter(
         (event.get("args") or {}).get("outcome")
         for event in trace.get("traceEvents", ())
