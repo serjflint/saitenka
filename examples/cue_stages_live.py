@@ -39,7 +39,7 @@ STAGES = (
     Stage(
         "text-only",
         "subtitle_draw (measured_boxes=0)",
-        "the line is readable, every word plain — no word is clickable yet",
+        "mpv's own subtitle, plain white — no word is colored or clickable yet",
     ),
     Stage(
         "colored",
@@ -59,17 +59,24 @@ STAGES = (
     Stage(
         "retired",
         "cue_redraw (empty)",
-        "the cue leaves the screen",
+        "our color comes off; mpv's own white text stays, exactly as in stage 1",
     ),
 )
 
 
 def _scorer():
     """A scorer that marks part of the demo line known, so `colored` differs visibly from
-    `text-only`. Without one every style is `None` and the color ladder has nothing to assign."""
+    `text-only`. Without one every style is `None` and the color ladder has nothing to assign.
+
+    The palette comes from the user's own config, not `Palette()`: a walkthrough that draws the
+    stock near-white while the config asks for something loud is showing the wrong thing, and it
+    did — the reason `1` and `2` looked identical was five of seven words changing by nothing
+    anyone could see.
+    """
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
 
+    from saitenka.app.config import load_config
     from saitenka.app.scoring import Coloring, Palette
 
     return Coloring(
@@ -78,7 +85,7 @@ def _scorer():
             enable_freq=False,
             enable_jlpt=False,
         ),
-        Palette(),
+        Palette.from_config(load_config().get("palette")),
     )
 
 
@@ -166,6 +173,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dwell", type=float, default=1.0, help="seconds to hold each stage")
     parser.add_argument("--loops", type=int, default=3, help="times to walk the cue")
+    parser.add_argument(
+        "--shots",
+        type=Path,
+        default=None,
+        help="write one window screenshot per stage here, so the stages can be compared as pixels",
+    )
     args = parser.parse_args(argv)
 
     from live_harness import live_reader
@@ -176,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     scorer = _scorer()
-    with live_reader(scorer=scorer) as (_tmp, reader, _ipc):
+    with live_reader(scorer=scorer, native_visible=True) as (_tmp, reader, _ipc):
         boxes = list(reader.graph.subtitle_presentation.cue.current.boxes)
         if not boxes:
             print("the cue produced no hit boxes — nothing to color; is the geometry mode on?")
@@ -192,6 +205,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{loop}/{args.loops}] {index}. {stage.name:11} — {stage.seen}")
                 _apply(reader, stage, boxes)
                 _hold(reader, args.dwell)
+                if args.shots is not None:
+                    args.shots.mkdir(parents=True, exist_ok=True)
+                    shot = args.shots / f"loop{loop}-{index}-{stage.name}.png"
+                    # `window`, not `video`: the overprint is an OSD overlay, and a video-only
+                    # capture would answer with the frame mpv decoded rather than what is on screen.
+                    _ipc.command("screenshot-to-file", str(shot), "window")
             print()
     return 0
 
