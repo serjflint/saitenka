@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import time
 from threading import RLock
 from typing import TYPE_CHECKING
 
+from saitenka import otel_metrics
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.runtime.surfaces import (
     SurfaceAction,
@@ -26,6 +28,18 @@ _SURFACE_TIMEOUT_S = 10.0
 #: Where ids for inline-settled transactions start. They never reach the reactor's sequence, so they
 #: only have to stay clear of it in a log read by a human.
 _INLINE_EFFECT_ID_BASE = 1_000_000
+
+
+def _payload_events(command: tuple[object, ...]) -> int:
+    """ASS events in an `osd-overlay` write; 0 for a bitmap one, which mpv does not parse.
+
+    The unit mpv is billed in: it walks the payload event by event, so a byte count would rate a
+    cue carrying four underlines the same as one carrying none.
+    """
+    if command and command[0] == "osd-overlay":
+        payload = next((part for part in command[3:4] if isinstance(part, str)), "")
+        return len(payload.splitlines()) if payload else 0
+    return 0
 
 
 class LifecycleSurfaces:
@@ -192,7 +206,32 @@ class LifecycleSurfaces:
         command: tuple[object, ...],
         finished: Callable[[EffectFinished], None],
     ) -> None:
-        """Hand the command to the correlated-command port, or issue it inline and settle here."""
+        """Hand the command to the correlated-command port, or issue it inline and settle here.
+
+        Timed end to end, because every other number on the draw path stops when the command leaves
+        us. `subtitle_draw` costs 0.33 ms to *build* a payload; what mpv then does with it — parse
+        the ASS, lay it out, composite — is on the far side of this call and was unmeasured, so a
+        late paint left every span green. A JLPT-heavy cue hands over twenty-odd events per write.
+        """
+        started = time.perf_counter()
+        settle = finished
+
+        def timed(completion: EffectFinished) -> None:
+            with otel_metrics.traced("surface_write") as span:
+                span.set("round_trip_ms", round((time.perf_counter() - started) * 1000.0, 3))
+                span.set(
+                    "route", "inline" if self._overlay.runtime_submit is None else "correlated"
+                )
+                span.set("command", str(command[0]))
+                span.set("slot", str(transaction.slot))
+                span.set("outcome", completion.outcome.value)
+                # The payload's size in the unit mpv pays per: an ASS write is parsed event by
+                # event, so bytes alone would say nothing about a cue with four underlines.
+                span.set("events", _payload_events(command))
+            settle(completion)
+
+        finished = timed
+
         submit = self._overlay.runtime_submit
         if submit is None:
             # No port: the command is issued and answered inline, so this layer settles the
