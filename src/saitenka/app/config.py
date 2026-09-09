@@ -371,7 +371,7 @@ class SubtitleGeometryOptions:
     #: it. Sized to the forward window alone (it was `lookahead + 1`), a cue's own speculation
     #: evicted the cue it was speculating for, so stepping back re-rendered every time — and
     #: stepping back is exactly what a viewer does when a line did not become scannable.
-    cache_max: int = field(default=5, metadata={"help": "Current/lookahead geometry cache bound."})
+    cache_max: int = field(default=6, metadata={"help": "Current/lookahead geometry cache bound."})
     lookahead: int = field(default=2, metadata={"help": "Static cues to render ahead."})
 
 
@@ -471,8 +471,9 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
         raise ValueError("subtitle_geometry.lookahead must be a non-negative integer")
     # Derived when unset, because the bound is a statement about the lookahead: a deeper window
     # with the stock bound reproduces the forward-only sizing that made every backward step
-    # re-render. An explicit `cache_max` is still honoured — that trade is the user's to make.
-    cache_max = values.get("cache_max", 2 * lookahead + 1)
+    # re-render. The floor is the maintainer's, above what the default lookahead derives. An
+    # explicit `cache_max` is still honoured — that trade is the user's to make.
+    cache_max = values.get("cache_max", max(defaults.cache_max, 2 * lookahead + 1))
     if isinstance(cache_max, bool) or not isinstance(cache_max, int) or cache_max <= 0:
         raise ValueError("subtitle_geometry.cache_max must be a positive integer")
     native_formats = values.get("native_formats", defaults.native_formats)

@@ -117,6 +117,8 @@ def test_an_unset_geometry_cache_bound_follows_the_lookahead_it_has_to_hold():
     explicit value still wins: trading history for memory is the user's call.
     """
     assert subtitle_geometry_options({"subtitle_geometry": {"lookahead": 4}}).cache_max == 9
+    # A floor above what the stock lookahead derives (5), so a shallow window still keeps history.
+    assert subtitle_geometry_options({"subtitle_geometry": {"lookahead": 1}}).cache_max == 6
     assert (
         subtitle_geometry_options({"subtitle_geometry": {"lookahead": 4, "cache_max": 2}}).cache_max
         == 2
