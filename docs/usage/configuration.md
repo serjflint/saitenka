@@ -49,6 +49,19 @@ point it at a *copy*, never the live `collection.anki2`:
 collection = "~/anki-copies/collection-copy.anki2"
 ```
 
+`[scoring]` turns the JLPT underline off. It is on by default; off is worth trying if subtitles
+feel slow to paint, because each underline is another ASS event mpv parses and lays out on every
+redraw — a line with four of them hands over roughly twice the payload of one with none:
+
+```toml
+[scoring]
+jlpt_underlines = false
+```
+
+!!! note
+    This changes the *classification*, not just the drawing: with it off, a word's JLPT level stops
+    reaching episode analysis and mined cards too.
+
 !!! tip
     The known-word source itself lives in `[known]` — a map of Anki decks to the fields that hold the
     expression. The default is `"Saitenka::Known" = ["Expression"]`; change it to match the deck and

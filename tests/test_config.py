@@ -3,6 +3,8 @@
 from dataclasses import fields
 from pathlib import Path
 
+import pytest
+
 from saitenka.app.config import (
     SubtitleGeometryOptions,
     TelemetryOptions,
@@ -123,3 +125,19 @@ def test_an_unset_geometry_cache_bound_follows_the_lookahead_it_has_to_hold():
         subtitle_geometry_options({"subtitle_geometry": {"lookahead": 4, "cache_max": 2}}).cache_max
         == 2
     )
+
+
+def test_jlpt_underlines_default_on_and_can_be_turned_off():
+    """A `[scoring]` table, not `[palette]`: this gates the verdict (`Scorer.enable_jlpt`), which
+    `episode_analysis` reads and a mined card carries. A look-and-feel table that quietly changed
+    what a word is classified as is the inference AGENTS.md forbids."""
+    from saitenka.app.config import resolve_jlpt_underlines
+
+    assert resolve_jlpt_underlines({}) is True
+    assert resolve_jlpt_underlines({"scoring": {}}) is True
+    assert resolve_jlpt_underlines({"scoring": {"jlpt_underlines": False}}) is False
+
+    with pytest.raises(TypeError, match="must be a boolean"):
+        resolve_jlpt_underlines({"scoring": {"jlpt_underlines": "no"}})
+    with pytest.raises(TypeError, match="must be a table"):
+        resolve_jlpt_underlines({"scoring": 3})

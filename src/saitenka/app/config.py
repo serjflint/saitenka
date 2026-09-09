@@ -488,6 +488,31 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     )
 
 
+def resolve_jlpt_underlines(cfg: dict | None = None) -> bool:
+    """Whether words carry their JLPT level as an underline — ``[scoring] jlpt_underlines``.
+
+    Not `[palette]`, though that is where a reader looks for how a word is marked: this gates the
+    *verdict* (`Scorer.enable_jlpt`), which `episode_analysis` reads and a mined card carries. A
+    look-and-feel table that silently changed what a word is classified as would be the inference
+    AGENTS.md forbids.
+
+    Off is a real setting, not only a diagnostic: underlines dominate the ASS payload handed to mpv
+    per redraw (four underlines on five colored tokens is 21 events against 9), and that payload's
+    cost lands on mpv's side of a boundary nothing here measures.
+    """
+    if cfg is None:
+        cfg = load_config()
+    raw = cfg.get("scoring")
+    if raw is None:
+        return True
+    if not isinstance(raw, dict):
+        raise TypeError("scoring must be a table")
+    value = raw.get("jlpt_underlines", True)
+    if not isinstance(value, bool):
+        raise TypeError("scoring.jlpt_underlines must be a boolean")
+    return value
+
+
 def resolve_resync_timeout(cfg: dict | None = None) -> int:
     """Resync subprocess timeout (seconds) from top-level ``resync_timeout`` in ``overlay.toml``."""
     if cfg is None:
