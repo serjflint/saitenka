@@ -126,6 +126,10 @@ class DrawRequest:
     #: The CURRENT cue's hit boxes. The legacy path produces them and the native focus path reads
     #: them, so they travel in the request rather than being re-read off a host mid-draw.
     boxes: list[WordBox] = field(default_factory=list)
+    #: Tokens the geometry owed a box for this cue, or `None` on the legacy path, which has no
+    #: geometry to owe anything. Carried so a draw is self-describing: `measured_boxes=0` reads the
+    #: same for a line whose geometry has not landed and for a music marker that owes nothing.
+    owed_color: int | None = None
     #: Whether mpv is paused. Only the layout calibration reads it, and only to stay off the
     #: playing core — `compute_bounds` costs mpv a full render and a cache flush.
     paused: bool = False
@@ -659,6 +663,8 @@ class NativeVisibleRenderer:
         #: Whether device 2's raster is on screen, so a cue that needs none takes the last one down
         #: rather than leaving it over the words that follow.
         self._overpaint_shown = False
+        #: Digest of the last cue whose draw actually carried boxes — see `lost_color`.
+        self._painted_cue: str | None = None
         #: Whether a saitenka overlay window (or `Alt+o`) has taken the session's pixels down. The
         #: focus slot is not a `LifecycleSurfaces` one, so nothing else stops a redraw repainting it.
         self._suspended = False
@@ -1178,6 +1184,22 @@ class NativeVisibleRenderer:
             # the text — a span attribute has no cardinality limit, but a subtitle line is the user's
             # content and does not belong in a bundle that gets shared.
             span.set("cue", cue_digest(request.text))
+            # How many tokens this cue OWES a color, from the styles it is drawing with. Without
+            # it a draw is not self-describing: `measured_boxes=0` reads the same for a line whose
+            # geometry has not landed and for a music marker that owes nothing, and telling them
+            # apart meant joining to a decision span that is often absent — "no geometry decision
+            # recorded" was the readout's most common verdict on the cue nobody could explain.
+            span.set("owed_color", request.owed_color)
+            # Color that was on screen for this cue and is not now. The wait-to-color reading takes
+            # the FIRST colored draw and stops, so a cue losing its color later is invisible to it;
+            # three such drops were found by hand and none of them by the readout.
+            digest = cue_digest(request.text)
+            lost = bool(self._painted_cue == digest and request.owed_color and not request.boxes)
+            span.set("lost_color", lost)
+            if request.boxes:
+                self._painted_cue = digest
+            elif lost:
+                self._painted_cue = None
             # How many authored events the drawn boxes came from. `active_events` on the geometry
             # side says how many the snapshot was measured against; this says how many reached the
             # screen, and a bundle where they disagree is a frame drawn with another frame's boxes
@@ -1457,8 +1479,20 @@ class NativeVisibleRenderer:
         """One fenced write to the focus slot. A stale acknowledgement is dropped by the runtime,
         so an overtaken highlight can never repaint over the current one."""
         transaction = self._focus.request(_FOCUS_SLOT, action)
+        # Timed here as well as in `LifecycleSurfaces`, because the subtitle's own overlay write
+        # does not go through that layer — it is the payload that carries the color, and it was the
+        # one write on the draw path with nothing measuring what mpv did with it.
+        started = time.perf_counter()
 
         def finished(completion: EffectFinished) -> None:
+            with otel_metrics.traced("surface_write") as span:
+                span.set("round_trip_ms", round((time.perf_counter() - started) * 1000.0, 3))
+                span.set("route", "correlated")
+                span.set("command", "osd-overlay")
+                span.set("slot", _FOCUS_SLOT)
+                span.set("outcome", completion.outcome.value)
+                payload = next((part for part in tail[2:3] if isinstance(part, str)), "")
+                span.set("events", len(payload.splitlines()) if payload else 0)
             self._focus.finish(
                 SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
             )

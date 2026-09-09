@@ -1170,6 +1170,16 @@ class NativeSubtitleGeometry:
         """
         return self._fonts.options == render.font_options
 
+    @property
+    def eligible_tokens(self) -> int:
+        """How many tokens the last decision owed a box — the cue's debt, not its styling.
+
+        Read by the draw so a frame can say what it was owed. The palette colors every token
+        including the skippable ones, so counting styles there answers "has a style", which is the
+        same for a music marker and a spoken line.
+        """
+        return self._eligible_tokens
+
     def set_source(self, path: Path | None, *, live: bool = False) -> None:
         """Point at a new source.
 

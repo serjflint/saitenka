@@ -153,6 +153,13 @@ class Appearance:
     eligible: int | None
     #: Draws carrying boxes with no tokens to put them on. Never a paint; always a defect.
     orphan_boxes: int
+    #: Tokens the DRAW itself said it owed color. Preferred over `eligible`: it rides on the draw,
+    #: so it cannot be missing the way a decision span can, and "no geometry decision recorded" was
+    #: this readout's most common verdict on the appearances nobody could explain.
+    owed: int | None = None
+    #: Draws that lost color this cue already had. The wait takes the FIRST colored draw and stops,
+    #: so a mid-cue drop is invisible to it — three were found by hand and none by this.
+    lost_color: int = 0
 
     @property
     def held(self) -> float:
@@ -160,7 +167,10 @@ class Appearance:
 
     @property
     def owed_color(self) -> bool:
-        """False only when the geometry positively settled on nothing to paint."""
+        """False when the cue positively owed no color. The draw's own count answers first: it is
+        always present, where a decision span often is not."""
+        if self.owed is not None:
+            return self.owed != 0
         return self.eligible != 0
 
 
@@ -200,6 +210,10 @@ def appearances(spans: list[dict], settled: list[dict] | None = None) -> list[Ap
                 draws=len(run),
                 wait=None if colored is None else colored["ts"] - start,
                 eligible=_eligible_in(settled, start, end, run[0].get("cue")),
+                owed=next(
+                    (span["owed_color"] for span in run if span.get("owed_color") is not None), None
+                ),
+                lost_color=sum(1 for span in run if span.get("lost_color")),
                 orphan_boxes=sum(
                     1 for span in run if span.get("measured_boxes") and not span.get("tokens")
                 ),
@@ -265,6 +279,9 @@ def main(argv: list[str] | None = None) -> int:
         )
     if unpaintable:
         print(f"  no color owed:  {unpaintable} (geometry settled on 0 eligible tokens)")
+    lost = sum(item.lost_color for item in shown)
+    if lost:
+        print(f"  LOST color:     {lost} draw(s) dropped color the same cue already had")
     orphans = sum(item.orphan_boxes for item in shown)
     if orphans:
         print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")

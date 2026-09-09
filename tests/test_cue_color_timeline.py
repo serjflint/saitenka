@@ -95,9 +95,24 @@ def _settle(result: TestSession, ipc: FakeIPC) -> None:
     result.pump()
 
 
-def _session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cues: tuple[Cue, ...]):
+def _coloring():
+    """A scorer, so tokens carry styles: without one every style is `None`, nothing is colorable,
+    and a test about what a cue owes would pass for the wrong reason."""
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring, Palette
+
+    return Coloring(
+        Scorer(known=KnownWords.from_set(["猫"]), enable_freq=False, enable_jlpt=False), Palette()
+    )
+
+
+def _session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cues: tuple[Cue, ...], *, scorer=None
+):
     spans = record_spans(monkeypatch)
-    result, ipc, backend = reader(tmp_path)
+    result, ipc, backend = reader(tmp_path, scorer=scorer)
     source = tmp_path / "timeline.ass"
     source.write_bytes(_source(cues))
     assert result.graph.subtitle_presentation.native is not None
@@ -450,5 +465,80 @@ def test_a_cue_matching_the_index_only_after_normalisation_still_waits(
 
         assert "subtitle-observation-pending" in _refusals(spans)
         assert not result.graph.subtitle_presentation.cue.current.boxes
+    finally:
+        result.close()
+
+
+def _draws(spans: list[dict]) -> list[dict]:
+    return [span["attrs"] for span in spans if span["name"] == "subtitle_draw"]
+
+
+def test_a_draw_says_how_much_color_its_cue_was_owed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Makes a draw self-describing, which it was not.
+
+    `measured_boxes=0` reads identically for a line whose geometry has not landed and for a music
+    marker that owes nothing, and telling them apart meant joining to a decision span that is often
+    absent — "no geometry decision recorded" was this readout's most common verdict on exactly the
+    appearances nobody could explain.
+    """
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, SILENCE, scorer=_coloring())
+    try:
+        _show(result, ipc, SILENCE[0])  # 猫を見る — content words, owes color
+        spoken = _draws(spans)[-1]
+        mark = len(spans)
+        _show(result, ipc, SILENCE[1])  # ♬～ — every token skippable, owes nothing
+
+        silent = _draws(spans[mark:])[-1]
+        assert spoken["owed_color"] > 0
+        assert silent["owed_color"] == 0
+        assert silent["measured_boxes"] == 0  # …and the two are distinguishable despite this
+    finally:
+        result.close()
+
+
+def test_a_cue_that_loses_the_color_it_had_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wait-to-color reading takes the FIRST colored draw and stops, so color going away later
+    is invisible to it. Three such drops were found by hand in one bundle and none by the readout."""
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        assert _draws(spans)[-1]["measured_boxes"] > 0
+        mark = len(spans)
+
+        presentation = result.graph.subtitle_presentation
+        presentation.cue.replace_geometry(boxes=[])  # what a degrade leaves behind
+        presentation.pipeline.draw_current(presentation.target())
+
+        dropped = _draws(spans[mark:])[-1]
+        assert dropped["measured_boxes"] == 0
+        assert dropped["lost_color"] is True
+    finally:
+        result.close()
+
+
+def test_the_write_that_carries_the_color_is_timed_to_mpvs_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The subtitle's own overlay write does not go through `LifecycleSurfaces`, so the round-trip
+    span added there covered the toast and the loading spinner and not the payload that actually
+    carries the color — the one write on the draw path with nothing measuring mpv's side of it."""
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+
+        written = [
+            span["attrs"]
+            for span in spans
+            if span["name"] == "surface_write"
+            and span["attrs"].get("slot") == "subtitle-native-focus"
+        ]
+        assert written, "the color payload's round trip is unmeasured"
+        assert written[-1]["command"] == "osd-overlay"
+        assert written[-1]["events"] > 0  # the ASS events mpv has to parse
+        assert written[-1]["round_trip_ms"] >= 0.0
     finally:
         result.close()
