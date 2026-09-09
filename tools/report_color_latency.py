@@ -273,10 +273,16 @@ def main(argv: list[str] | None = None) -> int:
         landed = [wait for wait, _cue in navigated if wait is not None]
         blank = len(navigated) - len(landed)
         if landed:
+            ranked = sorted(landed)
+            # p95 as well as p50, because they answer different questions and this readout was
+            # quoted on the median alone while a twentieth of its seeks cost fifty times it. On a
+            # session's worth of seeks p95 IS the max — `n` is printed so that is visible rather
+            # than implied.
             print(
                 f"  after a seek:   n={len(landed)}"
-                f"   p50 {statistics.median(sorted(landed)):6.1f} ms"
-                f"   max {max(landed):6.1f} ms"
+                f"   p50 {statistics.median(ranked):6.1f} ms"
+                f"   p95 {ranked[min(int(len(ranked) * 0.95), len(ranked) - 1)]:6.1f} ms"
+                f"   max {ranked[-1]:6.1f} ms"
                 + (f"   (+{blank} never colored before the next seek)" if blank else "")
             )
     refused = collections.Counter(
