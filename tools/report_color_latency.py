@@ -76,6 +76,73 @@ def caused_by(trace: dict, name: str) -> dict[str, str]:
     return causes
 
 
+def color_on_screen(trace: dict) -> list[tuple[str, float]]:
+    """Per cue arrival, how long until the colored overlay was ON SCREEN.
+
+    Both ends of the older reading were ours rather than the viewer's, and both were early:
+
+      start  our first draw          -> the cue ARRIVED. In native-visible mode mpv puts the text
+                                        up itself; our draw is not what makes the line appear, so
+                                        anchoring on it skips however long the line was already
+                                        showing plain (1.8-6.7 ms here).
+      end    our draw call returning -> mpv ACKNOWLEDGING the write. The draw hands off a payload;
+                                        the pixels arrive when mpv has parsed and composited it,
+                                        which is 2-34 ms later and was invisible until
+                                        `surface_write` measured it.
+
+    Between them they reported 0.0 ms for cues that took 4-37 ms. A p50 of zero is what prompted
+    the maintainer to say the number could not be right, and it could not.
+    """
+    arrivals = [
+        event
+        for event in trace.get("traceEvents", ())
+        if event.get("ph") == "X"
+        and event.get("name") in {"cue_reconcile", "sub_seek"}
+        and (event.get("args") or {}).get("cue")
+    ]
+    spans = sorted(
+        (event for event in trace.get("traceEvents", ()) if event.get("ph") == "X"),
+        key=lambda event: event["ts"],
+    )
+    result: list[tuple[str, float]] = []
+    for index, arrival in enumerate(sorted(arrivals, key=lambda event: event["ts"])):
+        start = arrival["ts"] / 1000.0
+        cue = (arrival.get("args") or {}).get("cue")
+        after = [span for span in spans if span["ts"] / 1000.0 >= start]
+        painted = next(
+            (
+                span
+                for span in after
+                if span.get("name") == "subtitle_draw"
+                and (span.get("args") or {}).get("cue") == cue
+                and (span.get("args") or {}).get("measured_boxes")
+                and (span.get("args") or {}).get("tokens")
+            ),
+            None,
+        )
+        if painted is None:
+            continue
+        acked = next(
+            (
+                span
+                for span in after
+                if span["ts"] >= painted["ts"]
+                and span.get("name") == "surface_write"
+                and (span.get("args") or {}).get("slot") == _COLOR_SLOT
+                and (span.get("args") or {}).get("events")
+            ),
+            None,
+        )
+        del index
+        result.append((cue, (acked or painted)["ts"] / 1000.0 - start))
+    return result
+
+
+#: The overlay slot the color payload is written to — the one write on the draw path whose cost is
+#: mpv's rather than ours.
+_COLOR_SLOT = "subtitle-native-focus"
+
+
 def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
     """Per navigation, how long until color was on screen — across cue identity, not within it.
 
@@ -271,9 +338,20 @@ def main(argv: list[str] | None = None) -> int:
     never = [item for item in owed if item.wait is None]
 
     print(f"{len(shown)} native appearances, {len(owed)} owed color, {len(measured)} colored")
+    on_screen = sorted(wait for _cue, wait in color_on_screen(trace))
+    if on_screen:
+        # The viewer's number: cue arrives -> mpv acknowledges the colored overlay. Printed first
+        # because the reading below it measures from our own first draw to our own draw call, which
+        # is both ends early and reported 0.0 ms for cues that took tens of milliseconds.
+        print(
+            f"  arrival->on screen: n={len(on_screen)}"
+            f"   p50 {statistics.median(on_screen):6.1f} ms"
+            f"   p95 {on_screen[min(int(len(on_screen) * 0.95), len(on_screen) - 1)]:6.1f} ms"
+            f"   max {on_screen[-1]:6.1f} ms"
+        )
     if measured:
         print(
-            f"  wait to color:  p50 {statistics.median(measured):7.1f} ms"
+            f"  (draw to draw):  p50 {statistics.median(measured):7.1f} ms"
             f"   p95 {measured[int(len(measured) * 0.95)]:7.1f} ms"
             f"   max {measured[-1]:7.1f} ms"
         )
