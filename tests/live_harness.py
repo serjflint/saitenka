@@ -101,6 +101,7 @@ def live_reader(
     *,
     paused: bool = True,
     dict_set=None,
+    scorer=None,
     config_dir: Path | None = None,
     cues: tuple[tuple[float, float, str], ...] | None = None,
 ):
@@ -111,6 +112,10 @@ def live_reader(
     ``dict_set`` is taken at construction, before the cue is driven, because a swap afterwards does not
     reach the cue's already-resolved entries: `replace_dictionary_set` is the async-arrival installer,
     and only `switch_to` pairs it with the invalidation that clears them.
+
+    ``scorer`` is what makes words *colored* rather than merely boxed: with none, every token's style
+    is `None` and the color ladder has nothing to assign, so a caller demonstrating color has to
+    supply one.
 
     ``config_dir`` replaces the default ``--no-config`` with a real mpv config directory, for the one
     question that cannot be asked without a user's own ``input.conf`` present. Everything else wants
@@ -149,7 +154,10 @@ def live_reader(
         gateway = install_session_runtime(ipc, startup_hint=False)
         reader = build_session(
             ipc,
-            services=SessionServices(dictionaries=dict_set if dict_set is not None else MiniDS()),
+            services=SessionServices(
+                dictionaries=dict_set if dict_set is not None else MiniDS(),
+                scorer=scorer,
+            ),
         )
         reader.start()
         reader.graph.subtitle_navigation.load_index(srt)

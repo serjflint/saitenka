@@ -659,6 +659,9 @@ smoke-live = { shell = "SAITENKA_LIVE=1 uv run --extra full pytest -q -p no:xdis
 # frame-drop counters — the true real-time signal the headless benches can't see. Needs a display; the
 # E2E GUI tier runs it under Xvfb. --max-drops is the catastrophic-jank gate.
 jank-live = { shell = "SAITENKA_LIVE=1 uv run --extra full python examples/jank_live.py --json jank.json --bench-json jank-bench.json --max-drops 30" }
+# One cue, every state it passes through, each held long enough to point at. The shared vocabulary
+# for "the delay": each stage prints the span it emits, so a name and a trace filter are one thing.
+cue-stages = { shell = "SAITENKA_LIVE=1 uv run --extra full python examples/cue_stages_live.py" }
 # Install-bootstrap smoke — the ONLY tier that drives the packaged `uv tool install` entrypoint on a
 # clean machine (assets from the installed wheel, PATH handoff, setup wizard non-tty path). `--source
 # wheel` (default) builds + installs the current tree; `--source pypi` validates the published artifact
