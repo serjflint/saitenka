@@ -18,7 +18,7 @@ from saitenka_subtitles import (
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
-from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
+from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_pipeline import (
     GeometryResolution,
     GeometryTicket,
@@ -1043,9 +1043,9 @@ def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> N
 class SplitLane(DeferredLane):
     """A lane that runs a job's body and delivers its terminal as two separate steps.
 
-    The gap between them is where the bug lives, and no single-step fake can hold it open: `_idle`
-    clears the in-flight flag at the end of the body, so the next cue is claimed and submitted
-    before the previous job's terminal has been consumed.
+    Every other fake does both at once, which is exactly the interleaving that cannot go wrong. The
+    slot is released when the body ends but settlement hangs off the terminal, so the two disagree
+    for a window that only a fake separating them can enter.
     """
 
     def run_body(self, index: int = 0) -> None:
@@ -1057,13 +1057,12 @@ class SplitLane(DeferredLane):
         on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
 
 
-def test_a_terminal_pays_its_own_jobs_settlement_and_not_the_next_ones() -> None:
-    """The field defect: a cue drawn plain for its whole life, colored only after a seek back.
+def test_a_terminal_pays_only_the_job_it_names() -> None:
+    """Settlements are addressed by the job's identity, not drained as a pool.
 
-    Settlements used to be pooled per worker, so the first job's terminal paid the second job's
-    callback as well — before the second job had run. That callback publishes whatever geometry is
-    current, which at that instant is the *previous* cue's, so it reported `no-snapshot`; the render
-    that did arrive a moment later then had no callback left to publish it, and nothing retried.
+    The slot admitting one job at a time already makes a pool *behave*, so this pins the addressing
+    itself: correctness that depends on no two jobs overlapping is one scheduling change away from
+    being wrong, which is how the pooled version failed in the first place.
     """
     lane = SplitLane()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
@@ -1073,24 +1072,18 @@ def test_a_terminal_pays_its_own_jobs_settlement_and_not_the_next_ones() -> None
     assert worker.submit_job(
         coordinator.generation,
         lambda: request(coordinator.generation, 1_000),
-        work_key="cue-a",
-        on_settled=lambda: settled.append("a"),
+        on_settled=lambda: settled.append("owed"),
     )
     lane.run_body()
-    assert not worker._inflight, "the premise: the body clears in flight before its terminal"
-    assert worker.submit_job(
-        coordinator.generation,
-        lambda: request(coordinator.generation, 2_000),
-        work_key="cue-b",
-        on_settled=lambda: settled.append("b"),
+    _job, _identity, on_finished = lane.held[0]
+    on_finished(
+        EffectFinished(EffectId(0), Owner.SUBTITLE, (GEOMETRY_LANE, 9_999), EffectOutcome.SUCCEEDED)
     )
 
-    lane.deliver(Owner.SUBTITLE)
+    assert settled == [], "a terminal naming another job paid this one's caller"
 
-    assert settled == ["a"], "the second cue was settled before its own job had run"
-    lane.run_body()
     lane.deliver(Owner.SUBTITLE)
-    assert settled == ["a", "b"], "the second cue's result reached nobody"
+    assert settled == ["owed"]
     worker.close()
 
 
