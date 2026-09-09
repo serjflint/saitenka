@@ -36,9 +36,27 @@ maturity levels:
 
 ```toml
 [palette]
-learning = "#eed49f"   # words still in learning
-young    = "#8bd5ca"   # young (not yet mature) cards
+base       = "#cad3f5"   # every word with no other signal — most of a line
+known      = "#a6da95"   # mature cards
+forgotten  = "#ee99a0"   # lapsed
+learning   = "#eed49f"   # words still in learning
+young      = "#8bd5ca"   # young (not yet mature) cards
+n_plus_one = "#c6a0f6"   # the line's single unknown word
+hover      = "#f4dbd6"   # the word under the cursor
+freq_single = "#f5a97f"  # frequency, unbanded
+freq_bands = ["#ed8796", "#f5a97f", "#f9e2af", "#8bd5ca", "#8aadf4"]
+
+[palette.jlpt]
+N1 = "#ed8796"
+N2 = "#f5a97f"
+N3 = "#f9e2af"
+N4 = "#8bd5ca"
+N5 = "#8aadf4"
 ```
+
+Every key is optional; unlisted ones keep the defaults above. `base` is the one worth changing first
+if you want to *see* which words the overlay has colored — it defaults to a near-white that sits
+almost invisibly over subtitle text that is already near-white.
 
 `[fsrs]` optionally reads maturity from a **copy** of your Anki collection so coloring reflects real
 review state. Set this when you want per-card maturity rather than a plain known/unknown split — and
