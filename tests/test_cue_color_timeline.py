@@ -389,3 +389,66 @@ def test_a_cue_owed_no_color_still_reads_ahead_for_the_ones_that_are(
         )
     finally:
         result.close()
+
+
+def _show_without_timings(result: TestSession, ipc: FakeIPC, cue: Cue) -> None:
+    """A cue arriving textually before it arrives temporally — mpv publishes `sub-text` and
+    `sub-start`/`sub-end` as separate property changes, and the gap between them is real."""
+    ipc.set_prop("sub-text/ass-full", _dialogue(cue))
+    ipc.set_prop("sub-start", None)
+    ipc.set_prop("sub-end", None)
+    ipc.set_prop("time-pos", cue.start + 0.25)
+    ipc.set_prop("sub-text", cue.text)
+    _settle(result, ipc)
+
+
+def test_a_cue_whose_timings_have_not_arrived_is_measured_from_the_index(timeline) -> None:
+    """The last visible instance of text-before-color, measured at 58 ms and 111 ms in the field.
+
+    Geometry needed `sub-start`/`sub-end` and refused without them, so the line drew plain and
+    stayed plain until mpv's second property change landed. The timings it needs are the cue's own
+    and the index has them — the same answer a navigation hint already takes, with the same guard:
+    an index disagreeing with the text on screen does not get to choose the instant.
+    """
+    result, ipc, _backend, spans = timeline
+
+    _show_without_timings(result, ipc, TIMELINE[0])
+
+    assert "subtitle-observation-pending" not in _refusals(spans)
+    cue = result.graph.subtitle_presentation.cue.current
+    assert cue.boxes, "a cue with no timings yet drew plain and stayed plain"
+    assert all(0 <= box.index < len(cue.tokens) for box in cue.boxes)
+
+
+def test_an_unknown_cue_without_timings_still_waits(timeline) -> None:
+    """The negative control. Substituting the index is only sound when the index agrees; a cue it
+    cannot identify has to keep waiting for mpv rather than be measured at a guessed instant."""
+    result, ipc, _backend, spans = timeline
+    stranger = Cue(11.0, 13.0, "知らない行")  # not in the index this session loaded
+
+    _show_without_timings(result, ipc, stranger)
+
+    assert "subtitle-observation-pending" in _refusals(spans)
+    assert not result.graph.subtitle_presentation.cue.current.boxes
+
+
+def test_a_cue_matching_the_index_only_after_normalisation_still_waits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard's own control, and not the same case as an unknown cue.
+
+    `locate` matches on NORMALISED text — whitespace collapsed — so it answers for a cue whose
+    spelling differs from the one on screen. Taking that cue's timings would measure one line's
+    instant for another's text, which is the failure the navigation hint already guards against.
+    An unknown cue cannot reach this: `locate` returns -1 and the first half of the check catches
+    it, which is why that test alone left this half unexercised.
+    """
+    spaced = Cue(1.0, 3.0, "猫を　見る")  # ideographic space; the index holds this spelling
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, (spaced, *TIMELINE[1:]))
+    try:
+        _show_without_timings(result, ipc, Cue(1.0, 3.0, "猫を 見る"))  # mpv reports an ASCII one
+
+        assert "subtitle-observation-pending" in _refusals(spans)
+        assert not result.graph.subtitle_presentation.cue.current.boxes
+    finally:
+        result.close()

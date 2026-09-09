@@ -1670,14 +1670,17 @@ class NativeSubtitleGeometry:
         seen: GeometryObservation,
         source: bytes | None,
         track_id: SubtitleTrackId,
-        start: float,
-        end: float,
+        start: float | None,
+        end: float | None,
         active_rows: object,
     ) -> tuple[float, float, int, str] | None:
         """Where in the track this cue is, and the rows that make it up.
 
         `source` is `None` for a converted track — mpv is not rendering a file there, so there is no
         document to index into and the rows have to come from mpv itself.
+
+        `start`/`end` are `None` while mpv has published the cue's text but not yet its timings —
+        the two arrive as separate property changes. The index answers for that gap.
         """
         hint = seen.cue_hint
         if hint is not None and self.source_kind is SourceKind.CONVERTED:
@@ -1698,6 +1701,8 @@ class NativeSubtitleGeometry:
         if not isinstance(active_rows, str) or not active_rows.strip():
             self._degrade_geometry("subtitle-ass-full-unavailable")
             return None
+        if start is None or end is None:
+            return self._indexed_span(seen, active_rows)
         try:
             _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
                 seen.prop("time-pos"), seen.prop("sub-delay"), start
@@ -1725,6 +1730,31 @@ class NativeSubtitleGeometry:
                     # across its span, and those are refused as `typesetting-unsupported`.
                     timestamp_ms = round(indexed.start * 1_000) + 1
         return start, end, timestamp_ms, active_rows
+
+    def _indexed_span(
+        self, seen: GeometryObservation, active_rows: str
+    ) -> tuple[float, float, int, str] | None:
+        """The cue's own span, taken from the index while mpv has yet to report its timings.
+
+        mpv publishes `sub-text` and `sub-start`/`sub-end` as separate property changes, so a cue
+        arrives textually before it arrives temporally. Refusing that gap drew the line plain and
+        left it plain until the timings landed — measured at 58 ms and 111 ms in the field, and the
+        last visible instance of text-before-color.
+
+        The document answers, exactly as it does for a navigation hint: the timings needed are the
+        cue's own, and the index has them. Guarded the same way too — an index that disagrees with
+        the text on screen is not allowed to decide which instant to measure.
+        """
+        index = seen.index
+        if index is None or not seen.text.strip():
+            self._degrade_geometry("subtitle-observation-pending")
+            return None
+        position = index.locate(text=seen.text, preferred=seen.nav_index)
+        if position < 0 or index.cues[position].text != seen.text:
+            self._degrade_geometry("subtitle-observation-pending")
+            return None
+        cue = index.cues[position]
+        return cue.start, cue.end, round(cue.start * 1_000) + 1, active_rows
 
     def _render_space(self, render: _RenderInputs) -> converted.RenderSpace:
         return converted.RenderSpace(render.frame_size[0], render.frame_size[1], render.margins)
@@ -1839,13 +1869,15 @@ class NativeSubtitleGeometry:
             self.ass_full_capability = AssFullCapability.SUPPORTED
         start = seen.prop("sub-start")
         end = seen.prop("sub-end")
-        if start is None or end is None:
-            self._degrade_geometry("subtitle-observation-pending")
-            return None
         generation = self._ports.pipeline.generation
         track_id = SubtitleTrackId(f"sid:{seen.prop('sid')}:{path.resolve()}")
         active = self._active_observation(
-            seen, source, track_id, float(start), float(end), active_rows
+            seen,
+            source,
+            track_id,
+            None if start is None else float(start),
+            None if end is None else float(end),
+            active_rows,
         )
         if active is None:
             return None
