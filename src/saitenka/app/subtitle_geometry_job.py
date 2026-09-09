@@ -11,7 +11,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from saitenka_subtitles.geometry import GeometrySnapshot
 
@@ -140,9 +140,16 @@ class SubtitleGeometryWorker:
         self._epoch_cause: GeometryCacheReason | None = None
         self._inflight = False
         self._pending_settled: Callable[[], None] | None = None
-        #: Settlements owed by the job now executing — a current request's own, plus any caller
-        #: that attached to an in-flight speculation instead of submitting its own job.
-        self._settling: list[Callable[[], None]] = []
+        #: Settlements owed, per issued job — a current request's own, plus any caller that attached
+        #: to an in-flight speculation instead of submitting its own job. Keyed by issue rather than
+        #: pooled, because `_idle` clears `_inflight` before the terminal fires: the next cue is
+        #: claimed inside that window, and a shared bag hands its callback to the previous job's
+        #: terminal. That paid it against a snapshot its cue had not produced yet, and left the
+        #: result that did arrive with no callback to publish it — the cue stayed uncolored until a
+        #: seek rescheduled it.
+        self._owed: dict[int, list[Callable[[], None]]] = {}
+        #: The issue the attach branch adds to: the speculation currently executing.
+        self._inflight_issue: int | None = None
         self._issued = 0
         self._closed = False
         self._submitted = 0
@@ -194,8 +201,8 @@ class SubtitleGeometryWorker:
                 self._prefetch_waiters[work_key] = reservation
                 # No job of our own: the speculation already executing is what will answer, so its
                 # terminal owes this caller the settlement.
-                if on_settled is not None:
-                    self._settling.append(on_settled)
+                if on_settled is not None and self._inflight_issue is not None:
+                    self._owed.setdefault(self._inflight_issue, []).append(on_settled)
                 self._record_submit_latency(started)
                 return True
             if work_key is not None and work_key in self._prefetch_pending:
@@ -271,7 +278,7 @@ class SubtitleGeometryWorker:
                 on_finished=self._delivered,
             ):
                 return
-            self._unwind_refusal(job)
+            self._unwind_refusal(job, identity[1])
 
     def _claim_next(self) -> tuple[GeometryJob, tuple[str, int]] | None:
         """Take the next item and mark the lane busy, or `None` when there is nothing to hand over."""
@@ -281,34 +288,35 @@ class SubtitleGeometryWorker:
             pending, self._pending = self._pending, None
             if pending is not None:
                 job = GeometryJob(self, pending, None)
-                if self._pending_settled is not None:
-                    self._settling.append(self._pending_settled)
+                owed = [] if self._pending_settled is None else [self._pending_settled]
                 self._pending_settled = None
             elif self._prefetch_pending:
                 key, build = self._prefetch_pending.popitem(last=False)
                 self._prefetch_inflight_key = key
                 job = GeometryJob(self, None, (key, self._prefetch_epoch, build))
+                owed = []
             else:
                 return None
             self._inflight = True
             self._issued += 1
+            self._owed[self._issued] = owed
+            self._inflight_issue = self._issued
             return job, (GEOMETRY_LANE, self._issued)
 
-    def _unwind_refusal(self, job: GeometryJob) -> None:
+    def _unwind_refusal(self, job: GeometryJob, issue: int) -> None:
         """Give back what a refused submit claimed, and pay what its terminal now never will.
 
         Refused admission is dropped work, not queued work: left marked in flight it stalls every
         later request behind it. Left queued, its settlements are paid by the NEXT terminal, running
         one cue's callback against another cue's snapshot with its owner nowhere in the traceback.
 
-        The drain takes all of `_settling`, not this job's share, and that is safe for a narrower
-        reason than "they are all ours": `_idle` clears `_inflight` before its terminal fires, so a
-        pump can claim and be refused while a previous job's callbacks are still queued. Every
-        `_idle` site sits downstream of the publish those callbacks report, so paying them here is
-        early rather than wrong. Move `_idle` above a publish and that stops being true.
+        Only this job's share is paid. Draining every queued callback took the ones belonging to a
+        job still waiting to run, which is a different bug in the same shape.
         """
         with self._condition:
             self._inflight = False
+            if issue == self._inflight_issue:
+                self._inflight_issue = None
             if job.current is not None:
                 self._superseded += 1
             else:
@@ -320,7 +328,7 @@ class SubtitleGeometryWorker:
                 self._remember_provenance(key, GeometryCacheReason.PREFETCH_SUPERSEDED)
                 self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
-            owed, self._settling = self._settling, []
+            owed = self._owed.pop(issue, [])
             self._condition.notify_all()
         for settle in owed:
             settle()
@@ -333,14 +341,19 @@ class SubtitleGeometryWorker:
             assert job.prefetch is not None
             self._process_prefetch(job.prefetch)
 
-    def _delivered(self, _completion: EffectFinished) -> None:
+    def _delivered(self, completion: EffectFinished) -> None:
         """The lane terminal. Admission of the next job happens here rather than at the end of the
         handler, so work enters from the thread that consumes terminals.
 
-        It also pays out the settlements this job owed, which is how a result reaches the host.
+        It also pays out the settlements this job owed, which is how a result reaches the host. The
+        completion's identity says which job that is; the terminal arriving is not proof that the
+        job it carries is the only one issued.
         """
+        _lane, issue = cast("tuple[str, int]", completion.identity)
         with self._condition:
-            settling, self._settling = self._settling, []
+            settling = self._owed.pop(issue, [])
+            if issue == self._inflight_issue:
+                self._inflight_issue = None
         for settle in settling:
             settle()
         self._pump()
@@ -741,7 +754,9 @@ class SubtitleGeometryWorker:
             self._cache.clear()
             # Same door as a refusal: no terminal is coming, so an unpaid settlement is one its
             # caller waits on forever. Paying it after close is what makes the wait bounded.
-            owed, self._settling = self._settling, []
+            owed = [settle for job in self._owed.values() for settle in job]
+            self._owed.clear()
+            self._inflight_issue = None
             self._pending_settled = None
             self._condition.notify_all()
         for settle in owed:

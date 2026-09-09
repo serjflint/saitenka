@@ -1040,6 +1040,60 @@ def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> N
     worker.close()
 
 
+class SplitLane(DeferredLane):
+    """A lane that runs a job's body and delivers its terminal as two separate steps.
+
+    The gap between them is where the bug lives, and no single-step fake can hold it open: `_idle`
+    clears the in-flight flag at the end of the body, so the next cue is claimed and submitted
+    before the previous job's terminal has been consumed.
+    """
+
+    def run_body(self, index: int = 0) -> None:
+        job, _identity, _on_finished = self.held[index]
+        job.worker.execute(job)
+
+    def deliver(self, owner, index: int = 0) -> None:
+        _job, identity, on_finished = self.held.pop(index)
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_a_terminal_pays_its_own_jobs_settlement_and_not_the_next_ones() -> None:
+    """The field defect: a cue drawn plain for its whole life, colored only after a seek back.
+
+    Settlements used to be pooled per worker, so the first job's terminal paid the second job's
+    callback as well — before the second job had run. That callback publishes whatever geometry is
+    current, which at that instant is the *previous* cue's, so it reported `no-snapshot`; the render
+    that did arrive a moment later then had no callback left to publish it, and nothing retried.
+    """
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
+    settled: list[str] = []
+
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 1_000),
+        work_key="cue-a",
+        on_settled=lambda: settled.append("a"),
+    )
+    lane.run_body()
+    assert not worker._inflight, "the premise: the body clears in flight before its terminal"
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 2_000),
+        work_key="cue-b",
+        on_settled=lambda: settled.append("b"),
+    )
+
+    lane.deliver(Owner.SUBTITLE)
+
+    assert settled == ["a"], "the second cue was settled before its own job had run"
+    lane.run_body()
+    lane.deliver(Owner.SUBTITLE)
+    assert settled == ["a", "b"], "the second cue's result reached nobody"
+    worker.close()
+
+
 def test_the_render_space_is_part_of_the_cache_key() -> None:
     """Not a freshness nicety: a snapshot's coverage masks are rasterised at this frame's pixels and
     uploaded as a bitmap, which mpv does not rescale with its OSD surface the way it rescales a text
