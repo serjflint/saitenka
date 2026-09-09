@@ -112,6 +112,37 @@ def _draw(reader) -> None:
     presentation.pipeline.draw_current(presentation.target())
 
 
+def _hold(reader, seconds: float) -> None:
+    """Hold a stage on screen, pumping throughout.
+
+    A draw does not reach mpv by returning: the overprint goes out as a correlated command, so its
+    write — and, for `text-only`, its *removal* — only lands once the runtime is drained. Sleeping
+    without pumping left the previous stage's color on screen under the next stage's label, which
+    is how the walkthrough came to show stage 1 and stage 2 as identical.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        reader.pump()
+        time.sleep(0.01)
+
+
+def _settle(reader, seconds: float = 2.0) -> list:
+    """Pump until the cue's real geometry has landed, and answer with its boxes.
+
+    Done once per walkthrough rather than per stage: with the geometry already published and the
+    fence unmoved, nothing re-publishes underneath a stage, so `text-only` stays uncolored for as
+    long as it is held.
+    """
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        reader.pump()
+        boxes = list(reader.graph.subtitle_presentation.cue.current.boxes)
+        if boxes:
+            return boxes
+        time.sleep(0.01)
+    return []
+
+
 def _apply(reader, stage: Stage, boxes: list) -> None:
     """Put the session into `stage` using the calls the runtime itself makes."""
     presentation = reader.graph.subtitle_presentation
@@ -156,13 +187,11 @@ def main(argv: list[str] | None = None) -> int:
         line = reader.graph.playback.cue.text
         for loop in range(1, args.loops + 1):
             reader.graph.cue.set_subtitle(line)  # a fresh arrival, as mpv reporting the cue does
+            boxes = _settle(reader) or boxes
             for index, stage in enumerate(STAGES, start=1):
-                # Drained BEFORE the stage is set, never during the hold: a pump inside the dwell
-                # would let the real geometry land and color `text-only` out from under the label.
-                reader.pump()
                 print(f"[{loop}/{args.loops}] {index}. {stage.name:11} — {stage.seen}")
                 _apply(reader, stage, boxes)
-                time.sleep(args.dwell)
+                _hold(reader, args.dwell)
             print()
     return 0
 
