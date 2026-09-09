@@ -76,6 +76,7 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-hint-text-mismatch",
         "subtitle-frame-unsupported",
         "subtitle-font-environment-stale",
+        "subtitle-font-environment-unread",
     }
 )
 _PENDING_REASONS = frozenset(
@@ -83,6 +84,7 @@ _PENDING_REASONS = frozenset(
         "subtitle-ass-full-unavailable",
         "subtitle-geometry-cache-miss",
         "subtitle-hint-text-mismatch",
+        "subtitle-font-environment-unread",
         "subtitle-observation-pending",
         "subtitle-timing-unavailable",
     }
@@ -1820,8 +1822,14 @@ class NativeSubtitleGeometry:
         self._last_render_inputs = render
         if not self._fonts_are_current(render):
             self.worker.mark_not_ready()
+            # Never read and changed under us are different facts with different advice. An unread
+            # environment is the ordinary race at a track load — it resolves a moment later — and
+            # reporting it as a mid-track change told the user to reselect a track that was fine,
+            # naming every option as "moved" because one side was empty.
             self._set_fallback(
-                "subtitle-font-environment-stale",
+                "subtitle-font-environment-stale"
+                if self._fonts.options
+                else "subtitle-font-environment-unread",
                 log_detail=_font_option_delta(self._fonts.options, render.font_options),
             )
             self._ports.degrade()

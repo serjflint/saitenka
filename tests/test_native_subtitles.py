@@ -4601,3 +4601,32 @@ def test_a_mid_track_font_change_reports_option_names_not_a_tuple_dump(
     assert "detail=sub-font" in caplog.text
     assert "((" not in caplog.text, "the diagnostic carries a raw tuple repr"
     result.close()
+
+
+def test_an_unread_font_environment_waits_instead_of_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Never read and changed under us are different facts with different advice.
+
+    A track load resolves the font set a moment after the first observation, so the first check
+    compares an empty set against mpv's six options. Reported as a mid-track change that told the
+    user to reselect a track that was fine — and, because one side was empty, named every option as
+    having "moved". Field screenshot: `mpv's fonts changed mid-track — reselect the track
+    (embeddedfonts, osd-font-provider, osd-fonts-dir, sub-font, …)` on a healthy session.
+    """
+    from saitenka.app.native_subtitles import _PENDING_REASONS
+
+    assert "subtitle-font-environment-unread" in _PENDING_REASONS  # pending never toasts
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native._fonts = replace(
+        result.graph.subtitle_presentation.native._fonts,
+        options=(),
+    )
+
+    with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
+        result.graph.cue.set_subtitle("猫を見る")
+
+    assert "subtitle-font-environment-unread" in caplog.text
+    assert "changed mid-track" not in caplog.text
+    result.close()
