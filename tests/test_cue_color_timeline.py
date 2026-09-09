@@ -240,6 +240,14 @@ def test_navigating_into_an_overlap_paints_without_waiting_for_mpv(overlapped) -
     cue = result.graph.subtitle_presentation.cue.current
     assert cue.boxes, "the navigated frame is on screen with no hit boxes"
     assert all(0 <= box.index < len(cue.tokens) for box in cue.boxes)
+    # A HIT, not merely a paint. The lookahead already speculates per visibility boundary and files
+    # under the document's rows there; the point of drawing the frame is that navigation now asks
+    # the same question, so the answer is already on the shelf and nothing renders.
+    assert [
+        span["attrs"]["outcome"]
+        for span in spans[mark:]
+        if span["name"] == "subtitle_geometry_cache"
+    ] == ["hit"]
 
 
 def test_navigating_onto_a_lone_cue_is_unchanged_by_the_frame(timeline) -> None:
@@ -277,3 +285,34 @@ def test_boxes_in_an_overlap_name_the_event_each_word_was_measured_in(overlapped
     assert all(box.event_id is not None for box in boxes)
     drawn = [span for span in spans if span["name"] == "subtitle_draw"]
     assert drawn[-1]["attrs"]["box_events"] == 2
+
+
+#: A sign held across a scene while dialogue comes and goes underneath it — partial overlap, the
+#: general case the format allows. Absent from this corpus (0 in 576 events) but not from the format.
+HELD_SIGN: tuple[Cue, ...] = (
+    Cue(0.5, 7.0, "看板を見る"),
+    Cue(1.0, 3.0, "猫を見る"),
+    Cue(3.0, 5.0, "犬も見る"),
+)
+
+
+def test_a_cue_under_a_held_sign_draws_both_and_paints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Partial overlap: the frame's membership changes while a cue is still on screen, so no cue's
+    own span describes what is drawn. The lookahead already speculates per visibility boundary
+    rather than per cue, so navigation agreeing with it is the whole claim — one of them working
+    off cue spans is a key the other can never match.
+    """
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, HELD_SIGN)
+    try:
+        _show(result, ipc, HELD_SIGN[0], at=0.6)  # the sign alone, before any dialogue
+        assert result.graph.playback.cue.text == "看板を見る"
+
+        assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+
+        assert result.graph.playback.cue.text == "看板を見る\n猫を見る"
+        assert "subtitle-hint-text-mismatch" not in _refusals(spans)
+        assert result.graph.subtitle_presentation.cue.current.boxes
+    finally:
+        result.close()
