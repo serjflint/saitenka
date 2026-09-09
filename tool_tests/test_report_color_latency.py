@@ -228,6 +228,84 @@ def test_an_observation_that_never_settled_contributes_no_interval() -> None:
     assert latency.settling(latency.decisions({"traceEvents": events})) == []
 
 
+def arrival(ts_ms: float, cue: str, name: str = "sub_seek") -> dict:
+    return {"ph": "X", "name": name, "ts": ts_ms * 1000.0, "args": {"cue": cue}}
+
+
+def nav(ts_ms: float) -> dict:
+    return {"ph": "X", "name": "sub_nav_identity", "ts": ts_ms * 1000.0, "args": {}}
+
+
+def native_draw(ts_ms: float, cue: str, boxes: int, owed: int) -> dict:
+    return {
+        "ph": "X",
+        "name": "subtitle_draw",
+        "ts": ts_ms * 1000.0,
+        "args": {
+            "cue": cue,
+            "measured_boxes": boxes,
+            "tokens": 6 if boxes else 3,
+            "path": "native",
+            "owed_color": owed,
+        },
+    }
+
+
+def test_an_arrival_that_never_colored_does_not_borrow_a_later_appearances_draw() -> None:
+    """A handle digests content, so a line that comes back on a seek returns under the same one.
+    Scanning forward without a bound paired an arrival that stayed plain with the colored draw of
+    its *next* showing, and reported the whole interval — six other cues wide — as its wait."""
+    events = [
+        arrival(0, "again"),
+        native_draw(10, "again", 0, 1),
+        arrival(100, "other"),
+        native_draw(110, "other", 6, 6),
+        arrival(2_000, "again"),
+        native_draw(2_010, "again", 6, 6),
+    ]
+
+    waits = latency.color_on_screen({"traceEvents": events})
+
+    assert waits == [("other", 10.0), ("again", 10.0)], "the plain arrival is absent, not 2 s slow"
+
+
+def test_the_ack_is_only_taken_from_within_the_appearance() -> None:
+    """The end of the measurement is bounded too: mpv's acknowledgement of a *later* cue's overlay
+    says nothing about when this one's pixels landed."""
+    events = [
+        arrival(0, "aa"),
+        native_draw(10, "aa", 6, 6),  # colored, but no acknowledgement inside this appearance
+        arrival(100, "bb"),
+        {
+            "ph": "X",
+            "name": "surface_write",
+            "ts": 520_000.0,
+            "args": {"slot": "subtitle-native-focus", "events": 6},
+        },
+    ]
+
+    assert latency.color_on_screen({"traceEvents": events}) == [("aa", 10.0)], (
+        "the next cue's overlay write was read as this one's pixels landing"
+    )
+
+
+def test_a_seek_onto_a_cue_owing_no_color_is_not_a_missing_overlay() -> None:
+    """A line of punctuation, or the gap between two lines, has nothing to paint. Counting those as
+    seeks whose color never arrived put four of them in one session's defect tail while every cue
+    that owed color had in fact been painted."""
+    events = [
+        nav(0),
+        native_draw(5, "punctuation", 0, 0),
+        nav(100),
+        native_draw(105, "spoken", 0, 4),
+    ]
+
+    navigated = latency.seek_waits({"traceEvents": events})
+
+    assert [item.owed for item in navigated] == [False, True]
+    assert sum(item.wait is None and item.owed for item in navigated) == 1
+
+
 def test_a_bundle_without_the_cue_handle_is_refused_rather_than_summarised(tmp_path: Path) -> None:
     """Without the handle every draw looks like one cue. A plausible wrong number is worse than
     none."""

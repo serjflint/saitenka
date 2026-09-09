@@ -92,23 +92,39 @@ def color_on_screen(trace: dict) -> list[tuple[str, float]]:
 
     Between them they reported 0.0 ms for cues that took 4-37 ms. A p50 of zero is what prompted
     the maintainer to say the number could not be right, and it could not.
+
+    The search is bounded at the next arrival of a *different* cue. A digest is not unique across a
+    session — the same line comes back on a seek — so an unbounded scan pairs an arrival that never
+    colored with a draw belonging to a later appearance of the same text. That reported 2.7 s of
+    "wait" across an interval in which six other cues came and went.
     """
-    arrivals = [
-        event
-        for event in trace.get("traceEvents", ())
-        if event.get("ph") == "X"
-        and event.get("name") in {"cue_reconcile", "sub_seek"}
-        and (event.get("args") or {}).get("cue")
-    ]
+    arrivals = sorted(
+        (
+            event
+            for event in trace.get("traceEvents", ())
+            if event.get("ph") == "X"
+            and event.get("name") in {"cue_reconcile", "sub_seek"}
+            and (event.get("args") or {}).get("cue")
+        ),
+        key=lambda event: event["ts"],
+    )
     spans = sorted(
         (event for event in trace.get("traceEvents", ()) if event.get("ph") == "X"),
         key=lambda event: event["ts"],
     )
     result: list[tuple[str, float]] = []
-    for index, arrival in enumerate(sorted(arrivals, key=lambda event: event["ts"])):
+    for index, arrival in enumerate(arrivals):
         start = arrival["ts"] / 1000.0
-        cue = (arrival.get("args") or {}).get("cue")
-        after = [span for span in spans if span["ts"] / 1000.0 >= start]
+        cue = str((arrival.get("args") or {}).get("cue"))
+        horizon = next(
+            (
+                later["ts"] / 1000.0
+                for later in arrivals[index + 1 :]
+                if (later.get("args") or {}).get("cue") != cue
+            ),
+            float("inf"),
+        )
+        after = [span for span in spans if start <= span["ts"] / 1000.0 < horizon]
         painted = next(
             (
                 span
@@ -133,7 +149,6 @@ def color_on_screen(trace: dict) -> list[tuple[str, float]]:
             ),
             None,
         )
-        del index
         result.append((cue, (acked or painted)["ts"] / 1000.0 - start))
     return result
 
@@ -143,7 +158,16 @@ def color_on_screen(trace: dict) -> list[tuple[str, float]]:
 _COLOR_SLOT = "subtitle-native-focus"
 
 
-def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
+@dataclass(frozen=True)
+class Navigation:
+    """One seek, and what became of the color it was owed."""
+
+    wait: float | None
+    cue: str
+    owed: bool
+
+
+def seek_waits(trace: dict) -> list[Navigation]:
     """Per navigation, how long until color was on screen — across cue identity, not within it.
 
     A seek draws a navigation *hint* from the cue index, and mpv's own `sub-text` follows tens of
@@ -154,6 +178,10 @@ def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
 
     Bounded by the next navigation, so a seek whose color never arrives stays `None` instead of
     borrowing the next one's.
+
+    A seek that lands on a cue owing no color is `owed=False`, not a miss. Counting those as
+    "never colored" put four punctuation-only and blank cues in the defect tail of one session —
+    every content cue there had colored.
     """
     events = sorted(
         (
@@ -163,18 +191,21 @@ def seek_waits(trace: dict) -> list[tuple[float | None, str]]:
         ),
         key=lambda event: event["ts"],
     )
-    result: list[tuple[float | None, str]] = []
+    result: list[Navigation] = []
     started: float | None = None
     for event in events:
         args = event.get("args") or {}
         if event["name"] == "sub_nav_identity":
             started = event["ts"] / 1000.0
-            result.append((None, ""))
+            result.append(Navigation(None, "", owed=False))
             continue
-        if started is None or args.get("path") != "native" or result[-1][0] is not None:
+        if started is None or args.get("path") != "native" or result[-1].wait is not None:
             continue
+        cue = str(args.get("cue", ""))
+        if args.get("owed_color"):
+            result[-1] = Navigation(None, cue, owed=True)
         if args.get("measured_boxes") and args.get("tokens"):
-            result[-1] = (event["ts"] / 1000.0 - started, args.get("cue", ""))
+            result[-1] = Navigation(event["ts"] / 1000.0 - started, cue, owed=True)
     return result
 
 
@@ -365,8 +396,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  ORPHAN boxes:   {orphans} draw(s) carried boxes with no tokens to put them on")
     navigated = seek_waits(trace)
     if navigated:
-        landed = [wait for wait, _cue in navigated if wait is not None]
-        blank = len(navigated) - len(landed)
+        landed = [nav.wait for nav in navigated if nav.wait is not None]
+        blank = sum(nav.wait is None and nav.owed for nav in navigated)
         if landed:
             ranked = sorted(landed)
             # p95 as well as p50, because they answer different questions and this readout was
