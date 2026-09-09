@@ -665,6 +665,10 @@ class NativeVisibleRenderer:
         self._overpaint_shown = False
         #: Digest of the last cue whose draw actually carried boxes — see `lost_color`.
         self._painted_cue: str | None = None
+        #: The payload currently live on the focus slot, so an identical rewrite can be skipped.
+        #: `None` means "assume nothing is up" — the safe direction, since a needless write costs
+        #: milliseconds and a skipped necessary one costs the color.
+        self._focus_payload: tuple[object, ...] | None = None
         #: Whether a saitenka overlay window (or `Alt+o`) has taken the session's pixels down. The
         #: focus slot is not a `LifecycleSurfaces` one, so nothing else stops a redraw repainting it.
         self._suspended = False
@@ -1155,6 +1159,7 @@ class NativeVisibleRenderer:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CUE_CHANGED, nonempty=nonempty)
         )
+        self._focus_payload = None  # a new cue's payload is never the one already up
         self._execute(target, actions)
         if nonempty:
             self.activate(target)
@@ -1478,6 +1483,13 @@ class NativeVisibleRenderer:
     def _submit_focus(self, ipc, action: SurfaceAction, tail: tuple[object, ...]) -> None:
         """One fenced write to the focus slot. A stale acknowledgement is dropped by the runtime,
         so an overtaken highlight can never repaint over the current one."""
+        if action is SurfaceAction.PRESENT and tail == self._focus_payload:
+            # Byte-identical to what is already up. `cue_redraw` and `subtitle_geometry_apply` both
+            # draw in the same millisecond and build the same payload, so every cue was paying mpv
+            # twice to composite one picture — measured at 2-33 ms per write, doubled.
+            if otel_metrics.subtitle_focus_writes_skipped is not None:
+                otel_metrics.subtitle_focus_writes_skipped.add(1)
+            return
         transaction = self._focus.request(_FOCUS_SLOT, action)
         # Timed here as well as in `LifecycleSurfaces`, because the subtitle's own overlay write
         # does not go through that layer — it is the payload that carries the color, and it was the
@@ -1493,10 +1505,13 @@ class NativeVisibleRenderer:
                 span.set("outcome", completion.outcome.value)
                 payload = next((part for part in tail[2:3] if isinstance(part, str)), "")
                 span.set("events", len(payload.splitlines()) if payload else 0)
+            if completion.outcome is not EffectOutcome.SUCCEEDED:
+                self._focus_payload = None  # never skip against a write that did not land
             self._focus.finish(
                 SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
             )
 
+        self._focus_payload = tail if action is SurfaceAction.PRESENT else None
         if not ipc.submit_runtime_mpv(
             owner=Owner.SUBTITLE,
             identity=transaction,
@@ -1504,6 +1519,7 @@ class NativeVisibleRenderer:
             timeout_s=10.0,
             on_finished=finished,
         ):
+            self._focus_payload = None
             self._focus.finish(
                 SurfaceTransactionOutcome(
                     transaction, EffectOutcome.FAILED, EffectError.DISCONNECTED

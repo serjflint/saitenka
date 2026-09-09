@@ -542,3 +542,88 @@ def test_the_write_that_carries_the_color_is_timed_to_mpvs_answer(
         assert written[-1]["round_trip_ms"] >= 0.0
     finally:
         result.close()
+
+
+def _color_writes(ipc: FakeIPC) -> list[tuple]:
+    """Every `osd-overlay` carrying a color payload — the write mpv pays 2-33 ms to composite.
+
+    Narrowed to the focus slot's own id: the layout calibration writes the SAME payload to its own
+    hidden id, so a filter on `ass-events` alone counts it as a duplicate of the thing it is
+    measuring.
+    """
+    from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
+
+    return [
+        command
+        for command in ipc.commands
+        if command
+        and command[0] == "osd-overlay"
+        and command[1] == NATIVE_FOCUS_ID
+        and command[2] == "ass-events"
+    ]
+
+
+def test_one_cue_writes_its_color_payload_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cue_redraw` and `subtitle_geometry_apply` both draw in the same millisecond and build the
+    same payload, so every cue paid mpv twice to composite one picture.
+
+    Measured, not assumed: `surface_write.round_trip_ms` puts each of those writes at 2-33 ms, back
+    to back, byte-identical — 987.513 and 987.514 in one bundle, 33.4 ms and 33.0 ms, 11 events
+    each.
+    """
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        assert _color_writes(ipc), "the cue never wrote a color payload"
+        before = len(_color_writes(ipc))
+
+        # The second draw, with nothing changed — which is what the runtime does: `cue_redraw` and
+        # `subtitle_geometry_apply` both reach `draw` for one arrival.
+        presentation = result.graph.subtitle_presentation
+        presentation.pipeline.draw_current(presentation.target())
+
+        assert len(_color_writes(ipc)) == before, "the same payload was sent to mpv twice"
+    finally:
+        result.close()
+
+
+def test_a_changed_payload_is_always_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The control that matters: skipping a needless write costs milliseconds, skipping a necessary
+    one costs the color. A hover changes the payload, so it must reach mpv."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        before = len(_color_writes(ipc))
+
+        result.graph.tooltip.select(0)  # adds the focus highlight to the same slot
+        presentation = result.graph.subtitle_presentation
+        presentation.pipeline.draw_current(presentation.target())
+
+        written = _color_writes(ipc)
+        assert len(written) > before, "a changed payload was skipped as a duplicate"
+        assert written[-1][3] != written[before - 1][3]
+    finally:
+        result.close()
+
+
+def test_the_next_cue_writes_even_when_its_payload_repeats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repeated line renders to the same payload, and skipping it would leave the previous cue's
+    color up. The cache is dropped on every cue change, so identity never spans one."""
+    repeated = (TIMELINE[0], TIMELINE[1], TIMELINE[0])
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, repeated, scorer=_coloring())
+    try:
+        for cue in repeated:
+            _show(result, ipc, cue)
+
+        first = _color_writes(ipc)[0][3]
+        assert any(command[3] == first for command in _color_writes(ipc)[1:]), (
+            "the repeated cue reused the earlier cue's write instead of making its own"
+        )
+    finally:
+        result.close()

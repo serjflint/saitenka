@@ -134,6 +134,7 @@ subtitle_boxes_dropped: Counter | None = None
 #: being invisible and becomes a number a report can show.
 subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
+subtitle_focus_writes_skipped: Counter | None = None
 subtitle_layout_drift_px: Histogram | None = None
 #: The `compute_bounds` round trip, which is the only OSD-side cost we can time: mpv lays the payload
 #: out on its core thread and answers. Every other span in the draw path measures OUR side, so
@@ -479,6 +480,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_focus_writes_skipped
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -741,6 +743,10 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.overpaint_frames",
             description="frames the raster device colored after the text device stood down",
         )
+        subtitle_focus_writes_skipped = meter.create_counter(
+            "saitenka.subtitle.focus_writes_skipped",
+            description="color payloads identical to the one already up, so never sent to mpv",
+        )
         subtitle_layout_drift_px = meter.create_histogram(
             "saitenka.subtitle.layout_drift_px",
             unit="px",
@@ -816,6 +822,7 @@ def unregister() -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_focus_writes_skipped
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -895,6 +902,7 @@ def unregister() -> None:
         subtitle_boxes_dropped = None
         subtitle_overprint_demotions = None
         subtitle_overpaint_frames = None
+        subtitle_focus_writes_skipped = None
         subtitle_layout_drift_px = None
         subtitle_token_device = None
         subtitle_calibration_ms = None
