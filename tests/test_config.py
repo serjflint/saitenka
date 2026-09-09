@@ -109,3 +109,15 @@ def test_every_subtitle_geometry_setting_survives_the_loader():
     loaded = subtitle_geometry_options({"subtitle_geometry": written})
 
     assert {f.name: getattr(loaded, f.name) for f in fields(loaded)} == written
+
+
+def test_an_unset_geometry_cache_bound_follows_the_lookahead_it_has_to_hold():
+    """A deeper window with the stock bound is the forward-only sizing that made every backward
+    step re-render — the bound has to be a statement about the lookahead, not a free constant. An
+    explicit value still wins: trading history for memory is the user's call.
+    """
+    assert subtitle_geometry_options({"subtitle_geometry": {"lookahead": 4}}).cache_max == 9
+    assert (
+        subtitle_geometry_options({"subtitle_geometry": {"lookahead": 4, "cache_max": 2}}).cache_max
+        == 2
+    )
