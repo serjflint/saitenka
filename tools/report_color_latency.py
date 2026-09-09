@@ -29,6 +29,21 @@ def draws(trace: dict) -> list[dict]:
     ]
 
 
+def from_records(records: list[dict], name: str) -> list[dict]:
+    """The shape :func:`draws` yields, from in-process ``traced`` records instead of a bundle.
+
+    Lets a test judge a driven timeline with the readout the field goes through, so the instrument
+    is gated rather than only trusted. A recorded span carries no clock, so the ordinal stands in
+    for ``ts``: it orders and it groups, which is all :func:`appearances` needs — a *duration* read
+    off one would be a fiction.
+    """
+    return [
+        {"ts": float(index), **(record.get("attrs") or {})}
+        for index, record in enumerate(records)
+        if record.get("name") == name
+    ]
+
+
 def decisions(trace: dict) -> list[dict]:
     """`subtitle_geometry_decision` spans, which carry how many tokens were owed a box."""
     return [
