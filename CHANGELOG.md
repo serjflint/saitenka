@@ -7,8 +7,16 @@ logs.
 
 ## [Unreleased]
 
+## [4.4.0] - 2026-09-12
+
 ### Added
 
+- **A session now reports how long each cue waited for its color.** The delay a viewer sees as a
+  flash had no number a report could carry — it was derivable only by hand, from a bundle, after the
+  fact. A session now times cue arrival to the color being acknowledged by mpv, and counts the cues
+  that took longer than one frame.
+- **The JLPT underline is configurable**, and every palette color is now read from your config rather
+  than two of them.
 - **TsukiHime now serves every language it carries, not only Japanese.** A release routinely holds one
   subtitle per language — one real release offers 243 attachments across 17 languages — and the
   provider discarded all but Japanese while parsing. A profile's target language now selects among
@@ -18,6 +26,25 @@ logs.
 
 ### Fixed
 
+- **A colored line no longer appears white first.** A cue could show plain and turn colored a frame
+  or more later — the flash reported as "not every line, but many of them". It had four causes, all
+  fixed: the geometry cache was keyed on the playhead, so every way of entering one cue produced a
+  different key and re-rendered work already done; the color payload was built and sent twice per
+  cue, making mpv composite the same picture twice; a geometry refresh cleared the color on any
+  observation it could not key, including the blank one mpv publishes mid-seek; and a cue whose
+  color had been pre-armed by a seek had it torn down when mpv re-reported that same cue in halves.
+- **A cue's hit boxes could be handed to a draw of a different cue**, putting a clickable region on
+  another line's word. Boxes are now refused unless the cue drawing them is the cue they were
+  measured for.
+- **Navigating lands on the event you asked for**, drawing the frame it appears in — a co-timed pair
+  of speakers, authored as two events sharing one span, previously refused geometry on the seek.
+- **A silent cue no longer blanks the words after it.** Speculation was tied to the cue on screen
+  having something to color, so a music marker — one holds the screen for twenty seconds in the
+  episode this was traced against — stopped the lookahead for everything behind it.
+- **Subtitles stay interactive while the video is pan-scanned.** mpv reports negative OSD margins for
+  a cropped frame and the geometry refused them outright.
+- **Esc again closes help when the word preview was open beneath it.** The preview released key
+  grabs it had never taken, so the binding was handed back while another surface still owned it.
 - Documentation pages now declare a canonical URL that resolves. Every nested page on Read the Docs
   pointed search engines at an unversioned address that returns 404, which can cost the page its
   ranking or drop it from the index.
@@ -56,6 +83,8 @@ logs.
 
 ### Changed
 
+- The subtitle sidebar now follows the active line from the cue's own settle rather than by reading
+  playback state on every turn of the poll loop.
 - **Four more capabilities are separate packages:** `saitenka_tokenize`, `saitenka_wordstate`,
   `saitenka_subtitles` and `saitenka_card`. Each has its own contracts and test suite and may not
   import `saitenka`, so the seam is enforced rather than intended — but they ship inside the
