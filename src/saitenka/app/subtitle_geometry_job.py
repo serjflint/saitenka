@@ -310,23 +310,29 @@ class SubtitleGeometryWorker:
         later request behind it. Left queued, its settlements are paid by the NEXT terminal, running
         one cue's callback against another cue's snapshot with its owner nowhere in the traceback.
 
-        Only this job's share is paid. Draining every queued callback took the ones belonging to a
-        job still waiting to run, which is a different bug in the same shape.
+        Everything here is addressed by THIS job — its issue, its key — because by the time a
+        refusal is unwound the slot may already belong to someone else. `RuntimeCorrelator.submit_job`
+        delivers its `REJECTED` terminal re-entrantly and only *then* returns False, so `_delivered`
+        has run, released the slot and pumped a successor into it before `_submit` even returns.
+        Releasing again, or clearing `_prefetch_inflight_key` by reading whatever is current, takes
+        the slot out from under a job that is genuinely executing — and the lane then admits a
+        second one alongside it.
         """
         with self._condition:
-            self._inflight = False
             if issue == self._inflight_issue:
+                self._inflight = False
                 self._inflight_issue = None
             if job.current is not None:
                 self._superseded += 1
             else:
                 # A caller can attach to an in-flight speculation between its key being published
                 # and the submit returning, registering a waiter and no job of its own.
-                key = self._prefetch_inflight_key or ""
+                key = job.prefetch[0] if job.prefetch is not None else ""
                 if self._prefetch_waiters.pop(key, None) is not None:
                     self._superseded += 1
                 self._remember_provenance(key, GeometryCacheReason.PREFETCH_SUPERSEDED)
-                self._prefetch_inflight_key = None
+                if key == self._prefetch_inflight_key:
+                    self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
             owed = self._owed.pop(issue, [])
             self._condition.notify_all()
