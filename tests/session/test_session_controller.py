@@ -4064,6 +4064,28 @@ def test_the_sidebar_follows_the_cue_when_the_cue_settles(monkeypatch, make_sess
     r.close()
 
 
+def test_the_sidebar_reads_the_next_episode_path_even_without_a_sub_index(make_session):
+    """The path is read once per episode, not per turn. Two episodes whose subtitle index never
+    loads must not share the read: the sidebar's mined and backlog rows, and a relink write, key
+    on it."""
+    ipc = FakeIPC()
+    r = make_session(
+        ipc,
+        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
+        options=ReaderOptions().with_overrides(prefetch=False),
+    )
+    ipc.props["path"] = "/ep1.mkv"
+    assert r.graph.track_commands.navigation.current.sub_index is None
+    assert r.graph.sidebar.view().video == "/ep1.mkv"
+
+    ipc.props["path"] = "/ep2.mkv"
+    assert r.graph.sidebar.view().video == "/ep1.mkv"  # same episode: no read
+    r.graph.cue.rebind_episode()
+
+    assert r.graph.sidebar.view().video == "/ep2.mkv"
+    r.close()
+
+
 def test_a_refused_seek_is_reported_rather_than_discarded(caplog, make_session):
     """The instant render already drew the target, so what the write owes is a terminal outcome:
     a seek that vanished into a discarded reply left the overlay showing a cue the video never

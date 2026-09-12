@@ -49,9 +49,8 @@ class SidebarController:
         self.store: SidebarStore = SIDEBAR_STATEFUL_BINDING.store(ipc)
         self.panel = sidebar.SidebarPanel()
         self._view_owners: SidebarViewOwners | None = None
-        #: The sub-index the cached path was read for — the object itself, not its id (which the
-        #: allocator hands to the next episode's index), and a sentinel rather than `None` (which
-        #: an episode with no index would match without ever reading).
+        #: The episode's navigation state the cached path was read for — the object itself, not its
+        #: id, which the allocator hands to the next episode's; a sentinel so the first read happens.
         self._video_path_key: object = _UNREAD
         self._video_path_value: str | None = None
 
@@ -83,7 +82,7 @@ class SidebarController:
             osd=owners.screen.osd,
             chrome_scale=owners.screen.chrome_scale(),
             surfaces=owners.surfaces,
-            video=self._video_path(navigation.sub_index, playback),
+            video=self._video_path(navigation, playback),
             backlog=owners.history.ensure_backlog,
             mined=lambda: owners.mining.store,
             mined_exists=owners.mining.store_exists,
@@ -94,15 +93,16 @@ class SidebarController:
             can_mine=owners.mining.configured,
         )
 
-    def _video_path(self, index: object, playback: PlaybackObservationController) -> str | None:
+    def _video_path(self, episode: object, playback: PlaybackObservationController) -> str | None:
         """The media path, read from mpv once per episode rather than on every turn.
 
         `view()` is built every turn ahead of the cue settle, and `path` is not an observed
         property, so reading it live put a blocking round trip on the color path — 250 ms while
-        mpv is mid-seek. The sub-index object changes exactly when the episode does.
+        mpv is mid-seek. Keyed on the navigation state, which the episode rebind replaces whether
+        or not a sub-index ever loads for it.
         """
-        if self._video_path_key is not index:
-            self._video_path_key = index
+        if self._video_path_key is not episode:
+            self._video_path_key = episode
             self._video_path_value = playback.text("path")
         return self._video_path_value
 
@@ -116,7 +116,6 @@ class SidebarController:
         sidebar.follow(self.view())
 
     def index_changed(self) -> None:
-        self._video_path_key = _UNREAD  # a new episode: read its path again
         sidebar.index_changed(self.view())
 
     def mark_active_mined(self) -> None:

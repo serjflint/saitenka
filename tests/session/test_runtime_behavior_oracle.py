@@ -318,6 +318,23 @@ def test_a_cue_re_observed_in_halves_keeps_the_color_it_already_has(make_session
     reader.close()
 
 
+def test_a_removal_that_never_left_the_process_is_still_owed(make_session, monkeypatch) -> None:
+    """A focus write the runtime refuses synchronously (disconnected) has not changed the slot.
+    Believing it had left the previous cue's color painted until the next reconnect."""
+    reader, ipc, presentation, _renderer = _native_with_color_up(make_session)
+    target = presentation.target()
+    before = len(_focus_writes(ipc))
+    submit = ipc.submit_runtime_mpv
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", lambda **_kwargs: False)
+    presentation.pipeline.clear(target.surfaces, target.ipc)  # refused before it left
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", submit)
+
+    presentation.pipeline.clear(target.surfaces, target.ipc)
+
+    assert _focus_writes(ipc)[before:] == ["none"]
+    reader.close()
+
+
 def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) -> None:
     ipc = _VisibilityIPC()
     ipc.props.update({"sid": 2, "sub-visibility": False})
