@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789228390063,
+  "lastUpdate": 1789228430338,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -16253,6 +16253,54 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 79.069053,
             "range": "3 replicas; min 72.8319; max 85.4968; MAD 6.23717",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "060ca08831eb42f46fa5a09b6db23e50c43dec78",
+          "message": "Merge pull request #513 from serjflint/release/4.4.0\n\nchore(overlay): release 4.4.0",
+          "timestamp": "2026-09-12T20:48:52+05:00",
+          "tree_id": "b6bbd7ffaaf859d02122fbebc063cd5cbc86c89c",
+          "url": "https://github.com/serjflint/saitenka/commit/060ca08831eb42f46fa5a09b6db23e50c43dec78"
+        },
+        "date": 1789228429168,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 142.280421,
+            "range": "3 replicas; min 128.522; max 283.669; MAD 13.7584",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 75.907893,
+            "range": "3 replicas; min 60.896; max 79.1813; MAD 3.27341",
             "unit": "ms"
           }
         ]
