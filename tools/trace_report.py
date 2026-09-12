@@ -262,6 +262,15 @@ def print_report(
         print(
             f"  scroll_frame ms                      p50={p50:.1f} p95={p95:.1f} p99={p99:.1f} max={mx:.1f} (n={n})"
         )
+    if "subtitle.color_latency_ms.count" in counters:
+        late = counters.get("subtitle.color_late", 0.0)
+        print(
+            f"  subtitle color latency ms            "
+            f"p50={counters.get('subtitle.color_latency_ms.p50', 0.0):.1f} "
+            f"p95={counters.get('subtitle.color_latency_ms.p95', 0.0):.1f} "
+            f"max={counters.get('subtitle.color_latency_ms.max', 0.0):.1f} "
+            f"(n={counters['subtitle.color_latency_ms.count']:.0f}, late={late:.0f})"
+        )
     shows = attr_breakdowns(events).get("tooltip_show.cold")
     if shows:
         print(f"  tooltip_show cold/warm               {dict(shows)}")

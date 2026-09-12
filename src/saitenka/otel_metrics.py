@@ -135,6 +135,11 @@ subtitle_boxes_dropped: Counter | None = None
 subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
 subtitle_focus_writes_skipped: Counter | None = None
+#: Cue arrival → the color for that cue acknowledged by mpv, and the count of those past
+#: COLOR_LATENCY_BUDGET_MS. The wait spans the coordinator and the renderer, so neither owns a span
+#: covering it; `record_cue_arrival` / `record_color_up` are its two ends.
+subtitle_color_latency_ms: Histogram | None = None
+subtitle_color_late: Counter | None = None
 subtitle_layout_drift_px: Histogram | None = None
 #: The `compute_bounds` round trip, which is the only OSD-side cost we can time: mpv lays the payload
 #: out on its core thread and answers. Every other span in the draw path measures OUR side, so
@@ -149,6 +154,55 @@ subtitle_token_device: Counter | None = None
 #: machine decided, and a `Cancel` reads the same whether the cursor was off the words or the cue had
 #: no geometry to test against — which is the difference between working and unusable.
 hover_target_outcomes: Counter | None = None
+
+
+#: The cue currently owed color, and when it arrived. One slot rather than a map: only the cue on
+#: screen can be waiting, and an arrival that displaces another ends that one's wait unrecorded —
+#: which is the intent. A cue that never colors has no duration to report, and inventing one by
+#: pairing it with a later cue's color is the mistake tools/report_color_latency.py bounds against.
+_color_wait: tuple[str, float] | None = None
+_color_wait_lock = threading.Lock()
+
+
+def record_cue_arrival(cue: str) -> None:
+    """Start the clock on *cue*'s color, unless it is already running for that same cue.
+
+    mpv re-reports one cue in halves (text, then rows a turn later) and a reconcile can reinstall the
+    line it just installed. The viewer has been waiting since the first of those, so a repeat must
+    not restart the clock — it would report a wait shorter than the one actually sat through.
+    """
+    global _color_wait
+    if not cue:
+        return
+    with _color_wait_lock:
+        if _color_wait is not None and _color_wait[0] == cue:
+            return
+        _color_wait = (cue, time.perf_counter())
+
+
+def record_color_up(cue: str) -> None:
+    """Close the wait *cue* opened: the color for it is on screen.
+
+    A no-op for any other cue, so a color arriving for a line that has already been replaced cannot
+    settle the current one's wait.
+    """
+    global _color_wait
+    with _color_wait_lock:
+        if _color_wait is None or _color_wait[0] != cue:
+            return
+        elapsed_ms = (time.perf_counter() - _color_wait[1]) * 1000.0
+        _color_wait = None
+    if subtitle_color_latency_ms is not None:
+        subtitle_color_latency_ms.record(elapsed_ms)
+    if subtitle_color_late is not None and elapsed_ms > COLOR_LATENCY_BUDGET_MS:
+        subtitle_color_late.add(1)
+
+
+def forget_color_wait() -> None:
+    """Drop the open wait, if any — a track switch or a shutdown, not a cue that colored."""
+    global _color_wait
+    with _color_wait_lock:
+        _color_wait = None
 
 
 def record_cue_settle(outcome: str, span: SpanSetter | None = None) -> None:
@@ -201,6 +255,12 @@ SCROLL_JANK_THRESHOLD_MS = 16.0
 # shows that a viewport-first head render was supposed to keep under it but didn't — see show_tooltip.
 COLD_FIRST_PAINT_BUDGET_MS = 100.0
 
+# ~one frame at 60Hz, the same budget scroll uses and for the same reason: a color that lands inside
+# the frame its text landed in was never separately visible, and one that misses is the white-then-blue
+# flash the viewer reports. See subtitle_color_late, and tools/report_color_latency.py for the offline
+# reading of the same interval from a bundle.
+COLOR_LATENCY_BUDGET_MS = 16.0
+
 # Gauges (prefetch queue depth is push-updated by the caller; gil_enabled is observed on read).
 prefetch_queue_depth: UpDownCounter | None = None
 
@@ -215,6 +275,7 @@ SPANLESS_HISTOGRAMS = frozenset(
         "saitenka.ipc.roundtrip_ms",  # timed() only — no ipc span (would flood at poll cadence)
         "saitenka.block_cache.rendered_px",  # band pixel height — a measure, not a duration span
         "saitenka.mpv_effect.apply_ms",  # no span: the wait happens after the caller returned
+        "saitenka.subtitle.color_latency_ms",  # spans two components; neither covers the wait
     }
 )
 
@@ -480,7 +541,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
-    global subtitle_focus_writes_skipped
+    global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -747,6 +808,15 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.focus_writes_skipped",
             description="color payloads identical to the one already up, so never sent to mpv",
         )
+        subtitle_color_latency_ms = meter.create_histogram(
+            "saitenka.subtitle.color_latency_ms",
+            unit="ms",
+            description="cue arrival -> its color acknowledged by mpv",
+        )
+        subtitle_color_late = meter.create_counter(
+            "saitenka.subtitle.color_late",
+            description=f"cues whose color arrived more than {COLOR_LATENCY_BUDGET_MS:.0f}ms after the cue",
+        )
         subtitle_layout_drift_px = meter.create_histogram(
             "saitenka.subtitle.layout_drift_px",
             unit="px",
@@ -822,7 +892,7 @@ def unregister() -> None:
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
-    global subtitle_focus_writes_skipped
+    global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -903,6 +973,8 @@ def unregister() -> None:
         subtitle_overprint_demotions = None
         subtitle_overpaint_frames = None
         subtitle_focus_writes_skipped = None
+        subtitle_color_latency_ms = None
+        subtitle_color_late = None
         subtitle_layout_drift_px = None
         subtitle_token_device = None
         subtitle_calibration_ms = None

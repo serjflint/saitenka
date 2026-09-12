@@ -14,6 +14,7 @@ it before the next one arrives.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import sys
 from pathlib import Path
@@ -24,6 +25,7 @@ from saitenka_subtitles import Cue, CueIndex
 from test_native_subtitles import reader, settle_geometry, settle_jobs
 from util import record_spans
 
+from saitenka import otel_metrics
 from saitenka.app.subtitle_intents import SeekCue
 
 if TYPE_CHECKING:
@@ -801,3 +803,38 @@ def test_the_next_cue_writes_even_when_its_payload_repeats(
         )
     finally:
         result.close()
+
+
+@contextlib.contextmanager
+def _telemetry():
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("test"))
+    try:
+        yield
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_a_timeline_times_the_color_of_every_cue_that_colors(tmp_path, monkeypatch) -> None:
+    """The runtime counter reaches the field, not just its own unit test.
+
+    `saitenka.subtitle.color_latency_ms` is joined from two components — the coordinator opens the
+    wait, the renderer closes it on mpv's acknowledgement — so either end can be unwired while both
+    halves still pass in isolation. Driving the timeline is what proves the join holds.
+    """
+    with _telemetry():
+        result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+        try:
+            for cue in TIMELINE:
+                _show(result, ipc, cue)
+            colored = [item for item in _appearances(spans) if item.owed_color]
+            snap = otel_metrics.snapshot()
+        finally:
+            result.close()
+    assert colored, "no appearance owed color — the timeline proves nothing about the timer"
+    assert snap["saitenka.subtitle.color_latency_ms"]["count"] == len(colored)

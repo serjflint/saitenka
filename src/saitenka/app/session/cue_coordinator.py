@@ -116,6 +116,7 @@ class CueCoordinator:
         before = o.playback.cue.text
         self._settling = True
         try:
+            _track_color_wait(cue.text)
             with otel_metrics.traced(
                 "cue_reconcile", cue_revision=str(self.revision), cue=cue_digest(cue.text)
             ) as span:
@@ -143,6 +144,7 @@ class CueCoordinator:
         log.debug(
             "sub-text change: %d chars, paused=%s", len(text.strip()), o.playback.value("pause")
         )
+        _track_color_wait(text)
         with otel_metrics.instrumented(
             otel_metrics.cue_redraw_duration_ms, "cue_redraw", cue=cue_digest(text)
         ):
@@ -419,6 +421,19 @@ class CueCoordinator:
 
     def _request_playback_retirement(self) -> None:
         self._o.playback.dispatch(events.CueIdentityRetireRequested(playback.RetireReason.CUE_TEXT))
+
+
+def _track_color_wait(text: str) -> None:
+    """Open (or keep) the color wait for *text*, or end it when the line owes no color.
+
+    A blank cue is the gap between lines, not a line waiting to be colored — starting a clock there
+    would leave one running until the next cue displaced it, and every such gap would then report
+    the following cue's wait as longer than it was.
+    """
+    if text.strip():
+        otel_metrics.record_cue_arrival(cue_digest(text))
+    else:
+        otel_metrics.forget_color_wait()
 
 
 def _noop() -> None:

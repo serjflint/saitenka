@@ -74,6 +74,13 @@ _VISIBILITY_ASSERT = "ownership:assert-native-visibility"
 _VISIBILITY_READBACK = "ownership:readback-visibility"
 
 
+def _color_is_up(cue: str | None, *, landed: bool) -> None:
+    """Close *cue*'s wait for color. `None` or a write that never landed closes nothing — a wait
+    left open is a cue still owed color, which is exactly what the counter is there to show."""
+    if cue is not None and landed:
+        otel_metrics.record_color_up(cue)
+
+
 def _send_visibility(ipc, identity: str, *, visible: bool, on_outcome=None) -> None:
     """One correlated `sub-visibility` write. Not awaited: mpv has a single ordered outbound
     channel, so a later read still observes it — what the correlation buys is a terminal outcome
@@ -1305,6 +1312,7 @@ class NativeVisibleRenderer:
                 request.osd[1],
                 1,
             ),
+            colored=bool(overprint),
         )
         self._calibrate(request, ipc, overprint)
         return None
@@ -1536,20 +1544,36 @@ class NativeVisibleRenderer:
             return  # the slot is already empty; mpv would parse a removal of nothing
         self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))
 
-    def _submit_focus(self, ipc, action: SurfaceAction, tail: tuple[object, ...]) -> None:
+    def _color_wait_cue(self, *, colored: bool) -> str | None:
+        """The cue this write would put color on screen for, or `None` when it carries no color —
+        a hover highlight shares the slot, and settling a wait on one would time the wrong thing."""
+        return self._focus_cue if colored else None
+
+    def _submit_focus(
+        self, ipc, action: SurfaceAction, tail: tuple[object, ...], *, colored: bool = False
+    ) -> None:
         """One fenced write to the focus slot. A stale acknowledgement is dropped by the runtime,
-        so an overtaken highlight can never repaint over the current one."""
+        so an overtaken highlight can never repaint over the current one.
+
+        *colored* separates the payloads that carry the overprint from a hover highlight drawn on
+        the same slot: only the former ends a cue's wait for its color.
+        """
         if action is SurfaceAction.PRESENT and tail == self._focus_payload:
             # Byte-identical to what is already up. `cue_redraw` and `subtitle_geometry_apply` both
             # draw in the same millisecond and build the same payload, so every cue was paying mpv
             # twice to composite one picture — measured at 2-33 ms per write, doubled.
             if otel_metrics.subtitle_focus_writes_skipped is not None:
                 otel_metrics.subtitle_focus_writes_skipped.add(1)
+            # The pixels this cue wants are already up — a seek pre-armed them. The wait ends
+            # here, not at a write that never had to happen.
+            _color_is_up(self._color_wait_cue(colored=colored), landed=True)
             # What is up is what this cue wants: a removal the cue change deferred is not owed.
             self._focus_clear_pending = False
             self._defer_focus_clear = False
             return
         transaction = self._focus.request(_FOCUS_SLOT, action)
+        # Read now, not in the callback: by the time mpv answers, the slot may hold a later cue.
+        colored_cue = self._color_wait_cue(colored=colored)
         # Timed here as well as in `LifecycleSurfaces`, because the subtitle's own overlay write
         # does not go through that layer — it is the payload that carries the color, and it was the
         # one write on the draw path with nothing measuring what mpv did with it.
@@ -1564,6 +1588,7 @@ class NativeVisibleRenderer:
                 span.set("outcome", completion.outcome.value)
                 payload = next((part for part in tail[2:3] if isinstance(part, str)), "")
                 span.set("events", len(payload.splitlines()) if payload else 0)
+            _color_is_up(colored_cue, landed=completion.outcome is EffectOutcome.SUCCEEDED)
             if completion.outcome is not EffectOutcome.SUCCEEDED:
                 self._focus_payload = None  # never skip against a write that did not land
                 self._focus_cue = None  # nor keep a color the slot may not hold
