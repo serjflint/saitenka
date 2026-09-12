@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789219593925,
+  "lastUpdate": 1789221422469,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15257,6 +15257,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.542848,
             "range": "3 replicas; min 1.22993; max 99.9181; MAD 0.312919; worst 99.9181",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cbf3592cdba923f25fe3f833f7d0e790d1a1f830",
+          "message": "Merge pull request #511 from serjflint/fix/geometry-lane-refusal-slot\n\nfix(geometry): address the refused job's own slot, not whichever now holds it",
+          "timestamp": "2026-09-12T18:55:32+05:00",
+          "tree_id": "9b8f05c174f3491be8bf647f82568250363d0c8f",
+          "url": "https://github.com/serjflint/saitenka/commit/cbf3592cdba923f25fe3f833f7d0e790d1a1f830"
+        },
+        "date": 1789221420913,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.356076,
+            "range": "3 replicas; min 6.30689; max 6.36318; MAD 0.007099",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.071974,
+            "range": "3 replicas; min 8.82474; max 10.8888; MAD 0.247232; worst 10.8888",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.780762,
+            "range": "3 replicas; min 20.5146; max 20.8234; MAD 0.042634",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 21.018877,
+            "range": "3 replicas; min 20.6916; max 21.5026; MAD 0.327298; worst 21.5026",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.199763,
+            "range": "3 replicas; min 14.4225; max 23.138; MAD 0.7773",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.122259,
+            "range": "3 replicas; min 0.120506; max 0.124704; MAD 0.001753; worst 0.124704",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.025067,
+            "range": "3 replicas; min 43.6448; max 44.0601; MAD 0.035002; worst 44.0601",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.327973,
+            "range": "3 replicas; min 3.27351; max 4.86456; MAD 0.05446; worst 4.86456",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.589815,
+            "range": "3 replicas; min 1.11755; max 2.03758; MAD 0.447768; worst 2.03758",
             "unit": "ms"
           }
         ]
