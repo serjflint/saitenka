@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import functools
 import hashlib
 import importlib
 import json
@@ -58,7 +59,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "c15a99962a4de41333fefcd0c4b5ea4e6ed935a5e51830593516bfaeb5eb6b7a"
+LOCKED_MANIFEST_SHA256 = "a3b2709f46be6cf4236a5e57c9b4dbfb20e9021188c84ba444b69abe63d7873b"
 
 
 def load_manifest(path: Path) -> dict:
@@ -156,6 +157,54 @@ def _frame_workloads(counts: list[int], library_path: Path | None) -> list[dict]
     return reports
 
 
+def _measure(call: Callable[[], object]) -> tuple[object, float, float]:
+    """One timed call: its result, wall ms, and calling-thread CPU ms."""
+    started = time.perf_counter_ns()
+    cpu_started = time.thread_time_ns()
+    result = call()
+    return (
+        result,
+        (time.perf_counter_ns() - started) / 1_000_000,
+        (time.thread_time_ns() - cpu_started) / 1_000_000,
+    )
+
+
+def _phase_attribution(
+    phases: list[str],
+    wall: list[float],
+    cpu: list[float],
+    offcpu: list[float],
+    worker: list[int],
+) -> dict[str, dict[str, float]]:
+    """Per-phase wall/cpu/off-cpu, and how much of each phase's tail the geometry lane was awake for.
+
+    A wall breach is otherwise unattributable: the samples are interleaved three phases deep in one
+    array, and the p99 over them is the 4th-worst, so the failing number names neither which
+    interaction was slow nor whether the thread was running at the time.
+    """
+    report: dict[str, dict[str, float]] = {}
+    for phase in dict.fromkeys(phases):
+        rows = [index for index, name in enumerate(phases) if name == phase]
+        phase_wall = [wall[index] for index in rows]
+        phase_offcpu = [offcpu[index] for index in rows]
+        cut = _percentile(phase_offcpu, 0.99)
+        stalled = [index for index in rows if offcpu[index] >= cut]
+        report[phase] = {
+            "samples": len(rows),
+            "wall_p50_ms": statistics.median(phase_wall),
+            "wall_p99_ms": _percentile(phase_wall, 0.99),
+            "cpu_p99_ms": _percentile([cpu[index] for index in rows], 0.99),
+            "offcpu_p99_ms": cut,
+            "offcpu_max_ms": max(phase_offcpu),
+            # 1.0 means every worst-stalled sample overlapped a geometry completion, which reads as
+            # contention with the lane rather than the runner descheduling us.
+            "stall_worker_active_fraction": (
+                sum(1 for index in stalled if worker[index]) / len(stalled) if stalled else 0.0
+            ),
+        }
+    return report
+
+
 def _percentile(samples: list[float], quantile: float) -> float:
     assert samples
     ordered = sorted(samples)
@@ -174,6 +223,9 @@ class _Budget(NamedTuple):
     metric: str
     compare: Callable[[float, float], bool]
     across_trials: str  # "median" | "every"
+    #: Absolute outlier allowance, for a budget that is a contract at zero rather than a scale —
+    #: :data:`OUTLIER_TOLERANCE` multiplies, and multiplying zero bounds nothing.
+    slack: float | None = None
 
 
 #: A p99 taken over one trial's ~300 samples is the third-worst sample, so it moves with a
@@ -201,10 +253,9 @@ class _Budget(NamedTuple):
 BUDGET_CLAUSES = {
     "interaction_cpu_p99_ms": _Budget("interaction_cpu_p99_ms", operator.le, "median"),
     "interaction_wall_p99_ms": _Budget("interaction_p99_ms", operator.le, "median"),
-    "interaction_cpu_delta_mean_ms": _Budget(
-        "interaction_cpu_delta_mean_ms", operator.le, "median"
+    "interaction_cpu_delta_signed_mean_ms": _Budget(
+        "interaction_cpu_delta_signed_mean_ms", operator.le, "median", slack=2.0
     ),
-    "interaction_cpu_delta_p95_ms": _Budget("interaction_cpu_delta_p95_ms", operator.le, "median"),
     "interaction_wall_delta_p99_ms": _Budget(
         "interaction_wall_delta_p99_ms", operator.le, "median"
     ),
@@ -248,9 +299,14 @@ OUTLIER_TOLERANCE = 2.0
 
 
 def _within_tolerance(value: float, budget: float, clause: _Budget) -> bool:
-    limit = (
-        budget * OUTLIER_TOLERANCE if clause.compare is operator.le else budget / OUTLIER_TOLERANCE
-    )
+    if clause.slack is not None:
+        limit = budget + clause.slack if clause.compare is operator.le else budget - clause.slack
+    else:
+        limit = (
+            budget * OUTLIER_TOLERANCE
+            if clause.compare is operator.le
+            else budget / OUTLIER_TOLERANCE
+        )
     return clause.compare(value, limit)
 
 
@@ -819,12 +875,19 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         # the positive half of the noise — a cost the run does not pay and cannot fall below.
         cpu_signed_deltas: list[float] = []
         wall_signed_deltas: list[float] = []
+        # Attribution for the wall tail. `interaction_p99_ms` is the 4th-worst of 303 interleaved
+        # samples, so a breach names neither the phase nor whether the time was even spent running.
+        phase_labels: list[str] = []
+        native_first_flags: list[bool] = []
+        offcpu_samples: list[float] = []
+        worker_completions: list[int] = []
         cadence_misses = 0
         geometry_apply_count = 0
         hit_test_count = 0
         focus_draw_count = 0
         tooltip_open_count = 0
         tooltip_scroll_count = 0
+        commands_before = 0
         interval_ns = int(manifest["presentation_interval_ms"] * 1_000_000)
         deadline = time.perf_counter_ns()
         for cue_index, (start, end, text) in enumerate(cues):
@@ -846,72 +909,118 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                         "time-pos": (start + 1) / 1_000,
                     }
                 )
-            started = time.perf_counter_ns()
-            cpu_started = time.thread_time_ns()
-            _present(baseline, text, native=False)
-            baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
-            baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
-            baseline_latencies.append(baseline_wall)
-            baseline_cpu_latencies.append(baseline_cpu)
-            started = time.perf_counter_ns()
-            cpu_started = time.thread_time_ns()
-            applied = _present(native, text, native=True)
-            geometry_apply_count += int(applied)
-            native_wall = (time.perf_counter_ns() - started) / 1_000_000
-            latencies.append(native_wall)
-            wall_signed_deltas.append(native_wall - baseline_wall)
-            native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
-            cpu_latencies.append(native_cpu)
-            cpu_signed_deltas.append(native_cpu - baseline_cpu)
-            started = time.perf_counter_ns()
-            cpu_started = time.thread_time_ns()
-            baseline_hit = _open_tooltip(baseline)
-            baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
-            baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
-            baseline_latencies.append(baseline_wall)
-            baseline_cpu_latencies.append(baseline_cpu)
-            if baseline_hit:
-                assert _settle_tooltip(baseline)
-            # Outside every timed region on purpose: the presentation numbers above are the perf
-            # claim and must keep their cold cue, but whether a tooltip opens is a functional
-            # invariant, and leaving it to race the geometry lane makes it a property of the
-            # runner's speed. The wait costs the measurement nothing and the oracle everything.
-            assert _settle_native_geometry(native)
-            started = time.perf_counter_ns()
-            cpu_started = time.thread_time_ns()
-            commands_before = len(native_ipc.commands)
-            hit = _open_tooltip(native)
-            hit_test_count += int(hit)
-            native_wall = (time.perf_counter_ns() - started) / 1_000_000
-            latencies.append(native_wall)
-            wall_signed_deltas.append(native_wall - baseline_wall)
-            native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
-            cpu_latencies.append(native_cpu)
-            cpu_signed_deltas.append(native_cpu - baseline_cpu)
-            tooltip_open_count += int(_settle_tooltip(native))
+            # Counterbalanced. Whichever side runs first in a cue pays that cue's first touch, so
+            # a fixed order puts a constant into every difference: measured at ~5 ms per
+            # presentation, which is larger than any regression this gate is meant to catch.
+            native_first = bool(cue_index % 2)
+
+            def _worker_completed() -> int:
+                worker = native_graph.subtitle_presentation.native
+                assert worker is not None
+                return worker.worker.stats.completed
+
+            def _pair(
+                phase: str,
+                baseline_call: Callable[[], object],
+                native_call: Callable[[], object],
+                *,
+                before_native: Callable[[], None] | None = None,
+                after_baseline: Callable[[object], None] | None = None,
+                after_native: Callable[[object], None] | None = None,
+                first: bool = native_first,
+            ) -> tuple[object, object]:
+                """Both sides of one interaction, recorded into the shared series.
+
+                A side is a unit of prepare, timed call, settle — swapping only the timed calls
+                moves a settle across the boundary, and the geometry settle submits a presentation
+                of its own when it lands anywhere but directly ahead of the native call.
+                """
+
+                def _side(
+                    call: Callable[[], object],
+                    before: Callable[[], None] | None,
+                    after: Callable[[object], None] | None,
+                ) -> tuple[object, float, float]:
+                    if before is not None:
+                        before()
+                    measured = _measure(call)
+                    if after is not None:
+                        after(measured[0])
+                    return measured
+
+                # Read outside the timed region on both sides, so the attribution costs the
+                # measurement nothing.
+                completed_before = _worker_completed()
+                if first:
+                    native_side = _side(native_call, before_native, after_native)
+                    baseline_side = _side(baseline_call, None, after_baseline)
+                else:
+                    baseline_side = _side(baseline_call, None, after_baseline)
+                    native_side = _side(native_call, before_native, after_native)
+                worker_completions.append(_worker_completed() - completed_before)
+                phase_labels.append(phase)
+                native_first_flags.append(first)
+                baseline_result, baseline_wall, baseline_cpu = baseline_side
+                native_result, native_wall, native_cpu = native_side
+                baseline_latencies.append(baseline_wall)
+                baseline_cpu_latencies.append(baseline_cpu)
+                latencies.append(native_wall)
+                cpu_latencies.append(native_cpu)
+                wall_signed_deltas.append(native_wall - baseline_wall)
+                cpu_signed_deltas.append(native_cpu - baseline_cpu)
+                # Wall the calling thread did not spend running. A stall here is contention or the
+                # scheduler; a rise in `cpu` is work. The budget cannot tell them apart alone.
+                offcpu_samples.append(max(0.0, native_wall - native_cpu))
+                return baseline_result, native_result
+
+            _, applied = _pair(
+                "present",
+                functools.partial(_present, baseline, text, native=False),
+                functools.partial(_present, native, text, native=True),
+            )
+            geometry_apply_count += int(bool(applied))
+
+            def _settle_before_hit_test() -> None:
+                # Outside every timed region on purpose: the presentation numbers above are the
+                # perf claim and must keep their cold cue, but whether a tooltip opens is a
+                # functional invariant, and leaving it to race the geometry lane makes it a
+                # property of the runner's speed. The wait costs the measurement nothing and the
+                # oracle everything.
+                nonlocal commands_before
+                assert _settle_native_geometry(native)
+                commands_before = len(native_ipc.commands)
+
+            def _settle_baseline_tooltip(baseline_hit: object) -> None:
+                if baseline_hit:
+                    assert _settle_tooltip(baseline)
+
+            def _settle_native_tooltip(_hit: object) -> None:
+                nonlocal tooltip_open_count
+                tooltip_open_count += int(_settle_tooltip(native))
+
+            _, hit = _pair(
+                "tooltip",
+                functools.partial(_open_tooltip, baseline),
+                functools.partial(_open_tooltip, native),
+                before_native=_settle_before_hit_test,
+                after_baseline=_settle_baseline_tooltip,
+                after_native=_settle_native_tooltip,
+            )
+            hit_test_count += int(bool(hit))
+            # After the settle, not before: the focus draw this looks for is emitted while the
+            # tooltip settles, so counting first reads every cue as having drawn nothing.
             focus_draw_count += int(
                 any(
                     command[:3] == ("osd-overlay", 1_001, "ass-events")
                     for command in native_ipc.commands[commands_before:]
                 )
             )
-            started = time.perf_counter_ns()
-            cpu_started = time.thread_time_ns()
-            _scroll_and_close_tooltip(baseline)
-            baseline_wall = (time.perf_counter_ns() - started) / 1_000_000
-            baseline_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
-            baseline_latencies.append(baseline_wall)
-            baseline_cpu_latencies.append(baseline_cpu)
-            started = time.perf_counter_ns()
-            cpu_started = time.thread_time_ns()
-            scrolled = _scroll_and_close_tooltip(native)
-            tooltip_scroll_count += int(scrolled)
-            native_wall = (time.perf_counter_ns() - started) / 1_000_000
-            latencies.append(native_wall)
-            wall_signed_deltas.append(native_wall - baseline_wall)
-            native_cpu = (time.thread_time_ns() - cpu_started) / 1_000_000
-            cpu_latencies.append(native_cpu)
-            cpu_signed_deltas.append(native_cpu - baseline_cpu)
+            _, scrolled = _pair(
+                "scroll",
+                functools.partial(_scroll_and_close_tooltip, baseline),
+                functools.partial(_scroll_and_close_tooltip, native),
+            )
+            tooltip_scroll_count += int(bool(scrolled))
         assert _settle_native_geometry(native)
         cpu_deltas = [max(0.0, delta) for delta in cpu_signed_deltas]
         wall_deltas = [max(0.0, delta) for delta in wall_signed_deltas]
@@ -945,6 +1054,13 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "interaction_cpu_delta_samples_ms": cpu_deltas,
         "interaction_wall_delta_samples_ms": wall_deltas,
         "interaction_cpu_delta_signed_samples_ms": cpu_signed_deltas,
+        "interaction_offcpu_samples_ms": offcpu_samples,
+        "interaction_phase_labels": phase_labels,
+        "interaction_native_first_flags": native_first_flags,
+        "interaction_phase_attribution": _phase_attribution(
+            phase_labels, latencies, cpu_latencies, offcpu_samples, worker_completions
+        ),
+        "interaction_offcpu_p99_ms": _percentile(offcpu_samples, 0.99),
         "interaction_clock": "thread_time",
         "interaction_p50_ms": statistics.median(latencies),
         "interaction_p99_ms": interaction_p99,
@@ -1068,8 +1184,7 @@ def _summarize(report: dict, manifest: dict, output: Path) -> str:
             f"  wall p99 {done['interaction_p99_ms']:.2f}ms"
             # Printed because the delta clauses are the ones that fail: reading only the absolute
             # p99 beside a delta breach sends the reader to the artifact for the number that bit.
-            f"  Δcpu mean {done['interaction_cpu_delta_mean_ms']:.3f}ms"
-            f" p95 {done['interaction_cpu_delta_p95_ms']:.2f}ms"
+            f"  Δcpu {done['interaction_cpu_delta_signed_mean_ms']:+.2f}ms"
             f"  ready {done['ready_before_presentation_ratio']:.3f}"
             f"  rss +{done['retained_rss_growth_mib']:.1f}MiB"
         )
@@ -1080,6 +1195,21 @@ def _summarize(report: dict, manifest: dict, output: Path) -> str:
             failed = [name for name, ok in checks.items() if not ok]
             if failed:
                 lines.append(f"    {kind} failures: {', '.join(failed)}")
+                if kind == "performance" and any(
+                    "wall" in name or "cpu" in name for name in failed
+                ):
+                    # A latency breach is the 4th-worst of 303 samples from three interleaved
+                    # phases; without this the reader cannot tell which one, or whether the thread
+                    # was running for it.
+                    for phase, row in done.get("interaction_phase_attribution", {}).items():
+                        lines.append(
+                            f"      {phase:8} wall p50 {row['wall_p50_ms']:5.2f}"
+                            f" p99 {row['wall_p99_ms']:6.2f}"
+                            f" | cpu p99 {row['cpu_p99_ms']:5.2f}"
+                            f" | off-cpu p99 {row['offcpu_p99_ms']:6.2f}"
+                            f" max {row['offcpu_max_ms']:6.2f}"
+                            f" | stalls over lane work {row['stall_worker_active_fraction']:.0%}"
+                        )
     lines.append(f"full report: {output}")
     return "\n".join(lines)
 

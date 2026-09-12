@@ -349,6 +349,33 @@ there twice: the **mean** for a cost every interaction pays, the **p95** for one
 The pair is 5x more sensitive to a real regression than the p99 clause it replaces, and fails none of
 the 157 runs that clause was flaking on.
 
+#### Counterbalancing, and what it cost to learn
+
+The clamp above is half the story; the pairing is the other half. Running both sides over the same
+cue with a fixed order charges that cue's first touch to whichever side goes first, and it was always
+the baseline. Measured by running the matrix in each order:
+
+| order | signed mean delta | native cpu p99 |
+| --- | --- | --- |
+| baseline first (as shipped until now) | -3.90 ms | 6.2-6.9 ms |
+| native first | -1.21 ms | 9.7-9.9 ms |
+| alternating | -2.56 ms | 8.9-9.6 ms |
+
+Solving `t - b` and `t + b` gives a true native advantage `t = -2.56 ms` and a first-position penalty
+`b = 1.35 ms`. Both effects are real: the native path genuinely costs the calling thread less, *and*
+a constant 1.35 ms of ordering bias sat in every difference the gate ever read. Alternating recovers
+`t`, and it is stable across trials to within 0.14 ms — by a wide margin the best-behaved statistic
+this benchmark has produced, which is why the gate is now a contract on it (`<= 0.0`: the native path
+may not cost the calling thread more than the baseline) rather than a fitted bound.
+
+Two consequences worth keeping:
+
+- **The clamped statistics cannot survive counterbalancing.** Half the samples now carry the
+  native-first penalty, and the clamp keeps that half instead of cancelling it — so the clamped mean
+  and p95 *rise* under a change that made the measurement more honest. They are gone from the gate.
+- **A budget of zero breaks a multiplicative tolerance.** `OUTLIER_TOLERANCE` scales the bound, and
+  scaling zero bounds nothing, so a contract-style clause carries an absolute `slack` instead.
+
 #### The clamp is the defect the statistic was working around
 
 `max(0.0, native - baseline)` is applied per pair. For a difference centred near zero that keeps
