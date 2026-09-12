@@ -29,6 +29,9 @@ def report() -> dict:
         "interaction_p99_ms": 1.0,
         "interaction_cpu_p99_ms": 1.0,
         "interaction_cpu_delta_p99_ms": 0.5,
+        "interaction_cpu_delta_p95_ms": 0.5,
+        "interaction_cpu_delta_mean_ms": 0.05,
+        "interaction_cpu_delta_zero_fraction": 0.89,
         "interaction_wall_delta_p99_ms": 0.75,
         "ready_before_presentation_ratio": 100 / 101,
         "ready_before_presented": 100,
@@ -67,7 +70,8 @@ def manifest() -> dict:
         "budgets": {
             "interaction_cpu_p99_ms": 16.67,
             "interaction_wall_p99_ms": 16.67,
-            "interaction_cpu_delta_p99_ms": 2.0,
+            "interaction_cpu_delta_mean_ms": 0.1,
+            "interaction_cpu_delta_p95_ms": 2.0,
             "interaction_wall_delta_p99_ms": 16.67,
             "ready_before_presentation_ratio": 0.99,
             "retained_rss_growth_mib": 256.0,
@@ -105,14 +109,14 @@ def test_a_foreign_schema_reports_a_failure_rather_than_raising() -> None:
 
 def test_summary_names_the_failing_budget_not_only_the_count() -> None:
     slow = report()
-    slow["interaction_cpu_delta_p99_ms"] = manifest()["budgets"]["interaction_cpu_delta_p99_ms"] + 1
+    slow["interaction_cpu_delta_p95_ms"] = manifest()["budgets"]["interaction_cpu_delta_p95_ms"] + 1
 
     summary = benchmark._summarize(
         benchmark.summarize_trials([slow, slow, slow], manifest()), manifest(), Path("report.json")
     )
 
     # One of the three budgets the printed numbers do not show, so a count alone cannot explain it.
-    assert "interaction_cpu_delta_p99_ms" in summary
+    assert "interaction_cpu_delta_p95_ms" in summary
     assert summary.startswith("FAIL")
 
 
@@ -160,7 +164,8 @@ def test_budget_oracle_rejects_each_regression() -> None:
         "interaction_clock": "wall_time",
         "interaction_cpu_p99_ms": 16.68,
         "interaction_p99_ms": 16.68,
-        "interaction_cpu_delta_p99_ms": 2.01,
+        "interaction_cpu_delta_mean_ms": 0.11,
+        "interaction_cpu_delta_p95_ms": 2.01,
         "interaction_wall_delta_p99_ms": 16.68,
         "ready_before_presentation_ratio": 0.989,
         "ready_before_presented": 99,
@@ -188,6 +193,26 @@ def test_budget_oracle_rejects_each_regression() -> None:
         mutated = report()
         mutated[field] = value
         assert not evaluate(mutated, manifest()), field
+
+
+def test_a_millisecond_added_to_every_interaction_fails_on_the_body_not_the_tail() -> None:
+    """Why the CPU delta is gated on its mean and p95 rather than its p99.
+
+    A cost paid by every interaction barely moves a tail already dominated by the noise of a
+    clamped paired difference — so the clause that used to be the only delta gate reads a uniform
+    +1 ms regression as comfortably inside budget, while the mean names it.
+    """
+    regressed = report()
+    regressed["interaction_cpu_delta_mean_ms"] = report()["interaction_cpu_delta_mean_ms"] + 1.0
+    regressed["interaction_cpu_delta_p95_ms"] = report()["interaction_cpu_delta_p95_ms"] + 1.0
+    regressed["interaction_cpu_delta_p99_ms"] = report()["interaction_cpu_delta_p99_ms"] + 1.0
+
+    assert regressed["interaction_cpu_delta_p99_ms"] < 4.0  # the retired clause's shipped budget
+    assert not evaluate(regressed, manifest())
+    failed = [
+        name for name, ok in benchmark._performance_checks(regressed, manifest()).items() if not ok
+    ]
+    assert failed == ["interaction_cpu_delta_mean_ms"]
 
 
 @pytest.mark.parametrize("mutation", ["missing-workload", "lost-token", "extra-workload"])
@@ -249,7 +274,7 @@ def test_trial_oracle_rejects_a_run_where_no_trial_was_ever_clean() -> None:
     without the clean-trial clause it aggregates to green."""
     first, second, third = report(), report(), report()
     first["interaction_p99_ms"] = 16.68
-    second["interaction_cpu_delta_p99_ms"] = 2.01
+    second["interaction_cpu_delta_p95_ms"] = 2.01
     third["ready_before_presentation_ratio"] = 0.5
 
     summary = summarize_trials([first, second, third], manifest())
@@ -471,7 +496,8 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     assert shipped["budgets"] == {
         "interaction_cpu_p99_ms": 16.67,
         "interaction_wall_p99_ms": 16.67,
-        "interaction_cpu_delta_p99_ms": 4.0,
+        "interaction_cpu_delta_mean_ms": 0.75,
+        "interaction_cpu_delta_p95_ms": 4.0,
         "interaction_wall_delta_p99_ms": 16.67,
         "ready_before_presentation_ratio": 0.99,
         "retained_rss_growth_mib": 256.0,

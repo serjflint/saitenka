@@ -317,9 +317,80 @@ if that spread moves — do not tighten it toward the typical value, which is wh
 
 A below-floor estimator is only as good as the claim excusing it. If a rank is not defensible, the
 number excusing it has to be re-measured, not asserted once and inherited.
-| `tools/native_subtitle_integration_benchmark.py` | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank |
+| `tools/native_subtitle_integration_benchmark.py` (absolute latencies) | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank |
+| `tools/native_subtitle_integration_benchmark.py` (CPU delta) | median across trials of each per-trial mean and p95 | all samples / 16th worst | conforms — see below for why this one clause does not use p99 |
 
-Two of the four do not meet the rank floor, and say so rather than claiming it. The floor is the
+### A clamped paired difference has no usable tail (2026-09-12)
+
+`interaction_cpu_delta_p99_ms` was the exception that kept failing: 3 of 157 archived macOS runs, on
+a budget already widened 2.0 -> 4.0 in August for exactly this reason. Rule 3 above says to add
+measurements rather than lower the quantile. Both were tested against the archive, and the rule's own
+remedy loses:
+
+| estimator | order statistic | failures / 157 runs | uniform regression it detects |
+| --- | --- | --- | --- |
+| per-trial p99, median across trials (shipped, budget 4.0) | 4th worst | 3 | +3.99 ms |
+| p99 pooled over three trials (n=909, budget 4.0) | 10th worst | **6** | +3.91 ms |
+| per-trial p95, median across trials (budget 4.0) | 16th worst | 0 | +4.01 ms |
+| per-trial mean, median across trials (budget 0.75) | all 303 | 0 | **+0.75 ms** |
+
+Pooling fixes the rank and makes the gate *worse*, because the rank was never the whole problem. This
+metric is not a latency: it is `max(0, native - baseline)` over two separately timed regions, and
+**~89% of its samples are exactly zero** — the native path comes in at or under its baseline in nine
+interactions out of ten. Work that is genuinely added cannot hide that way, so what the positive
+samples measure is the noise of the pair, and its 99th percentile is the largest noise excursion in
+the run. More samples estimate that noise more precisely; they do not make it a cost.
+
+So rule 1 (never lower the quantile to buy stability) is set aside for this clause alone, and the
+reason is not stability: the viewer-felt tail is already gated, physically anchored, by
+`interaction_cpu_p99_ms` and `interaction_wall_p99_ms` at 16.67 ms. The delta answers attribution —
+does the native path cost more than the baseline — and attribution lives in the body. It is gated
+there twice: the **mean** for a cost every interaction pays, the **p95** for one that a slice pays.
+The pair is 5x more sensitive to a real regression than the p99 clause it replaces, and fails none of
+the 157 runs that clause was flaking on.
+
+#### The clamp is the defect the statistic was working around
+
+`max(0.0, native - baseline)` is applied per pair. For a difference centred near zero that keeps
+only the positive half of the noise, so the series has a floor it cannot reach: its mean estimates
+about 0.4 sigma of the measurement noise and would read positive against a native path that cost
+exactly nothing. The 89% zeros are not evidence that the work is free — they are the discarded half.
+
+The unbiased form is the signed difference, whose mean over a trial is total native CPU minus total
+baseline CPU, with the noise cancelling instead of accumulating. The benchmark now records it
+(`interaction_cpu_delta_signed_mean_ms`) and does **not** gate on it, because no archived run carries
+the field and rule 4 wants a bound from measured noise rather than from a guess. Once a few dozen
+runs have it, the gate moves there and the clamped clauses retire.
+
+Ordering is the other half of the same problem: within each cue the baseline region is always timed
+first, so any per-cue warm-up is charged to the baseline and shows up as native looking cheap.
+Counterbalancing the order (alternating which side is measured first) cancels that to first order and
+is the cheapest remaining improvement.
+
+#### What actually stabilises a benchmark like this
+
+In rough order of leverage, and none of them is a wider bound:
+
+1. **Make the signal clear the clock.** One interaction's added cost is below what a single
+   `thread_time_ns` region can resolve, which is what produces a mostly-zero series. Aggregating the
+   work per sample is the standard fix (Criterion and `pytest-benchmark` both auto-size a batch for
+   exactly this). Gating the mean is the cheap form of it: over 303 samples the mean *is* the
+   aggregate.
+2. **Counterbalance and interleave** the A/B order so drift and warm-up cancel rather than land on
+   one side.
+3. **Report an effect size with an interval, not a point against a constant.** Bootstrap the paired
+   difference and fail on the interval's lower bound. A gate that says "+1.2 ms [0.9, 1.5]" survives
+   a noisy runner; one that says "p99 was 4.46 against 4.0" does not.
+4. **Compare against the recent history of `main`, not a hand-set number.** The dashboard already
+   stores runs; a regression is a shift from that distribution, which is the question anyone actually
+   has.
+5. **Only then, the bound** — and from the archive's worst run, never from its typical one.
+
+Generalising: before widening a bound, check whether the metric's mass is where the estimator is
+looking. A difference clamped at zero, a rate over mostly-empty windows, a duration that is usually
+exactly zero — each has a tail made entirely of the noise floor, and no bound on it is a gate.
+
+Two of the five do not meet the rank floor, and say so rather than claiming it. The floor is the
 first thing to reach for; when a gate cannot, it owes the reader the device that replaces it.
 
 A trial that reports a *validity* failure (a missed presentation cadence) is discarded, not counted
