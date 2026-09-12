@@ -693,11 +693,19 @@ class _MpvSession:
             font_dir = _materialize_fonts(workspace, fonts)
             command.append(f"--sub-fonts-dir={font_dir}")
         command.append(str(clip))
-        self.log_path = workspace / f"mpv-{time.monotonic_ns()}.log"
+        stamp = time.monotonic_ns()
+        self.log_path = workspace / f"mpv-{stamp}.log"
+        # mpv's own log, not the inherited stdout: `self.log` below is the PARENT's handle, so
+        # flushing it flushes nothing mpv wrote — mpv buffers in its own process, and to a file
+        # rather than a tty that is a full 4K block. That is why this diagnostic came back empty
+        # on nine CI failures. `--log-file` is written and flushed by mpv itself.
+        self.mpv_log_path = workspace / f"mpv-{stamp}-messages.log"
+        command.insert(1, f"--log-file={self.mpv_log_path}")
         self.log = self.log_path.open("wb")
         self.process = subprocess.Popen(command, stdout=self.log, stderr=subprocess.STDOUT)
         try:
             self.ipc = MpvIPC(self.endpoint).connect(timeout=15)
+            self._await_playback()
         except Exception as error:
             self.process.terminate()
             self.process.wait(timeout=5)
@@ -705,15 +713,34 @@ class _MpvSession:
             diagnostic = self.log_path.read_text(encoding="utf-8", errors="replace")
             raise RuntimeError(f"mpv did not expose Gate D IPC: {error}\n{diagnostic}") from error
 
+    def _await_playback(self) -> None:
+        """Block until mpv has a loaded file, not merely a listening socket.
+
+        `connect` returns as soon as the IPC socket dials, and mpv creates that socket before it
+        opens the clip. `sub-add` is refused until playback is initialized, and answers the same
+        "error running command" it gives for an ASS that will not parse — so on a slow runner the
+        session's first cell fails as if its subtitle were corrupt.
+        """
+        from mpv_source_transition import _wait_for
+
+        _wait_for(
+            lambda: self.ipc.probe("duration").get("error") == "success",
+            timeout=15.0,
+            message="mpv never finished loading the Gate D clip",
+        )
+
     def diagnostic(self, *, tail_lines: int = 40) -> str:
-        """The tail of this session's mpv log, flushed so the failing command's own lines are in it."""
-        try:
-            self.log.flush()
-            text = self.log_path.read_text(encoding="utf-8", errors="replace")
-        except OSError as error:  # the log is diagnostics; losing it must not mask the failure
-            return f"(mpv log unavailable: {error})"
-        lines = text.splitlines()
-        return "\n".join(lines[-tail_lines:])
+        """The tail of this session's mpv log."""
+        sections = []
+        for path in (self.mpv_log_path, self.log_path):
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as error:  # the log is diagnostics; losing it must not mask the failure
+                sections.append(f"({path.name} unavailable: {error})")
+                continue
+            lines = text.splitlines()
+            sections.append(f"--- {path.name}\n" + "\n".join(lines[-tail_lines:]))
+        return "\n".join(sections)
 
     def capture(
         self,
