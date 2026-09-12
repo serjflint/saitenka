@@ -15,6 +15,7 @@ import pytest
 from live_harness import BOUNDARY_CUES, live_reader, poll_until
 
 from saitenka import otel_metrics
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("SAITENKA_LIVE"),
@@ -138,6 +139,8 @@ def _coloring():
 
 
 @pytest.mark.live
+# The only test here that draws through native geometry, so the only one with that floor.
+@pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
 @pytest.mark.timeout(30)
 def test_the_color_latency_counter_measures_a_real_cue() -> None:
     """Liveness for the instrument, not a ceiling on what it reads.
