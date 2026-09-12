@@ -25,7 +25,7 @@ from saitenka.app.subtitle_pipeline import (
     SubtitleModeCoordinator,
 )
 from saitenka.app.subtitle_render import NullRenderer
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 
 
 class FakeCurrentRenderer(NullRenderer):
@@ -1142,3 +1142,89 @@ def test_the_render_space_is_part_of_the_cache_key() -> None:
     )
 
     assert base.cache_key() != resized.cache_key()
+
+
+class RefusingOnceLane:
+    """The correlator's refusal shape, which a `lambda **_: False` submitter does not have.
+
+    `RuntimeCorrelator.submit_job` delivers the `REJECTED` terminal re-entrantly and only *then*
+    returns False. So by the time the caller sees the refusal, that terminal has already released
+    the claim slot and pumped a successor into it — and a fake that merely returns False can never
+    reach the window where the unwind then runs against the successor's state.
+    """
+
+    def __init__(self) -> None:
+        self.live: list[object] = []
+        self.peak = 0
+        self.refuse_next = False
+        self._finish: dict[object, object] = {}
+
+    def __call__(self, *, owner, identity, lane, request, on_finished) -> bool:  # noqa: ARG002
+        if self.refuse_next:
+            self.refuse_next = False
+            on_finished(
+                EffectFinished(
+                    EffectId(0),
+                    owner,
+                    identity,
+                    EffectOutcome.REJECTED,
+                    error=EffectError.OVERLOADED,
+                )
+            )
+            return False
+        self.live.append(identity)
+        self.peak = max(self.peak, len(self.live))
+        self._finish[identity] = on_finished
+        return True
+
+    def deliver(self, identity) -> None:
+        self.live.remove(identity)
+        finish = self._finish.pop(identity)
+        finish(EffectFinished(EffectId(0), Owner.SUBTITLE, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_a_refusal_does_not_free_the_slot_its_successor_already_took() -> None:
+    """The lane admits one job at a time, and a refusal must not be what breaks that.
+
+    The refused job's terminal has already pumped a successor into the slot by the time the unwind
+    runs, so clearing the claim unconditionally clears the successor's — and the next request is
+    then admitted alongside a job that is still executing.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    lane = RefusingOnceLane()
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
+
+    assert worker.submit(request(coordinator.generation, 1_100))  # occupies the slot
+    assert worker.prefetch("successor", lambda: request(coordinator.generation, 1_300))
+    assert worker.submit(request(coordinator.generation, 1_200))  # queues behind the running job
+
+    lane.refuse_next = True  # the queued current is the one the lane will turn away
+    lane.deliver((GEOMETRY_LANE, 1))
+    assert worker.submit(request(coordinator.generation, 1_400))
+
+    assert lane.peak == 1, "two jobs were in flight on a lane that admits one"
+    worker.close()
+
+
+def test_a_refused_speculation_retires_its_own_key_not_the_one_now_running() -> None:
+    """Same window, the other piece of state it reaches.
+
+    The unwind reads the in-flight prefetch key to know what it was speculating on, but by then the
+    successor has published its own. Retiring that one files the refusal's provenance against a
+    speculation still executing and drops its key, so the caller it was meant to serve is told the
+    work was superseded while it is in fact running.
+    """
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    lane = RefusingOnceLane()
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
+
+    assert worker.submit(request(coordinator.generation, 1_100))  # occupies the slot
+    assert worker.prefetch("refused", lambda: request(coordinator.generation, 1_200))
+    assert worker.prefetch("successor", lambda: request(coordinator.generation, 1_300))
+
+    lane.refuse_next = True
+    lane.deliver((GEOMETRY_LANE, 1))
+
+    assert worker.prefetch_miss_reason("successor") is GeometryCacheReason.PREFETCH_PENDING
+    assert worker.prefetch_miss_reason("refused") is GeometryCacheReason.PREFETCH_SUPERSEDED
+    worker.close()
