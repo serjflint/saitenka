@@ -8,10 +8,13 @@ Opt-in: ``SAITENKA_LIVE=1`` — `uv run poe smoke-live`.
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 import pytest
 from live_harness import BOUNDARY_CUES, live_reader, poll_until
+
+from saitenka import otel_metrics
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("SAITENKA_LIVE"),
@@ -103,3 +106,53 @@ def test_no_box_survives_onto_a_cue_that_has_no_such_token() -> None:
 def _boxes_index_real_tokens(reader) -> bool:
     cue = reader.graph.subtitle_presentation.cue.current
     return all(0 <= box.index < len(cue.tokens) for box in cue.boxes)
+
+
+@contextlib.contextmanager
+def _telemetry():
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    otel_metrics.register(reader, provider.get_meter("live"))
+    try:
+        yield
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def _coloring():
+    """Without a scorer every token's style is `None`, nothing is colorable, and a test about how
+    long color took would pass on a cue that was never owed any."""
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring, Palette
+
+    return Coloring(
+        Scorer(known=KnownWords.from_set(["\u9580"]), enable_freq=False, enable_jlpt=False),
+        Palette(),
+    )
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_the_color_latency_counter_measures_a_real_cue() -> None:
+    """Liveness for the instrument, not a ceiling on what it reads.
+
+    Everything else that times this runs against FakeIPC, where a write is acknowledged in the same
+    turn it is sent — so the counter can be wired correctly there and record nothing once mpv is the
+    one acknowledging, which is the only case the number exists for. No threshold is asserted: this
+    produces the first real measurement of it, and a budget chosen before a baseline is a guess.
+    """
+    with _telemetry(), live_reader(native_visible=True, scorer=_coloring()) as (_tmp, reader, _ipc):
+        poll_until(
+            reader,
+            lambda: "saitenka.subtitle.color_latency_ms" in otel_metrics.snapshot(),
+            "a real cue colored and the color-latency timer recorded nothing",
+        )
+        latency = otel_metrics.snapshot()["saitenka.subtitle.color_latency_ms"]
+    assert latency["count"] >= 1
+    assert latency["max"] > 0.0  # a zero would mean both ends read the same instant
