@@ -797,7 +797,11 @@ audit = { shell = "uv audit --preview-features audit-command" }
 # ADVISORY (not in `all`) — second-opinion CVE scan via pip-audit (PyPA Advisory DB + OSV) over the
 # exported lockfile. `--no-deps` audits the pinned graph WITHOUT building a venv (a full build SIGABRTs
 # on uv-managed pythons, per the `audit` note above); runs out-of-process via uvx (free-threading-safe).
-pip-audit = { shell = "uv export --frozen --no-emit-project --no-hashes --all-extras | uvx pip-audit --no-deps -r /dev/stdin" }
+# `--no-color`: uv colorizes even into a pipe here, and the escape before the header's `#` stops
+# pip-audit from reading it as a comment — it rejects the whole file on line 1. The `-e ./x` filter
+# drops our own workspace packages: pip builds each one's metadata to resolve it, which fails on the
+# native bundles, and no first-party package has an advisory to find anyway.
+pip-audit = { shell = "uv export --frozen --no-emit-project --no-hashes --all-extras --no-color | sed '/^-e \\.\\//d' | uvx pip-audit --no-deps -r /dev/stdin" }
 # GATE (in `all`) — spelling across code + docs. typos (Rust via uvx), gitignore-aware; allowlist in
 # [tool.typos]. Ran from repo root so it covers the top-level docs and the deinflect add-on too.
 spell = { cmd = "uvx typos" }
