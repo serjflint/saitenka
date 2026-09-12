@@ -731,6 +731,19 @@ class _CueInputs:
 
 
 @dataclass(frozen=True, slots=True)
+class _CueSpan:
+    """Where a cue sits in the track, and the rows that make it up.
+
+    `timestamp_ms` is the instant to measure at: the cue's own start, never the playhead inside it.
+    """
+
+    start: float
+    end: float
+    timestamp_ms: int
+    active_rows: str
+
+
+@dataclass(frozen=True, slots=True)
 class _ScheduleInputs:
     path: Path
     source: bytes
@@ -1692,7 +1705,7 @@ class NativeSubtitleGeometry:
         start: float | None,
         end: float | None,
         active_rows: object,
-    ) -> tuple[float, float, int, str] | None:
+    ) -> _CueSpan | None:
         """Where in the track this cue is, and the rows that make it up.
 
         `source` is `None` for a converted track — mpv is not rendering a file there, so there is no
@@ -1716,7 +1729,7 @@ class NativeSubtitleGeometry:
                 # and disagreed with the one being drawn. That never resolves by waiting.
                 self._degrade_geometry("subtitle-hint-text-mismatch")
                 return None
-            return hint.start, hint.end, timestamp_ms, rows
+            return _CueSpan(hint.start, hint.end, timestamp_ms, rows)
         if not isinstance(active_rows, str) or not active_rows.strip():
             self._degrade_geometry("subtitle-ass-full-unavailable")
             return None
@@ -1726,7 +1739,7 @@ class NativeSubtitleGeometry:
 
     def _clocked_span(
         self, seen: GeometryObservation, start: float, end: float, active_rows: str
-    ) -> tuple[float, float, int, str] | None:
+    ) -> _CueSpan | None:
         """mpv's own timings, refined to the document's when the index agrees on the text."""
         try:
             _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
@@ -1754,11 +1767,9 @@ class NativeSubtitleGeometry:
                     # output is and `sub-start` is not. An animated cue would render differently
                     # across its span, and those are refused as `typesetting-unsupported`.
                     timestamp_ms = round(indexed.start * 1_000) + 1
-        return start, end, timestamp_ms, active_rows
+        return _CueSpan(start, end, timestamp_ms, active_rows)
 
-    def _indexed_span(
-        self, seen: GeometryObservation, active_rows: str
-    ) -> tuple[float, float, int, str] | None:
+    def _indexed_span(self, seen: GeometryObservation, active_rows: str) -> _CueSpan | None:
         """The cue's own span, taken from the index while mpv has yet to report its timings.
 
         mpv publishes `sub-text` and `sub-start`/`sub-end` as separate property changes, so a cue
@@ -1779,7 +1790,7 @@ class NativeSubtitleGeometry:
             self._degrade_geometry("subtitle-observation-pending")
             return None
         cue = index.cues[position]
-        return cue.start, cue.end, round(cue.start * 1_000) + 1, active_rows
+        return _CueSpan(cue.start, cue.end, round(cue.start * 1_000) + 1, active_rows)
 
     def _render_space(self, render: _RenderInputs) -> converted.RenderSpace:
         return converted.RenderSpace(render.frame_size[0], render.frame_size[1], render.margins)
@@ -1906,13 +1917,12 @@ class NativeSubtitleGeometry:
         )
         if active is None:
             return None
-        start, end, timestamp_ms, rows = active
         cue = _CueInputs(
-            round(start * 1_000),
-            round(end * 1_000),
-            timestamp_ms,
+            round(active.start * 1_000),
+            round(active.end * 1_000),
+            active.timestamp_ms,
             seen.text,
-            rows,
+            active.active_rows,
             render.frame_size,
             render.storage_size,
             render.pixel_aspect,
@@ -1922,7 +1932,7 @@ class NativeSubtitleGeometry:
         )
         return _ScheduleInputs(
             path,
-            self._document_for(rows, render),
+            self._document_for(active.active_rows, render),
             track_id,
             generation,
             render,
