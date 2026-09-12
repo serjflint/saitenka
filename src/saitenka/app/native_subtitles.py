@@ -1722,6 +1722,12 @@ class NativeSubtitleGeometry:
             return None
         if start is None or end is None:
             return self._indexed_span(seen, active_rows)
+        return self._clocked_span(seen, start, end, active_rows)
+
+    def _clocked_span(
+        self, seen: GeometryObservation, start: float, end: float, active_rows: str
+    ) -> tuple[float, float, int, str] | None:
+        """mpv's own timings, refined to the document's when the index agrees on the text."""
         try:
             _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
                 seen.prop("time-pos"), seen.prop("sub-delay"), start
