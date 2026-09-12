@@ -1584,6 +1584,8 @@ class NativeVisibleRenderer:
             on_finished=finished,
         ):
             self._focus_payload = None
+            self._focus_cue = None
+            self._focus_up = True  # the write never left: the slot holds whatever it held
             self._focus.finish(
                 SurfaceTransactionOutcome(
                     transaction, EffectOutcome.FAILED, EffectError.DISCONNECTED

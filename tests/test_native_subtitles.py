@@ -3403,6 +3403,27 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
     result.close()
 
 
+def test_a_refresh_on_a_refused_render_space_still_degrades(tmp_path: Path) -> None:
+    """The control for the guard above: an observation that cannot be keyed because the render
+    inputs refuse it — margins that swallow the frame — is not a withheld half. The boxes were
+    measured against a frame mpv no longer draws into, and the status must say so."""
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    settle_jobs(result, ipc)
+    assert native.status.geometry_ready
+
+    swallowed = {**_OSD, "mt": 5000, "mb": 5000}
+    ipc.props["osd-dimensions"] = swallowed
+    result.graph.playback.observe_event({"name": "osd-dimensions", "data": swallowed})
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+
+    assert not native.status.geometry_ready
+    assert native.status.fallback_reason == "subtitle-render-input-unsupported"
+    result.close()
+
+
 def test_a_refresh_with_nothing_to_key_leaves_the_cue_up(tmp_path: Path) -> None:
     """Mid-seek mpv withdraws `sub-text/ass-full`, `sub-start` and `sub-end` in one batch while
     navigation keeps the pre-armed target on screen. Each is a geometry input, so the batch arms a

@@ -41,12 +41,18 @@ class SidebarViewOwners:
     timers: LifecycleTimers
 
 
+_UNREAD = object()
+
+
 class SidebarController:
     def __init__(self, ipc: MpvIPC) -> None:
         self.store: SidebarStore = SIDEBAR_STATEFUL_BINDING.store(ipc)
         self.panel = sidebar.SidebarPanel()
         self._view_owners: SidebarViewOwners | None = None
-        self._video_path_key: int | None = None
+        #: The sub-index the cached path was read for — the object itself, not its id (which the
+        #: allocator hands to the next episode's index), and a sentinel rather than `None` (which
+        #: an episode with no index would match without ever reading).
+        self._video_path_key: object = _UNREAD
         self._video_path_value: str | None = None
 
     def bind_view(self, owners: SidebarViewOwners) -> None:
@@ -95,9 +101,8 @@ class SidebarController:
         property, so reading it live put a blocking round trip on the color path — 250 ms while
         mpv is mid-seek. The sub-index object changes exactly when the episode does.
         """
-        key = id(index)
-        if self._video_path_key != key:
-            self._video_path_key = key
+        if self._video_path_key is not index:
+            self._video_path_key = index
             self._video_path_value = playback.text("path")
         return self._video_path_value
 
@@ -111,6 +116,7 @@ class SidebarController:
         sidebar.follow(self.view())
 
     def index_changed(self) -> None:
+        self._video_path_key = _UNREAD  # a new episode: read its path again
         sidebar.index_changed(self.view())
 
     def mark_active_mined(self) -> None:

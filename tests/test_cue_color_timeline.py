@@ -649,6 +649,24 @@ def test_a_blank_after_a_colored_cue_removes_the_color_once(
         result.close()
 
 
+def test_a_second_blank_sends_no_second_removal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The slot is empty after the first blank; a session clearing the line again on top of it
+    (a track switch installs an empty cue) must not cost mpv another command."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        before = len(_focus_writes(ipc))
+
+        _blank(result, ipc, at=TIMELINE[0].end + 0.1)
+        result.graph.cue.set_subtitle("")  # `clear_cue`, the way a track switch spells it
+
+        assert [command[2] for command in _focus_writes(ipc)[before:]] == ["none"]
+    finally:
+        result.close()
+
+
 def test_a_seek_keeps_its_pre_armed_color_while_mpv_catches_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

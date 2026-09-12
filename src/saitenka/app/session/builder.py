@@ -856,8 +856,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     cue_coordinator.on_settled(sidebar_controller.follow)
 
     def render_space_changed() -> None:
-        presentation.redraw_after_resize()
-        sidebar_controller.follow()
+        presentation.redraw_after_resize()  # follows the sidebar itself once the OSD is re-read
 
     playback_projection = playback_projection_ref.bind(
         PlaybackProjection(

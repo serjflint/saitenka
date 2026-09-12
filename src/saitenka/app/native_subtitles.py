@@ -1286,16 +1286,19 @@ class NativeSubtitleGeometry:
             self._ports.clear_interaction()
 
     def refresh(self, seen: GeometryObservation) -> None:
-        identity = self._observation_key(seen)
-        if identity is None:
-            # mpv has withdrawn the rows or timings this cue renders from — the blank it publishes
-            # while a seek is in flight, or the text half of a split observation. Nothing can be
-            # keyed, so nothing can have moved; the half that arrives next arms the next refresh.
-            # Reading it as a move cleared the pre-armed color 12 ms after every `sub-seek`.
+        active_rows = seen.prop("sub-text/ass-full")
+        if not isinstance(active_rows, str) or not active_rows.strip():
+            # mpv has withdrawn the rows this cue renders from — the blank it publishes while a
+            # seek is in flight, or the text half of a split observation. Nothing can be keyed, so
+            # nothing can have moved; the half that arrives next arms the next refresh. Reading it
+            # as a move cleared the pre-armed color 12 ms after every `sub-seek`. Only the rows:
+            # a render space the inputs refuse must still fall through and degrade.
             return
+        identity = self._observation_key(seen)
         snapshot = self._ports.pipeline.current
         if (
-            identity == self._published_key
+            identity is not None
+            and identity == self._published_key
             and snapshot is not None
             and snapshot is self._last_snapshot
         ):

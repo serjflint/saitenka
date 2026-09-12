@@ -244,13 +244,15 @@ def hide_preview(ports: PreviewPorts) -> None:
     panel.clear()
     if not panel.keys_grabbed:
         return  # nothing was bound: every cue change dismisses, and most have no preview up
-    panel.keys_grabbed = False
     _release_preview_keys(
         ports.ipc,
         active_bindings(ports.keys, "preview"),
         help_open=ports.help_open,
         tip_keys_bound=ports.tip_keys_bound,
     )
+    # An open help overlay owns Esc and the release stands down; the keys stay owed, so the next
+    # dismiss retries rather than leaving them bound to a preview that is gone.
+    panel.keys_grabbed = ports.help_open
 
 
 def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:

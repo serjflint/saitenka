@@ -83,6 +83,7 @@ class CueCoordinator:
         self._pending: playback.ObservedCue | None = None
         self._identity_ever_installed = False
         self._settled_hooks: list[Callable[[], None]] = []
+        self._settling = False
 
     def on_settled(self, hook: Callable[[], None]) -> None:
         """Run `hook` after a cue observation has been reconciled — the cue-driven boundary for
@@ -113,12 +114,19 @@ class CueCoordinator:
             otel_metrics.record_cue_settle("no-observation")
             return
         before = o.playback.cue.text
-        with otel_metrics.traced(
-            "cue_reconcile", cue_revision=str(self.revision), cue=cue_digest(cue.text)
-        ) as span:
-            o.navigation.reconcile(cue.text)
-            settled = "adopted" if o.playback.cue.text != before else "reinstalled"
-            otel_metrics.record_cue_settle(settled, span)
+        self._settling = True
+        try:
+            with otel_metrics.traced(
+                "cue_reconcile", cue_revision=str(self.revision), cue=cue_digest(cue.text)
+            ) as span:
+                o.navigation.reconcile(cue.text)
+                settled = "adopted" if o.playback.cue.text != before else "reinstalled"
+                otel_metrics.record_cue_settle(settled, span)
+        finally:
+            self._settling = False
+        self._run_settled_hooks()
+
+    def _run_settled_hooks(self) -> None:
         for hook in self._settled_hooks:
             hook()
 
@@ -143,6 +151,11 @@ class CueCoordinator:
                 revise_session_cue=revise_session_cue,
                 provisional_navigation=provisional_navigation,
             )
+        if not self._settling:
+            # A cue installed by the session itself — navigation's pre-armed target, a track
+            # switch — moves the active line as much as an observed one does. Inside a settle the
+            # reconcile's own hook run follows.
+            self._run_settled_hooks()
 
     def _set_subtitle_inner(
         self,

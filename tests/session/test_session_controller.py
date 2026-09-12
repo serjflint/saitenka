@@ -4057,6 +4057,10 @@ def test_the_sidebar_follows_the_cue_when_the_cue_settles(monkeypatch, make_sess
     # The view it followed, not the host: identity with the owner says the settle boundary
     # reached this sidebar's own state rather than merely calling something once.
     assert [view.state for view in follows] == [r.graph.sidebar.state]
+
+    r.graph.cue.set_subtitle("先の行")  # a cue the session installs itself: a nav pre-arm
+
+    assert len(follows) == 2
     r.close()
 
 
