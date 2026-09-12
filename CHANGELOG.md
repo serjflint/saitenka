@@ -56,11 +56,11 @@ logs.
 
 ### Changed
 
-- **Four more capabilities are separate distributions:** `saitenka-tokenize`, `saitenka-wordstate`,
-  `saitenka-subtitles` and `saitenka-card`, joining `saitenka-dict` and `ankiconnect-client`. They
-  install automatically with `saitenka` and need no action; each is usable on its own, without a
-  player or a running Anki. `pysubs2` is consequently no longer a direct dependency of `saitenka` —
-  it belongs to `saitenka-subtitles`.
+- **Four more capabilities are separate packages:** `saitenka_tokenize`, `saitenka_wordstate`,
+  `saitenka_subtitles` and `saitenka_card`. Each has its own contracts and test suite and may not
+  import `saitenka`, so the seam is enforced rather than intended — but they ship inside the
+  `saitenka` wheel rather than as distributions of their own, so installing is unchanged and there
+  is nothing extra to add.
 
 ## [4.3.1] - 2026-08-30
 

@@ -47,7 +47,7 @@ internal modules with explicit dependency contracts, not independently published
   and result cache that reserve against it. Pillow remains the default; the opt-in external-ASS path
   wires `LibassGeometryBackend` while leaving mpv as the visible owner.
   It has no application, rendering, mpv, or filesystem dependencies — a gate, not a convention, since
-  it is now its own distribution; `app/sub_index.py` is the thin file-loading adapter. The corpus and
+  it is now its own package; `app/sub_index.py` is the thin file-loading adapter. The corpus and
   differential checks therefore exercise the stable surface without constructing a `SessionController`.
   Measurement is the host's: the geometry backend takes a telemetry sink and defaults to a no-op.
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
@@ -208,9 +208,10 @@ protocol-shaped class from being mistaken for production swappability.
 | Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
-`render/` and `panel/` are internal package boundaries in the Saitenka distribution. `saitenka-dict`,
-`ankiconnect-client`, `saitenka-subtitles`, `saitenka-tokenize`, `saitenka-wordstate`, and
-experimental native add-ons are independently published.
+`render/` and `panel/` are internal package boundaries in the Saitenka distribution, as are
+`saitenka_subtitles`, `saitenka_tokenize`, `saitenka_wordstate` and `saitenka_card` — separate
+packages with their own contracts and tests, shipped inside the Saitenka wheel. `saitenka-dict`,
+`ankiconnect-client` and the experimental native add-ons are independently published.
 
 ## Interactive startup and cue annotation
 

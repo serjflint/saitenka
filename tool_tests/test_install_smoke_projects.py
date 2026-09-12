@@ -1,10 +1,11 @@
-"""The install smoke must build a wheel for every in-repo package the install needs.
+"""Where each in-repo package belongs: inside this wheel, or on the index as a dependency.
 
-This is the one job that resolves saitenka's dependencies against the real registry, so an
-unpublished first-party package fails there and nowhere else — as a resolver error naming a missing
-distribution, not as a packaging assertion. Extracting `saitenka-tokenize`/`saitenka-wordstate` did
-exactly that: they became core dependencies that exist only in this checkout while the build list
-still named the previous three by hand.
+The install smoke is the one job that resolves against the real registry — but on a pull request it
+builds every path-sourced sibling locally and installs with `--find-links`, so an unpublished
+first-party dependency resolves there and fails only on a user's machine. That is not a gap these
+tests can close by resolving harder; it is closed by never depending on a package nobody publishes.
+So the rule is checked statically instead: a first-party package ships in the wheel or has a
+distribution of its own, and never both.
 """
 
 from __future__ import annotations
@@ -33,11 +34,7 @@ def test_extras_expand_to_the_first_party_packages_the_install_resolves():
     required = _required_names(subtitle_geometry=True)
     assert {
         "ankiconnect-client",
-        "saitenka-card",
         "saitenka-dict",
-        "saitenka-subtitles",
-        "saitenka-tokenize",
-        "saitenka-wordstate",
         "saitenka-deinflect",  # reached only through `full` -> `deinflect`
         "libasslite",  # reached only through `full` -> `subtitle-geometry`
     } <= required
@@ -91,3 +88,57 @@ def test_the_root_wheel_is_built_last_and_is_the_one_selected():
         name = _declared_name(path / "pyproject.toml")
         assert name is not None
         assert not f"{name.replace('-', '_')}-".startswith("saitenka-")
+
+
+#: Distributions of their own: each has a release workflow, a namespaced tag, and a published wheel
+#: an install is meant to resolve. Every other in-repo package ships inside the saitenka wheel.
+_OWN_DISTRIBUTION = {
+    "ankiconnect-client",
+    "libasslite",
+    "libasslite-bundle",
+    "resvglite",
+    "saitenka-deinflect",
+    "saitenka-dict",
+    "taffylite",
+}
+
+
+def _shipped_packages() -> set[str]:
+    """The top-level package directories this wheel carries, as distribution-style names."""
+    config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    packages = config["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+    return {Path(entry).name.replace("_", "-") for entry in packages}
+
+
+def test_a_first_party_package_is_shipped_or_published_but_never_depended_on_unpublished():
+    """The invariant a release rests on, and the one that was missing.
+
+    An in-repo package can be a dependency, resolved from the registry like any other, or it can
+    ship inside this wheel. Being a dependency without being published is neither: the install smoke
+    builds it from the checkout and passes, so nothing fails until the wheel meets a machine that
+    has only the index — which is the machine of every user. Four packages sat in that state, and
+    the first thing to notice was a release build.
+    """
+    required = _required_names(subtitle_geometry=True)
+    shipped = _shipped_packages()
+    on_disk = {
+        name
+        for pyproject in ROOT.glob("*/pyproject.toml")
+        if (name := _declared_name(pyproject)) is not None
+    }
+    stranded = sorted(
+        name
+        for name in on_disk
+        if name in required and name not in _OWN_DISTRIBUTION and name not in shipped
+    )
+    assert not stranded, (
+        f"depended on but neither published nor shipped in the wheel: {stranded} — "
+        "either give it a release workflow and a tag, or add it to the wheel's packages"
+    )
+
+
+def test_a_package_this_wheel_ships_is_not_also_a_dependency():
+    """The other direction: shipping a package and requiring it names one import path twice, and the
+    copy that wins is whichever the resolver installed — not the tree these tests ran against."""
+    both = sorted(_shipped_packages() & _required_names(subtitle_geometry=True))
+    assert not both, f"shipped inside the wheel and required from the index: {both}"
