@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789221422469,
+  "lastUpdate": 1789226521438,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15335,6 +15335,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.589815,
             "range": "3 replicas; min 1.11755; max 2.03758; MAD 0.447768; worst 2.03758",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5b3f4b1c7de2854e9921923bb4c65d5fc63e147a",
+          "message": "Merge pull request #512 from serjflint/refactor/one-distribution-many-packages\n\nrefactor(packaging): ship the capability packages inside the saitenka wheel",
+          "timestamp": "2026-09-12T20:20:34+05:00",
+          "tree_id": "ff874cea1bf0095e6911e21b6e1264896ccf7a8c",
+          "url": "https://github.com/serjflint/saitenka/commit/5b3f4b1c7de2854e9921923bb4c65d5fc63e147a"
+        },
+        "date": 1789226520583,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.361563,
+            "range": "3 replicas; min 4.24396; max 6.41558; MAD 0.054015",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.753389,
+            "range": "3 replicas; min 6.50882; max 8.93108; MAD 0.177692; worst 8.93108",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.537306,
+            "range": "3 replicas; min 12.5847; max 20.7659; MAD 0.228566",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.804687,
+            "range": "3 replicas; min 13.2112; max 21.1534; MAD 0.348699; worst 21.1534",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.962076,
+            "range": "3 replicas; min 15.6675; max 185.012; MAD 0.294596",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.121277,
+            "range": "3 replicas; min 0.071447; max 0.122449; MAD 0.001172; worst 0.122449",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.760569,
+            "range": "3 replicas; min 32.1045; max 44.6294; MAD 0.868807; worst 44.6294",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.754595,
+            "range": "3 replicas; min 3.09779; max 128.507; MAD 0.656803; worst 128.507",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.704309,
+            "range": "3 replicas; min 1.62993; max 61.5324; MAD 0.074381; worst 61.5324",
             "unit": "ms"
           }
         ]
