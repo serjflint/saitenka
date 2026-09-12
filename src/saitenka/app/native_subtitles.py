@@ -1287,10 +1287,15 @@ class NativeSubtitleGeometry:
 
     def refresh(self, seen: GeometryObservation) -> None:
         identity = self._observation_key(seen)
+        if identity is None:
+            # mpv has withdrawn the rows or timings this cue renders from — the blank it publishes
+            # while a seek is in flight, or the text half of a split observation. Nothing can be
+            # keyed, so nothing can have moved; the half that arrives next arms the next refresh.
+            # Reading it as a move cleared the pre-armed color 12 ms after every `sub-seek`.
+            return
         snapshot = self._ports.pipeline.current
         if (
-            identity is not None
-            and identity == self._published_key
+            identity == self._published_key
             and snapshot is not None
             and snapshot is self._last_snapshot
         ):

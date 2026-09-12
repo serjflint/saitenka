@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from saitenka_tokenize.languages import SECOND_LANG
 
 from saitenka import otel_metrics
-from saitenka.app import native_subtitles, subtitle_modes, subtitle_raster
+from saitenka.app import native_subtitles, subnav_settle, subtitle_modes, subtitle_raster
 from saitenka.app.features.annotation.annotation_controller import AnnotationInputs
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.runtime import CueCommandState
@@ -20,6 +20,8 @@ from saitenka.app.token_cache import cue_key
 from saitenka.runtime import events, playback
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.features.analysis.analysis_controller import AnalysisCommandEndpoint
     from saitenka.app.features.annotation.annotation_controller import (
         AnnotationTransition,
@@ -80,6 +82,12 @@ class CueCoordinator:
         self._o = owners
         self._pending: playback.ObservedCue | None = None
         self._identity_ever_installed = False
+        self._settled_hooks: list[Callable[[], None]] = []
+
+    def on_settled(self, hook: Callable[[], None]) -> None:
+        """Run `hook` after a cue observation has been reconciled — the cue-driven boundary for
+        anything that follows the active line (the sidebar), instead of a check on every turn."""
+        self._settled_hooks.append(hook)
 
     @property
     def revision(self) -> int:
@@ -111,6 +119,8 @@ class CueCoordinator:
             o.navigation.reconcile(cue.text)
             settled = "adopted" if o.playback.cue.text != before else "reinstalled"
             otel_metrics.record_cue_settle(settled, span)
+        for hook in self._settled_hooks:
+            hook()
 
     def set_subtitle(
         self,
@@ -167,6 +177,7 @@ class CueCoordinator:
             if o.presentation.native is not None:
                 o.presentation.native.mark_empty()
             o.presentation.pipeline.clear(o.surfaces, o.ipc)
+            o.presentation.pipeline.flush_focus(o.presentation.target())
             hide = getattr(o.overlay, "hide_interactive", o.overlay.hide)
             hide(OverlayId.TIP)
             return
@@ -178,6 +189,7 @@ class CueCoordinator:
         o.presentation.cue.reset()
         transition = o.annotation.replace(text, self.annotation_inputs())
         self.apply_annotation_transition(transition, draw=True)
+        o.presentation.pipeline.flush_focus(o.presentation.target())
 
     def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
         o = self._o
@@ -345,9 +357,32 @@ class CueCoordinator:
             return
         log.debug("cue interaction retired: %s", reason)
         self._request_playback_retirement()
+        if reason == playback.RetireReason.CUE_TEXT.value and self._mid_seek_transient():
+            # Our own sub-seek pre-armed the target cue's surfaces; mpv reports an empty (or the
+            # pre-nav) `sub-text` while the seek is in flight. The identity is retired like any
+            # other — the reconcile that adopts the landed cue keys off it — but the surfaces
+            # stay: resetting them on the blip cost the first frame after every seek its color.
+            log.debug("cue surfaces kept across a mid-seek transient")
+            return
         o.tooltip.teardown()
         o.tooltip.retire_selection()
         o.presentation.cue.reset()
+        if not o.playback.cue.text.strip():
+            # The line is gone, and this is the only place its pixels come down: the reconcile
+            # treats a blank as already retired, and the geometry refresh — which used to pay this
+            # by accident, on an observation it could not key — now waits for one it can.
+            if o.presentation.native is not None:
+                o.presentation.native.mark_empty()
+            o.presentation.pipeline.clear(o.surfaces, o.ipc)
+
+    def _mid_seek_transient(self) -> bool:
+        current = self._o.navigation.navigation.current
+        return subnav_settle.swallows(
+            current.sub_settle,
+            text=self._o.playback.cue.text,
+            nav_prev_text=current.nav_prev_text,
+            identity_reinstall=False,
+        )
 
     def replace_source(self, path: object = None, *, reason: str) -> None:
         o = self._o

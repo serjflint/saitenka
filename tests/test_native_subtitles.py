@@ -1700,7 +1700,11 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
 
 
 def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path: Path) -> None:
-    result, ipc, _backend = reader(tmp_path)
+    # A scorer, so the cue puts color on the focus slot: the removal asserted below is then a real
+    # one. Without color the slot was never written, and a removal of nothing is no longer sent.
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     result.graph.cue.set_subtitle("猫を見る")
     assert result.graph.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
@@ -1708,6 +1712,7 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
         result.graph.subtitle_presentation.native.status.geometry_ready
     )  # the lane terminal published it
     old_generation = result.graph.subtitle_presentation.pipeline.generation
+    assert any(c[:3] == ("osd-overlay", 1001, "ass-events") for c in ipc.commands)  # color is up
     ipc.commands.clear()
 
     result.graph.subtitle_presentation.native.set_source(None, live=True)
@@ -3395,6 +3400,30 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
 
     assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
     assert "subtitle:geometry-refresh" not in ipc.timers
+    result.close()
+
+
+def test_a_refresh_with_nothing_to_key_leaves_the_cue_up(tmp_path: Path) -> None:
+    """Mid-seek mpv withdraws `sub-text/ass-full`, `sub-start` and `sub-end` in one batch while
+    navigation keeps the pre-armed target on screen. Each is a geometry input, so the batch arms a
+    refresh, and the refresh — unable to key an observation with no rows — read that as the cue
+    having moved and cleared the color it was measured for. Twelve milliseconds after every seek,
+    thirty before the landed cue put it back."""
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    settle_jobs(result, ipc)
+    assert native.status.geometry_ready
+    before = visible_pixel_changes(ipc)
+
+    for name, data in (("sub-text/ass-full", ""), ("sub-start", None), ("sub-end", None)):
+        ipc.props[name] = data
+        result.graph.playback.observe_event({"name": name, "data": data})
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+
+    assert visible_pixel_changes(ipc) == before
+    assert native.status.geometry_ready
     result.close()
 
 

@@ -669,6 +669,20 @@ class NativeVisibleRenderer:
         #: `None` means "assume nothing is up" — the safe direction, since a needless write costs
         #: milliseconds and a skipped necessary one costs the color.
         self._focus_payload: tuple[object, ...] | None = None
+        #: Whether anything is on the focus slot at all. Starts `True`: an earlier session (attach
+        #: mode reconnects to a running mpv) may have left a payload up, and one removal is cheap.
+        self._focus_up = True
+        #: A cue change owes the slot a removal, but only if the draw that follows in the same
+        #: turn does not replace the payload. Removing first and presenting second was two writes
+        #: mpv parsed in sequence, and a frame composited between them showed the cue white.
+        self._focus_clear_pending = False
+        #: Set by `cue_changed` and cleared by the cue's first payload, its flush, or a clear: while
+        #: it holds, a removal — a draw with nothing to show, an ownership clear — is deferred to
+        #: the flush instead of paid, so a payload arriving later in the same turn replaces it.
+        self._defer_focus_clear = False
+        #: Digest of the cue whose payload is on the focus slot, so a cue turn can tell "the
+        #: previous line's color" from "this line's own, pre-armed by a seek".
+        self._focus_cue: str | None = None
         #: Whether a saitenka overlay window (or `Alt+o`) has taken the session's pixels down. The
         #: focus slot is not a `LifecycleSurfaces` one, so nothing else stops a redraw repainting it.
         self._suspended = False
@@ -998,7 +1012,10 @@ class NativeVisibleRenderer:
         elif action.kind == ActionKind.CLEAR_LEGACY:
             self._fallback.clear(target.surfaces, target.ipc)
         elif action.kind == ActionKind.CLEAR_INTERACTION:
-            self._hide_focus(target.ipc)
+            if self._defer_focus_clear:
+                self._focus_clear_pending = True
+            else:
+                self._hide_focus(target.ipc)
             self._hide_overpaint(target.surfaces)
         elif action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
             self._stage_legacy(target, action)
@@ -1128,6 +1145,7 @@ class NativeVisibleRenderer:
         return self._state.owner == PixelOwner.NATIVE
 
     def connection_replaced(self, target: SubtitleTarget) -> None:
+        self._focus_up = True  # a reconnected mpv may still show what the old connection put up
         context = OwnershipContext(
             self._state.context.connection_epoch + 1,
             self._state.context.ownership_epoch + 1,
@@ -1159,10 +1177,24 @@ class NativeVisibleRenderer:
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CUE_CHANGED, nonempty=nonempty)
         )
-        self._focus_payload = None  # a new cue's payload is never the one already up
+        # The payload dedupe is NOT reset here: a split observation burst (sub-text, then its
+        # timing) reconciles one cue twice, and the second draw's bytes are the first's. The slot
+        # forgets its payload when it is emptied, which is the only time a rewrite is owed.
+        self._defer_focus_clear = True
         self._execute(target, actions)
         if nonempty:
             self.activate(target)
+
+    def flush_focus(self, ipc) -> None:
+        """Pay a removal a cue change deferred, if no draw since has replaced the payload.
+
+        Called after the cue's own draw: a cue that lands without geometry, or whose annotation is
+        still computing, has drawn nothing, and the previous cue's glyphs must not stay painted
+        over the new line.
+        """
+        self._defer_focus_clear = False
+        if self._focus_clear_pending and ipc is not None:
+            self._hide_focus(ipc)
 
     def draw(
         self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
@@ -1223,12 +1255,15 @@ class NativeVisibleRenderer:
         self, request: DrawRequest, surfaces=None, ipc=None, /, *, on_settled=None
     ) -> DrawResult | None:
         if self._suspended:
+            self.flush_focus(ipc)
             return None
         if self._state.owner == PixelOwner.LEGACY:
+            self.flush_focus(ipc)
             return self._fallback.draw(request, surfaces, ipc, on_settled=on_settled)
         # `activate` drives the ownership FSM and needs the host, so the coordinator runs it just
         # before this and we read only its outcome. Splitting them is what lets `draw` be host-free.
         if self._state.owner != PixelOwner.NATIVE:
+            self.flush_focus(ipc)
             return None
         rect = (
             focus_rect(request.boxes, request.hover, request.hover_span)
@@ -1242,9 +1277,23 @@ class NativeVisibleRenderer:
             # One slot, one payload: the highlight and the color are drawn together so a repaint
             # can never leave one of them showing the previous cue.
             drawing = f"{focus_drawing(rect)}\n{overprint}" if overprint else focus_drawing(rect)
+        digest = cue_digest(request.text)
         if not drawing:
-            self._hide_focus(ipc)
+            if self._defer_focus_clear and self._focus_up and self._focus_cue == digest:
+                # The slot already holds this cue's own color: a seek pre-armed it, and mpv is now
+                # re-reporting the cue in halves (text first, rows a turn later) with nothing to
+                # measure against yet. The removal a cue change deferred is not owed to a payload
+                # the cue itself put up; the geometry that lands next replaces or dedupes it.
+                self._focus_clear_pending = False
+                self._defer_focus_clear = False
+            elif self._defer_focus_clear:
+                # Inside a cue change the first draw often has boxes and no styles yet; the styled
+                # draw follows in the same call. Removing here put a white frame between them.
+                self._focus_clear_pending = True
+            else:
+                self._hide_focus(ipc)
             return None
+        self._focus_cue = digest
         self._submit_focus(
             ipc,
             SurfaceAction.PRESENT,
@@ -1385,6 +1434,7 @@ class NativeVisibleRenderer:
             self._on_drift(self._drifting)
 
     def clear(self, surfaces=None, ipc=None, /) -> None:
+        self._defer_focus_clear = False  # a clear is the cue turn's end, deferred or not
         self._hide_focus(ipc)
         self._hide_overpaint(surfaces)
         self._fallback.clear(surfaces, ipc)
@@ -1414,6 +1464,7 @@ class NativeVisibleRenderer:
         return self._fallback.logged_first
 
     def deactivate(self, target: SubtitleTarget) -> None:
+        self._defer_focus_clear = False  # a close pays its removal now, whatever turn was open
         self._state, actions = reduce_ownership(
             self._state, OwnershipEvent(EventKind.CLOSE_REQUESTED)
         )
@@ -1425,6 +1476,7 @@ class NativeVisibleRenderer:
 
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
         self._suspended = True
+        self._defer_focus_clear = False
         self._hide_focus(target.ipc)
         self._hide_overpaint(target.surfaces)
         self._fallback.clear(target.surfaces, target.ipc)
@@ -1478,6 +1530,10 @@ class NativeVisibleRenderer:
             otel_metrics.subtitle_overpaint_frames.add(1)
 
     def _hide_focus(self, ipc) -> None:
+        self._focus_clear_pending = False
+        self._focus_cue = None
+        if not self._focus_up:
+            return  # the slot is already empty; mpv would parse a removal of nothing
         self._submit_focus(ipc, SurfaceAction.REMOVE, (NATIVE_FOCUS_ID, "none", ""))
 
     def _submit_focus(self, ipc, action: SurfaceAction, tail: tuple[object, ...]) -> None:
@@ -1489,6 +1545,9 @@ class NativeVisibleRenderer:
             # twice to composite one picture — measured at 2-33 ms per write, doubled.
             if otel_metrics.subtitle_focus_writes_skipped is not None:
                 otel_metrics.subtitle_focus_writes_skipped.add(1)
+            # What is up is what this cue wants: a removal the cue change deferred is not owed.
+            self._focus_clear_pending = False
+            self._defer_focus_clear = False
             return
         transaction = self._focus.request(_FOCUS_SLOT, action)
         # Timed here as well as in `LifecycleSurfaces`, because the subtitle's own overlay write
@@ -1507,11 +1566,16 @@ class NativeVisibleRenderer:
                 span.set("events", len(payload.splitlines()) if payload else 0)
             if completion.outcome is not EffectOutcome.SUCCEEDED:
                 self._focus_payload = None  # never skip against a write that did not land
+                self._focus_cue = None  # nor keep a color the slot may not hold
+                self._focus_up = True  # nor a removal against a slot whose state is unknown
             self._focus.finish(
                 SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
             )
 
         self._focus_payload = tail if action is SurfaceAction.PRESENT else None
+        self._focus_clear_pending = False
+        self._defer_focus_clear = False  # the cue has its payload; later removals are real
+        self._focus_up = action is SurfaceAction.PRESENT
         if not ipc.submit_runtime_mpv(
             owner=Owner.SUBTITLE,
             identity=transaction,

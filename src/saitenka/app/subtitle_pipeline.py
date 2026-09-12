@@ -194,6 +194,12 @@ class SubtitleModeCoordinator:
     def cue_changed(self, target: SubtitleTarget, *, nonempty: bool) -> None:
         self._renderer.cue_changed(target, nonempty=nonempty)
 
+    def flush_focus(self, target: SubtitleTarget) -> None:
+        """Settle a cue change's deferred focus removal; a renderer without a focus slot has none."""
+        flush = getattr(self._renderer, "flush_focus", None)
+        if flush is not None:
+            flush(target.ipc)
+
     def deactivate(self, target: SubtitleTarget) -> None:
         self._renderer.deactivate(target)
 

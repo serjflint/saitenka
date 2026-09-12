@@ -589,6 +589,162 @@ def test_one_cue_writes_its_color_payload_once(
         result.close()
 
 
+def _focus_writes(ipc: FakeIPC) -> list[tuple]:
+    """Every write to the focus slot, color payloads and removals alike, in order."""
+    from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
+
+    return [
+        command
+        for command in ipc.commands
+        if command and command[0] == "osd-overlay" and command[1] == NATIVE_FOCUS_ID
+    ]
+
+
+def _blank(result: TestSession, ipc: FakeIPC, *, at: float) -> None:
+    """The gap between cues, the way mpv reports it."""
+    ipc.set_prop("sub-text/ass-full", "")
+    ipc.set_prop("sub-start", None)
+    ipc.set_prop("sub-end", None)
+    ipc.set_prop("time-pos", at)
+    ipc.set_prop("sub-text", "")
+    _settle(result, ipc)
+
+
+def test_a_cue_change_replaces_the_color_in_one_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Measured against mpv's frame draw: the color write lands in the cue's own frame only inside a
+    5–20 ms window, and a removal sent ahead of it was a second command mpv parsed first — and a
+    frame composited between the two showed the cue white. The next cue's payload replaces the
+    previous one in a single write."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        assert _color_writes(ipc), "the first cue never wrote its color"
+        before = len(_focus_writes(ipc))
+
+        _show(result, ipc, TIMELINE[1])
+
+        since = _focus_writes(ipc)[before:]
+        assert [command[2] for command in since] == ["ass-events"], since
+    finally:
+        result.close()
+
+
+def test_a_blank_after_a_colored_cue_removes_the_color_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The invariant the single write must not cost: when the line goes away, so does its color —
+    in one removal, not the two the teardown and the empty draw used to send."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        before = len(_focus_writes(ipc))
+
+        _blank(result, ipc, at=TIMELINE[0].end + 0.1)
+
+        since = _focus_writes(ipc)[before:]
+        assert [command[2] for command in since] == ["none"], since
+    finally:
+        result.close()
+
+
+def test_a_seek_keeps_its_pre_armed_color_while_mpv_catches_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `sub-seek` pre-arms the target's color before mpv moves. mpv then, in order: withdraws the
+    rows and timings and blanks the text while the seek is in flight; reports the landed text
+    alone; reports its rows and timings a turn later. Traced on ten seeks: the pre-armed color was
+    up 7 ms after the press, taken down 12 ms later by a geometry refresh that could not key the
+    blank, and put back 30 ms after that — which is the line arriving white and turning blue."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+        _settle(result, ipc)
+        assert _color_writes(ipc)[-1:], "the seek never pre-armed the target's color"
+        before = len(_focus_writes(ipc))
+        landed = TIMELINE[1]
+
+        _blank(result, ipc, at=landed.start + 0.01)  # mid-seek
+        ipc.set_prop("sub-text", landed.text)  # the text half
+        _settle(result, ipc)
+        ipc.set_prop("sub-text/ass-full", _dialogue(landed))  # the rows and timings, a turn later
+        ipc.set_prop("sub-start", landed.start)
+        ipc.set_prop("sub-end", landed.end)
+        _settle(result, ipc)
+
+        since = _focus_writes(ipc)[before:]
+        assert [command[2] for command in since] == [], since
+        assert result.graph.subtitle_presentation.cue.current.boxes
+    finally:
+        result.close()
+
+
+def test_a_cue_owing_no_color_takes_the_previous_color_down(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A line with nothing to color must still clear the one before it: deferring the removal to
+    the draw is only safe because a draw with nothing to show pays it."""
+    silent = (Cue(1.0, 3.0, "猫を見る"), Cue(3.0, 5.0, "……"))
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, silent, scorer=_coloring())
+    try:
+        _show(result, ipc, silent[0])
+        assert _color_writes(ipc)
+        before = len(_focus_writes(ipc))
+
+        _show(result, ipc, silent[1])
+
+        since = _focus_writes(ipc)[before:]
+        assert [command[2] for command in since] == ["none"], since
+    finally:
+        result.close()
+
+
+def test_a_cue_change_with_no_preview_up_sends_no_keybind_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every cue change dismisses the card preview; releasing its keys is a `keybind` command mpv
+    queues ahead of the color write, and on the cues that never showed a preview it released
+    nothing."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        before = len(ipc.commands)
+
+        _show(result, ipc, TIMELINE[1])
+
+        assert not any(c[0] == "keybind" for c in ipc.commands[before:])
+    finally:
+        result.close()
+
+
+def test_a_split_observation_burst_writes_the_color_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mpv reports a cue as three property changes — the text, then its timing — and the reader
+    can deliver them across two turns, so one cue reconciles twice. Both draws build the same
+    bytes; the second was still sent, because the dedupe forgot its payload on every cue change.
+    Field trace: two identical 16-event writes 6 ms apart on every such cue."""
+    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        before = len(_focus_writes(ipc))
+        cue = TIMELINE[1]
+
+        ipc.set_prop("sub-text/ass-full", _dialogue(cue))
+        ipc.set_prop("sub-text", cue.text)
+        _settle(result, ipc)  # the text arrives alone
+        ipc.set_prop("sub-start", cue.start)
+        ipc.set_prop("sub-end", cue.end)
+        ipc.set_prop("time-pos", cue.start + 0.25)
+        _settle(result, ipc)  # its timing follows, and the cue reconciles again
+
+        assert [command[2] for command in _focus_writes(ipc)[before:]] == ["ass-events"]
+    finally:
+        result.close()
+
+
 def test_a_changed_payload_is_always_written(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
