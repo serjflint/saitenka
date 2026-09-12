@@ -4414,8 +4414,28 @@ def test_margins_that_swallow_the_frame_are_rejected():
     would be for a zero- or negative-sized region."""
     with pytest.raises(ValueError, match="osd-margins"):
         _inputs(osd={"mt": 600, "mb": 600})
-    with pytest.raises(ValueError, match="osd-margins"):
-        _inputs(osd={"ml": -1})
+
+
+def test_a_pan_scanned_video_keeps_its_frame():
+    """`panscan`/`video-zoom` scale the video past the window: mpv reports negative margins and
+    libass takes them as-is (`ass.h`: "may be negative if pan-and-scan is used"). A viewer who
+    pressed `W` lost every cue's interaction to a refusal here, while the layout was still exact."""
+    result = _inputs(osd={"mt": 89, "mb": 89, "ml": -17, "mr": -18})
+
+    assert result.margins == (89, 89, -17, -18)
+
+
+def test_a_pan_scanned_blend_surface_starts_past_the_window_edge():
+    """Under `--blend-subtitles` the same negative margins become a wider surface at a negative
+    origin: the boxes are laid out on it and offset onto the screen, clipped rather than moved."""
+    result = _inputs(
+        osd={"mt": 89, "mb": 89, "ml": -17, "mr": -18},
+        frame_size=(3024, 1898),
+        **{"blend-subtitles": True},
+    )
+
+    assert result.frame_size == (3024 + 17 + 18, 1898 - 89 - 89)
+    assert result.box_origin == (-17, 89)
 
 
 @pytest.mark.parametrize("par", [-1.0, float("nan"), float("inf")])

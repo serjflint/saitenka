@@ -540,8 +540,9 @@ def _blend_space(
 
 
 def _validate_frame(frame_size: tuple[int, int], margins: tuple[int, int, int, int]) -> None:
-    if any(value < 0 for value in margins):
-        raise ValueError(f"osd-margins={_short_repr(margins)}")
+    # Negative margins are a pan-scanned or zoomed video: the frame extends past the window, and
+    # both legs take that as-is (libass: "may be negative if pan-and-scan is used", `ass.h`). Only
+    # margins that leave no area to lay text into are meaningless.
     if margins[0] + margins[1] >= frame_size[1] or margins[2] + margins[3] >= frame_size[0]:
         raise ValueError(f"osd-margins={_short_repr(margins)}")
 
