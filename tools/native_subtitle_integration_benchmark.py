@@ -169,6 +169,42 @@ def _measure(call: Callable[[], object]) -> tuple[object, float, float]:
     )
 
 
+def _phase_attribution(
+    phases: list[str],
+    wall: list[float],
+    cpu: list[float],
+    offcpu: list[float],
+    worker: list[int],
+) -> dict[str, dict[str, float]]:
+    """Per-phase wall/cpu/off-cpu, and how much of each phase's tail the geometry lane was awake for.
+
+    A wall breach is otherwise unattributable: the samples are interleaved three phases deep in one
+    array, and the p99 over them is the 4th-worst, so the failing number names neither which
+    interaction was slow nor whether the thread was running at the time.
+    """
+    report: dict[str, dict[str, float]] = {}
+    for phase in dict.fromkeys(phases):
+        rows = [index for index, name in enumerate(phases) if name == phase]
+        phase_wall = [wall[index] for index in rows]
+        phase_offcpu = [offcpu[index] for index in rows]
+        cut = _percentile(phase_offcpu, 0.99)
+        stalled = [index for index in rows if offcpu[index] >= cut]
+        report[phase] = {
+            "samples": len(rows),
+            "wall_p50_ms": statistics.median(phase_wall),
+            "wall_p99_ms": _percentile(phase_wall, 0.99),
+            "cpu_p99_ms": _percentile([cpu[index] for index in rows], 0.99),
+            "offcpu_p99_ms": cut,
+            "offcpu_max_ms": max(phase_offcpu),
+            # 1.0 means every worst-stalled sample overlapped a geometry completion, which reads as
+            # contention with the lane rather than the runner descheduling us.
+            "stall_worker_active_fraction": (
+                sum(1 for index in stalled if worker[index]) / len(stalled) if stalled else 0.0
+            ),
+        }
+    return report
+
+
 def _percentile(samples: list[float], quantile: float) -> float:
     assert samples
     ordered = sorted(samples)
@@ -839,6 +875,12 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         # the positive half of the noise — a cost the run does not pay and cannot fall below.
         cpu_signed_deltas: list[float] = []
         wall_signed_deltas: list[float] = []
+        # Attribution for the wall tail. `interaction_p99_ms` is the 4th-worst of 303 interleaved
+        # samples, so a breach names neither the phase nor whether the time was even spent running.
+        phase_labels: list[str] = []
+        native_first_flags: list[bool] = []
+        offcpu_samples: list[float] = []
+        worker_completions: list[int] = []
         cadence_misses = 0
         geometry_apply_count = 0
         hit_test_count = 0
@@ -872,7 +914,13 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
             # presentation, which is larger than any regression this gate is meant to catch.
             native_first = bool(cue_index % 2)
 
+            def _worker_completed() -> int:
+                worker = native_graph.subtitle_presentation.native
+                assert worker is not None
+                return worker.worker.stats.completed
+
             def _pair(
+                phase: str,
                 baseline_call: Callable[[], object],
                 native_call: Callable[[], object],
                 *,
@@ -900,12 +948,18 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                         after(measured[0])
                     return measured
 
+                # Read outside the timed region on both sides, so the attribution costs the
+                # measurement nothing.
+                completed_before = _worker_completed()
                 if first:
                     native_side = _side(native_call, before_native, after_native)
                     baseline_side = _side(baseline_call, None, after_baseline)
                 else:
                     baseline_side = _side(baseline_call, None, after_baseline)
                     native_side = _side(native_call, before_native, after_native)
+                worker_completions.append(_worker_completed() - completed_before)
+                phase_labels.append(phase)
+                native_first_flags.append(first)
                 baseline_result, baseline_wall, baseline_cpu = baseline_side
                 native_result, native_wall, native_cpu = native_side
                 baseline_latencies.append(baseline_wall)
@@ -914,9 +968,13 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                 cpu_latencies.append(native_cpu)
                 wall_signed_deltas.append(native_wall - baseline_wall)
                 cpu_signed_deltas.append(native_cpu - baseline_cpu)
+                # Wall the calling thread did not spend running. A stall here is contention or the
+                # scheduler; a rise in `cpu` is work. The budget cannot tell them apart alone.
+                offcpu_samples.append(max(0.0, native_wall - native_cpu))
                 return baseline_result, native_result
 
             _, applied = _pair(
+                "present",
                 functools.partial(_present, baseline, text, native=False),
                 functools.partial(_present, native, text, native=True),
             )
@@ -941,6 +999,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                 tooltip_open_count += int(_settle_tooltip(native))
 
             _, hit = _pair(
+                "tooltip",
                 functools.partial(_open_tooltip, baseline),
                 functools.partial(_open_tooltip, native),
                 before_native=_settle_before_hit_test,
@@ -957,6 +1016,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                 )
             )
             _, scrolled = _pair(
+                "scroll",
                 functools.partial(_scroll_and_close_tooltip, baseline),
                 functools.partial(_scroll_and_close_tooltip, native),
             )
@@ -994,6 +1054,13 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "interaction_cpu_delta_samples_ms": cpu_deltas,
         "interaction_wall_delta_samples_ms": wall_deltas,
         "interaction_cpu_delta_signed_samples_ms": cpu_signed_deltas,
+        "interaction_offcpu_samples_ms": offcpu_samples,
+        "interaction_phase_labels": phase_labels,
+        "interaction_native_first_flags": native_first_flags,
+        "interaction_phase_attribution": _phase_attribution(
+            phase_labels, latencies, cpu_latencies, offcpu_samples, worker_completions
+        ),
+        "interaction_offcpu_p99_ms": _percentile(offcpu_samples, 0.99),
         "interaction_clock": "thread_time",
         "interaction_p50_ms": statistics.median(latencies),
         "interaction_p99_ms": interaction_p99,
@@ -1128,6 +1195,21 @@ def _summarize(report: dict, manifest: dict, output: Path) -> str:
             failed = [name for name, ok in checks.items() if not ok]
             if failed:
                 lines.append(f"    {kind} failures: {', '.join(failed)}")
+                if kind == "performance" and any(
+                    "wall" in name or "cpu" in name for name in failed
+                ):
+                    # A latency breach is the 4th-worst of 303 samples from three interleaved
+                    # phases; without this the reader cannot tell which one, or whether the thread
+                    # was running for it.
+                    for phase, row in done.get("interaction_phase_attribution", {}).items():
+                        lines.append(
+                            f"      {phase:8} wall p50 {row['wall_p50_ms']:5.2f}"
+                            f" p99 {row['wall_p99_ms']:6.2f}"
+                            f" | cpu p99 {row['cpu_p99_ms']:5.2f}"
+                            f" | off-cpu p99 {row['offcpu_p99_ms']:6.2f}"
+                            f" max {row['offcpu_max_ms']:6.2f}"
+                            f" | stalls over lane work {row['stall_worker_active_fraction']:.0%}"
+                        )
     lines.append(f"full report: {output}")
     return "\n".join(lines)
 
