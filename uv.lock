@@ -2263,6 +2263,7 @@ dependencies = [
     { name = "cyclopts" },
     { name = "filelock" },
     { name = "fonttools" },
+    { name = "fugashi" },
     { name = "ijson" },
     { name = "keyring", marker = "python_full_version < '3.15' or sys_platform != 'linux'" },
     { name = "msgspec" },
@@ -2270,16 +2271,14 @@ dependencies = [
     { name = "pillow" },
     { name = "platformdirs" },
     { name = "psutil" },
+    { name = "pysubs2" },
     { name = "questionary" },
     { name = "rich" },
-    { name = "saitenka-card" },
     { name = "saitenka-dict" },
-    { name = "saitenka-subtitles" },
-    { name = "saitenka-tokenize" },
-    { name = "saitenka-wordstate" },
     { name = "stamina" },
     { name = "structlog" },
     { name = "tomlkit" },
+    { name = "unidic-lite" },
 ]
 
 [package.optional-dependencies]
@@ -2380,6 +2379,7 @@ requires-dist = [
     { name = "cyclopts", specifier = ">=4.22.1" },
     { name = "filelock", specifier = ">=3.32.0" },
     { name = "fonttools", specifier = ">=4.55" },
+    { name = "fugashi", specifier = ">=1.5.2" },
     { name = "ijson", specifier = ">=3.5.1" },
     { name = "jamdict", marker = "extra == 'jmdict'", specifier = ">=0.1a11.post2" },
     { name = "jamdict-data", marker = "sys_platform != 'win32' and extra == 'jmdict'", specifier = ">=1.5" },
@@ -2395,6 +2395,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.0" },
     { name = "platformdirs", specifier = ">=4.11.0" },
     { name = "psutil", specifier = ">=7.2.2" },
+    { name = "pysubs2", specifier = ">=1.8.1" },
     { name = "questionary", specifier = ">=2.1.1" },
     { name = "resvg-py", marker = "extra == 'images'", specifier = "==0.5.0" },
     { name = "rich", specifier = ">=14.0" },
@@ -2405,16 +2406,13 @@ requires-dist = [
     { name = "saitenka", extras = ["subtitle-geometry"], marker = "extra == 'full'" },
     { name = "saitenka", extras = ["subtitle-geometry"], marker = "extra == 'subtitle-geometry-bundle'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
-    { name = "saitenka-card", editable = "saitenka-card" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "deinflect" },
     { name = "saitenka-dict", editable = "saitenka-dict" },
-    { name = "saitenka-subtitles", editable = "saitenka-subtitles" },
-    { name = "saitenka-tokenize", editable = "saitenka-tokenize" },
-    { name = "saitenka-wordstate", editable = "saitenka-wordstate" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "taffylite", marker = "extra == 'layout-engine'", specifier = ">=0.2.0" },
     { name = "tomlkit", specifier = ">=0.15.1" },
+    { name = "unidic-lite", specifier = ">=1.0.8" },
 ]
 provides-extras = ["deinflect", "layout-engine", "images", "subtitle-geometry", "subtitle-geometry-bundle", "jmdict", "telemetry", "linux-keyring", "minimal", "full"]
 
@@ -2463,20 +2461,6 @@ test = [
 ]
 
 [[package]]
-name = "saitenka-card"
-version = "0.1.0"
-source = { editable = "saitenka-card" }
-dependencies = [
-    { name = "saitenka-tokenize" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "saitenka-tokenize", editable = "saitenka-tokenize" }]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
-
-[[package]]
 name = "saitenka-deinflect"
 version = "0.2.0"
 source = { editable = "deinflect" }
@@ -2498,62 +2482,6 @@ dev = [
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-timeout", specifier = ">=2.4" },
 ]
-
-[[package]]
-name = "saitenka-subtitles"
-version = "0.1.0"
-source = { editable = "saitenka-subtitles" }
-dependencies = [
-    { name = "fonttools" },
-    { name = "numpy" },
-    { name = "pysubs2" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fonttools", specifier = ">=4.55" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "pysubs2", specifier = ">=1.8.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
-
-[[package]]
-name = "saitenka-tokenize"
-version = "0.1.0"
-source = { editable = "saitenka-tokenize" }
-dependencies = [
-    { name = "fugashi" },
-    { name = "unidic-lite" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fugashi", specifier = ">=1.5.2" },
-    { name = "unidic-lite", specifier = ">=1.0.8" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
-
-[[package]]
-name = "saitenka-wordstate"
-version = "0.1.0"
-source = { editable = "saitenka-wordstate" }
-dependencies = [
-    { name = "ankiconnect-client" },
-    { name = "saitenka-tokenize" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ankiconnect-client", editable = "ankiconnect-client" },
-    { name = "saitenka-tokenize", editable = "saitenka-tokenize" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "secretstorage"

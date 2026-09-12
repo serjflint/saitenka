@@ -7,11 +7,13 @@ license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is
 requires-python = ">=3.13"
 dependencies = [
     "ankiconnect-client>=0.1.0",
-    "saitenka-card>=0.1.0",
     "saitenka-dict>=0.1.1",
-    "saitenka-subtitles>=0.1.0",
-    "saitenka-tokenize>=0.1.0",
-    "saitenka-wordstate>=0.1.0",
+    # `saitenka_card`/`_subtitles`/`_tokenize`/`_wordstate` are packages of THIS distribution, not
+    # dependencies — see `[tool.hatch.build.targets.wheel]`. Their own third-party requirements are
+    # therefore ours: fugashi/unidic-lite for the tokenizer, pysubs2 for the subtitle document.
+    "fugashi>=1.5.2",
+    "unidic-lite>=1.0.8",
+    "pysubs2>=1.8.1",
     "pillow>=11.0",
     "fonttools>=4.55",
     "numpy>=2.0",
@@ -123,10 +125,6 @@ saitenka = "saitenka.app.cli:main"
 saitenka-deinflect = { path = "deinflect", editable = true }
 ankiconnect-client = { path = "ankiconnect-client", editable = true }
 saitenka-dict = { path = "saitenka-dict", editable = true }
-saitenka-card = { path = "saitenka-card", editable = true }
-saitenka-subtitles = { path = "saitenka-subtitles", editable = true }
-saitenka-tokenize = { path = "saitenka-tokenize", editable = true }
-saitenka-wordstate = { path = "saitenka-wordstate", editable = true }
 libasslite = { path = "libasslite", editable = true }
 libasslite-bundle = { path = "libasslite-bundle", editable = true }
 
@@ -202,7 +200,18 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/saitenka"]
+# One distribution, several top-level packages. The `saitenka_*` trees are separate packages with
+# their own contracts and test suites — that is the seam — but they ship inside this wheel rather
+# than as distributions of their own, so nothing has to be published for `pip install saitenka` to
+# resolve. A contract forbidding them to import `saitenka` is what keeps the seam real; being a
+# separate artifact on an index never was.
+packages = [
+    "src/saitenka",
+    "saitenka-card/src/saitenka_card",
+    "saitenka-subtitles/src/saitenka_subtitles",
+    "saitenka-tokenize/src/saitenka_tokenize",
+    "saitenka-wordstate/src/saitenka_wordstate",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -228,6 +237,7 @@ markers = [
 [tool.deptry.per_rule_ignores]
 DEP002 = [
     "jamdict-data",     # CC BY-SA DB loaded by jamdict at runtime (never imported)
+    "unidic-lite",      # UniDic payload fugashi loads by path at runtime (never imported)
     "jamdict-data-fix", # Windows drop-in for jamdict-data (never imported)
     "saitenka", # self-reference from the `full`/`minimal` convenience extras
     "saitenka-deinflect", # `deinflect` extra; imported as module saitenka_deinflect (name mismatch)
@@ -904,7 +914,10 @@ pages = { cmd = "bash install/publish-pages.sh" }
 # project `.venv`, incl. in CI's `uv sync --locked --extra full`), so this runs against the already-built
 # env instead of `--with deptry` minting a fresh ephemeral overlay env every gate run. Clean after
 # the [tool.deptry] ignores (declared rich, forward-declared filelock). JSON for agents: add `-o dep.json`.
-deps = { shell = "uv run --extra full deptry src" }
+# Scans every package this wheel ships, not just `src`: the bundled `saitenka_*` trees are where
+# fugashi/unidic-lite/pysubs2 are imported, so scanning `src` alone reports them unused and the
+# bundled packages themselves as transitive.
+deps = { shell = "uv run --extra full deptry src saitenka-card/src saitenka-subtitles/src saitenka-tokenize/src saitenka-wordstate/src" }
 # ADVISORY — cross-module dead code (ruff `F` only catches unused imports/locals). vulture with a
 # whitelist for interface-mandated params (structlog processors, OTel exporter overrides, signal
 # handlers) that are "unused" by signature but required. Tune with --min-confidence.
