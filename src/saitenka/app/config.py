@@ -366,7 +366,12 @@ class SubtitleGeometryOptions:
         default=None,
         metadata={"help": "Optional explicit path to the system libass library."},
     )
-    cache_max: int = field(default=3, metadata={"help": "Current/lookahead geometry cache bound."})
+    #: Entries, not bytes — the coverage masks carry their own byte budget, so this bounds hit-box
+    #: lists. `2 * lookahead + 1`: the forward window, the cue on screen, and the same reach behind
+    #: it. Sized to the forward window alone (it was `lookahead + 1`), a cue's own speculation
+    #: evicted the cue it was speculating for, so stepping back re-rendered every time — and
+    #: stepping back is exactly what a viewer does when a line did not become scannable.
+    cache_max: int = field(default=6, metadata={"help": "Current/lookahead geometry cache bound."})
     lookahead: int = field(default=2, metadata={"help": "Static cues to render ahead."})
 
 
@@ -458,15 +463,19 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     native_visible = values.get("native_visible", defaults.native_visible)
     if not isinstance(native_visible, bool):
         raise TypeError("subtitle_geometry.native_visible must be a boolean")
-    cache_max = values.get("cache_max", defaults.cache_max)
-    if isinstance(cache_max, bool) or not isinstance(cache_max, int) or cache_max <= 0:
-        raise ValueError("subtitle_geometry.cache_max must be a positive integer")
     library_path = values.get("library_path", defaults.library_path)
     if library_path is not None and not isinstance(library_path, str):
         raise ValueError("subtitle_geometry.library_path must be a string")
     lookahead = values.get("lookahead", defaults.lookahead)
     if isinstance(lookahead, bool) or not isinstance(lookahead, int) or lookahead < 0:
         raise ValueError("subtitle_geometry.lookahead must be a non-negative integer")
+    # Derived when unset, because the bound is a statement about the lookahead: a deeper window
+    # with the stock bound reproduces the forward-only sizing that made every backward step
+    # re-render. The floor is the maintainer's, above what the default lookahead derives. An
+    # explicit `cache_max` is still honoured — that trade is the user's to make.
+    cache_max = values.get("cache_max", max(defaults.cache_max, 2 * lookahead + 1))
+    if isinstance(cache_max, bool) or not isinstance(cache_max, int) or cache_max <= 0:
+        raise ValueError("subtitle_geometry.cache_max must be a positive integer")
     native_formats = values.get("native_formats", defaults.native_formats)
     if not isinstance(native_formats, str):
         raise TypeError("subtitle_geometry.native_formats must be a string")
@@ -477,6 +486,31 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
         cache_max=cache_max,
         lookahead=lookahead,
     )
+
+
+def resolve_jlpt_underlines(cfg: dict | None = None) -> bool:
+    """Whether words carry their JLPT level as an underline — ``[scoring] jlpt_underlines``.
+
+    Not `[palette]`, though that is where a reader looks for how a word is marked: this gates the
+    *verdict* (`Scorer.enable_jlpt`), which `episode_analysis` reads and a mined card carries. A
+    look-and-feel table that silently changed what a word is classified as would be the inference
+    AGENTS.md forbids.
+
+    Off is a real setting, not only a diagnostic: underlines dominate the ASS payload handed to mpv
+    per redraw (four underlines on five colored tokens is 21 events against 9), and that payload's
+    cost lands on mpv's side of a boundary nothing here measures.
+    """
+    if cfg is None:
+        cfg = load_config()
+    raw = cfg.get("scoring")
+    if raw is None:
+        return True
+    if not isinstance(raw, dict):
+        raise TypeError("scoring must be a table")
+    value = raw.get("jlpt_underlines", True)
+    if not isinstance(value, bool):
+        raise TypeError("scoring.jlpt_underlines must be a boolean")
+    return value
 
 
 def resolve_resync_timeout(cfg: dict | None = None) -> int:

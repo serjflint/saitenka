@@ -2,7 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 from enum import StrEnum
+
+
+def cue_digest(text: str) -> str:
+    """The join key relating a cue's spans to its geometry's.
+
+    A digest, not the text: a bundle gets shared and a subtitle line is the user's content. It
+    identifies *content*, so a repeated line reuses its handle — a caller needing occurrences must
+    separate them itself.
+
+    Lives in this leaf so the geometry side can reach it without depending on the renderer.
+    """
+    return hashlib.blake2s(text.encode(), digest_size=4).hexdigest()
 
 
 class GeometryOutcome(StrEnum):
@@ -102,3 +115,12 @@ def geometry_failure_reason(error: BaseException | str) -> tuple[str, GeometryEr
         "subtitle-frame-unsupported" if code in _UNSUPPORTED_CODES else "geometry-provider-failed"
     )
     return reason, code
+
+
+class UnpaintableFrame(ValueError):
+    """A speculated frame with no interaction-eligible tokens — a music marker, a lone sign.
+
+    Its own type because the queuer has to tell it from a transient build failure: this verdict is
+    stable for that frame and worth remembering, and a retryable one is not. Lives in this leaf so
+    the broker can raise on it without depending on the feature that raises it.
+    """

@@ -11,11 +11,12 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 from saitenka_subtitles.geometry import GeometrySnapshot
 
-from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
+from saitenka import otel_metrics
+from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason, UnpaintableFrame
 from saitenka.runtime import EffectFinished, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, LocalJobLane, configure_lane
 
@@ -68,7 +69,7 @@ class GeometryJob:
 
     worker: SubtitleGeometryWorker
     current: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None
-    prefetch: tuple[str, tuple[int, GeometryRequestBuilder]] | None
+    prefetch: tuple[str, int, GeometryRequestBuilder] | None
 
 
 class _Prefetched(NamedTuple):
@@ -120,18 +121,35 @@ class SubtitleGeometryWorker:
         self._cache: OrderedDict[str, GeometrySnapshot] = OrderedDict()
         self._condition = threading.Condition()
         self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
-        self._prefetch_pending: OrderedDict[str, tuple[int, GeometryRequestBuilder]] = OrderedDict()
+        self._prefetch_pending: OrderedDict[str, GeometryRequestBuilder] = OrderedDict()
         self._prefetched: OrderedDict[str, _Prefetched] = OrderedDict()
+        #: Frames whose build reported they have nothing to paint — a music marker, a lone sign.
+        #: Whether one is paintable is only known on the worker, after tokenizing, so the queuer
+        #: cannot tell them apart up front and spends its whole window on them. Two silent cues in
+        #: a row were enough: the spoken line after them was never speculated and always rendered
+        #: cold. Remembering the verdict makes the second pass over the same stretch skip them.
+        self._unpaintable: OrderedDict[str, None] = OrderedDict()
         self._prefetch_inflight_key: str | None = None
+        #: Speculation's own fence. The live generation moves on the arrival a prefetch exists for,
+        #: so it cannot answer for one. This moves only when the document, fonts or source change —
+        #: the only thing making a filed result wrong rather than merely early.
+        self._prefetch_epoch = 0
         self._prefetch_waiters: dict[str, GeometryReservation] = {}
         self._provenance: OrderedDict[str, GeometryCacheReason] = OrderedDict()
         self._history_lossy = False
         self._epoch_cause: GeometryCacheReason | None = None
         self._inflight = False
         self._pending_settled: Callable[[], None] | None = None
-        #: Settlements owed by the job now executing — a current request's own, plus any caller
-        #: that attached to an in-flight speculation instead of submitting its own job.
-        self._settling: list[Callable[[], None]] = []
+        #: Settlements owed, per issued job — a current request's own, plus any caller that attached
+        #: to an in-flight speculation instead of submitting its own job. Keyed by issue rather than
+        #: pooled, because `_idle` clears `_inflight` before the terminal fires: the next cue is
+        #: claimed inside that window, and a shared bag hands its callback to the previous job's
+        #: terminal. That paid it against a snapshot its cue had not produced yet, and left the
+        #: result that did arrive with no callback to publish it — the cue stayed uncolored until a
+        #: seek rescheduled it.
+        self._owed: dict[int, list[Callable[[], None]]] = {}
+        #: The issue the attach branch adds to: the speculation currently executing.
+        self._inflight_issue: int | None = None
         self._issued = 0
         self._closed = False
         self._submitted = 0
@@ -183,8 +201,8 @@ class SubtitleGeometryWorker:
                 self._prefetch_waiters[work_key] = reservation
                 # No job of our own: the speculation already executing is what will answer, so its
                 # terminal owes this caller the settlement.
-                if on_settled is not None:
-                    self._settling.append(on_settled)
+                if on_settled is not None and self._inflight_issue is not None:
+                    self._owed.setdefault(self._inflight_issue, []).append(on_settled)
                 self._record_submit_latency(started)
                 return True
             if work_key is not None and work_key in self._prefetch_pending:
@@ -203,14 +221,32 @@ class SubtitleGeometryWorker:
         elapsed_us = (time.perf_counter_ns() - started + 999) // 1_000
         self._max_submit_us = max(self._max_submit_us, elapsed_us)
 
-    def prefetch(self, key: str, generation: int, build: GeometryRequestBuilder) -> bool:
-        if generation != self._coordinator.generation:
-            return False
+    def is_unpaintable(self, key: str) -> bool:
+        """Whether a build already reported this frame has nothing to paint.
+
+        Asked before a boundary spends the caller's lookahead window, which is the whole point: two
+        music markers in a row consumed a window of two and the spoken line behind them was never
+        speculated.
+        """
+        with self._condition:
+            return key in self._unpaintable
+
+    def prefetch(self, key: str, build: GeometryRequestBuilder) -> bool:
+        """Queue one speculation. Deliberately *not* fenced by the live generation.
+
+        A prefetch is work about a cue that has not arrived. Gating it on the generation gated it on
+        the arrival it was built for: the fence moves two or three times per cue, so a speculation
+        was near-certain to be refused, dropped mid-render, or have its result discarded before
+        anything could want it. What decides whether it is still valid is render identity — the
+        document, fonts and frame it was built from — and a change to any of those already clears
+        these maps through `invalidate_cache`. `publish_prefetched` rebinds the generation, so a
+        result outliving the fence it was built under is the design, not a leak.
+        """
         with self._condition:
             if self._closed or key in self._prefetched:
                 return False
             self._prefetch_pending.pop(key, None)
-            self._prefetch_pending[key] = (generation, build)
+            self._prefetch_pending[key] = build
             while len(self._prefetch_pending) > self._cache_max:
                 dropped, _item = self._prefetch_pending.popitem(last=False)
                 self._prefetch_dropped += 1
@@ -242,7 +278,7 @@ class SubtitleGeometryWorker:
                 on_finished=self._delivered,
             ):
                 return
-            self._unwind_refusal(job)
+            self._unwind_refusal(job, identity[1])
 
     def _claim_next(self) -> tuple[GeometryJob, tuple[str, int]] | None:
         """Take the next item and mark the lane busy, or `None` when there is nothing to hand over."""
@@ -252,34 +288,35 @@ class SubtitleGeometryWorker:
             pending, self._pending = self._pending, None
             if pending is not None:
                 job = GeometryJob(self, pending, None)
-                if self._pending_settled is not None:
-                    self._settling.append(self._pending_settled)
+                owed = [] if self._pending_settled is None else [self._pending_settled]
                 self._pending_settled = None
             elif self._prefetch_pending:
-                entry = self._prefetch_pending.popitem(last=False)
-                self._prefetch_inflight_key = entry[0]
-                job = GeometryJob(self, None, entry)
+                key, build = self._prefetch_pending.popitem(last=False)
+                self._prefetch_inflight_key = key
+                job = GeometryJob(self, None, (key, self._prefetch_epoch, build))
+                owed = []
             else:
                 return None
             self._inflight = True
             self._issued += 1
+            self._owed[self._issued] = owed
+            self._inflight_issue = self._issued
             return job, (GEOMETRY_LANE, self._issued)
 
-    def _unwind_refusal(self, job: GeometryJob) -> None:
+    def _unwind_refusal(self, job: GeometryJob, issue: int) -> None:
         """Give back what a refused submit claimed, and pay what its terminal now never will.
 
         Refused admission is dropped work, not queued work: left marked in flight it stalls every
         later request behind it. Left queued, its settlements are paid by the NEXT terminal, running
         one cue's callback against another cue's snapshot with its owner nowhere in the traceback.
 
-        The drain takes all of `_settling`, not this job's share, and that is safe for a narrower
-        reason than "they are all ours": `_idle` clears `_inflight` before its terminal fires, so a
-        pump can claim and be refused while a previous job's callbacks are still queued. Every
-        `_idle` site sits downstream of the publish those callbacks report, so paying them here is
-        early rather than wrong. Move `_idle` above a publish and that stops being true.
+        Only this job's share is paid. Draining every queued callback took the ones belonging to a
+        job still waiting to run, which is a different bug in the same shape.
         """
         with self._condition:
             self._inflight = False
+            if issue == self._inflight_issue:
+                self._inflight_issue = None
             if job.current is not None:
                 self._superseded += 1
             else:
@@ -291,7 +328,7 @@ class SubtitleGeometryWorker:
                 self._remember_provenance(key, GeometryCacheReason.PREFETCH_SUPERSEDED)
                 self._prefetch_inflight_key = None
                 self._prefetch_dropped += 1
-            owed, self._settling = self._settling, []
+            owed = self._owed.pop(issue, [])
             self._condition.notify_all()
         for settle in owed:
             settle()
@@ -304,14 +341,22 @@ class SubtitleGeometryWorker:
             assert job.prefetch is not None
             self._process_prefetch(job.prefetch)
 
-    def _delivered(self, _completion: EffectFinished) -> None:
+    def _delivered(self, completion: EffectFinished) -> None:
         """The lane terminal. Admission of the next job happens here rather than at the end of the
         handler, so work enters from the thread that consumes terminals.
 
-        It also pays out the settlements this job owed, which is how a result reaches the host.
+        It also releases the claim slot and pays out the settlements this job owed, which is how a
+        result reaches the host. The completion's identity says which job that is — jobs stay
+        addressed by identity even though the slot now admits one at a time, because a refusal and a
+        close both retire jobs whose terminals never arrive in that order.
         """
+        _lane, issue = cast("tuple[str, int]", completion.identity)
         with self._condition:
-            settling, self._settling = self._settling, []
+            self._inflight = False
+            settling = self._owed.pop(issue, [])
+            if issue == self._inflight_issue:
+                self._inflight_issue = None
+            self._condition.notify_all()
         for settle in settling:
             settle()
         self._pump()
@@ -371,7 +416,12 @@ class SubtitleGeometryWorker:
 
     def invalidate_cache(self, *, cause: GeometryCacheReason | None = None) -> None:
         with self._condition:
+            self._prefetch_epoch += 1
             self._superseded += len(self._prefetch_waiters)
+            # Eligibility is a fact about the frame's text, but the key is not: it carries the
+            # render inputs, so a verdict kept across an epoch would be filed under a key nothing
+            # asks for again. Cheaper to re-earn than to reason about.
+            self._unpaintable.clear()
             self._cache.clear()
             self._prefetched.clear()
             self._prefetch_pending.clear()
@@ -385,6 +435,14 @@ class SubtitleGeometryWorker:
         generation = self._coordinator.invalidate()
         self.invalidate_cache(cause=cause)
         return generation
+
+    def retire_live(self) -> int:
+        """Move the publish fence, keeping what was rendered for cues still to come.
+
+        The cue on screen changing retires that cue's result and says nothing about the document the
+        next one renders from. Render identity still goes through `invalidate`.
+        """
+        return self._coordinator.invalidate()
 
     def _cached(self, request: GeometryRequest) -> GeometrySnapshot | None:
         key = request.cache_key()
@@ -474,7 +532,19 @@ class SubtitleGeometryWorker:
                 self._prefetched[cue] = entry._replace(snapshot=stripped)
 
     def _idle(self) -> None:
-        self._inflight = False
+        """The body is done. The claim slot is NOT released here — its terminal releases it.
+
+        Clearing `_inflight` here made the slot mean "a render is running" while settlement and the
+        next admission both hang off the terminal. The next cue was claimed in the gap between the
+        two and inherited the previous job's completion: settled before its own render existed,
+        against the earlier cue's geometry, leaving the render that did arrive with nobody to
+        publish it. Releasing on the terminal makes the two agree, so the gap has no states to leak
+        through.
+
+        Safe against wedging because a completion is delivered exactly once for every admitted job:
+        `_Lane` completes a handler that raised as FAILED and everything still pending as CANCELLED
+        on close, and a refused admission never occupies the slot at all.
+        """
         self._condition.notify_all()
 
     def _drop_prefetch(self, key: str, error: Exception | None = None) -> None:
@@ -482,6 +552,11 @@ class SubtitleGeometryWorker:
             waiter = self._prefetch_waiters.pop(key, None)
             self._prefetch_inflight_key = None
             self._prefetch_dropped += 1
+            if isinstance(error, UnpaintableFrame):
+                self._unpaintable.pop(key, None)
+                self._unpaintable[key] = None
+                while len(self._unpaintable) > self._cache_max:
+                    self._unpaintable.popitem(last=False)
         failure_recorded = bool(
             waiter is not None
             and error is not None
@@ -495,18 +570,15 @@ class SubtitleGeometryWorker:
                     self._superseded += 1
             self._idle()
 
-    def _process_prefetch(self, item: tuple[str, tuple[int, GeometryRequestBuilder]]) -> None:
-        key, (generation, build) = item
+    def _process_prefetch(self, item: tuple[str, int, GeometryRequestBuilder]) -> None:
+        key, epoch, build = item
         try:
             request = build()
         except Exception as error:  # noqa: BLE001 -- a promoted waiter turns this into a failure
             self._drop_prefetch(key, error)
             return
-        if generation != self._coordinator.generation:
-            self._drop_prefetch(key)
-            return
         outcome = self._coordinator.render_prefetch_outcome(request)
-        waiter = self._cache_prefetch_outcome(key, generation, request, outcome.snapshot)
+        waiter = self._cache_prefetch_outcome(key, epoch, request, outcome.snapshot)
         published, failure_recorded = self._resolve_prefetch_waiter(waiter, request, outcome)
         with self._condition:
             if waiter is not None:
@@ -522,14 +594,16 @@ class SubtitleGeometryWorker:
     def _cache_prefetch_outcome(
         self,
         key: str,
-        generation: int,
+        epoch: int,
         request: GeometryRequest,
         result: GeometrySnapshot | None,
     ) -> GeometryReservation | None:
         with self._condition:
             waiter = self._prefetch_waiters.pop(key, None)
             self._prefetch_inflight_key = None
-            if result is None or generation != self._coordinator.generation:
+            # The epoch, not the generation: a source or font change mid-render means this was
+            # built from a document that is gone, and filing it would resurrect a cleared cache.
+            if result is None or epoch != self._prefetch_epoch:
                 self._prefetch_dropped += 1
                 return waiter
             cache_key = request.cache_key()
@@ -591,9 +665,21 @@ class SubtitleGeometryWorker:
             return
         ticket = self._coordinator.bind(reservation, request)
         if ticket is None:
+            # `bind` refuses on a moved fence, which is the one way a current request is dropped
+            # without either publishing or failing.
+            with otel_metrics.traced("subtitle_geometry_lane") as span:
+                span.set("outcome", "fence-moved")
+                span.set("timestamp_ms", request.timestamp_ms)
             self._finish_current(published=False)
             return
         cached = self._cached(ticket.request)
+        # The result cache, distinct from the prefetch map `subtitle_geometry_cache` reports. Its
+        # key includes `timestamp_ms`, so a cue re-requested at a different instant within itself
+        # misses and re-renders — invisible until this span, because a hit simply skips the render.
+        with otel_metrics.traced("subtitle_geometry_lane") as span:
+            span.set("outcome", "cached" if cached is not None else "rendering")
+            span.set("timestamp_ms", request.timestamp_ms)
+            span.set("result_cache_entries", len(self._cache))
         if cached is not None:
             published = self._coordinator.publish(ticket, cached)
             with self._condition:
@@ -683,7 +769,9 @@ class SubtitleGeometryWorker:
             self._cache.clear()
             # Same door as a refusal: no terminal is coming, so an unpaid settlement is one its
             # caller waits on forever. Paying it after close is what makes the wait bounded.
-            owed, self._settling = self._settling, []
+            owed = [settle for job in self._owed.values() for settle in job]
+            self._owed.clear()
+            self._inflight_issue = None
             self._pending_settled = None
             self._condition.notify_all()
         for settle in owed:

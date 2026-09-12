@@ -102,6 +102,12 @@ class GeometryPrefetchResolution:
     error: Exception | None = None
 
 
+#: Passed by a caller that means "whatever is published is now wrong" regardless of the cue --
+#: a source change, a font change, a close. Distinct from `None`, which is a real cue identity
+#: (no cue on screen) and must compare equal to itself.
+_ALWAYS_NEW = object()
+
+
 class SubtitleModeCoordinator:
     """Reject obsolete geometry while keeping provider ownership out of ``SessionController``."""
 
@@ -118,6 +124,7 @@ class SubtitleModeCoordinator:
         self._state_lock = threading.Lock()
         self._backend_lock = threading.Lock()
         self._generation = 0
+        self._cue_identity: object = _ALWAYS_NEW
         self._request_sequence = 0
         self._current: GeometrySnapshot | None = None
         self._last_error: str | None = None
@@ -187,6 +194,12 @@ class SubtitleModeCoordinator:
     def cue_changed(self, target: SubtitleTarget, *, nonempty: bool) -> None:
         self._renderer.cue_changed(target, nonempty=nonempty)
 
+    def flush_focus(self, target: SubtitleTarget) -> None:
+        """Settle a cue change's deferred focus removal; a renderer without a focus slot has none."""
+        flush = getattr(self._renderer, "flush_focus", None)
+        if flush is not None:
+            flush(target.ipc)
+
     def deactivate(self, target: SubtitleTarget) -> None:
         self._renderer.deactivate(target)
 
@@ -220,10 +233,23 @@ class SubtitleModeCoordinator:
             self._last_error = None
             return error
 
-    def invalidate(self) -> int:
+    def invalidate(self, identity: object = _ALWAYS_NEW) -> int:
+        """Retire the published geometry and move the fence.
+
+        The fence orders publishes against the *live cue*, so it moves on cue identity and holds
+        otherwise. mpv publishes `sub-text` for the blank gap between cues and re-publishes an
+        unchanged line; each of those moving the fence retires every speculation and in-flight
+        render behind it.
+
+        Callers meaning "whatever is published is now wrong" — a source or font change — pass no
+        identity.
+        """
         with self._state_lock:
             if self._closed:
                 return self._generation
+            if identity is not _ALWAYS_NEW and identity == self._cue_identity:
+                return self._generation
+            self._cue_identity = identity
             self._generation += 1
             self._current = None
             self._last_error = None
@@ -330,7 +356,10 @@ class SubtitleModeCoordinator:
     def render_prefetch_outcome(self, request: GeometryRequest) -> GeometryPrefetchResolution:
         with self._backend_lock:
             with self._state_lock:
-                if self._closed or request.generation != self._generation:
+                # Deliberately not fenced by the generation: this renders from the request's own
+                # document and never reads or writes `_current`, so a speculation outliving the cue
+                # it was queued behind is the point. `publish` still holds the fence.
+                if self._closed:
                     return GeometryPrefetchResolution(None)
             if self._backend is None:
                 return GeometryPrefetchResolution(None)

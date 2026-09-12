@@ -851,6 +851,13 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         inputs = translation_observation.current()
         translation_controller.secondary_text_changed(replace(inputs, secondary_text=value))
 
+    # The sidebar follows the active line on the events that move it — a settled cue and a
+    # render-space change (its geometry key) — not on every turn ahead of the cue settle.
+    cue_coordinator.on_settled(sidebar_controller.follow)
+
+    def render_space_changed() -> None:
+        presentation.redraw_after_resize()  # follows the sidebar itself once the OSD is re-read
+
     playback_projection = playback_projection_ref.bind(
         PlaybackProjection(
             PlaybackApplication(
@@ -860,7 +867,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 subtitle_selection_changed=subtitle_selection_changed,
                 subtitle_timing_changed=subtitle_timing_changed,
                 geometry_input_changed=geometry_input_changed,
-                render_space_changed=presentation.redraw_after_resize,
+                render_space_changed=render_space_changed,
                 end_of_file_changed=episode_watch.advance_if_reached,
                 pause_changed=pause_changed,
                 secondary_text_changed=secondary_text_changed,

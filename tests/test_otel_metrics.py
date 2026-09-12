@@ -312,3 +312,61 @@ def test_snapshot_sums_a_labeled_histogram_across_every_label():
     hist = snap["saitenka.dict_sql.duration_ms"]
     assert hist["count"] == 3
     assert hist["sum"] == 510
+
+
+@pytest.fixture
+def color_clock(monkeypatch):
+    """A hand-advanced clock for the color wait, and a wait slot reset either side of the test."""
+    now = [0.0]
+    monkeypatch.setattr(otel_metrics.time, "perf_counter", lambda: now[0])
+    otel_metrics.forget_color_wait()
+    yield now
+    otel_metrics.forget_color_wait()
+
+
+@pytest.mark.usefixtures("registered")
+def test_color_late_counts_only_the_cue_that_missed_the_budget(color_clock):
+    # The white-then-blue flash as a number: the histogram times every cue that colored, and the
+    # counter bumps only for the one whose color arrived a frame or more after the line did.
+    otel_metrics.record_cue_arrival("slow")
+    color_clock[0] += (otel_metrics.COLOR_LATENCY_BUDGET_MS + 1) / 1000.0
+    otel_metrics.record_color_up("slow")
+    otel_metrics.record_cue_arrival("quick")
+    color_clock[0] += 0.001
+    otel_metrics.record_color_up("quick")
+    snap = otel_metrics.snapshot()
+    assert snap["saitenka.subtitle.color_late"]["value"] == 1
+    assert snap["saitenka.subtitle.color_latency_ms"]["count"] == 2
+
+
+@pytest.mark.usefixtures("registered")
+def test_a_color_for_another_cue_leaves_the_wait_open(color_clock):
+    # A color landing for a line already replaced must not close the current line's wait, or the
+    # cue on screen reports the previous one's latency and its own miss never appears.
+    otel_metrics.record_cue_arrival("current")
+    color_clock[0] += 1.0
+    otel_metrics.record_color_up("departed")
+    assert "saitenka.subtitle.color_latency_ms" not in otel_metrics.snapshot()
+
+
+@pytest.mark.usefixtures("registered")
+def test_re_observing_one_cue_keeps_the_wait_it_opened(color_clock):
+    # mpv reports a cue in halves, so the same digest arrives twice. The viewer has been waiting
+    # since the first, and restarting the clock would report only the second half's share.
+    otel_metrics.record_cue_arrival("halves")
+    color_clock[0] += 0.050
+    otel_metrics.record_cue_arrival("halves")
+    color_clock[0] += 0.010
+    otel_metrics.record_color_up("halves")
+    assert otel_metrics.snapshot()["saitenka.subtitle.color_latency_ms"]["max"] == pytest.approx(
+        60.0, abs=0.5
+    )
+
+
+@pytest.mark.usefixtures("registered")
+def test_a_forgotten_wait_records_nothing(color_clock):
+    otel_metrics.record_cue_arrival("dropped")
+    otel_metrics.forget_color_wait()
+    color_clock[0] += 1.0
+    otel_metrics.record_color_up("dropped")
+    assert "saitenka.subtitle.color_latency_ms" not in otel_metrics.snapshot()

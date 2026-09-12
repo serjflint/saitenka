@@ -205,6 +205,7 @@ def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
     ports.preview.store.dispatch(events.PreviewShown(pv, audio_path))
     render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width)
     _grab_preview_keys(ports.ipc, active_bindings(ports.keys, "preview"))
+    ports.preview.panel.keys_grabbed = True
 
 
 def render_preview(
@@ -239,13 +240,19 @@ def hide_preview(ports: PreviewPorts) -> None:
     _stop_preview_audio(ports.preview.panel)
     ports.surfaces.remove(OverlayId.PREVIEW)
     ports.preview.store.dispatch(events.PreviewDismissed())
-    ports.preview.panel.clear()
+    panel = ports.preview.panel
+    panel.clear()
+    if not panel.keys_grabbed:
+        return  # nothing was bound: every cue change dismisses, and most have no preview up
     _release_preview_keys(
         ports.ipc,
         active_bindings(ports.keys, "preview"),
         help_open=ports.help_open,
         tip_keys_bound=ports.tip_keys_bound,
     )
+    # An open help overlay owns Esc and the release stands down; the keys stay owed, so the next
+    # dismiss retries rather than leaving them bound to a preview that is gone.
+    panel.keys_grabbed = ports.help_open
 
 
 def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:

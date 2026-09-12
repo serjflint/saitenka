@@ -5,6 +5,7 @@ from typing import cast
 
 import pytest
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
+from saitenka_tokenize.japanese import Token
 from session_behavior_trace import SessionTrace, _visible_surfaces
 from util import FakeIPC, await_ready, bare_gateway
 
@@ -15,7 +16,13 @@ from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
+from saitenka.app.token_cache import TokenizedCue
 from saitenka.mpvio.ipc import IPCRequest
+from saitenka.runtime import events
+
+
+def _token(surface: str) -> Token:
+    return Token(surface=surface, lemma=surface, reading="", pos="名詞", start=0, end=len(surface))
 
 
 class _VisibilityIPC(FakeIPC):
@@ -118,6 +125,13 @@ def test_changed_cue_retires_interaction_before_later_batch_command(
     )
     reader.graph.playback.start_session()
     reader.graph.cue.set_subtitle("old")
+    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
+    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
+    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
+    # assertion below then rests on it.
+    reader.graph.subtitle_presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     copied: list[str] = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
@@ -173,6 +187,154 @@ def test_changed_cue_retires_interaction_before_later_batch_command(
     reader.close()
 
 
+def _focus_writes(ipc) -> list[str]:
+    from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
+
+    return [
+        command[2]
+        for command in ipc.commands
+        if command and command[0] == "osd-overlay" and command[1] == NATIVE_FOCUS_ID
+    ]
+
+
+def _native_with_color_up(make_session):
+    """A session whose native focus slot carries a payload — the state every cue change starts
+    from once a colored line has been on screen."""
+    ipc = _VisibilityIPC()
+    ipc.props.update({"sid": 2, "sub-visibility": False})
+    renderer = NativeVisibleRenderer()
+    reader = make_session(
+        ipc,
+        infrastructure=SessionInfrastructure(renderer=renderer),
+        options=ReaderOptions().with_overrides(prefetch=False),
+    )
+    presentation = reader.graph.subtitle_presentation
+    reader.graph.playback.install_seed({"sub-text": "active"})
+    presentation.pipeline.cue_changed(presentation.target(), nonempty=True)
+    await_ready(
+        lambda: _runtime_settled(reader), "native subtitle setup did not settle", pump=reader.pump
+    )
+    presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
+    presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
+    renderer.use_native(presentation.target())
+    reader.graph.tooltip.select(0)
+    presentation.pipeline.draw_current(presentation.target())
+    await_ready(
+        lambda: bool(_visible_surfaces(ipc.commands)),
+        "native subtitle surface did not settle",
+        pump=reader.pump,
+    )
+    return reader, ipc, presentation, renderer
+
+
+def test_a_cue_change_whose_first_draw_has_nothing_to_show_does_not_remove_before_it_paints(
+    make_session,
+) -> None:
+    """Inside one cue change the first draw often has boxes and no styles yet, and the styled draw
+    follows in the same call. A removal between them was a second command for mpv, and a frame
+    composited in the gap showed the line white. The removal is owed only if nothing replaces it."""
+    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
+    target = presentation.target()
+    before = len(_focus_writes(ipc))
+
+    presentation.pipeline.cue_changed(target, nonempty=True)
+    renderer.use_native(target)
+    reader.graph.tooltip.retire_selection()
+    presentation.cue.replace_geometry(boxes=[])
+    presentation.pipeline.draw_current(target)  # nothing to show yet
+    presentation.cue.replace_geometry(boxes=[WordBox(0, 30, 10, 20, 20)])  # a new place
+    reader.graph.tooltip.select(0)
+    presentation.pipeline.draw_current(target)  # now there is
+    presentation.pipeline.flush_focus(target)
+
+    assert _focus_writes(ipc)[before:] == ["ass-events"]
+    reader.close()
+
+
+def test_a_cue_change_whose_payload_is_already_up_writes_nothing_and_keeps_it(make_session) -> None:
+    """The same bytes again — a re-observation of one cue — must neither be rewritten nor
+    removed: the deferred removal is cancelled by the match, not paid at the flush."""
+    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
+    target = presentation.target()
+    before = len(_focus_writes(ipc))
+
+    presentation.pipeline.cue_changed(target, nonempty=True)
+    renderer.use_native(target)
+    reader.graph.tooltip.retire_selection()
+    presentation.cue.replace_geometry(boxes=[])
+    presentation.pipeline.draw_current(target)
+    presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])  # the same place
+    reader.graph.tooltip.select(0)
+    presentation.pipeline.draw_current(target)
+    presentation.pipeline.flush_focus(target)
+
+    assert _focus_writes(ipc)[before:] == []
+    reader.close()
+
+
+def test_a_cue_change_that_never_paints_still_takes_the_previous_color_down(make_session) -> None:
+    """The control: deferring the removal is only safe because the flush pays it."""
+    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
+    target = presentation.target()
+    before = len(_focus_writes(ipc))
+
+    reader.graph.playback.dispatch(events.CueTextReplaced("next"))  # another line, as production
+    presentation.pipeline.cue_changed(target, nonempty=True)
+    renderer.use_native(target)
+    reader.graph.tooltip.retire_selection()
+    presentation.cue.replace_geometry(boxes=[])
+    presentation.pipeline.draw_current(target)
+    presentation.pipeline.flush_focus(target)
+
+    assert _focus_writes(ipc)[before:] == ["none"]
+    reader.close()
+
+
+def test_a_cue_re_observed_in_halves_keeps_the_color_it_already_has(make_session) -> None:
+    """A seek pre-arms the target's color; mpv then reports that cue as text first and rows a turn
+    later. The text half has nothing to measure against, so geometry degrades to pending and the
+    draw has nothing to show — and both used to take the cue's own color down, to be rewritten
+    when the rows landed. The same line, colored, white, colored again."""
+    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
+    target = presentation.target()
+    before = len(_focus_writes(ipc))
+
+    presentation.pipeline.cue_changed(target, nonempty=True)
+    renderer.use_native(target)
+    reader.graph.tooltip.retire_selection()
+    presentation.cue.replace_geometry(boxes=[])
+    renderer.degrade_geometry(target)  # rows not observed yet: pending, not gone
+    presentation.pipeline.draw_current(target)
+    presentation.pipeline.flush_focus(target)
+    assert _focus_writes(ipc)[before:] == []
+
+    presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])  # the rows land
+    reader.graph.tooltip.select(0)
+    presentation.pipeline.draw_current(target)
+
+    assert _focus_writes(ipc)[before:] == []  # what is up is what the cue wants
+    reader.close()
+
+
+def test_a_removal_that_never_left_the_process_is_still_owed(make_session, monkeypatch) -> None:
+    """A focus write the runtime refuses synchronously (disconnected) has not changed the slot.
+    Believing it had left the previous cue's color painted until the next reconnect."""
+    reader, ipc, presentation, _renderer = _native_with_color_up(make_session)
+    target = presentation.target()
+    before = len(_focus_writes(ipc))
+    submit = ipc.submit_runtime_mpv
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", lambda **_kwargs: False)
+    presentation.pipeline.clear(target.surfaces, target.ipc)  # refused before it left
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", submit)
+
+    presentation.pipeline.clear(target.surfaces, target.ipc)
+
+    assert _focus_writes(ipc)[before:] == ["none"]
+    reader.close()
+
+
 def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) -> None:
     ipc = _VisibilityIPC()
     ipc.props.update({"sid": 2, "sub-visibility": False})
@@ -198,6 +360,13 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
     trace = SessionTrace(reader)
     trace.observe("native-cue", outcome="pixels-established")
 
+    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
+    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
+    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
+    # assertion below then rests on it.
+    reader.graph.subtitle_presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     renderer.use_native(reader.graph.subtitle_presentation.target())
     reader.graph.tooltip.select(0)
@@ -218,6 +387,13 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
         pump=reader.pump,
     )
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
+    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
+    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
+    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
+    # assertion below then rests on it.
+    reader.graph.subtitle_presentation.cue.install_tokenized(
+        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
+    )
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
     renderer.use_native(reader.graph.subtitle_presentation.target())
     reader.graph.subtitle_presentation.pipeline.draw_current(

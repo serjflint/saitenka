@@ -20,11 +20,20 @@ if TYPE_CHECKING:
 @dataclass(frozen=True, slots=True)
 class NavigationTarget:
     index: int
+    #: The authored event stepped to. Still the unit for mining and history — a card is made from a
+    #: line someone said, not from a frame.
     cue: Cue
     #: Other cues that were on screen alongside the one this step was measured from. Carried so a
     #: step taken in an overlap is distinguishable in a trace from an unambiguous one — the two
     #: land the user in different places and only one of them is obviously right.
     overlapping: int = 0
+    #: What is on screen when `cue` is: every co-timed event, document order. This is what gets
+    #: drawn, because it is what mpv draws and what the document reports at that instant.
+    frame_text: str = ""
+
+    @property
+    def drawn_text(self) -> str:
+        return self.frame_text or self.cue.text
 
 
 #: mpv's subtitle filters (`mp_sub_filter_opts`, `sd_ass.c`) that decide a cue never appears.
@@ -138,7 +147,9 @@ def resolve_target(
     target = index.target(current, delta, inside=inside)
     if target < 0:  # out of range / ambiguous
         return None
-    return NavigationTarget(target, index.cues[target], active.overlapping)
+    return NavigationTarget(
+        target, index.cues[target], active.overlapping, index.frame_text(target)
+    )
 
 
 def anchor_delay(

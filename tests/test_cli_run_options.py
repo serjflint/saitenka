@@ -251,3 +251,48 @@ def test_attach_options_read_hover_pause_settings():
     assert opts.tooltip.annotation_mode == "hover"
     assert opts.stats.enabled is True
     assert opts.stats.summary is False
+
+
+def test_run_carries_every_config_table_the_dependency_build_reads():
+    """`run` used to rebuild its effective config from a hand-written key list, so a table it
+    forgot worked under `attach` and silently did nothing under `run` — the setting keeps its
+    default, the config file says otherwise, and nothing warns.
+
+    Three had already fallen through when this was written: `[palette]` (band colors), `[fsrs]`
+    (maturity from Anki) and `[scoring]`. The language field carries a comment about the same trap,
+    paid for once already as #254. Named tables rather than a fixed list, because the point is that
+    the config reaches the builder whole.
+    """
+    from saitenka.app.launch.run import RunDepsRequest, _run_effective_config
+
+    scoped = {
+        "palette": {"learning": "#eed49f"},
+        "fsrs": {"collection": "/tmp/copy.anki2"},
+        "scoring": {"jlpt_underlines": False},
+        "dicts": ["from config"],
+    }
+    request = RunDepsRequest(
+        mine=False,
+        mine_deck="",
+        mine_model="",
+        mine_key="",
+        mine_all_key="",
+        mine_normalize_audio=False,
+        mine_animated_screenshot=False,
+        raw_mine={},
+        known_cfg=None,
+        known="",
+        color=True,
+        dict_titles=["from the flag"],
+        freq_titles=[],
+        pitch_titles=[],
+        scoped_cfg=scoped,
+    )
+
+    effective = _run_effective_config(request)
+
+    assert effective["palette"] == {"learning": "#eed49f"}
+    assert effective["fsrs"] == {"collection": "/tmp/copy.anki2"}
+    assert effective["scoring"] == {"jlpt_underlines": False}
+    # …and the run's own options still win over the file they are layered onto.
+    assert effective["dicts"] == ["from the flag"]

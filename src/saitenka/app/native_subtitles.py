@@ -33,6 +33,8 @@ from saitenka.app import subtitle_fonts
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
+    UnpaintableFrame,
+    cue_digest,
     geometry_error_code,
     geometry_failure_reason,
 )
@@ -71,14 +73,18 @@ _FALLBACK_REASONS = frozenset(
         "subtitle-ass-full-unsupported",
         "subtitle-geometry-cache-miss",
         "subtitle-observation-pending",
+        "subtitle-hint-text-mismatch",
         "subtitle-frame-unsupported",
         "subtitle-font-environment-stale",
+        "subtitle-font-environment-unread",
     }
 )
 _PENDING_REASONS = frozenset(
     {
         "subtitle-ass-full-unavailable",
         "subtitle-geometry-cache-miss",
+        "subtitle-hint-text-mismatch",
+        "subtitle-font-environment-unread",
         "subtitle-observation-pending",
         "subtitle-timing-unavailable",
     }
@@ -117,15 +123,39 @@ _FALLBACK_ACTIONS = {
 }
 
 
+#: Longest diagnostic a toast will carry. This is a line over video, not a log: one detail arrived
+#: as the repr of two option tuples and covered the screen edge to edge, truncated mid-word.
+_NOTICE_DETAIL_MAX = 60
+
+
 def _fallback_notice(reason: str, diagnostic: str | None) -> str:
     """One line naming the loss, the cause, and — when mpv named the options — which ones.
 
     The detail is what makes it actionable: the reason alone sends a user to the source, while the
-    same line carrying the option names mpv reported sends them to their own mpv.conf.
+    same line carrying the option names mpv reported sends them to their own mpv.conf. Bounded,
+    because a detail that overflows the video says less than no detail at all.
     """
     cause = _FALLBACK_ACTIONS.get(reason, reason)
+    if diagnostic and len(diagnostic) > _NOTICE_DETAIL_MAX:
+        diagnostic = diagnostic[: _NOTICE_DETAIL_MAX - 1] + "…"
     detail = f" ({diagnostic})" if diagnostic else ""
     return f"no word scanning: {cause}{detail}"
+
+
+def _font_option_delta(
+    ours: tuple[tuple[str, str], ...], theirs: tuple[tuple[str, str], ...]
+) -> str:
+    """The option NAMES whose values moved — what the notice's docstring promises.
+
+    Not both tuples' repr, which is what it used to be: a dozen `(name, value)` pairs twice over,
+    unreadable on screen and telling the user nothing they could act on. The names alone are the
+    actionable half; the values are in the log.
+    """
+    before, after = dict(ours), dict(theirs)
+    moved = sorted(
+        name for name in before.keys() | after.keys() if before.get(name) != after.get(name)
+    )
+    return ", ".join(moved)
 
 
 #: The demuxer codecs whose libavcodec-to-ASS conversion `subtitles.converted` reproduces. Only
@@ -510,8 +540,9 @@ def _blend_space(
 
 
 def _validate_frame(frame_size: tuple[int, int], margins: tuple[int, int, int, int]) -> None:
-    if any(value < 0 for value in margins):
-        raise ValueError(f"osd-margins={_short_repr(margins)}")
+    # Negative margins are a pan-scanned or zoomed video: the frame extends past the window, and
+    # both legs take that as-is (libass: "may be negative if pan-and-scan is used", `ass.h`). Only
+    # margins that leave no area to lay text into are meaningless.
     if margins[0] + margins[1] >= frame_size[1] or margins[2] + margins[3] >= frame_size[0]:
         raise ValueError(f"osd-margins={_short_repr(margins)}")
 
@@ -700,6 +731,19 @@ class _CueInputs:
 
 
 @dataclass(frozen=True, slots=True)
+class _CueSpan:
+    """Where a cue sits in the track, and the rows that make it up.
+
+    `timestamp_ms` is the instant to measure at: the cue's own start, never the playhead inside it.
+    """
+
+    start: float
+    end: float
+    timestamp_ms: int
+    active_rows: str
+
+
+@dataclass(frozen=True, slots=True)
 class _ScheduleInputs:
     path: Path
     source: bytes
@@ -795,6 +839,8 @@ class NativeSubtitleGeometry:
         self.ass_full_capability = AssFullCapability.UNKNOWN
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        #: Which cue the traced decisions are about — the join key across this chain.
+        self._cue = cue_digest("")
         self._last_decision: tuple[GeometryOutcome, str] | None = None
         self._owner = "unknown"
         self._submitted_at: tuple[int, float] | None = None
@@ -891,6 +937,7 @@ class NativeSubtitleGeometry:
         active_events: int,
     ) -> None:
         with otel_metrics.traced("subtitle_geometry_decision") as span:
+            span.set("cue", self._cue)
             span.set("outcome", outcome)
             span.set("reason", reason)
             span.set("generation", self.worker.generation)
@@ -1137,6 +1184,16 @@ class NativeSubtitleGeometry:
         """
         return self._fonts.options == render.font_options
 
+    @property
+    def eligible_tokens(self) -> int:
+        """How many tokens the last decision owed a box — the cue's debt, not its styling.
+
+        Read by the draw so a frame can say what it was owed. The palette colors every token
+        including the skippable ones, so counting styles there answers "has a style", which is the
+        same for a music marker and a spoken line.
+        """
+        return self._eligible_tokens
+
     def set_source(self, path: Path | None, *, live: bool = False) -> None:
         """Point at a new source.
 
@@ -1222,20 +1279,34 @@ class NativeSubtitleGeometry:
         *,
         live: bool = False,
         cause: GeometryCacheReason = GeometryCacheReason.RENDER_INPUT_CHANGED,
+        keep_lookahead: bool = False,
     ) -> None:
         """Drop the cached geometry. `live` retires the interaction it was backing — see
-        `set_source`."""
+        `set_source`. `keep_lookahead` distinguishes the cue on screen being replaced from what
+        future cues render *from* changing; only the latter invalidates speculation.
+        """
         if live:
             self._consume_failure()
         self._last_snapshot = None
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
-        self.worker.invalidate(cause=cause)
+        if keep_lookahead:
+            self.worker.retire_live()
+        else:
+            self.worker.invalidate(cause=cause)
         if live:
             self._ports.clear_interaction()
 
     def refresh(self, seen: GeometryObservation) -> None:
+        active_rows = seen.prop("sub-text/ass-full")
+        if not isinstance(active_rows, str) or not active_rows.strip():
+            # mpv has withdrawn the rows this cue renders from — the blank it publishes while a
+            # seek is in flight, or the text half of a split observation. Nothing can be keyed, so
+            # nothing can have moved; the half that arrives next arms the next refresh. Reading it
+            # as a move cleared the pre-armed color 12 ms after every `sub-seek`. Only the rows:
+            # a render space the inputs refuse must still fall through and degrade.
+            return
         identity = self._observation_key(seen)
         snapshot = self._ports.pipeline.current
         if (
@@ -1250,7 +1321,8 @@ class NativeSubtitleGeometry:
             else:
                 self._set_ready(active_events=active_events)
             return
-        self.invalidate(live=True)
+        # The cue moved, not the document it renders from, so the lookahead for later cues survives.
+        self.invalidate(live=True, keep_lookahead=True)
         if seen.text.strip():
             self.schedule(seen)
 
@@ -1571,7 +1643,10 @@ class NativeSubtitleGeometry:
             if inputs is None:
                 continue
             key = self._key(path, inputs)
-            if key in queued_keys:
+            # A frame already found to have nothing to paint must not spend the window. Two music
+            # markers in a row are enough to swallow it whole, and the spoken line behind them then
+            # renders cold every time — which is what a viewer reports as the delay.
+            if key in queued_keys or self.worker.is_unpaintable(key):
                 continue
             queued_keys.add(key)
             # Per cue, not once for the track: a converted document is rebuilt around this cue's own
@@ -1594,7 +1669,7 @@ class NativeSubtitleGeometry:
                     seen.is_skippable,
                 )
                 if not selection.annotations:
-                    raise ValueError("prefetched frame has no interaction-eligible tokens")
+                    raise UnpaintableFrame("prefetched frame has no interaction-eligible tokens")
                 return self._build(
                     document,
                     track_id,
@@ -1606,7 +1681,7 @@ class NativeSubtitleGeometry:
                     unreachable,
                 )
 
-            self.worker.prefetch(key, generation, build)
+            self.worker.prefetch(key, build)
             if len(queued_keys) >= self.lookahead:
                 break
 
@@ -1627,14 +1702,17 @@ class NativeSubtitleGeometry:
         seen: GeometryObservation,
         source: bytes | None,
         track_id: SubtitleTrackId,
-        start: float,
-        end: float,
+        start: float | None,
+        end: float | None,
         active_rows: object,
-    ) -> tuple[float, float, int, str] | None:
+    ) -> _CueSpan | None:
         """Where in the track this cue is, and the rows that make it up.
 
         `source` is `None` for a converted track — mpv is not rendering a file there, so there is no
         document to index into and the rows have to come from mpv itself.
+
+        `start`/`end` are `None` while mpv has published the cue's text but not yet its timings —
+        the two arrive as separate property changes. The index answers for that gap.
         """
         hint = seen.cue_hint
         if hint is not None and self.source_kind is SourceKind.CONVERTED:
@@ -1647,12 +1725,22 @@ class NativeSubtitleGeometry:
             timestamp_ms = round(hint.start * 1_000) + 1
             rows, semantic_text = authored_ass_rows_at(source, track_id, timestamp_ms)
             if semantic_text != seen.normalise(seen.text):
-                self._degrade_geometry("subtitle-observation-pending")
+                # Not `subtitle-observation-pending`: the document WAS read at the navigated cue
+                # and disagreed with the one being drawn. That never resolves by waiting.
+                self._degrade_geometry("subtitle-hint-text-mismatch")
                 return None
-            return hint.start, hint.end, timestamp_ms, rows
+            return _CueSpan(hint.start, hint.end, timestamp_ms, rows)
         if not isinstance(active_rows, str) or not active_rows.strip():
             self._degrade_geometry("subtitle-ass-full-unavailable")
             return None
+        if start is None or end is None:
+            return self._indexed_span(seen, active_rows)
+        return self._clocked_span(seen, start, end, active_rows)
+
+    def _clocked_span(
+        self, seen: GeometryObservation, start: float, end: float, active_rows: str
+    ) -> _CueSpan | None:
+        """mpv's own timings, refined to the document's when the index agrees on the text."""
         try:
             _video_time, _sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(
                 seen.prop("time-pos"), seen.prop("sub-delay"), start
@@ -1671,7 +1759,38 @@ class NativeSubtitleGeometry:
                 indexed = seen.index.cues[position]
                 if indexed.text == seen.text:
                     start, end = indexed.start, indexed.end
-        return start, end, timestamp_ms, active_rows
+                    # The cue's own start, not the playhead inside it. `timestamp_ms` reaches the
+                    # cache key, so a playhead-derived one gives every entry point to the same cue a
+                    # different key: the lookahead files at cue starts, a navigation hint renders at
+                    # one, and a reconcile lands wherever the clock happens to be. Only the indexed
+                    # start can serve, being in the document's own timeline as `_subtitle_clock`'s
+                    # output is and `sub-start` is not. An animated cue would render differently
+                    # across its span, and those are refused as `typesetting-unsupported`.
+                    timestamp_ms = round(indexed.start * 1_000) + 1
+        return _CueSpan(start, end, timestamp_ms, active_rows)
+
+    def _indexed_span(self, seen: GeometryObservation, active_rows: str) -> _CueSpan | None:
+        """The cue's own span, taken from the index while mpv has yet to report its timings.
+
+        mpv publishes `sub-text` and `sub-start`/`sub-end` as separate property changes, so a cue
+        arrives textually before it arrives temporally. Refusing that gap drew the line plain and
+        left it plain until the timings landed — measured at 58 ms and 111 ms in the field, and the
+        last visible instance of text-before-color.
+
+        The document answers, exactly as it does for a navigation hint: the timings needed are the
+        cue's own, and the index has them. Guarded the same way too — an index that disagrees with
+        the text on screen is not allowed to decide which instant to measure.
+        """
+        index = seen.index
+        if index is None or not seen.text.strip():
+            self._degrade_geometry("subtitle-observation-pending")
+            return None
+        position = index.locate(text=seen.text, preferred=seen.nav_index)
+        if position < 0 or index.cues[position].text != seen.text:
+            self._degrade_geometry("subtitle-observation-pending")
+            return None
+        cue = index.cues[position]
+        return _CueSpan(cue.start, cue.end, round(cue.start * 1_000) + 1, active_rows)
 
     def _render_space(self, render: _RenderInputs) -> converted.RenderSpace:
         return converted.RenderSpace(render.frame_size[0], render.frame_size[1], render.margins)
@@ -1769,9 +1888,15 @@ class NativeSubtitleGeometry:
         self._last_render_inputs = render
         if not self._fonts_are_current(render):
             self.worker.mark_not_ready()
+            # Never read and changed under us are different facts with different advice. An unread
+            # environment is the ordinary race at a track load — it resolves a moment later — and
+            # reporting it as a mid-track change told the user to reselect a track that was fine,
+            # naming every option as "moved" because one side was empty.
             self._set_fallback(
-                "subtitle-font-environment-stale",
-                log_detail=f"{self._fonts.options} != {render.font_options}",
+                "subtitle-font-environment-stale"
+                if self._fonts.options
+                else "subtitle-font-environment-unread",
+                log_detail=_font_option_delta(self._fonts.options, render.font_options),
             )
             self._ports.degrade()
             return None
@@ -1780,23 +1905,24 @@ class NativeSubtitleGeometry:
             self.ass_full_capability = AssFullCapability.SUPPORTED
         start = seen.prop("sub-start")
         end = seen.prop("sub-end")
-        if start is None or end is None:
-            self._degrade_geometry("subtitle-observation-pending")
-            return None
         generation = self._ports.pipeline.generation
         track_id = SubtitleTrackId(f"sid:{seen.prop('sid')}:{path.resolve()}")
         active = self._active_observation(
-            seen, source, track_id, float(start), float(end), active_rows
+            seen,
+            source,
+            track_id,
+            None if start is None else float(start),
+            None if end is None else float(end),
+            active_rows,
         )
         if active is None:
             return None
-        start, end, timestamp_ms, rows = active
         cue = _CueInputs(
-            round(start * 1_000),
-            round(end * 1_000),
-            timestamp_ms,
+            round(active.start * 1_000),
+            round(active.end * 1_000),
+            active.timestamp_ms,
             seen.text,
-            rows,
+            active.active_rows,
             render.frame_size,
             render.storage_size,
             render.pixel_aspect,
@@ -1806,7 +1932,7 @@ class NativeSubtitleGeometry:
         )
         return _ScheduleInputs(
             path,
-            self._document_for(rows, render),
+            self._document_for(active.active_rows, render),
             track_id,
             generation,
             render,
@@ -1842,10 +1968,12 @@ class NativeSubtitleGeometry:
     def _schedule(self, seen: GeometryObservation) -> bool:
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        self._cue = cue_digest(seen.text)
         inputs = self._resolve_schedule_inputs(seen)
         if inputs is None:
             return False
         with otel_metrics.traced("subtitle_geometry_cache") as span:
+            span.set("cue", cue_digest(seen.text))
             cache_hit = self._publish_cached(seen, inputs)
             stats = self.worker.stats
             span.set("outcome", "hit" if cache_hit else "miss")
@@ -1859,6 +1987,11 @@ class NativeSubtitleGeometry:
             span.set("prefetch_dropped", stats.prefetch_dropped)
             span.set("prefetch_cache_entries", stats.prefetch_cache_entries)
             span.set("coverage_trimmed", stats.coverage_trimmed)
+            # A finished render discarded by a moved fence is otherwise indistinguishable from one
+            # never requested.
+            span.set("superseded", stats.superseded)
+            span.set("failures", stats.failures)
+            span.set("completed", stats.completed)
         if cache_hit:
             # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
             # a cached cue would sit unapplied until some later miss happened to land.
@@ -1883,6 +2016,17 @@ class NativeSubtitleGeometry:
             if self._ports.use_native():
                 self._published_key = inputs.observation_key
                 self._set_ready()
+                # A cue with nothing to paint still has successors that do. Tying speculation to
+                # this cue's eligibility made every music marker a dead zone — one holds the screen
+                # for twenty seconds in the episode this was traced against.
+                self._prefetch(
+                    seen,
+                    inputs.path,
+                    inputs.track_id,
+                    inputs.generation,
+                    inputs.render,
+                    inputs.cue.timestamp_ms,
+                )
                 return True
             if self._ports.ownership_undecided():
                 return False  # the assertion's terminal re-drives the refresh
@@ -2013,6 +2157,7 @@ class NativeSubtitleGeometry:
                 item.italic,
                 item.glyph_dx,
                 item.glyph_dy,
+                item.event_id,
             )
             for item in snapshot.tokens
         ]
@@ -2029,25 +2174,43 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
 
     def _apply(self, seen: GeometryObservation) -> bool:
-        snapshot = self._ports.pipeline.current
-        if snapshot is None:
-            self._consume_failure()
-            return False
-        if snapshot is self._last_snapshot:
-            return False
-        if not self._snapshot_identities_are_valid(snapshot, len(seen.tokens)):
-            self._degrade_geometry("geometry-token-identity-invalid")
-            return False
-        self._ports.publish(self._install_snapshot(snapshot), (0, 0))
-        self._record_ready_latency(snapshot.generation)
-        if not self._ports.use_native():
-            if self._ports.ownership_undecided():
-                return False  # the assertion's terminal re-drives the refresh
-            self._set_fallback("mpv-sub-visibility-rejected")
-            return False
-        self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
-        self._ports.redraw()
-        return True
+        """Turn the published snapshot into boxes on screen, or trace why not.
+
+        Five ways to answer no. Untraced, a published render leaving through one is
+        indistinguishable from a render that never ran.
+        """
+        with otel_metrics.traced("subtitle_geometry_apply") as span:
+            self._cue = cue_digest(seen.text)
+            span.set("cue", self._cue)
+            snapshot = self._ports.pipeline.current
+            span.set("has_snapshot", snapshot is not None)
+            if snapshot is None:
+                span.set("outcome", "no-snapshot")
+                self._consume_failure()
+                return False
+            span.set("generation", snapshot.generation)
+            span.set("snapshot_tokens", len(snapshot.tokens))
+            span.set("observed_tokens", len(seen.tokens))
+            if snapshot is self._last_snapshot:
+                span.set("outcome", "already-installed")
+                return False
+            if not self._snapshot_identities_are_valid(snapshot, len(seen.tokens)):
+                span.set("outcome", "identity-invalid")
+                self._degrade_geometry("geometry-token-identity-invalid")
+                return False
+            self._ports.publish(self._install_snapshot(snapshot), (0, 0))
+            self._record_ready_latency(snapshot.generation)
+            if not self._ports.use_native():
+                if self._ports.ownership_undecided():
+                    span.set("outcome", "ownership-undecided")
+                    return False  # the assertion's terminal re-drives the refresh
+                span.set("outcome", "sub-visibility-rejected")
+                self._set_fallback("mpv-sub-visibility-rejected")
+                return False
+            self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
+            self._ports.redraw()
+            span.set("outcome", "applied")
+            return True
 
     def close(self) -> None:
         self.worker.close()

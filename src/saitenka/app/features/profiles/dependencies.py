@@ -396,6 +396,7 @@ def build_reader_deps(
         if want_scorer:
             from saitenka_wordstate import Scorer
 
+            from saitenka.app.config import resolve_jlpt_underlines
             from saitenka.app.scoring import Coloring, Palette
 
             assert kw_fut is not None and fd_fut is not None and jlpt_fut is not None  # want_scorer
@@ -405,6 +406,7 @@ def build_reader_deps(
                     freq=fd_fut.result(),
                     jlpt=jlpt_fut.result(),
                     fsrs_snap=fsrs_fut.result(),
+                    enable_jlpt=resolve_jlpt_underlines(cfg),
                 ),
                 Palette.from_config(cfg.get("palette")),
             )

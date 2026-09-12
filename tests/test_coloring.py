@@ -310,3 +310,53 @@ def test_known_cache_migrates_the_previous_dictionary_db_state(tmp_path):
     migrated = KnownWords.from_cache(db, decks)
 
     assert migrated is not None and migrated.words == {"人", "ひと"}
+
+
+def test_every_palette_color_survives_the_loader():
+    """Field by field off the dataclass, because a hand-written list is what this loader was: it
+    read `learning` and `young`, so the other eight — `base` above all, the color most of a line is
+    drawn in — could be set in the config and silently keep their defaults with nothing warning.
+
+    Deriving the expectation from `fields(Palette)` is the point: a colour added later joins this
+    assertion by existing, rather than by someone remembering to add it here too.
+    """
+    from dataclasses import fields as dataclass_fields
+
+    from saitenka.app.scoring import Palette
+
+    loud = "#ff00ff"
+    simple = [f.name for f in dataclass_fields(Palette) if f.name not in {"freq_bands", "jlpt"}]
+    raw = dict.fromkeys(simple, loud)
+    raw["freq_bands"] = [loud] * len(Palette().freq_bands)
+    raw["jlpt"] = dict.fromkeys(Palette().jlpt, loud)
+
+    palette = Palette.from_config(raw)
+
+    magenta = (255, 0, 255, 255)
+    assert {name: getattr(palette, name) for name in simple} == dict.fromkeys(simple, magenta)
+    assert set(palette.freq_bands) == {magenta}
+    assert set(palette.jlpt.values()) == {magenta}
+
+
+def test_a_partial_palette_keeps_the_defaults_it_does_not_name():
+    from saitenka.app.scoring import Palette
+
+    palette = Palette.from_config({"base": "#000000", "jlpt": {"N3": "#ffffff"}})
+
+    assert palette.base == (0, 0, 0, 255)
+    assert palette.known == Palette().known
+    assert palette.jlpt["N3"] == (255, 255, 255, 255)
+    assert palette.jlpt["N1"] == Palette().jlpt["N1"]
+
+
+def test_a_mistyped_palette_key_is_refused_rather_than_ignored():
+    """A JLPT level nobody scores would colour nothing and say nothing — the same silence the
+    two-key loader produced, one level down."""
+    from saitenka.app.scoring import Palette
+
+    with pytest.raises(ValueError, match="unknown level"):
+        Palette.from_config({"jlpt": {"N6": "#ffffff"}})
+    with pytest.raises(ValueError, match="six-digit hex"):
+        Palette.from_config({"base": "red"})
+    with pytest.raises(ValueError, match="list of 5"):
+        Palette.from_config({"freq_bands": ["#ffffff"]})

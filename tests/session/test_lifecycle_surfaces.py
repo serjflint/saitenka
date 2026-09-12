@@ -300,3 +300,55 @@ def test_a_repaint_while_hidden_draws_nothing():
     surfaces.repaint()
 
     assert ipc.commands == []
+
+
+def test_a_surface_write_is_timed_to_mpvs_answer_not_to_our_dispatch(monkeypatch):
+    """Every other number on the draw path stops when the command leaves us — `subtitle_draw` costs
+    a third of a millisecond to *build* a payload, and what mpv does with it was unmeasured. A late
+    paint left the whole trace green.
+
+    The clock is advanced between the submit and the terminal, so a span that timed the dispatch
+    reports ~0 here and one that times the round trip reports the whole wait.
+    """
+    from saitenka.app import lifecycle_surfaces as module
+
+    clock = iter([100.0, 100.25])  # submit, then the terminal a quarter-second later
+    monkeypatch.setattr(module.time, "perf_counter", lambda: next(clock))
+    spans = util.record_spans(monkeypatch)
+    ipc = _DeferredIPC()
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
+
+    surfaces.present(Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.TOAST)
+    assert not [span for span in spans if span["name"] == "surface_write"]  # nothing to report yet
+    ipc.finish(0)
+
+    written = [span["attrs"] for span in spans if span["name"] == "surface_write"]
+    assert len(written) == 1
+    assert written[0]["round_trip_ms"] == pytest.approx(250.0)
+    assert written[0]["route"] == "correlated"
+    assert written[0]["command"] == "overlay-add"
+    assert written[0]["events"] == 0  # a bitmap write; mpv parses no ASS for it
+
+
+def test_an_ass_write_reports_the_events_mpv_has_to_parse(monkeypatch):
+    """Bytes would rate a cue carrying four JLPT underlines the same as one carrying none. mpv walks
+    the payload event by event, so events are the unit it is billed in."""
+    spans = util.record_spans(monkeypatch)
+    ipc = _DeferredIPC()
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
+
+    surfaces._submit(  # the ASS path has no public presenter on this layer
+        surfaces._runtime.request("9", module_action()),
+        ("osd-overlay", 9, "ass-events", "one\ntwo\nthree", 1920, 1080, 1),
+        None,
+    )
+    ipc.finish(0)
+
+    written = [span["attrs"] for span in spans if span["name"] == "surface_write"]
+    assert written[0]["events"] == 3
+
+
+def module_action():
+    from saitenka.runtime.surfaces import SurfaceAction
+
+    return SurfaceAction.PRESENT

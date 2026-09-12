@@ -17,7 +17,8 @@ from saitenka_subtitles import (
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
-from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
+from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason
+from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE, SubtitleGeometryWorker
 from saitenka.app.subtitle_pipeline import (
     GeometryResolution,
     GeometryTicket,
@@ -256,7 +257,7 @@ def test_worker_drops_superseded_pending_request() -> None:
     second = request(coordinator.generation, 1_300)
 
     # Occupy the lane so both currents queue rather than executing on arrival.
-    assert worker.prefetch("blocking", coordinator.generation, lambda: request(0, 1_100))
+    assert worker.prefetch("blocking", lambda: request(0, 1_100))
     assert backend.entered.wait(1)
     assert worker.submit(first)
     assert worker.submit(second)
@@ -407,7 +408,7 @@ def test_worker_prefetch_publishes_synchronously_after_generation_change() -> No
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert worker.prefetch("future", lambda: future)
     assert worker.wait_idle()
     assert coordinator.current is None
     coordinator.invalidate()
@@ -422,13 +423,156 @@ def test_worker_prefetch_publishes_synchronously_after_generation_change() -> No
     worker.close()
 
 
+def test_a_queued_prefetch_survives_the_cue_arrival_it_was_built_for() -> None:
+    """The fence moves on the arrival a speculation exists for, so it cannot fence one. Contrast
+    `test_worker_drops_prefetch_invalidated_during_backend_render`: the two differ only in which
+    invalidation happened, which is the whole distinction."""
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    future = request(coordinator.generation, 1_300)
+
+    assert worker.prefetch("future", lambda: future)
+    assert backend.entered.wait(1)
+    coordinator.invalidate()  # the next cue arrives: the fence moves, render identity does not
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert worker.publish_prefetched("future", coordinator.generation) is not None
+    assert worker.stats.prefetch_dropped == 0
+    worker.close()
+
+
+def test_a_prefetch_is_admitted_after_the_fence_has_already_moved() -> None:
+    """Admission asked whether the current cue had changed — not a question about one that has not
+    arrived."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    future = request(coordinator.generation, 1_300)
+    coordinator.invalidate()
+
+    assert worker.prefetch("future", lambda: future)
+    assert worker.wait_idle()
+
+    assert worker.publish_prefetched("future", coordinator.generation) is not None
+    worker.close()
+
+
+def test_retiring_the_live_cue_keeps_the_lookahead_that_was_filed() -> None:
+    """`retire_live` retires what is on screen; `invalidate` says what future cues render *from*
+    changed."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    assert worker.prefetch("future", lambda: request(coordinator.generation, 1_300))
+    assert worker.wait_idle()
+
+    worker.retire_live()
+
+    assert worker.filed_keys() == ("future",)
+    assert worker.stats.prefetch_cache_entries == 1
+    worker.close()
+
+
+def test_a_render_identity_change_still_discards_the_lookahead() -> None:
+    """A new source or font environment means the filed speculation renders from a document that is
+    gone."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    assert worker.prefetch("future", lambda: request(coordinator.generation, 1_300))
+    assert worker.wait_idle()
+
+    worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
+
+    assert worker.filed_keys() == ()
+    assert worker.stats.prefetch_cache_entries == 0
+    worker.close()
+
+
+def test_the_fence_holds_when_the_same_cue_is_observed_again() -> None:
+    """mpv re-publishes `sub-text` for a line already on screen. That is not a new cue."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    identity = ("猫を見る", 1.0, 3.0, 1)
+    first = coordinator.invalidate(identity)
+
+    assert coordinator.invalidate(identity) == first
+    assert coordinator.generation == first
+
+
+@pytest.mark.parametrize(
+    "moved",
+    [
+        pytest.param(("犬も見る", 1.0, 3.0, 1), id="text"),
+        pytest.param(("猫を見る", 4.0, 3.0, 1), id="start"),
+        pytest.param(("猫を見る", 1.0, 6.0, 1), id="end"),
+        pytest.param(("猫を見る", 1.0, 3.0, 2), id="track"),
+        pytest.param(("", 1.0, 3.0, 1), id="cue-cleared"),
+    ],
+)
+def test_the_fence_moves_for_every_component_of_cue_identity(moved: tuple) -> None:
+    """The evasion, not the example: a repeat with the same text at different timing is a different
+    cue, and geometry published for the first would be painted onto the second. Parametrised so a
+    comparison quietly dropping a component fails here."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    before = coordinator.invalidate(("猫を見る", 1.0, 3.0, 1))
+
+    assert coordinator.invalidate(moved) > before
+
+
+def test_a_caller_with_no_cue_identity_always_moves_the_fence() -> None:
+    """A source or font change invalidates regardless of the cue. `None` is a real identity — no
+    cue on screen — so it cannot serve as that sentinel."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    first = coordinator.invalidate()
+
+    assert coordinator.invalidate() > first
+    assert coordinator.invalidate(None) > first + 1
+    assert coordinator.invalidate(None) == first + 2  # None compares equal to itself
+
+
+def test_a_current_result_dropped_mid_render_leaves_the_cue_with_no_retry() -> None:
+    """Characterization: `bind` and `publish` both refuse once the generation has moved, so a
+    result finished while the fence moved underneath is discarded — superseded, reported as no
+    failure, and never re-driven. The drop window is the render's own duration.
+
+    Asserts what the code does, not the contract wanted, so that fixing it fails loudly.
+    """
+    backend = BlockingBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+
+    assert worker.submit(request(coordinator.generation, 1_300))
+    assert backend.entered.wait(1)
+    coordinator.invalidate()  # a reconcile lands while libass is still running
+    backend.release.set()
+    assert worker.wait_idle()
+
+    assert coordinator.current is None  # the finished render went nowhere
+    assert (worker.stats.superseded, worker.stats.failures) == (1, 0)
+    worker.close()
+
+
+def test_a_cached_answer_never_enters_the_drop_window() -> None:
+    """Served from the cache the publish is synchronous with the submit, so no fence moves between
+    them."""
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    assert worker.submit(request(coordinator.generation, 1_300)) and worker.wait_idle()
+    coordinator.invalidate()
+
+    assert worker.submit(request(coordinator.generation, 1_300)) and worker.wait_idle()
+
+    assert coordinator.current is not None
+    assert worker.stats.cache_hits == 1
+    worker.close()
+
+
 def test_worker_drops_prefetch_invalidated_during_backend_render() -> None:
     backend = BlockingBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert worker.prefetch("future", lambda: future)
     assert backend.entered.wait(1)
     worker.invalidate()
     backend.release.set()
@@ -446,7 +590,7 @@ def test_worker_attaches_current_waiter_to_inflight_prefetch() -> None:
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert worker.prefetch("future", lambda: future)
     assert backend.entered.wait(1)
     assert worker.submit_job(
         coordinator.generation,
@@ -482,7 +626,7 @@ def test_worker_promotes_queued_prefetch_without_running_its_builder() -> None:
 
     assert worker.submit_job(coordinator.generation, blocked_current)
     assert entered.wait(1)
-    assert worker.prefetch("future", coordinator.generation, speculative)
+    assert worker.prefetch("future", speculative)
     assert worker.submit_job(
         coordinator.generation,
         lambda: request(coordinator.generation, 1_300),
@@ -503,7 +647,7 @@ def test_worker_reports_failure_from_inflight_prefetch_with_current_waiter() -> 
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", coordinator.generation, lambda: future)
+    assert worker.prefetch("future", lambda: future)
     assert backend.entered.wait(1)
     assert worker.submit_job(
         coordinator.generation,
@@ -530,10 +674,10 @@ def test_worker_bounds_prefetch_queue_and_records_drop() -> None:
         assert release.wait(1)
         return request(coordinator.generation, 1_200)
 
-    assert worker.prefetch("running", coordinator.generation, blocking)
+    assert worker.prefetch("running", blocking)
     assert entered.wait(1)
-    assert worker.prefetch("drop", coordinator.generation, lambda: request(0, 1_300))
-    assert worker.prefetch("keep", coordinator.generation, lambda: request(0, 1_400))
+    assert worker.prefetch("drop", lambda: request(0, 1_300))
+    assert worker.prefetch("keep", lambda: request(0, 1_400))
     release.set()
     assert worker.wait_idle()
 
@@ -554,9 +698,9 @@ def test_worker_reports_loss_aware_prefetch_miss_provenance() -> None:
 
     assert worker.submit_job(coordinator.generation, blocking)
     assert entered.wait(1)
-    assert worker.prefetch("oldest", coordinator.generation, lambda: request(0, 1_300))
-    assert worker.prefetch("middle", coordinator.generation, lambda: request(0, 1_400))
-    assert worker.prefetch("newest", coordinator.generation, lambda: request(0, 1_500))
+    assert worker.prefetch("oldest", lambda: request(0, 1_300))
+    assert worker.prefetch("middle", lambda: request(0, 1_400))
+    assert worker.prefetch("newest", lambda: request(0, 1_500))
 
     assert worker.prefetch_miss_reason("newest") == "prefetch-pending"
     assert worker.prefetch_miss_reason("oldest") == "provenance-unknown"
@@ -720,7 +864,6 @@ def fill_cache(worker: SubtitleGeometryWorker, coordinator, count: int) -> None:
     for index in range(count):
         assert worker.prefetch(
             f"cue-{index}",
-            coordinator.generation,
             lambda index=index: request(coordinator.generation, 1_300 + index),
         )
         assert worker.wait_idle()
@@ -869,7 +1012,7 @@ def test_a_caller_that_attached_to_a_refused_speculation_is_settled_too() -> Non
         return False
 
     worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=refuse_after_a_caller_attaches)
-    assert worker.prefetch("cue-0", coordinator.generation, lambda: request(coordinator.generation))
+    assert worker.prefetch("cue-0", lambda: request(coordinator.generation))
 
     assert settled == ["attached"]
     assert not worker._prefetch_waiters, "the refused speculation left a waiter behind"
@@ -894,6 +1037,91 @@ def test_a_refused_lane_admission_settles_its_own_caller_and_no_one_elses() -> N
         )
 
     assert settled == ["first", "second"]
+    worker.close()
+
+
+class SplitLane(DeferredLane):
+    """A lane that runs a job's body and delivers its terminal as two separate steps.
+
+    Every other fake does both at once, which is exactly the interleaving that cannot go wrong —
+    settlement and the next admission both hang off the terminal, so a fake that never separates it
+    from the body cannot show what the claim slot means in between.
+    """
+
+    def run_body(self, index: int = 0) -> None:
+        job, _identity, _on_finished = self.held[index]
+        job.worker.execute(job)
+
+    def deliver(self, owner, index: int = 0) -> None:
+        _job, identity, on_finished = self.held.pop(index)
+        on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_the_claim_slot_is_held_until_the_terminal_not_until_the_body_ends() -> None:
+    """The field defect: a cue drawn plain for its whole life, colored only after a seek back.
+
+    Releasing the slot when the body finished made it mean "a render is running" while settlement
+    and the next admission both hang off the terminal. The next cue was claimed inside that gap and
+    inherited the previous job's completion — settled before its own render existed, against the
+    earlier cue's geometry, leaving the render that did arrive with nobody to publish it. Nothing
+    retried, because from the worker's side that cue had been settled.
+    """
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
+    settled: list[str] = []
+
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 1_000),
+        work_key="cue-a",
+        on_settled=lambda: settled.append("a"),
+    )
+    lane.run_body()
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 2_000),
+        work_key="cue-b",
+        on_settled=lambda: settled.append("b"),
+    )
+    assert len(lane.held) == 1, "the second cue was admitted while the first still held the slot"
+
+    lane.deliver(Owner.SUBTITLE)
+
+    assert settled == ["a"], "the second cue was settled before its own job had run"
+    lane.run_body()
+    lane.deliver(Owner.SUBTITLE)
+    assert settled == ["a", "b"], "the second cue's result reached nobody"
+    worker.close()
+
+
+def test_a_terminal_pays_only_the_job_it_names() -> None:
+    """Settlements are addressed by the job's identity, not drained as a pool.
+
+    The slot admitting one job at a time already makes a pool *behave*, so this pins the addressing
+    itself: correctness that depends on no two jobs overlapping is one scheduling change away from
+    being wrong, which is how the pooled version failed in the first place.
+    """
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
+    settled: list[str] = []
+
+    assert worker.submit_job(
+        coordinator.generation,
+        lambda: request(coordinator.generation, 1_000),
+        on_settled=lambda: settled.append("owed"),
+    )
+    lane.run_body()
+    _job, _identity, on_finished = lane.held[0]
+    on_finished(
+        EffectFinished(EffectId(0), Owner.SUBTITLE, (GEOMETRY_LANE, 9_999), EffectOutcome.SUCCEEDED)
+    )
+
+    assert settled == [], "a terminal naming another job paid this one's caller"
+
+    lane.deliver(Owner.SUBTITLE)
+    assert settled == ["owed"]
     worker.close()
 
 

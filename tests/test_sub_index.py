@@ -266,3 +266,59 @@ def test_target_from_a_gap_lands_on_the_upcoming_cue():
     assert idx.target(2, -1, inside=False) == 1  # prev → the cue before the gap
     assert idx.target(2, 0, inside=False) == -1  # replay from a gap → let mpv decide
     assert idx.target(0, -1, inside=False) == -1  # gap before the first cue → nothing before it
+
+
+#: Two speakers over each other, authored as two events with identical timing, plus a sign held
+#: across both — the partial overlap the format allows and this corpus happens not to contain.
+_OVERLAP = [
+    Cue(1.0, 3.0, "（児童）雨　すごいね。"),
+    Cue(1.0, 3.0, "（児童）ねえ。"),
+    Cue(0.5, 5.0, "（看板）雨天決行"),
+    Cue(6.0, 8.0, "ひとり。"),
+]
+
+
+def test_a_frame_is_every_cue_on_screen_at_the_instant_its_cue_appears():
+    """The renderer asks the document at ``round(start * 1000) + 1`` ms and draws whatever is
+    active there. A frame computed at any other instant is a set the document disagrees with, which
+    is the disagreement the whole split exists to remove."""
+    idx = CueIndex(list(_OVERLAP))
+    positions = {cue.text: index for index, cue in enumerate(idx.cues)}
+    sign = positions["（看板）雨天決行"]
+    first, second = positions["（児童）雨　すごいね。"], positions["（児童）ねえ。"]
+
+    assert idx.frame_at_position(first) == idx.frame_at_position(second) == (sign, first, second)
+    assert idx.frame_at_position(sign) == (sign,)  # at 0.501 the dialogue has not started
+    assert idx.frame_at_position(positions["ひとり。"]) == (positions["ひとり。"],)
+
+
+def test_a_frames_text_joins_in_document_order():
+    """The renderer joins the document's own event order, so this has to as well — the two texts
+    are compared for equality, and a different order is a mismatch nobody moved a line to cause."""
+    idx = CueIndex(list(_OVERLAP))
+
+    assert idx.frame_text(idx.cues.index(Cue(1.0, 3.0, "（児童）ねえ。"))) == (
+        "（看板）雨天決行\n（児童）雨　すごいね。\n（児童）ねえ。"
+    )
+
+
+def test_a_cue_outside_any_overlap_is_its_own_frame():
+    """The negative control: nothing about a lone cue changes, so a frame-aware draw is identical
+    to the single-cue draw it replaces."""
+    idx = CueIndex(list(_OVERLAP))
+    lone = idx.cues.index(Cue(6.0, 8.0, "ひとり。"))
+
+    assert idx.frame_text(lone) == "ひとり。"
+
+
+def test_a_drawn_frame_locates_back_to_the_cue_it_was_drawn_for():
+    """Chaining. After a navigation the line on screen is the frame, so `locate` is asked about
+    text no single cue has; without the frame in the text map, next/next/next stops dead the moment
+    it steps into an overlap — and the timings it would fall back on are stale mid-seek."""
+    idx = CueIndex(list(_OVERLAP))
+    second = idx.cues.index(Cue(1.0, 3.0, "（児童）ねえ。"))
+    # Spelled out, not `frame_text(second)`: sourcing both sides from the same call asserts that a
+    # function agrees with itself, which it does even when it returns the single cue this is about.
+    drawn = "（看板）雨天決行\n（児童）雨　すごいね。\n（児童）ねえ。"
+
+    assert idx.locate(text=drawn, preferred=second) == second

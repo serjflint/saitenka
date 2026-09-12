@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -112,6 +112,12 @@ class RunDepsRequest:
     # table, so the language must be threaded explicitly or the dict set defaults to JP and the
     # second-language deinflection lookup silently no-ops (#254).
     language: str = "jp"
+    #: The profile-scoped config these overrides apply *to*. Carried whole because rebuilding an
+    #: effective config from a hand-written key list is how `[palette]`, `[fsrs]` and `[scoring]`
+    #: each reached `attach` and silently never reached `run` — the setting keeps its default, the
+    #: config file says otherwise, and nothing warns. The language field above is the same trap,
+    #: already paid for once (#254).
+    scoped_cfg: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -826,8 +832,13 @@ def reslot_to_current(
 
 
 def _run_effective_config(req: RunDepsRequest) -> dict:
-    """The profile-scoped config after proven run-option precedence is applied."""
+    """The profile-scoped config with this run's option precedence layered on top.
+
+    Layered, not rebuilt: every key the dependency build reads and this list forgot was a setting
+    that worked under `attach` and silently did nothing under `run`.
+    """
     return {
+        **req.scoped_cfg,
         "dicts": req.dict_titles,
         "freq": req.freq_titles,
         "pitch": req.pitch_titles,
@@ -1092,6 +1103,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             freq_titles=_resolve_names(freq, selected_cfg, "freq"),
             pitch_titles=_resolve_names(pitch, selected_cfg, "pitch"),
             language=selected.langs.main,
+            scoped_cfg=selected_cfg,
         )
 
     initial_request = _request_for(active_profile)

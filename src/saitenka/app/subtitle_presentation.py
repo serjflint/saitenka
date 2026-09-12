@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from saitenka import otel_metrics
 from saitenka.app import geometry_refresh, native_subtitles
 from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import configure_runtime_job as configure_geometry_lane
@@ -59,6 +60,26 @@ class CueRenderState:
     origin: tuple[int, int] = (0, 0)
 
 
+def boxes_for(tokens: list[Token], boxes: list[WordBox]) -> list[WordBox]:
+    """Only the boxes indexing a token ``tokens`` has.
+
+    `TooltipController.hit` indexes `tokens` by whatever box answers a click, so a box past the end
+    is a crash or a hit region on another cue's word. Geometry measured for the cue that left can
+    reach the one that arrived: a `DrawRequest` takes its text from `playback.cue.text`, written
+    when mpv observes `sub-text`, and its content from this store, written by `set_subtitle`.
+
+    An index check, not an emptiness check — three boxes against six tokens is the same defect.
+    Applied on write so drawing and hit testing cannot disagree.
+
+    A drop is counted: a silent filter turns a mispaired box into a missing one, which reads in a
+    bundle as geometry that never arrived.
+    """
+    kept = [box for box in boxes if 0 <= box.index < len(tokens)]
+    if len(kept) != len(boxes) and otel_metrics.subtitle_boxes_dropped is not None:
+        otel_metrics.subtitle_boxes_dropped.add(len(boxes) - len(kept))
+    return kept
+
+
 class CueRenderStore:
     """Single writer for the current cue's derived render facts."""
 
@@ -82,7 +103,7 @@ class CueRenderStore:
             lines=cue.lines,
             tokens=cue.tokens,
             styles=cue.styles,
-            boxes=state.boxes,
+            boxes=boxes_for(cue.tokens, state.boxes),
             origin=state.origin,
         )
 
@@ -95,13 +116,14 @@ class CueRenderStore:
     ) -> None:
         """Replace selected derived cue facts while preserving one atomic state value."""
         state = self._current
+        replaced = state.tokens if tokens is _UNCHANGED else cast("list[Token]", tokens)
         self._current = CueRenderState(
             lines=state.lines if lines is _UNCHANGED else cast("list[list[Token]]", lines),
-            tokens=state.tokens if tokens is _UNCHANGED else cast("list[Token]", tokens),
+            tokens=replaced,
             styles=(
                 state.styles if styles is _UNCHANGED else cast("list[TokenStyle] | None", styles)
             ),
-            boxes=state.boxes,
+            boxes=boxes_for(replaced, state.boxes),
             origin=state.origin,
         )
 
@@ -111,7 +133,9 @@ class CueRenderStore:
 
     def publish_geometry(self, boxes: list[WordBox], origin: tuple[int, int]) -> None:
         state = self._current
-        self._current = CueRenderState(state.lines, state.tokens, state.styles, boxes, origin)
+        self._current = CueRenderState(
+            state.lines, state.tokens, state.styles, boxes_for(state.tokens, boxes), origin
+        )
 
     def replace_geometry(
         self,
@@ -125,7 +149,10 @@ class CueRenderStore:
             state.lines,
             state.tokens,
             state.styles,
-            state.boxes if boxes is _UNCHANGED else cast("list[WordBox]", boxes),
+            boxes_for(
+                state.tokens,
+                state.boxes if boxes is _UNCHANGED else cast("list[WordBox]", boxes),
+            ),
             state.origin if origin is _UNCHANGED else cast("tuple[int, int]", origin),
         )
 

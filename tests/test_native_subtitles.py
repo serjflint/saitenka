@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -431,17 +432,18 @@ def reader(
 
 
 def settle_jobs(result: TestSession, ipc: FakeIPC) -> None:
-    """Let the geometry lane finish and deliver its terminals.
+    """Deliver the geometry lane's terminals and let it come to rest.
 
-    Two steps because they are two facts: the work completing, and the host being told. The broker
-    publishes a completion to the mailbox, so the host learns on a later drain — which is why a cue
-    can be scheduled and not yet published, and why this is not folded into `wait_idle`. A legacy
-    session has no lane at all, so there is nothing to settle.
+    Two steps because they are two facts: the host being told, and the lane having no work left.
+    The broker publishes a completion to the mailbox, so the host learns on a later drain — which is
+    why a cue can be scheduled and not yet published. Delivery comes first because the lane's claim
+    slot is held until the terminal is consumed, so waiting for idle before draining waits for a
+    completion this harness is itself holding. A legacy session has no lane at all.
     """
     if result.graph.subtitle_presentation.native is None:
         return
-    assert result.graph.subtitle_presentation.native.worker.wait_idle()
     ipc.deliver_runtime_jobs()
+    assert result.graph.subtitle_presentation.native.worker.wait_idle()
 
 
 def toasts(ipc: FakeIPC) -> list[tuple]:
@@ -1310,6 +1312,132 @@ def test_sub_delay_during_gap_preserves_ready_lookahead_for_next_cue(tmp_path: P
     result.close()
 
 
+def test_the_lookahead_survives_the_cue_arriving_that_it_was_built_for(tmp_path: Path) -> None:
+    """A cue change retired the whole speculative cache, discarding the lookahead by the event that
+    made it useful. Render identity still clears it — see
+    `test_a_render_identity_change_still_discards_the_lookahead`."""
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    native.set_source(source)
+    result.graph.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る"))
+    )
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert native.worker.filed_keys(), "the second cue should have been rendered speculatively"
+    rendered = len(backend.requests)
+    # The next cue's rows, with the first cue still the published one: the observation no longer
+    # identifies what is on screen, which is the branch a cue change takes through `refresh`.
+    ipc.props["sub-text/ass-full"] = (
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0000,0000,0000,,\u72ac\u3082\u898b\u308b"
+    )
+    result.graph.playback.install_seed(ipc.props)
+
+    native.refresh(result.graph.cue.geometry_observation())
+    settle_jobs(result, ipc)
+
+    # Counting renders, not filed keys: `refresh` re-queues the lookahead it just discarded, so the
+    # key set recovers either way and only the backend can say whether the work was redone.
+    assert len(backend.requests) == rendered
+    result.close()
+
+
+#: Spans a per-cue query has to be able to join. Deliberately not "every span": `dict_sql` and
+#: `prefetch_decode` are dictionary work that outlives the cue that triggered it, and stamping them
+#: would claim an ownership they do not have.
+JOINABLE_SPANS = frozenset(
+    {
+        "cue_redraw",
+        "cue_reconcile",
+        "sub_text_reconcile",
+        "subtitle_draw",
+        "subtitle_geometry_apply",
+        "subtitle_geometry_cache",
+        "subtitle_geometry_decision",
+    }
+)
+
+
+def test_every_span_a_per_cue_query_needs_carries_the_cue_handle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Gated because the failure is silent: a span that stops setting `cue` still traces, still
+    parents, and simply drops out of every per-cue query.
+
+    The coverage assertion is load-bearing — without it this passes while most of the set never
+    fires.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_source(source)
+
+    spans = record_spans(monkeypatch)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    # A *changed* text, so the reconcile adopts rather than returning early — that early return is
+    # why an earlier draft never exercised `sub_text_reconcile` and passed anyway.
+    result.graph.cue.observe(replace(result.graph.playback.state.cue, text="犬…　かな？"))
+    result.graph.cue.settle()
+
+    covered = {span["name"] for span in spans} & JOINABLE_SPANS
+    assert covered == JOINABLE_SPANS, f"never exercised: {sorted(JOINABLE_SPANS - covered)}"
+    unjoinable = sorted(
+        span["name"]
+        for span in spans
+        if span["name"] in JOINABLE_SPANS and "cue" not in span["attrs"]
+    )
+    assert not unjoinable, f"joinable spans with no cue handle: {unjoinable}"
+    result.close()
+
+
+def test_one_cue_renders_at_one_timestamp_however_it_was_reached(tmp_path: Path) -> None:
+    """`timestamp_ms` reaches the cache key, so a cue reached two ways must produce one key.
+
+    The lookahead files at cue starts and a navigation hint renders at one, while a reconcile lands
+    wherever the playhead is. With the playhead in the key those never match, and a cue re-requested
+    a few tens of milliseconds into itself re-renders instead of hitting the result it just filed.
+    """
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_source(source)
+    result.graph.track_commands.navigation.current.sub_index = CueIndex(
+        (Cue(1.0, 3.0, "猫を見る"), Cue(4.0, 6.0, "犬も見る"))
+    )
+
+    for playhead in (1.05, 1.4, 2.9):  # the same cue, observed at three different moments
+        ipc.props["time-pos"] = playhead
+        result.graph.playback.install_seed(ipc.props)
+        result.graph.subtitle_presentation.native.invalidate()
+        result.graph.cue.set_subtitle("猫を見る")
+        settle_jobs(result, ipc)
+
+    stamps = {request.timestamp_ms for request in backend.requests if request.timestamp_ms < 4_000}
+    assert stamps == {1_001}, f"one cue rendered at {len(stamps)} timestamps: {sorted(stamps)}"
+    result.close()
+
+
+def test_a_draw_request_never_carries_boxes_without_tokens(tmp_path: Path) -> None:
+    """The wiring, not the invariant — `draw_request` is where the two owners meet.
+    `tests/test_cue_render_store.py` owns the invariant itself."""
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    assert result.graph.cue.draw_request().boxes, "the cue that owns them still gets them"
+
+    # The successor's tokenization lands while the predecessor's geometry is still filed.
+    result.graph.subtitle_presentation.cue.replace_tokenized(lines=[], tokens=[])
+
+    assert result.graph.cue.draw_request().boxes == []
+    result.close()
+
+
 def test_prefetched_hit_restores_native_pixels_after_provider_failure(tmp_path: Path) -> None:
     result, ipc, backend = reader(tmp_path)
     source = tmp_path / "episode.ass"
@@ -1572,7 +1700,11 @@ def test_instant_navigation_uses_target_cue_timing_not_stale_mpv_properties(tmp_
 
 
 def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path: Path) -> None:
-    result, ipc, _backend = reader(tmp_path)
+    # A scorer, so the cue puts color on the focus slot: the removal asserted below is then a real
+    # one. Without color the slot was never written, and a removal of nothing is no longer sent.
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
     result.graph.cue.set_subtitle("猫を見る")
     assert result.graph.subtitle_presentation.native is not None
     settle_jobs(result, ipc)
@@ -1580,6 +1712,7 @@ def test_source_clear_is_a_generation_boundary_and_keeps_native_pixels(tmp_path:
         result.graph.subtitle_presentation.native.status.geometry_ready
     )  # the lane terminal published it
     old_generation = result.graph.subtitle_presentation.pipeline.generation
+    assert any(c[:3] == ("osd-overlay", 1001, "ass-events") for c in ipc.commands)  # color is up
     ipc.commands.clear()
 
     result.graph.subtitle_presentation.native.set_source(None, live=True)
@@ -3270,6 +3403,51 @@ def test_a_batch_of_geometry_input_changes_arms_one_deadline(tmp_path: Path) -> 
     result.close()
 
 
+def test_a_refresh_on_a_refused_render_space_still_degrades(tmp_path: Path) -> None:
+    """The control for the guard above: an observation that cannot be keyed because the render
+    inputs refuse it — margins that swallow the frame — is not a withheld half. The boxes were
+    measured against a frame mpv no longer draws into, and the status must say so."""
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    settle_jobs(result, ipc)
+    assert native.status.geometry_ready
+
+    swallowed = {**_OSD, "mt": 5000, "mb": 5000}
+    ipc.props["osd-dimensions"] = swallowed
+    result.graph.playback.observe_event({"name": "osd-dimensions", "data": swallowed})
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+
+    assert not native.status.geometry_ready
+    assert native.status.fallback_reason == "subtitle-render-input-unsupported"
+    result.close()
+
+
+def test_a_refresh_with_nothing_to_key_leaves_the_cue_up(tmp_path: Path) -> None:
+    """Mid-seek mpv withdraws `sub-text/ass-full`, `sub-start` and `sub-end` in one batch while
+    navigation keeps the pre-armed target on screen. Each is a geometry input, so the batch arms a
+    refresh, and the refresh — unable to key an observation with no rows — read that as the cue
+    having moved and cleared the color it was measured for. Twelve milliseconds after every seek,
+    thirty before the landed cue put it back."""
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    settle_jobs(result, ipc)
+    assert native.status.geometry_ready
+    before = visible_pixel_changes(ipc)
+
+    for name, data in (("sub-text/ass-full", ""), ("sub-start", None), ("sub-end", None)):
+        ipc.props[name] = data
+        result.graph.playback.observe_event({"name": name, "data": data})
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+
+    assert visible_pixel_changes(ipc) == before
+    assert native.status.geometry_ready
+    result.close()
+
+
 def test_a_track_change_cancels_a_pending_geometry_refresh(tmp_path: Path) -> None:
     """The tick drain refreshed only while the pipeline generation held. The deadline keeps that
     guard: a refresh armed for the old track is cancelled rather than left to fire against the
@@ -4286,8 +4464,28 @@ def test_margins_that_swallow_the_frame_are_rejected():
     would be for a zero- or negative-sized region."""
     with pytest.raises(ValueError, match="osd-margins"):
         _inputs(osd={"mt": 600, "mb": 600})
-    with pytest.raises(ValueError, match="osd-margins"):
-        _inputs(osd={"ml": -1})
+
+
+def test_a_pan_scanned_video_keeps_its_frame():
+    """`panscan`/`video-zoom` scale the video past the window: mpv reports negative margins and
+    libass takes them as-is (`ass.h`: "may be negative if pan-and-scan is used"). A viewer who
+    pressed `W` lost every cue's interaction to a refusal here, while the layout was still exact."""
+    result = _inputs(osd={"mt": 89, "mb": 89, "ml": -17, "mr": -18})
+
+    assert result.margins == (89, 89, -17, -18)
+
+
+def test_a_pan_scanned_blend_surface_starts_past_the_window_edge():
+    """Under `--blend-subtitles` the same negative margins become a wider surface at a negative
+    origin: the boxes are laid out on it and offset onto the screen, clipped rather than moved."""
+    result = _inputs(
+        osd={"mt": 89, "mb": 89, "ml": -17, "mr": -18},
+        frame_size=(3024, 1898),
+        **{"blend-subtitles": True},
+    )
+
+    assert result.frame_size == (3024 + 17 + 18, 1898 - 89 - 89)
+    assert result.box_origin == (-17, 89)
 
 
 @pytest.mark.parametrize("par", [-1.0, float("nan"), float("inf")])
@@ -4409,3 +4607,97 @@ def test_the_calibration_round_trip_is_timed_not_just_its_arithmetic(tmp_path: P
         assert drift[0]["calibration_ms"] >= 0.0
         assert recorded, "the histogram was never recorded"
         result.close()
+
+
+def test_a_font_change_notice_names_the_options_and_fits_on_screen() -> None:
+    """The notice is a line drawn over video, not a log entry.
+
+    Its detail arrived as the repr of two option tuples — a dozen `(name, value)` pairs twice over —
+    and covered the screen edge to edge, truncated mid-word by the display rather than by anything
+    that knew where to cut. The names that MOVED are the actionable half and are what the notice's
+    own docstring promises; the values stay in the log.
+    """
+    from saitenka.app.native_subtitles import _fallback_notice, _font_option_delta
+
+    before = (("embeddedfonts", "True"), ("sub-font", "'sans-serif'"), ("sub-fonts-dir", "''"))
+    after = (("embeddedfonts", "True"), ("sub-font", "'Yu Gothic'"), ("sub-fonts-dir", "'/x'"))
+
+    delta = _font_option_delta(before, after)
+
+    assert delta == "sub-font, sub-fonts-dir"
+    assert "embeddedfonts" not in delta  # unchanged options are not the user's problem
+    notice = _fallback_notice("subtitle-font-environment-stale", delta)
+    assert "sub-font" in notice
+    assert len(notice) < 140
+
+
+def test_a_notices_length_does_not_grow_with_its_detail() -> None:
+    """A bound on the class, not on the one detail that overflowed: the next diagnostic to grow
+    would otherwise repeat this, and nothing between here and the screen would stop it.
+
+    The property, not a number — the cause strings are fixed and reviewed, so what has to hold is
+    that an unbounded input cannot lengthen the line.
+    """
+    from saitenka.app.native_subtitles import _fallback_notice
+
+    hundred = _fallback_notice("subtitle-font-environment-stale", "x" * 100)
+    four_thousand = _fallback_notice("subtitle-font-environment-stale", "x" * 4000)
+
+    assert hundred == four_thousand
+    assert four_thousand.endswith("…)")
+    assert len(four_thousand) < 140
+
+
+def test_a_mid_track_font_change_reports_option_names_not_a_tuple_dump(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The call site, not just the helper. A test that only exercised `_font_option_delta` stayed
+    green while the caller went on formatting both option tuples into the diagnostic — the field
+    screenshot that started this was a toast reading `(('embeddedfonts', 'True'), ('osd-font-…`
+    stretched across the video and cut off mid-word.
+
+    Asserted on the log because the notice and the log take the SAME diagnostic string, and the
+    toast renders to a bitmap — its text is not in the command stream to read back.
+    """
+    result, ipc, _backend = reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+
+    with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
+        ipc.props["options/sub-font"] = "Yu Gothic"  # the font environment moves under the track
+        assert result.graph.subtitle_presentation.native is not None
+        result.graph.subtitle_presentation.native.schedule(result.graph.cue.geometry_observation())
+
+    assert "subtitle-font-environment-stale" in caplog.text
+    assert "detail=sub-font" in caplog.text
+    assert "((" not in caplog.text, "the diagnostic carries a raw tuple repr"
+    result.close()
+
+
+def test_an_unread_font_environment_waits_instead_of_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Never read and changed under us are different facts with different advice.
+
+    A track load resolves the font set a moment after the first observation, so the first check
+    compares an empty set against mpv's six options. Reported as a mid-track change that told the
+    user to reselect a track that was fine — and, because one side was empty, named every option as
+    having "moved". Field screenshot: `mpv's fonts changed mid-track — reselect the track
+    (embeddedfonts, osd-font-provider, osd-fonts-dir, sub-font, …)` on a healthy session.
+    """
+    from saitenka.app.native_subtitles import _PENDING_REASONS
+
+    assert "subtitle-font-environment-unread" in _PENDING_REASONS  # pending never toasts
+    result, _ipc, _backend = reader(tmp_path)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native._fonts = replace(
+        result.graph.subtitle_presentation.native._fonts,
+        options=(),
+    )
+
+    with caplog.at_level(logging.INFO, logger="saitenka.app.native_subtitles"):
+        result.graph.cue.set_subtitle("猫を見る")
+
+    assert "subtitle-font-environment-unread" in caplog.text
+    assert "changed mid-track" not in caplog.text
+    result.close()

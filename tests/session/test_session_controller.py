@@ -778,6 +778,87 @@ def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
     assert r.graph.playback.cue.text == "さん"
 
 
+def _writes(ipc) -> tuple:
+    """The commands that change what mpv shows; a property read is not one of them."""
+    return tuple(c for c in ipc.commands if c and c[0] != "get_property")
+
+
+def _cue_redraws() -> int:
+    from saitenka import otel_metrics
+
+    return otel_metrics.snapshot().get("saitenka.cue_redraw.duration_ms", {}).get("count", 0)
+
+
+def test_mid_seek_blank_observation_keeps_the_pre_armed_cue_surfaces(monkeypatch):
+    """A sub-seek pre-arms the target cue's surfaces before mpv lands; mpv then reports an empty
+    `sub-text` while the seek is in flight. Observed through the production seam that blank used to
+    reset every surface — so the first frame after every seek was drawn without its color — even
+    though navigation swallowed the same observation for the cue text."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.graph.cue.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r.command(_msg_for(ipc, "Alt+RIGHT"))
+    assert r.graph.playback.cue.text == "に"
+    writes_before = _writes(ipc)
+
+    r.graph.playback.observe("sub-text", "")  # mpv's mid-seek blank, through the observation seam
+    r.graph.cue.settle()
+
+    assert _writes(ipc) == writes_before  # nothing torn down, nothing redrawn
+    assert r.graph.annotation.view.retired is True  # the identity itself did retire
+
+
+def test_the_cue_after_a_seek_still_draws(monkeypatch):
+    """Keeping the surfaces must not stall the chain: the landed cue is adopted, and the next
+    ordinary cue change after it redraws. The first cut of this guard skipped the retirement
+    outright, and a line arriving two seconds after a seek was never drawn at all."""
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    from saitenka import otel_metrics
+
+    r, ipc = _reader_with_index(monkeypatch)
+    r.graph.cue.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r.command(_msg_for(ipc, "Alt+RIGHT"))
+    metric_reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[metric_reader])
+    otel_metrics.register(metric_reader, provider.get_meter("test"))
+    try:
+        r.graph.playback.observe("sub-text", "")  # blank while the seek is in flight
+        r.graph.cue.settle()
+        r.graph.playback.observe("sub-text", "に")  # the seek lands on the pre-armed target
+        r.graph.cue.settle()
+        assert r.graph.playback.cue.text == "に"
+        redraws = _cue_redraws()
+
+        r.graph.playback.observe("sub-text", "さん")  # an ordinary later cue change
+        r.graph.cue.settle()
+
+        assert r.graph.playback.cue.text == "さん"
+        assert _cue_redraws() == redraws + 1
+    finally:
+        otel_metrics.unregister()
+        provider.shutdown()
+
+
+def test_a_blank_outside_the_settle_window_still_retires_the_cue(monkeypatch):
+    """The negative control for the guard above: a real gap between cues clears everything."""
+    r, ipc = _reader_with_index(monkeypatch)
+    r.graph.cue.set_subtitle("いち")
+    ipc.props["sub-start"] = 1.0
+    r.command(_msg_for(ipc, "Alt+RIGHT"))
+    r.graph.subtitle_navigation.retire_settle()
+    writes_before = _writes(ipc)
+
+    r.graph.playback.observe("sub-text", "")
+    r.graph.cue.settle()
+
+    assert r.graph.annotation.view.retired is True
+    assert r.graph.playback.cue.text == ""
+    assert _writes(ipc) != writes_before  # surfaces were torn down
+
+
 def test_settle_guard_expires_and_adopts_empty(monkeypatch):
     """Outside the settle window an empty sub-text is honoured (a real gap between cues clears it)."""
     r, _ipc = _reader_with_index(monkeypatch)
@@ -3083,8 +3164,10 @@ def test_panel_cache_lru_eviction_not_wholesale_clear(make_session):
     for i in range(r.graph.tooltip.cache_limit):
         r.graph.tooltip.surface_state().panel_cache.setdefault(f"key_{i}", sentinel)
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
+    # Tokens first: a box exists because a token was measured, and the store drops a box that
+    # indexes a token the cue does not have. Reversed, this builds a state the runtime never reaches.
     r.graph.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
+    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
     Driver(r).move_to_word(0)
     # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
     assert (
@@ -3948,8 +4031,10 @@ def test_capability_probes_refresh_on_their_own_deadline(monkeypatch, make_sessi
     r.close()
 
 
-def test_the_sidebar_follows_the_cue_when_interaction_settles(monkeypatch, make_session):
-    """The active row re-follows at the interaction boundary rather than on a polling tick."""
+def test_the_sidebar_follows_the_cue_when_the_cue_settles(monkeypatch, make_session):
+    """The active row re-follows when a cue observation settles, not on every turn: the follow
+    used to run in the interaction settle ahead of the cue, and its three blocking property reads
+    put 250 ms between a seek and the cue's color."""
     ipc = FakeIPC()
     r = make_session(
         ipc,
@@ -3964,10 +4049,40 @@ def test_the_sidebar_follows_the_cue_when_interaction_settles(monkeypatch, make_
     monkeypatch.setattr(sidebar_module, "follow", follows.append)
 
     r.graph.interaction.settle()
+    assert follows == []  # a turn with no cue change is not a follow
+
+    r.graph.playback.observe("sub-text", "次の行")
+    r.graph.cue.settle()
 
     # The view it followed, not the host: identity with the owner says the settle boundary
     # reached this sidebar's own state rather than merely calling something once.
     assert [view.state for view in follows] == [r.graph.sidebar.state]
+
+    r.graph.cue.set_subtitle("先の行")  # a cue the session installs itself: a nav pre-arm
+
+    assert len(follows) == 2
+    r.close()
+
+
+def test_the_sidebar_reads_the_next_episode_path_even_without_a_sub_index(make_session):
+    """The path is read once per episode, not per turn. Two episodes whose subtitle index never
+    loads must not share the read: the sidebar's mined and backlog rows, and a relink write, key
+    on it."""
+    ipc = FakeIPC()
+    r = make_session(
+        ipc,
+        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
+        options=ReaderOptions().with_overrides(prefetch=False),
+    )
+    ipc.props["path"] = "/ep1.mkv"
+    assert r.graph.track_commands.navigation.current.sub_index is None
+    assert r.graph.sidebar.view().video == "/ep1.mkv"
+
+    ipc.props["path"] = "/ep2.mkv"
+    assert r.graph.sidebar.view().video == "/ep1.mkv"  # same episode: no read
+    r.graph.cue.rebind_episode()
+
+    assert r.graph.sidebar.view().video == "/ep2.mkv"
     r.close()
 
 

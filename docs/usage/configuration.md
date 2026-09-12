@@ -36,9 +36,27 @@ maturity levels:
 
 ```toml
 [palette]
-learning = "#eed49f"   # words still in learning
-young    = "#8bd5ca"   # young (not yet mature) cards
+base       = "#cad3f5"   # every word with no other signal — most of a line
+known      = "#a6da95"   # mature cards
+forgotten  = "#ee99a0"   # lapsed
+learning   = "#eed49f"   # words still in learning
+young      = "#8bd5ca"   # young (not yet mature) cards
+n_plus_one = "#c6a0f6"   # the line's single unknown word
+hover      = "#f4dbd6"   # the word under the cursor
+freq_single = "#f5a97f"  # frequency, unbanded
+freq_bands = ["#ed8796", "#f5a97f", "#f9e2af", "#8bd5ca", "#8aadf4"]
+
+[palette.jlpt]
+N1 = "#ed8796"
+N2 = "#f5a97f"
+N3 = "#f9e2af"
+N4 = "#8bd5ca"
+N5 = "#8aadf4"
 ```
+
+Every key is optional; unlisted ones keep the defaults above. `base` is the one worth changing first
+if you want to *see* which words the overlay has colored — it defaults to a near-white that sits
+almost invisibly over subtitle text that is already near-white.
 
 `[fsrs]` optionally reads maturity from a **copy** of your Anki collection so coloring reflects real
 review state. Set this when you want per-card maturity rather than a plain known/unknown split — and
@@ -48,6 +66,19 @@ point it at a *copy*, never the live `collection.anki2`:
 [fsrs]
 collection = "~/anki-copies/collection-copy.anki2"
 ```
+
+`[scoring]` turns the JLPT underline off. It is on by default; off is worth trying if subtitles
+feel slow to paint, because each underline is another ASS event mpv parses and lays out on every
+redraw — a line with four of them hands over roughly twice the payload of one with none:
+
+```toml
+[scoring]
+jlpt_underlines = false
+```
+
+!!! note
+    This changes the *classification*, not just the drawing: with it off, a word's JLPT level stops
+    reaching episode analysis and mined cards too.
 
 !!! tip
     The known-word source itself lives in `[known]` — a map of Anki decks to the fields that hold the

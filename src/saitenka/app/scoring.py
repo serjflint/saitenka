@@ -7,7 +7,7 @@ token has a JLPT level (matching SubMiner's "frequency only if no other signal")
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING
 
 from saitenka_wordstate.verdict import MATURITY_STATES, TokenVerdict
@@ -34,6 +34,35 @@ def _configured_color(raw: dict, name: str, default: RGBA) -> RGBA:
         return _hex(value)
     except ValueError as error:
         raise ValueError(f"palette.{name} must be a six-digit hex color") from error
+
+
+def _configured_bands(raw: dict, default: tuple[RGBA, ...]) -> tuple[RGBA, ...]:
+    """`freq_bands`, a list of hex colours. Its length IS the band count the scorer splits into, so
+    a shorter list is a different classification, not a shorter palette — rejected rather than
+    padded."""
+    value = raw.get("freq_bands")
+    if value is None:
+        return default
+    if not isinstance(value, (list, tuple)) or len(value) != len(default):
+        raise ValueError(f"palette.freq_bands must be a list of {len(default)} hex colors")
+    return tuple(
+        _configured_color({"freq_bands": item}, "freq_bands", default[index])
+        for index, item in enumerate(value)
+    )
+
+
+def _configured_levels(raw: dict, default: dict) -> dict:
+    """`jlpt`, a table of level -> hex colour. Unlisted levels keep their default; an unknown level
+    is a typo that would otherwise colour nothing and say nothing."""
+    value = raw.get("jlpt")
+    if value is None:
+        return dict(default)
+    if not isinstance(value, dict):
+        raise TypeError("palette.jlpt must be a table of level -> hex color")
+    unknown = set(value) - set(default)
+    if unknown:
+        raise ValueError(f"palette.jlpt has unknown level(s): {', '.join(sorted(unknown))}")
+    return {level: _configured_color(value, level, colour) for level, colour in default.items()}
 
 
 @dataclass(frozen=True)
@@ -67,12 +96,24 @@ class Palette:
 
     @classmethod
     def from_config(cls, raw: object) -> Palette:
+        """Every colour this palette draws with, from `[palette]`.
+
+        Field by field off `fields(cls)` rather than a hand-written list: `learning` and `young`
+        were the list, so the other eight — `base` above all, the colour most of a line is drawn in
+        — could be set in the config and silently keep their defaults, with nothing warning.
+        """
         palette = cls()
         if not isinstance(raw, dict):
             return palette
+        simple = {
+            f.name: _configured_color(raw, f.name, getattr(palette, f.name))
+            for f in fields(cls)
+            if f.name not in {"freq_bands", "jlpt"}
+        }
         return cls(
-            learning=_configured_color(raw, "learning", palette.learning),
-            young=_configured_color(raw, "young", palette.young),
+            **simple,
+            freq_bands=_configured_bands(raw, palette.freq_bands),
+            jlpt=_configured_levels(raw, palette.jlpt),
         )
 
     def style_for(self, verdict: TokenVerdict) -> TokenStyle:

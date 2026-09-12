@@ -63,7 +63,11 @@ def test_every_device_leg_is_priced_from_work_it_actually_did(tmp_path: Path) ->
     by_name = {item["name"]: item["value"] for item in result}
     assert by_name["device 1: per token"] > 0
     assert by_name["device 2: per token"] > 0
-    assert all(item["value"] >= 0 for item in result)
+    # Every DURATION is non-negative. The decoration figure is not one — it is the difference of two
+    # medians, and under a loaded `-n auto` run the ruled cue can come out marginally faster than the
+    # plain one, which is noise rather than a negative cost. Asserting its sign failed exactly there.
+    durations = [item for item in result if "delta" not in item["name"]]
+    assert all(item["value"] >= 0 for item in durations)
 
 
 def test_an_absent_libass_is_reported_as_absent_not_as_zero(monkeypatch, tmp_path: Path) -> None:

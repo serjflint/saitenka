@@ -89,6 +89,9 @@ class PreviewPanel:
     audio_rect: Rect | None = None
     image_rect: Rect | None = None
     dup_rect: Rect | None = None
+    #: Whether the preview's keys are currently bound in mpv, so a dismiss on a cue with no preview
+    #: up does not send a `keybind` command per cue.
+    keys_grabbed: bool = False
 
     def clear(self) -> None:
         """Dismiss: forget every clickable region in one move."""
