@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788899613147,
+  "lastUpdate": 1789219593925,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15179,6 +15179,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.282152,
             "range": "3 replicas; min 1.24398; max 1.30122; MAD 0.019071; worst 1.30122",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec54414dfcf0e6dc843f6601721e7bd1f0aae7cf",
+          "message": "Merge pull request #510 from serjflint/feat/color-latency-telemetry\n\nfeat(telemetry): make the wait-to-color derivable from the trace",
+          "timestamp": "2026-09-12T18:25:15+05:00",
+          "tree_id": "a42c624b0ace38df079c1c7048d868cc7cc8817d",
+          "url": "https://github.com/serjflint/saitenka/commit/ec54414dfcf0e6dc843f6601721e7bd1f0aae7cf"
+        },
+        "date": 1789219592638,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.903528,
+            "range": "3 replicas; min 4.39235; max 6.38263; MAD 0.511179",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.851212,
+            "range": "3 replicas; min 6.01352; max 8.72171; MAD 0.837688; worst 8.72171",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.454158,
+            "range": "3 replicas; min 13.8492; max 20.4089; MAD 0.604956",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 15.797516,
+            "range": "3 replicas; min 14.5403; max 20.6561; MAD 1.25726; worst 20.6561",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.860555,
+            "range": "3 replicas; min 13.8538; max 49.306; MAD 1.00672",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.070706,
+            "range": "3 replicas; min 0.06815; max 0.120564; MAD 0.002556; worst 0.120564",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 35.694743,
+            "range": "3 replicas; min 30.2647; max 44.1471; MAD 5.43003; worst 44.1471",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 4.974824,
+            "range": "3 replicas; min 2.8925; max 48.5318; MAD 2.08232; worst 48.5318",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.542848,
+            "range": "3 replicas; min 1.22993; max 99.9181; MAD 0.312919; worst 99.9181",
             "unit": "ms"
           }
         ]
