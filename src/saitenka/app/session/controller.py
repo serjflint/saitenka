@@ -69,8 +69,10 @@ class SessionController:
         return self._graph.lifecycle.close()
 
     def _settle_turn(self) -> None:
-        self._graph.interaction.settle()
+        # The cue first: its color write is racing mpv's frame draw, and everything the
+        # interaction settle does (tooltip speculation, hover) can wait a millisecond.
         self._graph.cue.settle()
+        self._graph.interaction.settle()
 
     def _drain_event(self, event: object) -> None:
         graph = self._graph

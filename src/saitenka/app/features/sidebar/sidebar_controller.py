@@ -46,6 +46,8 @@ class SidebarController:
         self.store: SidebarStore = SIDEBAR_STATEFUL_BINDING.store(ipc)
         self.panel = sidebar.SidebarPanel()
         self._view_owners: SidebarViewOwners | None = None
+        self._video_path_key: int | None = None
+        self._video_path_value: str | None = None
 
     def bind_view(self, owners: SidebarViewOwners) -> None:
         if self._view_owners is not None:
@@ -64,8 +66,10 @@ class SidebarController:
             active=sidebar._active_index(
                 navigation.sub_index,
                 playback.cue.text,
-                sub_start=playback.query("sub-start"),
-                time_pos=playback.query("time-pos"),
+                # Observed facts, not round trips: this runs every turn ahead of the cue settle,
+                # and a read blocks for as long as mpv is busy — 250 ms across a seek.
+                sub_start=playback.value("sub-start"),
+                time_pos=playback.value("time-pos"),
                 preferred=navigation.nav_idx,
             ),
             index=navigation.sub_index,
@@ -73,7 +77,7 @@ class SidebarController:
             osd=owners.screen.osd,
             chrome_scale=owners.screen.chrome_scale(),
             surfaces=owners.surfaces,
-            video=playback.text("path"),
+            video=self._video_path(navigation.sub_index, playback),
             backlog=owners.history.ensure_backlog,
             mined=lambda: owners.mining.store,
             mined_exists=owners.mining.store_exists,
@@ -83,6 +87,19 @@ class SidebarController:
             analysis=owners.analysis.result,
             can_mine=owners.mining.configured,
         )
+
+    def _video_path(self, index: object, playback: PlaybackObservationController) -> str | None:
+        """The media path, read from mpv once per episode rather than on every turn.
+
+        `view()` is built every turn ahead of the cue settle, and `path` is not an observed
+        property, so reading it live put a blocking round trip on the color path — 250 ms while
+        mpv is mid-seek. The sub-index object changes exactly when the episode does.
+        """
+        key = id(index)
+        if self._video_path_key != key:
+            self._video_path_key = key
+            self._video_path_value = playback.text("path")
+        return self._video_path_value
 
     def show(self) -> None:
         sidebar.show(self.view())

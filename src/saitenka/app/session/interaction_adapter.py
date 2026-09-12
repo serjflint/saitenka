@@ -152,7 +152,6 @@ class InteractionCoordinator:
         ports.sync_mouse_capture()
         ports.tooltip.publish_pending()
         ports.tooltip.update_prefetch()
-        ports.sidebar.follow()
 
     def command_coordinator(self) -> InteractionCommandCoordinator:
         tooltip = self._ports.tooltip
