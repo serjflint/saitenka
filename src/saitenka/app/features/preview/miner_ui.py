@@ -205,6 +205,7 @@ def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
     ports.preview.store.dispatch(events.PreviewShown(pv, audio_path))
     render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width)
     _grab_preview_keys(ports.ipc, active_bindings(ports.keys, "preview"))
+    ports.preview.panel.keys_grabbed = True
 
 
 def render_preview(
@@ -239,7 +240,11 @@ def hide_preview(ports: PreviewPorts) -> None:
     _stop_preview_audio(ports.preview.panel)
     ports.surfaces.remove(OverlayId.PREVIEW)
     ports.preview.store.dispatch(events.PreviewDismissed())
-    ports.preview.panel.clear()
+    panel = ports.preview.panel
+    panel.clear()
+    if not panel.keys_grabbed:
+        return  # nothing was bound: every cue change dismisses, and most have no preview up
+    panel.keys_grabbed = False
     _release_preview_keys(
         ports.ipc,
         active_bindings(ports.keys, "preview"),
