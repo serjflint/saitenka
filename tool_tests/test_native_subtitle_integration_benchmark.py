@@ -509,6 +509,39 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     assert set(shipped["budgets"]) == set(benchmark.BUDGET_CLAUSES)
 
 
+def test_the_harness_builds_the_overlay_composition_would_have_built() -> None:
+    """Every argument of the benchmark's hand-built `Overlay`, not just the one it was added for.
+
+    The session under measurement must be on the DEFERRED overlay path. `Overlay` asks
+    `_defer_interaction_for` when composition does not say, and that probe is an
+    `isinstance(ipc, MpvIPC)` — false for `_IPC` and for every other stand-in. On the inline path
+    `show_bgra_interactive` encodes and writes each tooltip frame on the thread this benchmark is
+    timing, which production hands to `_InteractionPresenter`. Nothing else fails when the
+    `overlay=` wiring is dropped — the run stays green and every phase number silently changes.
+
+    Supplying that overlay means `_reader` now hand-copies the argument list
+    `build_session_assembly` uses, so the OTHER two arguments can drift the same silent way. A
+    missing `runtime_submit` is the sharp one: `LifecycleSurfaces` branches on it being `None` and
+    issues every surface write inline instead of through the correlated gateway — the same class of
+    divergence this test exists to prevent, one argument over.
+    """
+    import numpy as np
+
+    from saitenka.app.config import ReaderOptions
+
+    reader = benchmark._reader(benchmark._IPC())
+    try:
+        overlay = reader.graph.overlay
+        result = overlay.show_bgra_interactive(np.zeros((4, 4, 4), np.uint8), oid=1)
+        runtime_submit, id_base = overlay.runtime_submit, overlay.id_base
+    finally:
+        reader.close()
+
+    assert result == {"error": "deferred"}
+    assert runtime_submit is not None  # else every surface write settles inline
+    assert id_base == ReaderOptions().overlay_id_base
+
+
 def test_the_harness_answers_every_option_the_geometry_gate_reads() -> None:
     """The fake mpv has to hold what production reads, or the benchmark measures a refusal.
 

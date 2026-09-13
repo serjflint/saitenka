@@ -279,6 +279,25 @@ the estimator is looking before touching the bound.
 Wall time is still recorded per sample, per phase, with its off-CPU split — as evidence, which is how
 the phase above was identified. Evidence does not have to be a gate.
 
+### The harness has to be on the path the product runs (2026-09-13)
+
+`Overlay` decides whether interaction pixels are encoded and written inline or handed to
+`_InteractionPresenter`, and until #516 it decided that *only* by `isinstance(ipc, MpvIPC)` — false
+for every stand-in. (The probe survives as the default; what changed is that composition can now
+say.) So this benchmark timed the inline path and gated a product that runs the deferred one.
+
+The two are not the same measurement offset by a constant. Deferring takes the tail off `scroll`
+(per-trial p99 ~5.5 → ~4.5 ms, worst trial 8.6 → 4.7) and puts a little on `present` (~4.5 → ~5.0 ms
+median). Note what did and did not move: `_measure` reads `time.thread_time_ns()`, so the encode and
+write do not *travel* from `scroll` to `present` — they leave the measurement altogether, and
+`present`'s rise is a second thread contending beside the subtitle render, which is what the product
+also has. The gated `interaction_cpu_p99_ms` barely moves because it pools every phase.
+
+The general form: **a fake picked by a type probe picks the simple path, and the simple path is not
+the one under test.** `runtime_submit` was already a constructor argument for this reason; deferral
+now is too. When a harness stands in for a boundary that owns a thread, say which side of it you are
+measuring — do not let an `isinstance` decide.
+
 ## Gating a noisy metric — quantile, sample count, bound (2026-08-25)
 
 The repo runs four benchmark gates. Two arrived at the right policy independently, one had to be
