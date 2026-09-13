@@ -236,6 +236,49 @@ free-threaded support is **unconfirmed** (both read/monitor interpreter internal
 check their trackers before relying. `pytest-benchmark` auto-disables under `pytest-xdist`, so any
 micro-suite must run serially, separate from the `-n auto` gate — the custom harness stays primary.
 
+### What this gate is for (2026-09-13)
+
+`native_subtitle_integration_benchmark.py` spent its life being retuned, and the git history says why
+better than any argument: **every commit that ever touched its budgets changed the benchmark and its
+own tests, and never a line of `src/`.**
+
+| commit | what it changed |
+| --- | --- |
+| `ac090829` enforce interactive wall budget | bench + fixture + bench tests |
+| `9211ba72` align interaction budget with 60 fps | bench + fixture + bench tests |
+| `b89a05b9` enforce interactive frame budget | bench + fixture + bench tests |
+| `3907aaa4` stabilize interaction release oracle | bench + fixture + bench tests |
+| `9f8af715` headroom a tail metric needs | fixture only |
+| `6afbc8c2` judge each budget on the median | bench |
+
+Nine commits of gate maintenance, no product defect caught, against three false failures in 157
+archived runs and a job that was the failing one in 12 of 28 red CI runs. A gate whose whole history
+is adjustments to itself is measuring the harness.
+
+So the wall clauses are gone. Two live sessions share this process **by design** — that is what makes
+the comparison possible — so a wall tail is their contention, not the product's. Measured: the tail
+sits entirely in one phase, its CPU is stable to 0.15 ms across trials while its off-CPU time swings
+1.7 to 11.7 ms, and **0%** of the worst-stalled samples overlap our own geometry lane. The question
+the wall clause looked like it answered — does an interaction fit in a frame — belongs to the live
+tier against a real mpv, which this repo already runs.
+
+What remains is four clauses, and only one is a performance bound:
+
+| clause | kind |
+| --- | --- |
+| `ready_before_presentation_ratio >= 0.99` | invariant — geometry arrives before the cue is drawn, which is the flash a viewer sees |
+| `interaction_cpu_delta_signed_mean_ms <= 0.0` | contract — the native path may not cost the calling thread more than the baseline |
+| `retained_rss_growth_mib <= 256` | leak ceiling |
+| `interaction_cpu_p99_ms <= 16.67` | performance, anchored to a frame |
+
+That is the general lesson, and it outranks every estimator rule above: **an invariant with an anchor
+survives a noisy runner; a fitted percentile negotiates with it.** Reach for the percentile only when
+no invariant can answer the question, and when it flakes, check whether the metric's mass is where
+the estimator is looking before touching the bound.
+
+Wall time is still recorded per sample, per phase, with its off-CPU split — as evidence, which is how
+the phase above was identified. Evidence does not have to be a gate.
+
 ## Gating a noisy metric — quantile, sample count, bound (2026-08-25)
 
 The repo runs four benchmark gates. Two arrived at the right policy independently, one had to be
@@ -317,7 +360,7 @@ if that spread moves — do not tighten it toward the typical value, which is wh
 
 A below-floor estimator is only as good as the claim excusing it. If a rank is not defensible, the
 number excusing it has to be re-measured, not asserted once and inherited.
-| `tools/native_subtitle_integration_benchmark.py` (absolute latencies) | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank |
+| `tools/native_subtitle_integration_benchmark.py` (`interaction_cpu_p99_ms`) | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank. It is now the only fitted performance bound in that file; see "What this gate is for" |
 | `tools/native_subtitle_integration_benchmark.py` (CPU delta) | median across trials of each per-trial mean and p95 | all samples / 16th worst | conforms — see below for why this one clause does not use p99 |
 
 ### A clamped paired difference has no usable tail (2026-09-12)
@@ -348,6 +391,33 @@ does the native path cost more than the baseline — and attribution lives in th
 there twice: the **mean** for a cost every interaction pays, the **p95** for one that a slice pays.
 The pair is 5x more sensitive to a real regression than the p99 clause it replaces, and fails none of
 the 157 runs that clause was flaking on.
+
+#### Counterbalancing, and what it cost to learn
+
+The clamp above is half the story; the pairing is the other half. Running both sides over the same
+cue with a fixed order charges that cue's first touch to whichever side goes first, and it was always
+the baseline. Measured by running the matrix in each order:
+
+| order | signed mean delta | native cpu p99 |
+| --- | --- | --- |
+| baseline first (as shipped until now) | -3.90 ms | 6.2-6.9 ms |
+| native first | -1.21 ms | 9.7-9.9 ms |
+| alternating | -2.56 ms | 8.9-9.6 ms |
+
+Solving `t - b` and `t + b` gives a true native advantage `t = -2.56 ms` and a first-position penalty
+`b = 1.35 ms`. Both effects are real: the native path genuinely costs the calling thread less, *and*
+a constant 1.35 ms of ordering bias sat in every difference the gate ever read. Alternating recovers
+`t`, and it is stable across trials to within 0.14 ms — by a wide margin the best-behaved statistic
+this benchmark has produced, which is why the gate is now a contract on it (`<= 0.0`: the native path
+may not cost the calling thread more than the baseline) rather than a fitted bound.
+
+Two consequences worth keeping:
+
+- **The clamped statistics cannot survive counterbalancing.** Half the samples now carry the
+  native-first penalty, and the clamp keeps that half instead of cancelling it — so the clamped mean
+  and p95 *rise* under a change that made the measurement more honest. They are gone from the gate.
+- **A budget of zero breaks a multiplicative tolerance.** `OUTLIER_TOLERANCE` scales the bound, and
+  scaling zero bounds nothing, so a contract-style clause carries an absolute `slack` instead.
 
 #### The clamp is the defect the statistic was working around
 

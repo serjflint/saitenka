@@ -30,7 +30,7 @@ def report() -> dict:
         "interaction_cpu_p99_ms": 1.0,
         "interaction_cpu_delta_p99_ms": 0.5,
         "interaction_cpu_delta_p95_ms": 0.5,
-        "interaction_cpu_delta_mean_ms": 0.05,
+        "interaction_cpu_delta_signed_mean_ms": -2.5,
         "interaction_cpu_delta_zero_fraction": 0.89,
         "interaction_wall_delta_p99_ms": 0.75,
         "ready_before_presentation_ratio": 100 / 101,
@@ -69,10 +69,7 @@ def manifest() -> dict:
         "presentation_interval_ms": 0.0,
         "budgets": {
             "interaction_cpu_p99_ms": 16.67,
-            "interaction_wall_p99_ms": 16.67,
-            "interaction_cpu_delta_mean_ms": 0.1,
-            "interaction_cpu_delta_p95_ms": 2.0,
-            "interaction_wall_delta_p99_ms": 16.67,
+            "interaction_cpu_delta_signed_mean_ms": 0.0,
             "ready_before_presentation_ratio": 0.99,
             "retained_rss_growth_mib": 256.0,
         },
@@ -109,14 +106,16 @@ def test_a_foreign_schema_reports_a_failure_rather_than_raising() -> None:
 
 def test_summary_names_the_failing_budget_not_only_the_count() -> None:
     slow = report()
-    slow["interaction_cpu_delta_p95_ms"] = manifest()["budgets"]["interaction_cpu_delta_p95_ms"] + 1
+    slow["interaction_cpu_delta_signed_mean_ms"] = (
+        manifest()["budgets"]["interaction_cpu_delta_signed_mean_ms"] + 1
+    )
 
     summary = benchmark._summarize(
         benchmark.summarize_trials([slow, slow, slow], manifest()), manifest(), Path("report.json")
     )
 
     # One of the three budgets the printed numbers do not show, so a count alone cannot explain it.
-    assert "interaction_cpu_delta_p95_ms" in summary
+    assert "interaction_cpu_delta_signed_mean_ms" in summary
     assert summary.startswith("FAIL")
 
 
@@ -152,10 +151,18 @@ def test_native_log_restores_stderr_even_when_the_body_raises(tmp_path) -> None:
     assert log.read_bytes() == b"from the C side\n"
 
 
-def test_budget_oracle_accepts_wall_frame_boundary() -> None:
+def test_budget_oracle_accepts_cpu_frame_boundary() -> None:
+    """The frame anchor lives on the CPU clause now. Wall time is recorded, never gated: two live
+    sessions share this process, so its tail is their contention."""
     measured = report()
-    measured["interaction_p99_ms"] = 16.67
+    measured["interaction_cpu_p99_ms"] = 16.67
     assert evaluate(measured, manifest())
+    assert "interaction_wall_p99_ms" not in manifest()["budgets"]
+
+    stalled = report()
+    stalled["interaction_p99_ms"] = 400.0
+
+    assert evaluate(stalled, manifest()), "wall time must not be able to fail this gate"
 
 
 def test_budget_oracle_rejects_each_regression() -> None:
@@ -163,10 +170,7 @@ def test_budget_oracle_rejects_each_regression() -> None:
         "event_count": 100,
         "interaction_clock": "wall_time",
         "interaction_cpu_p99_ms": 16.68,
-        "interaction_p99_ms": 16.68,
-        "interaction_cpu_delta_mean_ms": 0.11,
-        "interaction_cpu_delta_p95_ms": 2.01,
-        "interaction_wall_delta_p99_ms": 16.68,
+        "interaction_cpu_delta_signed_mean_ms": 0.01,
         "ready_before_presentation_ratio": 0.989,
         "ready_before_presented": 99,
         "retained_rss_growth_mib": 256.01,
@@ -195,24 +199,26 @@ def test_budget_oracle_rejects_each_regression() -> None:
         assert not evaluate(mutated, manifest()), field
 
 
-def test_a_millisecond_added_to_every_interaction_fails_on_the_body_not_the_tail() -> None:
-    """Why the CPU delta is gated on its mean and p95 rather than its p99.
+def test_the_native_path_may_not_cost_the_calling_thread_more_than_the_baseline() -> None:
+    """The delta clause is a contract, not a fitted bound: 0.0 is the point where the native path
+    stops being the cheaper way to put a cue on screen.
 
-    A cost paid by every interaction barely moves a tail already dominated by the noise of a
-    clamped paired difference — so the clause that used to be the only delta gate reads a uniform
-    +1 ms regression as comfortably inside budget, while the mean names it.
+    It reads the *signed* difference. Clamping each pair at zero — what this gate used to measure —
+    keeps only the positive half of the noise, so it cannot see the direction the contract is about
+    and reads a cost against a path that is 2.5 ms cheaper.
     """
-    regressed = report()
-    regressed["interaction_cpu_delta_mean_ms"] = report()["interaction_cpu_delta_mean_ms"] + 1.0
-    regressed["interaction_cpu_delta_p95_ms"] = report()["interaction_cpu_delta_p95_ms"] + 1.0
-    regressed["interaction_cpu_delta_p99_ms"] = report()["interaction_cpu_delta_p99_ms"] + 1.0
+    measured = report()
+    assert measured["interaction_cpu_delta_signed_mean_ms"] < 0.0
+    assert evaluate(measured, manifest())
 
-    assert regressed["interaction_cpu_delta_p99_ms"] < 4.0  # the retired clause's shipped budget
-    assert not evaluate(regressed, manifest())
+    regressed = report()
+    regressed["interaction_cpu_delta_signed_mean_ms"] = 0.01
+
     failed = [
         name for name, ok in benchmark._performance_checks(regressed, manifest()).items() if not ok
     ]
-    assert failed == ["interaction_cpu_delta_mean_ms"]
+    assert failed == ["interaction_cpu_delta_signed_mean_ms"]
+    assert not evaluate(regressed, manifest())
 
 
 @pytest.mark.parametrize("mutation", ["missing-workload", "lost-token", "extra-workload"])
@@ -273,8 +279,8 @@ def test_trial_oracle_rejects_a_run_where_no_trial_was_ever_clean() -> None:
     three passing medians and nothing clean anywhere. That is the shape of a broad regression, and
     without the clean-trial clause it aggregates to green."""
     first, second, third = report(), report(), report()
-    first["interaction_p99_ms"] = 16.68
-    second["interaction_cpu_delta_p95_ms"] = 2.01
+    first["interaction_cpu_p99_ms"] = 16.68
+    second["interaction_cpu_delta_signed_mean_ms"] = 0.01
     third["ready_before_presentation_ratio"] = 0.5
 
     summary = summarize_trials([first, second, third], manifest())
@@ -333,11 +339,12 @@ def test_one_trial_may_be_noisy_but_not_arbitrarily_far_past_a_budget(budget: st
     clause = benchmark.BUDGET_CLAUSES[budget]
     limit = manifest()["budgets"][budget]
     wild = report()
-    wild[clause.metric] = (
-        limit * (benchmark.OUTLIER_TOLERANCE + 1)
-        if clause.compare is operator.le
-        else limit / (benchmark.OUTLIER_TOLERANCE + 1)
-    )
+    if clause.slack is not None:
+        wild[clause.metric] = limit + clause.slack * 2
+    elif clause.compare is operator.le:
+        wild[clause.metric] = limit * (benchmark.OUTLIER_TOLERANCE + 1)
+    else:
+        wild[clause.metric] = limit / (benchmark.OUTLIER_TOLERANCE + 1)
 
     summary = summarize_trials([report(), wild, report()], manifest())
 
@@ -484,9 +491,9 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     (a tighter delta makes the boundary cases readable, and a zero interval keeps them instant), so
     it cannot serve this purpose.
 
-    `interaction_wall_p99_ms` is 1000/60: the 60 Hz frame interval, not a fitted number. It is a
-    floor tied to something a viewer perceives, so it does not move to accommodate a noisy runner —
-    the estimator absorbs noise instead (`BUDGET_CLAUSES`).
+    `interaction_cpu_p99_ms` is 1000/60: the 60 Hz frame interval, not a fitted number, and the one
+    remaining performance bound. The other three are invariants with an anchor, which is why they do
+    not get retuned — every fitted percentile this gate ever carried did.
     """
     shipped = load_manifest(
         Path(__file__).parents[1] / "tests/fixtures/native_subtitle_integration.json"
@@ -495,10 +502,7 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     assert shipped["trials"] == 3
     assert shipped["budgets"] == {
         "interaction_cpu_p99_ms": 16.67,
-        "interaction_wall_p99_ms": 16.67,
-        "interaction_cpu_delta_mean_ms": 0.75,
-        "interaction_cpu_delta_p95_ms": 4.0,
-        "interaction_wall_delta_p99_ms": 16.67,
+        "interaction_cpu_delta_signed_mean_ms": 0.0,
         "ready_before_presentation_ratio": 0.99,
         "retained_rss_growth_mib": 256.0,
     }
