@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789306885588,
+  "lastUpdate": 1789306903765,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15881,6 +15881,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.151249,
             "range": "3 replicas; min 1.11844; max 4.37254; MAD 0.03281; worst 4.37254",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "74c86fdd99b956d089be91f162857da74e056596",
+          "message": "fix(bench): measure the overlay path production actually runs (#520)\n\n* fix(bench): measure the overlay path production actually runs\n\n`Overlay` decides whether interaction pixels are encoded and written\ninline or handed to `_InteractionPresenter`, and it decided by\n`isinstance(ipc, MpvIPC)` — false for every stand-in, because no fake is\nan `MpvIPC`. So the native-subtitle gate timed the inline path and gated\na product that runs the deferred one.\n\nThe two are not one measurement offset by a constant. Over two runs of\nthree trials each, per-trial CPU p99:\n\n  phase     inline                     deferred\n  scroll    5.5 median, 8.6 worst      4.5 median, 4.7 worst\n  tooltip   0.88                       0.88\n  present   4.5 median                 5.0 median\n\nDeferring takes the tail off `scroll` and puts a little on `present`,\nbecause the presenter thread is now awake beside the subtitle render the\nway it is in the product. The gated `interaction_cpu_p99_ms` barely\nmoves — the tail changes phase rather than going away — so no budget is\nre-locked here. The plan for this change predicted a drop and a\ntightening; measured, there is neither.\n\nDeferral becomes a constructor argument, the way `runtime_submit`\nalready is and for the same stated reason: a type probe makes behaviour\ndepend on which class a collaborator happens to be, and the harness\ncannot satisfy it. The probe stays as the default, so production and the\nfakes that want the inline path are unchanged.\n\nTwo tests, each verified against the poison it exists for:\n`test_composition_may_override_who_presents_interaction_pixels` reddens\nwhen the new argument is accepted and ignored, and\n`test_the_harness_uploads_interaction_pixels_the_way_production_does`\nreddens when the `overlay=` wiring is dropped from the benchmark. The\nsecond is the one that matters: nothing else fails when that line goes,\nthe run stays green, and every phase number silently changes.\n\nFound while decomposing #516.\n\n* test(bench): pin every argument of the harness's overlay, not just one\n\nAdversarial review of the previous commit. Supplying the benchmark's own\n`Overlay` means `_reader` hand-copies the argument list\n`build_session_assembly` uses, and the test added with it asserted only\nthe argument it was written for. The other two were free to drift the\nsame silent way.\n\n`runtime_submit` is the sharp one. `LifecycleSurfaces` branches on it\nbeing `None` and issues every surface write inline instead of through the\ncorrelated gateway — it even labels the span `\"inline\"` vs\n`\"correlated\"`. That is the same divergence this test exists to prevent,\none argument over: harness on a path production does not run, gate green,\nevery number quietly different.\n\nBoth were confirmed undetected before this commit and detected after:\ndropping `runtime_submit` and setting `id_base=7` each left\n`poe loop-tools-test` at 457 passed, and each now reddens the test alone.\n\nThree lines against the overlay already in hand — not a shared factory.\nThe duplication is fine as duplication; what was missing was an oracle.\n\nProse, same review:\n\n- `modelling` -> `modeling`; the repo is American and it was the only\n  British spelling in the commit.\n- BENCHMARKS.md said the probe \"decided by\" the isinstance, which reads\n  as though it were removed. It is still the default; composition can now\n  override it.\n- BENCHMARKS.md said the tail \"changes phase\". Too generous. `_measure`\n  reads `time.thread_time_ns()`, so the encode and write do not travel\n  from `scroll` to `present` — they leave the measurement, and\n  `present`'s rise is a second thread contending beside the subtitle\n  render. The conclusion is unchanged, because the gated percentile pools\n  every phase.\n\nNot acted on, recorded: poisoning `_defer_interaction_for` to `return\nTrue` HANGS `poe test` rather than failing it — `poe test` sets no global\ntimeout, and three tests block forever. Caught with `--timeout=30` (5\nfailed, 3 of them timeouts). Pre-existing, and the opposite poison\n(`return False`, production losing deferral) fails cleanly in 2 tests.",
+          "timestamp": "2026-09-13T16:40:14+03:00",
+          "tree_id": "74fbe2cb9174be617789ccf821fce8aecda2c571",
+          "url": "https://github.com/serjflint/saitenka/commit/74c86fdd99b956d089be91f162857da74e056596"
+        },
+        "date": 1789306902162,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.392651,
+            "range": "3 replicas; min 4.25126; max 6.48974; MAD 0.097087",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.959334,
+            "range": "3 replicas; min 5.72917; max 8.97224; MAD 0.01291; worst 8.97224",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.919296,
+            "range": "3 replicas; min 12.6136; max 20.8137; MAD 1.89439",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.218079,
+            "range": "3 replicas; min 12.7066; max 21.0656; MAD 1.84753; worst 21.0656",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.266698,
+            "range": "3 replicas; min 12.7645; max 45.9543; MAD 2.50222",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.090044,
+            "range": "3 replicas; min 0.063485; max 0.127378; MAD 0.026559; worst 0.127378",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.062576,
+            "range": "3 replicas; min 31.3284; max 44.238; MAD 5.17544; worst 44.238",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.204366,
+            "range": "3 replicas; min 2.86905; max 17.9548; MAD 0.335318; worst 17.9548",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.87573,
+            "range": "3 replicas; min 1.0354; max 10.5763; MAD 0.840334; worst 10.5763",
             "unit": "ms"
           }
         ]
