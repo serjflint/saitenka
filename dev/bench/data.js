@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789285711611,
+  "lastUpdate": 1789293663908,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15647,6 +15647,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.310061,
             "range": "3 replicas; min 1.1095; max 1.3896; MAD 0.079535; worst 1.3896",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "245a54ca69039facfec1ec51e6c303fa025ea936",
+          "message": "Merge pull request #517 from serjflint/perf/packed-viewport-background-fill\n\nperf(render): fill a viewport background with a memset, not a broadcast",
+          "timestamp": "2026-09-13T14:59:38+05:00",
+          "tree_id": "5f2e78dc937b98c08e9afed7a7f4f8102e63d8fe",
+          "url": "https://github.com/serjflint/saitenka/commit/245a54ca69039facfec1ec51e6c303fa025ea936"
+        },
+        "date": 1789293662713,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.84802,
+            "range": "3 replicas; min 5.07705; max 6.38764; MAD 0.539623",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.342825,
+            "range": "3 replicas; min 7.79223; max 8.92132; MAD 0.550599; worst 8.92132",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 17.020477,
+            "range": "3 replicas; min 15.3528; max 20.6714; MAD 1.66764",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 17.50123,
+            "range": "3 replicas; min 16.9387; max 20.7459; MAD 0.562557; worst 20.7459",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 16.745084,
+            "range": "3 replicas; min 14.8746; max 18.2406; MAD 1.49553",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.08542,
+            "range": "3 replicas; min 0.075481; max 0.122609; MAD 0.009939; worst 0.122609",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 42.901132,
+            "range": "3 replicas; min 40.6749; max 44.4348; MAD 1.53363; worst 44.4348",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.312799,
+            "range": "3 replicas; min 2.98499; max 3.48721; MAD 0.17441; worst 3.48721",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.646103,
+            "range": "3 replicas; min 1.31646; max 1.92401; MAD 0.277909; worst 1.92401",
             "unit": "ms"
           }
         ]
