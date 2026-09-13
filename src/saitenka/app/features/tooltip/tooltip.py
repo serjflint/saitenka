@@ -926,11 +926,6 @@ def _paint_from_cache(ports: TipPorts, key, cap: int, anchor) -> bool:
     return True
 
 
-_CRISP_MIN_SCALE = (
-    1.05  # below this the soft upscale IS the native render (1080p ≈ 1.0) — no crisp pass
-)
-
-
 def apply_engaged_open(
     ports: TipPorts, panel: PanelPorts, result: tooltip_engaged.OpenReady
 ) -> None:

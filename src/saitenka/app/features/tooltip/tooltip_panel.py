@@ -41,9 +41,22 @@ FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RG
 JLPT_DARKEN = (
     0.62  # darken the pastel underline hue for the pill name-segment so white text is legible
 )
-_CRISP_MIN_SCALE = (
-    1.05  # below this the soft upscale IS the native render (1080p ≈ 1.0) — no crisp pass
-)
+#: Half-width of the band around 1.0 where the soft 1× composite IS the native render, so the crisp
+#: pass would buy nothing (1080p ≈ 1.0). Outside it the native tier composites at the display scale.
+_SOFT_SCALE_BAND = 0.05
+
+
+def soft_scale(scale: float) -> bool:
+    """Is ``scale`` close enough to 1.0 that the soft 1× composite already IS the native render?
+
+    A BAND, not a floor. Above it the native tier wins on sharpness; below it — a sub-1080p OSD —
+    it wins on cost, because the alternative is compositing the full reference viewport and then
+    resizing every frame of it down, which nothing ever upgrades away. That resize was 7.5 of the
+    8 ms a scroll notch cost at 0.667 (#516).
+    """
+    return abs(scale - 1.0) <= _SOFT_SCALE_BAND
+
+
 log = logging.getLogger(__name__)
 
 
@@ -598,7 +611,7 @@ def apply_pending_crisp(ports: TipPorts, view: PopupView) -> None:
     # partial soft frame would never be upgraded.
     warm = (
         st.native_viewport_warm(y0, vh, ports.scale.raster)
-        if ports.scale.raster > _CRISP_MIN_SCALE
+        if not soft_scale(ports.scale.raster)
         else st.viewport_warm(y0, vh)
     )
     if warm:
@@ -617,7 +630,7 @@ def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
     scale = (
         ports.scale.raster
     )  # bucketed → matches hit_target's inverse; reuses cached native bands
-    if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
+    if soft_scale(scale):  # 1080p — native == soft upscale, take the cheaper 1× path
         view.crisp_miss = "not_hidpi"
         rect = blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
         # A partial frame owes itself a re-blit: the main thread no longer rasters the 1x bands, so a

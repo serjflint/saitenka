@@ -42,6 +42,12 @@ class _RecordingPanel:
     def warm_viewport(self, scroll, view_h):
         self.calls.append(("warm_viewport", scroll, view_h))
 
+    def warm_native_viewport(self, scroll, view_h, scale):
+        # Reached at any scale outside the soft band — sub-1080p as well as hi-dpi, since the
+        # default fixture OSD is 720p. Before the band, a scale below 1.0 skipped the native tier
+        # and this panel never needed the method.
+        self.calls.append(("warm_native_viewport", scroll, view_h, scale))
+
     def render_ahead(self, scroll, view_h, *, direction, should_cancel, scale=1.0):
         self.calls.append((scroll, view_h, direction, should_cancel(), scale))
         return len(self.calls)
@@ -100,7 +106,9 @@ def test_newest_pending_request_runs_once_after_inflight_completion():
     r.graph.tooltip.surface_state().view.scroll = 999
     _submitter(r).finish()
 
-    assert [call[0] for call in panel.calls if isinstance(call[0], int)] == [999]
+    # One destination, warmed at both tiers — the display scale and again at 1x for the soft
+    # fallback. The "once" this test is about is the JOB, which the submitter assertions carry.
+    assert [call[0] for call in panel.calls if isinstance(call[0], int)] == [999, 999]
     assert _submitter(r).calls == []
 
 
@@ -134,7 +142,8 @@ def test_running_stale_request_observes_supersession_before_newest_runs():
     _submitter(r).finish()
 
     assert cancelled == [True]
-    assert [call[0] for call in new.calls if isinstance(call[0], int)] == [120]
+    # The newest destination, warmed at both tiers (display scale, then 1x for the soft fallback).
+    assert [call[0] for call in new.calls if isinstance(call[0], int)] == [120, 120]
 
 
 def test_render_ahead_survives_disabled_speculative_prefetch():
@@ -152,11 +161,17 @@ def test_broker_completion_warms_the_requested_viewport():
     r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
     r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish()
-    # the landing viewport first (what gates publication), then the lookahead past it — the latter at
-    # the (bucketed) display scale, not cancelled: native bands, one panel
+    # The landing viewport first (what gates publication), then its native bands, then the lookahead
+    # past it — at the display scale and again at 1x, because the soft fallback that covers a cold
+    # native band is composited at 1x. The fixture OSD is 720p, so `raster` is BELOW 1.0: the native
+    # tier is for any scale outside the soft band, not for hi-dpi only.
+    raster = r.graph.tooltip.scale().raster
+    assert raster < 1.0 and not tooltip_panel.soft_scale(raster)
     assert panel.calls == [
         ("warm_viewport", 120, 300),
-        (120, 300, 1, False, r.graph.tooltip.scale().raster),
+        ("warm_native_viewport", 120, 300, raster),
+        (120, 300, 1, False, raster),
+        (120, 300, 1, False, 1.0),
     ]
 
 

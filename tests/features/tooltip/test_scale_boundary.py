@@ -16,7 +16,8 @@ from tip_fakes import hidpi_reader
 from saitenka.app.features.tooltip import tooltip, tooltip_panel
 from saitenka.app.subtitle_render import NullRenderer
 
-_SCALES = [1.5, 2.0]
+#: Every scale outside the soft band, both sides of it: the native tier is not a hi-dpi feature.
+_SCALES = [2 / 3, 1.5, 2.0]
 
 
 def _reader(scale: float, monkeypatch):
@@ -126,6 +127,38 @@ def test_warm_native_viewport_composites_crisp_immediately(scale, monkeypatch):
         r.tooltip.surface_state().view.crisp_miss == ""
         and not r.tooltip.surface_state().view.crisp_pending
     )
+
+
+def test_a_sub_1080p_tooltip_uploads_display_sized_pixels(monkeypatch):
+    """A cold sub-1080p show still composites at the 1920x1080 reference and resizes down at upload —
+    and the pixels that reach mpv, not just ``rect``, have to be that size.
+
+    This is the soft FALLBACK, the one frame before the native bands warm; the band makes the steady
+    state native, so the resize is no longer paid per notch. It is still the only place one is paid
+    at all, and nothing watched it: dropping it outright left the whole suite green while every
+    sub-1080p tooltip uploaded a frame half again too big for its OSD, with `rect` still claiming
+    the smaller one the hit-test inverts.
+    """
+    r = hidpi_reader(2 / 3).graph
+    monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
+    uploaded: list[tuple[int, ...]] = []
+
+    def record(bgra, *_args, **_kwargs):
+        uploaded.append(bgra.shape)
+        return {"error": "success"}
+
+    monkeypatch.setattr(r.overlay, "show_bgra", record)
+    r.tooltip.select(0)
+    r.tooltip.show_tooltip(0)
+
+    scale = r.tooltip.scale()
+    assert not tooltip_panel.soft_scale(scale.raster)  # outside the band: the native tier's range
+    assert (
+        r.tooltip.surface_state().view.crisp_miss == "warming"
+    )  # but cold, so this IS the soft one
+    height, width = uploaded[-1][:2]
+    assert width == round(scale.width * scale.display)  # the reference panel, resized down
+    assert (width, height) == r.tooltip.surface_state().view.rect[2:4]  # what the hit-test inverts
 
 
 def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
