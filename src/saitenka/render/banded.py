@@ -211,7 +211,7 @@ class RenderedBlock:
 
 @dataclass(frozen=True, slots=True)
 class _NativeView:
-    """A native (scale>1) viewport request — the ``(scroll, view_h, overscan, scale)`` quad threaded
+    """A native (scale != 1) viewport request — the ``(scroll, view_h, overscan, scale)`` quad threaded
     through the crisp compose/warm path, plus its device-px derivations (so the many-arg internal calls
     collapse to one value)."""
 
@@ -362,7 +362,7 @@ class WindowedPanel:
         # Per-band opaque premul-BGRA, converted once (#138) so a warm scroll frame is disjoint numpy
         # row-copies, not a per-frame whole-viewport convert. Keyed like _blocks; dropped on re-store/evict.
         self._bgra: dict[tuple[int, int], np.ndarray] = {}
-        # NATIVE (scale>1) band pixels, keyed (row, band, scale) — kept SEPARATE from the 1× cache so the
+        # NATIVE (scale != 1) band pixels, keyed (row, band, scale) — kept SEPARATE from the 1× cache so the
         # reference hot path is byte-for-byte untouched (the scale-boundary rewrite, Stage 2). Geometry
         # (_geom) stays 1×/scale-free, so hit-testing is unchanged. Bounded by _scaled_cap (LRU).
         self._scaled_blocks: OrderedDict[tuple[int, int, float], CachedBlock] = OrderedDict()
@@ -842,7 +842,7 @@ class WindowedPanel:
         goldens/skeleton. A scroll=0 request matching an idle :meth:`precompose` returns a copy of the
         cached composite (0 synchronous rasters) — the warm-hover fast path.
 
-        ``scale`` > 1 is the crisp NATIVE viewport (scale-boundary arch): a ``round(view_h×scale) ×
+        ``scale`` != 1 is the crisp NATIVE viewport (scale-boundary arch; sub-1080p uses it too): a ``round(view_h×scale) ×
         round(width×scale)`` device buffer assembled from native bands over the SAME 1× geometry — a
         separate cache/code path, so ``scale == 1.0`` stays byte-identical."""
         if scale != 1.0:
@@ -911,7 +911,7 @@ class WindowedPanel:
         self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
     ) -> Image.Image:
         """Composite the ``[scroll, scroll+view_h)`` viewport, rendering + evicting BANDS as needed — a
-        cold reach or warm scroll frame touches O(band) getmask2, never O(block). ``scale`` > 1 composites
+        cold reach or warm scroll frame touches O(band) getmask2, never O(block). ``scale`` != 1 composites
         the crisp NATIVE viewport over the same 1× geometry (a separate path; 1.0 is byte-identical)."""
         if scale != 1.0:
             with self._lock:
@@ -930,7 +930,7 @@ class WindowedPanel:
             self._last_frame_rasters = self._sync_rasters - n0
             return img
 
-    # --- Native (scale>1) crisp path (scale-boundary Stage 2) -------------------------------------
+    # --- Native (scale != 1) crisp path (scale-boundary Stage 2) -------------------------------------
     # A SEPARATE code path so the 1× hot path above is byte-for-byte untouched. Native bands are placed
     # by CUMULATIVE device height within a row (seam-exact — no absolute-edge rounding gaps; rows abut
     # only across bg gaps). Geometry (_geom) stays 1×, so scan_hit/link_hit are unchanged.

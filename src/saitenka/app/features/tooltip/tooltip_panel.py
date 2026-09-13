@@ -23,6 +23,7 @@ from saitenka_wordstate.fsrs import rareness_band
 
 from saitenka import otel_metrics
 from saitenka.app.features.tooltip.popups import Panel, PanelCache, PopupView, TipPorts
+from saitenka.app.features.tooltip.prefetch import SCALE_BUCKET
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.panel import Freq, panel_rows
@@ -41,20 +42,24 @@ FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RG
 JLPT_DARKEN = (
     0.62  # darken the pastel underline hue for the pill name-segment so white text is legible
 )
-#: Half-width of the band around 1.0 where the soft 1× composite IS the native render, so the crisp
-#: pass would buy nothing (1080p ≈ 1.0). Outside it the native tier composites at the display scale.
-_SOFT_SCALE_BAND = 0.05
 
 
 def soft_scale(scale: float) -> bool:
-    """Is ``scale`` close enough to 1.0 that the soft 1× composite already IS the native render?
+    """Is this the raster bucket centred on 1.0, where the soft 1× composite IS the native render?
 
-    A BAND, not a floor. Above it the native tier wins on sharpness; below it — a sub-1080p OSD —
-    it wins on cost, because the alternative is compositing the full reference viewport and then
-    resizing every frame of it down, which nothing ever upgrades away. That resize was 7.5 of the
-    8 ms a scroll notch cost at 0.667 (#516).
+    Takes a BUCKETED scale (``TipScale.raster``), so this is the single bucket containing 1.0 —
+    half a bucket either side — and the identity in the sentence above is exact there, not
+    approximate. Every other bucket composites natively at its own scale.
+
+    It replaces a FLOOR at 1.05, which sent everything below it down the soft path: that composited
+    the full 1920×1080 reference viewport and resized it, per notch, forever, with nothing to
+    upgrade it (#516). The width matters as much as the direction. A resize costs what the SOURCE
+    viewport costs, so it does not get cheaper as the scale approaches 1 — measured at display 0.96
+    it is still 6.1 ms p50 / 13.2 ms p99, against 1.7 / 2.3 once the native tier takes it. A band a
+    whole bucket wide either side would therefore have left the most common sub-1080p case — a
+    maximized window on a 1080p monitor, ~1040 px of OSD — paying full price.
     """
-    return abs(scale - 1.0) <= _SOFT_SCALE_BAND
+    return abs(scale - 1.0) < SCALE_BUCKET / 2
 
 
 log = logging.getLogger(__name__)

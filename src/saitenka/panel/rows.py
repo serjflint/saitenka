@@ -132,7 +132,7 @@ class Row:
     paint its visible top first and finish the below-the-fold bodies in the background."""
 
     x: int
-    # ``render(*, scale=1.0)`` — scale>1 rasters the row NATIVELY (crisp non-body; scale-boundary arch).
+    # ``render(*, scale=1.0)`` — scale != 1 rasters the row NATIVELY (crisp non-body; scale-boundary arch).
     render: Callable[..., tuple[Image.Image, list[ScanBox], list[LinkBox]]]
     gap: int | None = None  # trailing gap after this row (None = theme.gap); lets a split def body
     # keep its 3px inter-block spacing while other rows use the 7px row gap
@@ -156,7 +156,7 @@ class Row:
     # ``render_window(y0, y1)`` rasters just the band ``[y0, y1)`` (image + row-local scan/link boxes in
     # band space). Non-body rows are small (one band, never split) and keep only ``render``.
     measure: Callable[[], int] | None = None
-    # ``render_window(y0, y1, *, scale=1.0)`` — scale>1 rasters the band natively (scale-boundary arch).
+    # ``render_window(y0, y1, *, scale=1.0)`` — scale != 1 rasters the band natively (scale-boundary arch).
     render_window: Callable[..., tuple[Image.Image, list[ScanBox], list[LinkBox]]] | None = None
     # Whole-row scan/link hitboxes (row-local) from the layout, no raster — lets the banded engine
     # retain a MEASURED-but-not-yet-rastered row's geometry (a scroll-jump to the bottom keeps the top
