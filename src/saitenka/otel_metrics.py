@@ -305,16 +305,28 @@ _trace_module: ModuleType | None = None
 
 
 def _resolve_trace_module() -> ModuleType | None:
+    """The `opentelemetry.trace` module, or ``None`` when tracing is off.
+
+    The two globals answer different questions — "may we trace" and "through what" — so the import
+    is keyed on the second. Keying it on the first made ``_trace_available = True`` a way to turn
+    tracing OFF: the availability check is what used to populate the module, so setting the flag
+    from outside skipped it, left ``_trace_module`` at ``None``, and every span silently became a
+    no-op. That is exactly what a test enabling tracing does, and it made the tracing assertions
+    depend on some earlier test in the same process having resolved the module first.
+    """
     global _trace_available, _trace_module
-    if _trace_available is None:
+    if _trace_available is False:
+        return None
+    if _trace_module is None:
         try:
             import opentelemetry.trace as _trace
         except ImportError:
             _trace_available = False
-        else:
+            return None
+        _trace_module = _trace
+        if _trace_available is None:
             _trace_available = True
-            _trace_module = _trace
-    return _trace_module if _trace_available else None
+    return _trace_module
 
 
 class SpanSetter:

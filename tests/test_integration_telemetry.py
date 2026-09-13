@@ -73,3 +73,31 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
         assert all(event["args"]["parent_id"] == request["args"]["span_id"] for event in attempts)
         assert all(event["args"]["status"] == "error" for event in attempts)
         assert "private" not in json.dumps(events)
+
+
+def test_enabling_tracing_externally_still_resolves_the_module(monkeypatch):
+    """`_trace_available` answers "may we trace"; `_trace_module` answers "through what".
+
+    Setting the first without the second used to turn tracing OFF — the availability check was
+    what populated the module, so skipping it left `_trace_module` at `None` and every span became
+    a silent no-op. That is the state every test above sets up, which made their tracing
+    assertions pass only when some earlier test in the same process had resolved the module first:
+    run the file alone and the two `tracing=True` cases failed.
+    """
+    monkeypatch.setattr(otel_metrics, "_trace_available", True)
+    monkeypatch.setattr(otel_metrics, "_trace_module", None)
+
+    assert otel_metrics._resolve_trace_module() is not None
+
+
+def test_a_confirmed_absent_extra_is_still_never_re_imported(monkeypatch):
+    """The negative half: `False` means "checked, not installed", and it must stay sticky.
+
+    Keying the import on `_trace_module is None` would otherwise re-attempt a failing import on
+    every call from a hot path like `traced()`, which is the cost the memo exists to avoid.
+    """
+    monkeypatch.setattr(otel_metrics, "_trace_available", False)
+    monkeypatch.setattr(otel_metrics, "_trace_module", None)
+    monkeypatch.delitem(__import__("sys").modules, "opentelemetry.trace", raising=False)
+
+    assert otel_metrics._resolve_trace_module() is None
