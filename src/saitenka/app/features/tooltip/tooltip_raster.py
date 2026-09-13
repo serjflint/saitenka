@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
+from saitenka.app.features.tooltip.tooltip_panel import soft_scale
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 
@@ -90,7 +91,7 @@ def _warm(request: RenderAheadRequest, should_cancel, span) -> object:
         span.set("stage", "destination")
         if should_cancel():
             return None
-        if request.scale > 1.0:
+        if not soft_scale(request.scale):
             request.panel.warm_native_viewport(request.scroll, request.view_h, request.scale)
             span.set("stage", "native")
         if should_cancel():
@@ -102,7 +103,7 @@ def _warm(request: RenderAheadRequest, should_cancel, span) -> object:
             should_cancel=should_cancel,
             scale=request.scale,
         )
-        if request.scale > 1.0 and not should_cancel():
+        if not soft_scale(request.scale) and not should_cancel():
             request.panel.render_ahead(
                 request.scroll,
                 request.view_h,

@@ -23,6 +23,7 @@ from saitenka_wordstate.fsrs import rareness_band
 
 from saitenka import otel_metrics
 from saitenka.app.features.tooltip.popups import Panel, PanelCache, PopupView, TipPorts
+from saitenka.app.features.tooltip.prefetch import SCALE_BUCKET
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.panel import Freq, panel_rows
@@ -41,9 +42,34 @@ FLASH_BGRA = (90, 214, 255, 255)  # premultiplied BGRA of the warm highlight (RG
 JLPT_DARKEN = (
     0.62  # darken the pastel underline hue for the pill name-segment so white text is legible
 )
-_CRISP_MIN_SCALE = (
-    1.05  # below this the soft upscale IS the native render (1080p ≈ 1.0) — no crisp pass
-)
+
+
+def soft_scale(scale: float) -> bool:
+    """Is this the raster bucket centred on 1.0, where the soft 1× composite IS the native render?
+
+    Takes a BUCKETED scale (``TipScale.raster``), so this is the single bucket containing 1.0 —
+    half a bucket either side — and the identity in the sentence above is exact there, not
+    approximate. Every other bucket composites natively at its own scale.
+
+    It replaces a FLOOR at 1.05, which sent everything below it down the soft path: that composited
+    the full 1920×1080 reference viewport and resized it, per notch, forever, with nothing to
+    upgrade it (#516).
+
+    The axis is WINDOW height, not display resolution — ``display`` is ``osd_h / 1080``, and
+    ``osd_h`` is mpv's window, so every fullscreen modern panel is already above the band (a 14"
+    MacBook is 1.82, a 3440×1440 ultrawide 1.33, 1080p exactly 1.0 where the resize is a no-op).
+    What sits below it is windowed playback at any resolution — 0.91 for half a MacBook screen,
+    0.83 for a window beside Anki, 0.96 for a merely-maximized 1080p window. That is the ordinary
+    way to read subtitles next to a dictionary, which is what makes it worth the second warm tier.
+
+    The band's WIDTH matters as much as its direction, because a resize costs what the SOURCE
+    viewport costs and so does not get cheaper as the scale approaches 1: measured at display 0.96
+    it is still 6.1 ms p50 / 13.2 ms p99, against 1.7 / 2.3 once the native tier takes it. A band a
+    whole bucket either side would have left every window within 5% of fullscreen-1080p paying it.
+    """
+    return abs(scale - 1.0) < SCALE_BUCKET / 2
+
+
 log = logging.getLogger(__name__)
 
 
@@ -636,7 +662,7 @@ def apply_pending_crisp(ports: TipPorts, view: PopupView) -> None:
     # partial soft frame would never be upgraded.
     warm = (
         st.native_viewport_warm(y0, vh, ports.scale.raster)
-        if ports.scale.raster > _CRISP_MIN_SCALE
+        if not soft_scale(ports.scale.raster)
         else st.viewport_warm(y0, vh)
     )
     if warm:
@@ -655,7 +681,7 @@ def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
     scale = (
         ports.scale.raster
     )  # bucketed → matches hit_target's inverse; reuses cached native bands
-    if scale <= _CRISP_MIN_SCALE:  # 1080p — native == soft upscale, take the cheaper 1× path
+    if soft_scale(scale):  # 1080p — native == soft upscale, take the cheaper 1× path
         view.crisp_miss = "not_hidpi"
         rect = blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
         # A partial frame owes itself a re-blit: the main thread no longer rasters the 1x bands, so a
