@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789318930569,
+  "lastUpdate": 1789318950257,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -16037,6 +16037,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.341489,
             "range": "3 replicas; min 1.19976; max 2.36668; MAD 0.141725; worst 2.36668",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2fdd6d88c6105ea9a70356ce211a693b9706b70a",
+          "message": "perf(tooltip): make the crisp threshold a band, so sub-1080p stops resizing (#521)\n\n* fix(bench): measure the overlay path production actually runs\n\n`Overlay` decides whether interaction pixels are encoded and written\ninline or handed to `_InteractionPresenter`, and it decided by\n`isinstance(ipc, MpvIPC)` — false for every stand-in, because no fake is\nan `MpvIPC`. So the native-subtitle gate timed the inline path and gated\na product that runs the deferred one.\n\nThe two are not one measurement offset by a constant. Over two runs of\nthree trials each, per-trial CPU p99:\n\n  phase     inline                     deferred\n  scroll    5.5 median, 8.6 worst      4.5 median, 4.7 worst\n  tooltip   0.88                       0.88\n  present   4.5 median                 5.0 median\n\nDeferring takes the tail off `scroll` and puts a little on `present`,\nbecause the presenter thread is now awake beside the subtitle render the\nway it is in the product. The gated `interaction_cpu_p99_ms` barely\nmoves — the tail changes phase rather than going away — so no budget is\nre-locked here. The plan for this change predicted a drop and a\ntightening; measured, there is neither.\n\nDeferral becomes a constructor argument, the way `runtime_submit`\nalready is and for the same stated reason: a type probe makes behaviour\ndepend on which class a collaborator happens to be, and the harness\ncannot satisfy it. The probe stays as the default, so production and the\nfakes that want the inline path are unchanged.\n\nTwo tests, each verified against the poison it exists for:\n`test_composition_may_override_who_presents_interaction_pixels` reddens\nwhen the new argument is accepted and ignored, and\n`test_the_harness_uploads_interaction_pixels_the_way_production_does`\nreddens when the `overlay=` wiring is dropped from the benchmark. The\nsecond is the one that matters: nothing else fails when that line goes,\nthe run stays green, and every phase number silently changes.\n\nFound while decomposing #516.\n\n* perf(tooltip): make the crisp threshold a band, so sub-1080p stops resizing\n\n`_CRISP_MIN_SCALE` was a FLOOR. Above 1.05 the native tier composites at\nthe display scale and uploads 1:1; at or below it, every frame took the\nsoft 1x path and `decorate_and_upload` resized the whole viewport. That\nis correct at 1.0, where the resize is skipped outright. Below 1.0 it is\nnot: a sub-1080p OSD composited the full 1920x1080 reference viewport and\nthen shrank it, every notch, forever, with nothing that upgrades it.\n\nThe floor becomes a band around 1.0, and the two render-ahead gates that\nwarmed native bands only for `scale > 1.0` widen to match — without them\nthe band changes which tier is asked for but not which one is warm, so\nevery sub-1080p blit falls back to soft and stays `crisp_pending`.\n\nSteady-state tooltip scroll, 8 notches on one open tall panel with\nrender-ahead allowed to land, main-thread CPU:\n\n  display scale   before p50/p99     after p50/p99\n  0.667 (720p)    7.5 / 11.0 ms      1.7 / 2.3 ms\n  1.0 (1080p)     1.4 / 2.1 ms       unchanged\n  2.0 (4K)        0.6 / 0.9 ms       unchanged\n\nSub-1080p now costs what 1080p costs, which is what it should always have\ncost: it is the tier with the FEWEST pixels. The cold-start outlier at\n0.667 goes too — the first notch was 13 ms and is now 2.2.\n\nThe other half of #516's plan was to move that resize onto the presenter\nthread instead. Measured, it is the wrong fix: it is just as fast on the\nscroll frame but it relocates the work rather than removing it, and the\npresenter then contends with the geometry prefetch lane. The\nnative-subtitle gate caught that — 4 of 12 trials drew a cue before its\ngeometry was ready (`presented` 102 against 101 cues, one extra\nsupersession), against 0 of 9 in the matched control. This change does\nnot: 9 of 9 trials clean, readiness 0.990 throughout.\n\nIt is not free. The worker now warms two tiers below 1.0 where it warmed\none, so sub-1080p retains ~25 MiB more band cache (147 MiB against a\n256 MiB ceiling) and each notch's lookahead does roughly twice the work\noff-thread. That is the trade: bounded background memory and background\nCPU for a main thread that no longer resizes a viewport per frame.\n\nPoisoned and counted. Reverting the band to the floor reddens 6 tests;\nreverting the two render-ahead gates reddens 3. The gap the new\n`test_a_sub_1080p_tooltip_uploads_display_sized_pixels` closes is the\nsoft fallback's own resize, which the whole suite watched with zero\ntests: dropping it left everything green while the cold frame uploaded a\nviewport half again too big for its OSD.\n\nBoth dead copies of `_CRISP_MIN_SCALE` are gone — `tooltip.py`'s was\nunreferenced, and `tooltip_panel.py`'s is now the band's upper edge.\n\n* fix(tooltip): narrow the soft tier to the 1.0 bucket, and test the thumb\n\nAdversarial review of the previous commit found two things.\n\nThe band was a whole bucket wide either side of 1.0, which left the most\ncommon sub-1080p case unfixed. A resize costs what its SOURCE viewport\ncosts, so it does not get cheaper as the scale approaches 1: measured at\ndisplay 0.96 the scroll notch was still 6.1 ms p50 / 13.2 ms p99, against\nthe 7.5 / 11.0 the previous commit set out to remove. Anything whose\nraster bucketed to 0.95 — a maximized window on a 1080p monitor, ~1040 px\nof OSD — paid full price and the commit message claimed otherwise.\n\nThe soft tier is now exactly the bucket containing 1.0, half a bucket\neither side, so it is the one place where \"the soft 1x composite IS the\nnative render\" is exact rather than approximate. `SCALE_BUCKET` is\nimported rather than respelled, which also retires the floating-point\nedge the old literal had: `abs(21*0.05 - 1.0) > 0.05`, so the band that\nread as closed on the top side was open.\n\n  display 0.96 (raster 0.95)   6.1 / 13.2 ms  ->  0.8 / 1.2 ms\n  display 0.94 (raster 0.95)   7.9 / 12.5 ms  ->  0.4 / 1.0 ms\n\nSecond: `_blit_native` passes `round(y0*scale), round(full_h*scale)` so\nthe scrollbar thumb is sized in display px, and its comment says so, and\nnothing tested it. Passing the unscaled pair instead left the whole suite\ngreen. The new test reddens at all three scales — and at 2.0 the poison\ndraws no thumb at all, because the unscaled `full_h` no longer exceeds\nthe viewport height, which is worse than the 36%-short thumb the review\npredicted. Its position survives that bug (the `y0/(full_h-vh)` ratio is\nscale-invariant), so only its height is a witness.\n\nThe denominator has to be read before the blit: `full_height` is a\nconverging estimate and the blit advances it, 664 -> 684 at scale 2.0.\nReading it after understates it and the assertion passes on a wrong frame.\n\nProse: seven comments across `banded.py`, `rows.py` and `popups.py` still\nsaid `scale>1` meant the native tier. Sub-1 is a first-class native scale\nnow; they say `scale != 1`.\n\nGate re-run after the narrowing: 9 of 9 trials clean, readiness 0.990\nthroughout. `interaction_cpu_p99_ms` reads ~1.8 ms higher than it did an\nhour ago on the same code path (the benchmark's own OSD is 0.65, which\nneither commit moves), so I am recording that as unattributed drift on a\nlong-running machine rather than an effect of this change.\n\n* test(bench): pin every argument of the harness's overlay, not just one\n\nAdversarial review of the previous commit. Supplying the benchmark's own\n`Overlay` means `_reader` hand-copies the argument list\n`build_session_assembly` uses, and the test added with it asserted only\nthe argument it was written for. The other two were free to drift the\nsame silent way.\n\n`runtime_submit` is the sharp one. `LifecycleSurfaces` branches on it\nbeing `None` and issues every surface write inline instead of through the\ncorrelated gateway — it even labels the span `\"inline\"` vs\n`\"correlated\"`. That is the same divergence this test exists to prevent,\none argument over: harness on a path production does not run, gate green,\nevery number quietly different.\n\nBoth were confirmed undetected before this commit and detected after:\ndropping `runtime_submit` and setting `id_base=7` each left\n`poe loop-tools-test` at 457 passed, and each now reddens the test alone.\n\nThree lines against the overlay already in hand — not a shared factory.\nThe duplication is fine as duplication; what was missing was an oracle.\n\nProse, same review:\n\n- `modelling` -> `modeling`; the repo is American and it was the only\n  British spelling in the commit.\n- BENCHMARKS.md said the probe \"decided by\" the isinstance, which reads\n  as though it were removed. It is still the default; composition can now\n  override it.\n- BENCHMARKS.md said the tail \"changes phase\". Too generous. `_measure`\n  reads `time.thread_time_ns()`, so the encode and write do not travel\n  from `scroll` to `present` — they leave the measurement, and\n  `present`'s rise is a second thread contending beside the subtitle\n  render. The conclusion is unchanged, because the gated percentile pools\n  every phase.\n\nNot acted on, recorded: poisoning `_defer_interaction_for` to `return\nTrue` HANGS `poe test` rather than failing it — `poe test` sets no global\ntimeout, and three tests block forever. Caught with `--timeout=30` (5\nfailed, 3 of them timeouts). Pre-existing, and the opposite poison\n(`return False`, production losing deferral) fails cleanly in 2 tests.\n\n* docs(tooltip): the sub-1 tier is about window height, not display size\n\nThe previous commit justified the band's width with \"the most common\nsub-1080p case — a maximized window on a 1080p monitor\". That is wrong,\nand wrong on the axis, not just the ranking. `display` is `osd_h / 1080`\nand `osd_h` is mpv's WINDOW, so display resolution barely enters into it:\n\n  MacBook 14\" fullscreen (1964 px)     1.82   native already\n  3440x1440 ultrawide fullscreen       1.33   native already\n  1440p / 4K fullscreen                1.33 / 2.00   native already\n  1080p fullscreen                     1.00   soft, resize is a no-op\n\nEvery fullscreen modern panel was already on the native tier and is\nuntouched by this work. What was paying the per-notch resize is windowed\nplayback, at any resolution:\n\n  half a 14\" MacBook screen             0.91\n  a window beside Anki on an ultrawide  0.83\n  a merely-maximized 1080p window       0.96\n  a half-height window on 1080p         0.57\n\nThat is a better argument than the one it replaces, not a weaker one:\nreading subtitles with a dictionary and a deck next to the player is the\nordinary way to use this, and it is exactly the configuration that was\ncompositing a full 1920x1080 reference viewport and shrinking it every\nframe.\n\nThe measured numbers are unchanged; only the claim about who benefits is\ncorrected. The commit message of 91dc2295 carries the wrong version and\ncannot be edited — the PR description records the correction.",
+          "timestamp": "2026-09-13T22:01:04+05:00",
+          "tree_id": "8249cdb8889a5b2f65e09c8c6dfce7e28cf70db1",
+          "url": "https://github.com/serjflint/saitenka/commit/2fdd6d88c6105ea9a70356ce211a693b9706b70a"
+        },
+        "date": 1789318948625,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.120305,
+            "range": "3 replicas; min 3.48827; max 6.44925; MAD 0.328941",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.353836,
+            "range": "3 replicas; min 5.35492; max 9.48261; MAD 1.12878; worst 9.48261",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 17.813266,
+            "range": "3 replicas; min 10.0702; max 20.5095; MAD 2.6962",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.206815,
+            "range": "3 replicas; min 10.3598; max 20.7814; MAD 2.57456; worst 20.7814",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.939321,
+            "range": "3 replicas; min 14.2501; max 21.9028; MAD 1.68921",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.090431,
+            "range": "3 replicas; min 0.048103; max 0.126015; MAD 0.035584; worst 0.126015",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.943322,
+            "range": "3 replicas; min 20.095; max 47.7701; MAD 3.82682; worst 47.7701",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.830853,
+            "range": "3 replicas; min 2.83164; max 5.97326; MAD 0.999217; worst 5.97326",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.902146,
+            "range": "3 replicas; min 1.18346; max 28.4337; MAD 0.718687; worst 28.4337",
             "unit": "ms"
           }
         ]
