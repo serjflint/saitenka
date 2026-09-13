@@ -53,11 +53,19 @@ def soft_scale(scale: float) -> bool:
 
     It replaces a FLOOR at 1.05, which sent everything below it down the soft path: that composited
     the full 1920×1080 reference viewport and resized it, per notch, forever, with nothing to
-    upgrade it (#516). The width matters as much as the direction. A resize costs what the SOURCE
-    viewport costs, so it does not get cheaper as the scale approaches 1 — measured at display 0.96
+    upgrade it (#516).
+
+    The axis is WINDOW height, not display resolution — ``display`` is ``osd_h / 1080``, and
+    ``osd_h`` is mpv's window, so every fullscreen modern panel is already above the band (a 14"
+    MacBook is 1.82, a 3440×1440 ultrawide 1.33, 1080p exactly 1.0 where the resize is a no-op).
+    What sits below it is windowed playback at any resolution — 0.91 for half a MacBook screen,
+    0.83 for a window beside Anki, 0.96 for a merely-maximized 1080p window. That is the ordinary
+    way to read subtitles next to a dictionary, which is what makes it worth the second warm tier.
+
+    The band's WIDTH matters as much as its direction, because a resize costs what the SOURCE
+    viewport costs and so does not get cheaper as the scale approaches 1: measured at display 0.96
     it is still 6.1 ms p50 / 13.2 ms p99, against 1.7 / 2.3 once the native tier takes it. A band a
-    whole bucket wide either side would therefore have left the most common sub-1080p case — a
-    maximized window on a 1080p monitor, ~1040 px of OSD — paying full price.
+    whole bucket either side would have left every window within 5% of fullscreen-1080p paying it.
     """
     return abs(scale - 1.0) < SCALE_BUCKET / 2
 
