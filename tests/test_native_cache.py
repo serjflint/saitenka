@@ -12,16 +12,20 @@ import numpy as np
 import pytest
 import util
 
+from saitenka.model import Theme
 from saitenka.panel import panel_rows, render_panel
 from saitenka.render import banded
 from saitenka.render.banded import WindowedPanel
 
 _W, _VH = 384, 240
+#: Every channel distinct, unlike ``Theme().bg`` = (252, 252, 250, 255) whose color channels are
+#: near-equal. A background fill that transposes or drops a channel is invisible against the default.
+_ODD_BG = (11, 22, 33, 255)
 
 
-def _panel():
+def _panel(theme: Theme | None = None):
     entry = util.cjk_links_entry(8)  # tall enough to span many bands → real eviction pressure
-    wp = WindowedPanel(panel_rows(entry, _W), _W)
+    wp = WindowedPanel(panel_rows(entry, _W), _W, theme)
     total = render_panel(entry, width=_W).height
     return wp, total
 
@@ -124,3 +128,20 @@ def test_1x_bgra_memo_still_reused_after_the_shared_counter_change():
     wp.viewport_bgra(0, _VH)
     for k, arr in snap.items():
         assert wp._bgra[k] is arr  # 1× per-band BGRA still memoised (unchanged)
+
+
+def test_a_cold_native_frame_is_filled_with_the_theme_background():
+    """What a warm_only native compose paints where it has no band — the whole frame, here.
+
+    The only other test through this path asserts `out.shape`, so the pixels it writes were
+    unchecked: the native compose is the one the crisp (hi-dpi) scroll frame runs, and a viewport it
+    has no bands for is pure background.
+    """
+    wp, total = _panel(Theme(bg=_ODD_BG))
+    _measure(wp, total)  # warms the 1x bands; the native ones stay cold
+    r, g, b, a = _ODD_BG
+    background = np.array([b, g, r, a], np.uint8)  # premultiplied BGRA at alpha 255
+
+    out = wp.viewport_bgra(0, _VH, scale=2.0, warm_only=True)
+
+    assert np.array_equal(out, np.broadcast_to(background, out.shape))
