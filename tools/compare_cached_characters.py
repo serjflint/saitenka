@@ -26,7 +26,6 @@ from saitenka_subtitles import (
     Cue,
     GeometryRequest,
     SubtitleTrackId,
-    TokenAnnotation,
     converted,
     font_names,
     subrip,
@@ -51,6 +50,9 @@ from saitenka.mpvio.osd import Overlay
 from saitenka.version import overlay_version
 
 PROFILE = (
+    "--osc=no",
+    "--load-scripts=no",
+    "--osd-bar=no",
     "--sub-ass-override=no",
     "--sub-ass-scale-with-window=no",
     "--sub-scale=1",
@@ -164,7 +166,16 @@ def request_for(
         TRACK,
         active_rows=rows,
         text=text,
-        tokens=[TokenAnnotation(i, token.start, token.end) for i, token in enumerate(tokens)],
+        tokens=[
+            annotation
+            for i, token in enumerate(tokens)
+            if (
+                annotation := native_subtitles._annotation_for_token(
+                    token, i, text, 0, lambda _token: False
+                )[0]
+            )
+            is not None
+        ],
     )
     palette = native_subtitles._palette_in_frame_units(
         prepared,
