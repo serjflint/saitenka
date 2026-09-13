@@ -290,6 +290,17 @@ class BandedTuning:
     raw_band_ceiling: int = 0
 
 
+def _fill_bgra(out: np.ndarray, pixel: np.ndarray) -> None:
+    """Fill a contiguous ``(h, w, 4)`` uint8 buffer with one premultiplied-BGRA ``pixel``.
+
+    ``out[:] = pixel`` broadcasts a length-4 array along the last axis, which forgoes NumPy's memset
+    for a strided per-element write — two orders of magnitude slower, enough to dominate a scroll
+    frame at viewport sizes. Packing the pixel into one uint32 and filling through a uint32 view is
+    byte-identical and hits the fast path.
+    """
+    out.view(np.uint32)[:] = np.frombuffer(pixel.tobytes(), np.uint32)[0]
+
+
 class WindowedPanel:
     """Drive :func:`saitenka.panel.panel_rows` from the geometry core: MEASURE a row's height when the
     visible range reaches it, rasterise + retain it in viewport-sized BANDS, and composite viewports
@@ -708,7 +719,7 @@ class WindowedPanel:
             bg = to_bgra_array(Image.new("RGBA", (1, 1), self.theme.bg))[0, 0]
             self._bg_bgra = bg
         out = np.empty((max(view_h, 1), self.width, 4), np.uint8)
-        out[:] = bg
+        _fill_bgra(out, bg)
         for i in range(start, end):
             if not self._offsets.known(i):
                 continue
@@ -794,7 +805,7 @@ class WindowedPanel:
             self._missed_last_assemble = missing
             self._evict(*self._retention_window(scroll, view_h, overscan))
         out = np.empty((max(view_h, 1), self.width, 4), np.uint8)
-        out[:] = background
+        _fill_bgra(out, background)
         for key, block, band_top in plan:
             placed = _clip_band(band_top, block.h, view_h)
             if placed is not None:
@@ -1024,7 +1035,7 @@ class WindowedPanel:
             with self._lock:
                 self._scaled_bgra.update(fresh)
         out = np.empty((dev_vh, dev_w, 4), np.uint8)
-        out[:] = background
+        _fill_bgra(out, background)
         for key, band_top in plan:
             array = arrays.get(key)
             if array is None:  # cold → leave background; a worker will warm this band
@@ -1215,7 +1226,7 @@ class WindowedPanel:
         Call under ``self._lock``."""
         dev_w, dev_vh, _dev_scroll = v.dims(self.width)
         out = np.empty((dev_vh, dev_w, 4), np.uint8)
-        out[:] = self._scaled_bg()
+        _fill_bgra(out, self._scaled_bg())
         for i, span, cb, band_top in self._scaled_placements(v, warm_only=warm_only):
             if cb is None:  # warm_only miss → leave background; a worker will warm this band
                 continue
