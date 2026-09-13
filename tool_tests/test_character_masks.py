@@ -86,3 +86,91 @@ def test_checkpoint_keeps_the_full_denominator_on_interruption():
     assert report["kanji"]["unattempted"] == 1
     changed = oracle.manifest([(1000, 2000, "猫と")], {"source": "hash"})
     assert changed["census_sha256"] != frozen["census_sha256"]
+
+
+def test_neighbor_recoloring_does_not_invalidate_unchanged_target_ink():
+    oracle = module()
+    original = np.zeros((12, 30, 3), dtype=np.uint8)
+    original[3:9, 3:6] = original[3:9, 20:23] = 255
+    red = original.copy()
+    red[:, :, 1:] = 0
+    blue = red.copy()
+    blue[3:9, 3:6] = (0, 0, 255)
+    blue[3:9, 20:23] = (240, 0, 0)
+
+    mask, reason = oracle.reference_mask(original, red, blue)
+
+    assert reason == ""
+    assert np.array_equal(mask, blue[:, :, 2])
+
+
+def test_target_recoloring_cannot_move_the_native_reference_mask():
+    oracle = module()
+    original = np.zeros((12, 30, 3), dtype=np.uint8)
+    original[3:9, 3:6] = 255
+    red = original.copy()
+    red[:, :, 1:] = 0
+    blue = np.zeros_like(red)
+    blue[3:9, 3:8, 2] = 255
+
+    mask, reason = oracle.reference_mask(original, red, blue)
+
+    assert reason == ""
+    assert np.array_equal(mask, original[:, :, 0])
+    assert oracle.compare_mask(mask, blue[:, :, 2], original[:, :, 0])["verdict"] == "failed"
+
+
+def test_native_white_ink_cannot_pass_as_green_overpaint():
+    oracle = module()
+    original = np.full((3, 3, 3), 255, dtype=np.uint8)
+
+    result = oracle.compare_mask(
+        original[:, :, 0], oracle.green_coverage(original), original[:, :, 0]
+    )
+
+    assert result["verdict"] == "failed"
+    assert result["missing_pixels"] == 9
+
+
+def test_green_coverage_cancels_native_antialiasing():
+    # Half-coverage green over half-intensity gray: (64, 192, 64).
+    composite = np.full((3, 3, 3), (64, 192, 64), dtype=np.uint8)
+
+    coverage = module().green_coverage(composite)
+
+    assert np.array_equal(coverage, np.full((3, 3), 128, dtype=np.uint8))
+
+
+def test_disappearing_disconnected_mark_cannot_shrink_the_denominator():
+    original = np.zeros((9, 9, 3), dtype=np.uint8)
+    original[2, 4] = original[6, 4] = 255
+    red = original.copy()
+    red[:, :, 1:] = 0
+    blue = np.zeros_like(red)
+    blue[6, 4, 2] = 255
+
+    oracle = module()
+    mask, reason = oracle.reference_mask(original, red, blue)
+
+    assert reason == ""
+    result = oracle.compare_mask(mask, blue[:, :, 2], original[:, :, 0])
+    assert result["verdict"] == "failed"
+    assert result["frame_missing_pixels"] == 1
+
+
+def test_disconnected_ink_reassigned_by_probe_still_fails_whole_cue():
+    oracle = module()
+    original = np.zeros((9, 9, 3), dtype=np.uint8)
+    original[2, 4] = original[6, 4] = 255
+    red = original.copy()
+    red[:, :, 1:] = 0
+    blue = red.copy()
+    blue[6, 4] = (0, 0, 255)
+    mask, reason = oracle.reference_mask(original, red, blue)
+    assert reason == ""
+
+    result = oracle.compare_mask(mask, blue[:, :, 2], original[:, :, 0])
+
+    assert result["verdict"] == "failed"
+    assert result["cue_verdict"] == "failed"
+    assert result["frame_missing_pixels"] == 1

@@ -92,6 +92,45 @@ def manifest(events: list[tuple[int, int, str]], provenance: dict) -> dict:
     return {**result, "manifest_sha256": digest(result)}
 
 
+def reference_mask(
+    original: np.ndarray, red: np.ndarray, blue: np.ndarray
+) -> tuple[np.ndarray, str]:
+    """Use the color probe only to identify an isolated cell of unchanged native ink."""
+    mask = np.zeros(original.shape[:2], dtype=np.uint8)
+    if not np.array_equal(original[:, :, 0], original[:, :, 1]):
+        return mask, "native-reference-has-red-green-chroma"
+    if np.any(red[:, :, 1:]) or np.any(blue[:, :, 1]):
+        return mask, "non-primary-reference-channels"
+    if not np.array_equal(original[:, :, 0], red[:, :, 0]):
+        return mask, "whole-cue-recoloring-changes-native-ink"
+    ys, xs = np.where(blue[:, :, 2])
+    if not len(xs):
+        return mask, "empty-reference-mask"
+    ink = original[:, :, 0] > 0
+    top, bottom = int(ys.min()), int(ys.max()) + 1
+    while top > 0 and ink[top - 1].any():
+        top -= 1
+    while bottom < ink.shape[0] and ink[bottom].any():
+        bottom += 1
+    columns = ink[top:bottom].any(axis=0)
+    left, right = int(xs.min()), int(xs.max()) + 1
+    while left > 0 and columns[left - 1]:
+        left -= 1
+    while right < ink.shape[1] and columns[right]:
+        right += 1
+    region = np.s_[top:bottom, left:right]
+    # Red inside this cell belongs to another character: touching/overlapping ink is ambiguous.
+    if blue[:, :, 0][region].any():
+        return mask, "native-ink-cell-has-other-characters"
+    mask[region] = original[:, :, 0][region]
+    return mask, ""
+
+
+def green_coverage(composite: np.ndarray) -> np.ndarray:
+    """When native R=G, G-R cancels the subtitle and leaves green overlay coverage."""
+    return np.maximum(composite[:, :, 1].astype(np.int16) - composite[:, :, 0], 0).astype(np.uint8)
+
+
 def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -> dict:
     """Reference ownership is independent of our boxes; missing output never shrinks the mask."""
     if reference.shape != ours.shape or reference.shape != context.shape or reference.ndim != 2:
@@ -119,14 +158,22 @@ def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -
     spill = int((region & visible & ~permitted).sum())
     frame_spill = int((visible & ~permitted).sum())
     alpha_error = float(np.abs(ours.astype(float) - reference.astype(float))[target].max())
-    failed = missed > 0 or frame_spill > 0 or alpha_error > 0
+    cue_target = context > 32
+    frame_missing = int((cue_target & ~visible).sum())
+    frame_error = float(np.abs(ours.astype(float) - context.astype(float))[cue_target].max())
+    character_failed = missed > 0 or spill > 0 or alpha_error > 0
+    cue_failed = frame_missing > 0 or frame_spill > 0 or frame_error > 0
     return {
-        "verdict": "failed" if failed else "passed",
-        "reason": "pixel-disagreement" if failed else "",
+        "verdict": "failed" if character_failed or cue_failed else "passed",
+        "reason": "pixel-disagreement" if character_failed or cue_failed else "",
+        "character_verdict": "failed" if character_failed else "passed",
+        "cue_verdict": "failed" if cue_failed else "passed",
         "reference_pixels": expected,
         "missing_pixels": missed,
         "spill_pixels": spill,
         "frame_spill_pixels": frame_spill,
+        "frame_missing_pixels": frame_missing,
+        "frame_intensity_error": frame_error,
         "coverage": (expected - missed) / expected,
         "intensity_error": alpha_error,
         "reference_centroid": [float(xs.mean()), float(ys.mean())],
