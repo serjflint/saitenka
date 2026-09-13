@@ -69,9 +69,7 @@ def manifest() -> dict:
         "presentation_interval_ms": 0.0,
         "budgets": {
             "interaction_cpu_p99_ms": 16.67,
-            "interaction_wall_p99_ms": 16.67,
             "interaction_cpu_delta_signed_mean_ms": 0.0,
-            "interaction_wall_delta_p99_ms": 16.67,
             "ready_before_presentation_ratio": 0.99,
             "retained_rss_growth_mib": 256.0,
         },
@@ -153,10 +151,18 @@ def test_native_log_restores_stderr_even_when_the_body_raises(tmp_path) -> None:
     assert log.read_bytes() == b"from the C side\n"
 
 
-def test_budget_oracle_accepts_wall_frame_boundary() -> None:
+def test_budget_oracle_accepts_cpu_frame_boundary() -> None:
+    """The frame anchor lives on the CPU clause now. Wall time is recorded, never gated: two live
+    sessions share this process, so its tail is their contention."""
     measured = report()
-    measured["interaction_p99_ms"] = 16.67
+    measured["interaction_cpu_p99_ms"] = 16.67
     assert evaluate(measured, manifest())
+    assert "interaction_wall_p99_ms" not in manifest()["budgets"]
+
+    stalled = report()
+    stalled["interaction_p99_ms"] = 400.0
+
+    assert evaluate(stalled, manifest()), "wall time must not be able to fail this gate"
 
 
 def test_budget_oracle_rejects_each_regression() -> None:
@@ -164,9 +170,7 @@ def test_budget_oracle_rejects_each_regression() -> None:
         "event_count": 100,
         "interaction_clock": "wall_time",
         "interaction_cpu_p99_ms": 16.68,
-        "interaction_p99_ms": 16.68,
         "interaction_cpu_delta_signed_mean_ms": 0.01,
-        "interaction_wall_delta_p99_ms": 16.68,
         "ready_before_presentation_ratio": 0.989,
         "ready_before_presented": 99,
         "retained_rss_growth_mib": 256.01,
@@ -275,7 +279,7 @@ def test_trial_oracle_rejects_a_run_where_no_trial_was_ever_clean() -> None:
     three passing medians and nothing clean anywhere. That is the shape of a broad regression, and
     without the clean-trial clause it aggregates to green."""
     first, second, third = report(), report(), report()
-    first["interaction_p99_ms"] = 16.68
+    first["interaction_cpu_p99_ms"] = 16.68
     second["interaction_cpu_delta_signed_mean_ms"] = 0.01
     third["ready_before_presentation_ratio"] = 0.5
 
@@ -487,9 +491,9 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     (a tighter delta makes the boundary cases readable, and a zero interval keeps them instant), so
     it cannot serve this purpose.
 
-    `interaction_wall_p99_ms` is 1000/60: the 60 Hz frame interval, not a fitted number. It is a
-    floor tied to something a viewer perceives, so it does not move to accommodate a noisy runner —
-    the estimator absorbs noise instead (`BUDGET_CLAUSES`).
+    `interaction_cpu_p99_ms` is 1000/60: the 60 Hz frame interval, not a fitted number, and the one
+    remaining performance bound. The other three are invariants with an anchor, which is why they do
+    not get retuned — every fitted percentile this gate ever carried did.
     """
     shipped = load_manifest(
         Path(__file__).parents[1] / "tests/fixtures/native_subtitle_integration.json"
@@ -498,9 +502,7 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     assert shipped["trials"] == 3
     assert shipped["budgets"] == {
         "interaction_cpu_p99_ms": 16.67,
-        "interaction_wall_p99_ms": 16.67,
         "interaction_cpu_delta_signed_mean_ms": 0.0,
-        "interaction_wall_delta_p99_ms": 16.67,
         "ready_before_presentation_ratio": 0.99,
         "retained_rss_growth_mib": 256.0,
     }

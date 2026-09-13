@@ -1,4 +1,13 @@
-"""Post-integration evidence for the opt-in native-visible geometry path."""
+"""Conformance evidence for the opt-in native-visible geometry path.
+
+Three of the four clauses are invariants with an anchor — a readiness ratio, a contract at zero, a
+leak ceiling — and one, `interaction_cpu_p99_ms`, is a performance bound. That is deliberate, and it
+is why they hold: every clause here that was a fitted percentile spent its life being retuned. Wall
+time is recorded but not gated. Two live sessions share this process by design, so a wall tail is
+that contention rather than the product's, and the question it looks like it answers — does an
+interaction fit in a frame — belongs to the live tier against a real mpv. See BENCHMARKS.md,
+"What this gate is for".
+"""
 
 from __future__ import annotations
 
@@ -59,7 +68,7 @@ Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H64000000,0,0,0,0,100,
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-LOCKED_MANIFEST_SHA256 = "a3b2709f46be6cf4236a5e57c9b4dbfb20e9021188c84ba444b69abe63d7873b"
+LOCKED_MANIFEST_SHA256 = "4c7856d37c2bdc7eeb4d963e1722b0cbd141dcb028516068d65edb20c2b25b7d"
 
 
 def load_manifest(path: Path) -> dict:
@@ -252,12 +261,8 @@ class _Budget(NamedTuple):
 #: of; `interaction_cpu_delta_signed_mean_ms` is the unbiased successor, recorded but not yet gated.
 BUDGET_CLAUSES = {
     "interaction_cpu_p99_ms": _Budget("interaction_cpu_p99_ms", operator.le, "median"),
-    "interaction_wall_p99_ms": _Budget("interaction_p99_ms", operator.le, "median"),
     "interaction_cpu_delta_signed_mean_ms": _Budget(
         "interaction_cpu_delta_signed_mean_ms", operator.le, "median", slack=2.0
-    ),
-    "interaction_wall_delta_p99_ms": _Budget(
-        "interaction_wall_delta_p99_ms", operator.le, "median"
     ),
     "ready_before_presentation_ratio": _Budget(
         "ready_before_presentation_ratio", operator.ge, "median"

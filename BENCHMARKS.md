@@ -236,6 +236,49 @@ free-threaded support is **unconfirmed** (both read/monitor interpreter internal
 check their trackers before relying. `pytest-benchmark` auto-disables under `pytest-xdist`, so any
 micro-suite must run serially, separate from the `-n auto` gate — the custom harness stays primary.
 
+### What this gate is for (2026-09-13)
+
+`native_subtitle_integration_benchmark.py` spent its life being retuned, and the git history says why
+better than any argument: **every commit that ever touched its budgets changed the benchmark and its
+own tests, and never a line of `src/`.**
+
+| commit | what it changed |
+| --- | --- |
+| `ac090829` enforce interactive wall budget | bench + fixture + bench tests |
+| `9211ba72` align interaction budget with 60 fps | bench + fixture + bench tests |
+| `b89a05b9` enforce interactive frame budget | bench + fixture + bench tests |
+| `3907aaa4` stabilize interaction release oracle | bench + fixture + bench tests |
+| `9f8af715` headroom a tail metric needs | fixture only |
+| `6afbc8c2` judge each budget on the median | bench |
+
+Nine commits of gate maintenance, no product defect caught, against three false failures in 157
+archived runs and a job that was the failing one in 12 of 28 red CI runs. A gate whose whole history
+is adjustments to itself is measuring the harness.
+
+So the wall clauses are gone. Two live sessions share this process **by design** — that is what makes
+the comparison possible — so a wall tail is their contention, not the product's. Measured: the tail
+sits entirely in one phase, its CPU is stable to 0.15 ms across trials while its off-CPU time swings
+1.7 to 11.7 ms, and **0%** of the worst-stalled samples overlap our own geometry lane. The question
+the wall clause looked like it answered — does an interaction fit in a frame — belongs to the live
+tier against a real mpv, which this repo already runs.
+
+What remains is four clauses, and only one is a performance bound:
+
+| clause | kind |
+| --- | --- |
+| `ready_before_presentation_ratio >= 0.99` | invariant — geometry arrives before the cue is drawn, which is the flash a viewer sees |
+| `interaction_cpu_delta_signed_mean_ms <= 0.0` | contract — the native path may not cost the calling thread more than the baseline |
+| `retained_rss_growth_mib <= 256` | leak ceiling |
+| `interaction_cpu_p99_ms <= 16.67` | performance, anchored to a frame |
+
+That is the general lesson, and it outranks every estimator rule above: **an invariant with an anchor
+survives a noisy runner; a fitted percentile negotiates with it.** Reach for the percentile only when
+no invariant can answer the question, and when it flakes, check whether the metric's mass is where
+the estimator is looking before touching the bound.
+
+Wall time is still recorded per sample, per phase, with its off-CPU split — as evidence, which is how
+the phase above was identified. Evidence does not have to be a gate.
+
 ## Gating a noisy metric — quantile, sample count, bound (2026-08-25)
 
 The repo runs four benchmark gates. Two arrived at the right policy independently, one had to be
@@ -317,7 +360,7 @@ if that spread moves — do not tighten it toward the typical value, which is wh
 
 A below-floor estimator is only as good as the claim excusing it. If a rank is not defensible, the
 number excusing it has to be re-measured, not asserted once and inherited.
-| `tools/native_subtitle_integration_benchmark.py` (absolute latencies) | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank |
+| `tools/native_subtitle_integration_benchmark.py` (`interaction_cpu_p99_ms`) | median across trials of each per-trial p99, single-trial breach capped at 2x | **still 4th worst per trial** | the rank was never fixed — trials are not exchangeable, so pooling was rejected. What holds this gate is the trial median plus the 2x cap, not the rank. It is now the only fitted performance bound in that file; see "What this gate is for" |
 | `tools/native_subtitle_integration_benchmark.py` (CPU delta) | median across trials of each per-trial mean and p95 | all samples / 16th worst | conforms — see below for why this one clause does not use p99 |
 
 ### A clamped paired difference has no usable tail (2026-09-12)
