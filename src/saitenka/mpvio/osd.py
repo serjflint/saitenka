@@ -43,6 +43,12 @@ _warned_oids: set[int] = set()
 
 
 def _defer_interaction_for(ipc: object) -> bool:
+    """Whether interaction pixels go to the presenter thread, for a caller that did not say.
+
+    The probe answers for production and for the ad-hoc fakes that only want the inline path. It
+    cannot answer for a stand-in that is deliberately modelling the deferred one, because no fake
+    is an ``MpvIPC`` — which is what ``Overlay(defer_interaction=…)`` is for.
+    """
     from saitenka.mpvio.ipc import MpvIPC
 
     return isinstance(ipc, MpvIPC)
@@ -162,7 +168,14 @@ def _set_draw_geometry(span: otel_metrics.SpanSetter, x: int, y: int, w: int, h:
 class Overlay:
     """Manage one or more mpv OSD overlays keyed by id (0..63)."""
 
-    def __init__(self, ipc: MpvIPC, id_base: int = 1, *, runtime_submit=None):
+    def __init__(
+        self,
+        ipc: MpvIPC,
+        id_base: int = 1,
+        *,
+        runtime_submit=None,
+        defer_interaction: bool | None = None,
+    ):
         """``id_base`` shifts the physical mpv overlay ids so we can coexist with another script that
         owns the low ids (namespace hygiene). The controller keeps using its logical ids 1..6;
         base 1 (default) is a no-op offset → byte-identical to before.
@@ -170,7 +183,14 @@ class Overlay:
         ``runtime_submit`` is the correlated-command port, supplied by composition. It is a
         constructor argument rather than something detected on ``ipc``, because a probe makes egress
         depend on which methods a collaborator happens to expose: handing any fake the port would
-        silently move overlay writes onto the gateway and change what every caller observes."""
+        silently move overlay writes onto the gateway and change what every caller observes.
+
+        ``defer_interaction`` says whether TIP/NESTED pixels are staged and written on the presenter
+        thread. ``None`` asks :func:`_defer_interaction_for`, which is right for production and for
+        a fake that wants the simpler inline path. Pass it explicitly to model the other side: a
+        stand-in measuring main-thread cost has to be on the deferred path, because the two are not
+        the same measurement — deferring takes the tail off the timed call and puts a presenter
+        thread beside it."""
         self.ipc = ipc
         self.id_base = id_base
         self._runtime_submit = runtime_submit
@@ -186,7 +206,9 @@ class Overlay:
         self.visible = True
         self.ops = 0  # bumped on every add/remove; the controller watches it to nudge a paused OSD
         self._interaction_presenter = _InteractionPresenter()
-        self._defer_interaction = _defer_interaction_for(ipc)
+        self._defer_interaction = (
+            _defer_interaction_for(ipc) if defer_interaction is None else defer_interaction
+        )
         self._interaction_oids: set[int] = set()
         self.lifecycle_oids: set[int] = set()
         self._staged_lifecycle_paths: set[Path] = set()

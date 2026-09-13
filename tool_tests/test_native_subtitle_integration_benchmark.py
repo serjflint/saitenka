@@ -509,6 +509,27 @@ def test_the_shipped_budgets_are_the_ones_under_review() -> None:
     assert set(shipped["budgets"]) == set(benchmark.BUDGET_CLAUSES)
 
 
+def test_the_harness_uploads_interaction_pixels_the_way_production_does() -> None:
+    """The session under measurement must be on the DEFERRED overlay path, not the inline one.
+
+    `Overlay` asks `_defer_interaction_for` when composition does not say, and that probe is an
+    `isinstance(ipc, MpvIPC)` — false for `_IPC` and for every other stand-in. On the inline path
+    `show_bgra_interactive` encodes and writes each tooltip frame on the thread this benchmark is
+    timing, which production hands to `_InteractionPresenter`. The two are different measurements:
+    deferring moves the `scroll` tail down and `present` slightly up. Nothing else fails when the
+    `overlay=` wiring is dropped — the run stays green and every phase number silently changes.
+    """
+    import numpy as np
+
+    reader = benchmark._reader(benchmark._IPC())
+    try:
+        result = reader.graph.overlay.show_bgra_interactive(np.zeros((4, 4, 4), np.uint8), oid=1)
+    finally:
+        reader.close()
+
+    assert result == {"error": "deferred"}
+
+
 def test_the_harness_answers_every_option_the_geometry_gate_reads() -> None:
     """The fake mpv has to hold what production reads, or the benchmark measures a refusal.
 

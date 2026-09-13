@@ -202,6 +202,40 @@ def test_visibility_off_removes_an_inflight_interaction_paint(monkeypatch):
         ipc.close()
 
 
+@pytest.mark.timeout(5)
+def test_composition_may_override_who_presents_interaction_pixels():
+    """`Overlay(defer_interaction=…)` decides the path; the `isinstance` probe is only the default.
+
+    Deferral is what keeps encode-and-write off the event thread, so it is the difference between
+    the main-thread CPU a tooltip scroll costs and the CPU it appears to cost. Left to the probe,
+    every stand-in gets the inline path — no fake is an `MpvIPC` — so a harness measuring that cost
+    measures the path production does not run, and cannot say so. Both directions are pinned here:
+    a fake that asks for deferral gets it, and a real IPC that asks for inline gets that.
+    """
+    deferred = Overlay(_FakeIPC(), defer_interaction=True)
+    presented = threading.Event()
+    try:
+        result = deferred.show_bgra_interactive(
+            np.zeros((8, 8, 4), np.uint8),
+            oid=OverlayId.TIP,
+            on_presented=lambda _result: presented.set(),
+        )
+        assert result == {"error": "deferred"}  # the caller did not pay for the upload
+        assert presented.wait(2)  # and someone else did
+    finally:
+        deferred.close()
+
+    ipc = MpvIPC("unused")
+    inline = Overlay(ipc, defer_interaction=False)
+    try:
+        assert inline.show_bgra_interactive(np.zeros((8, 8, 4), np.uint8), oid=OverlayId.TIP) != {
+            "error": "deferred"
+        }
+    finally:
+        inline.close()
+        ipc.close()
+
+
 def test_publishing_a_frame_leaks_no_files():
     """One stable path per oid plus its staging name, however many frames a scroll publishes. What
     makes that path safe to reuse is `tests/test_overlay_frame_publication.py` — the frame-identity

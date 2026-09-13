@@ -47,6 +47,7 @@ from saitenka.app.dictionary import DictionarySet
 from saitenka.app.embedded_subs import resolve_track_fonts
 from saitenka.app.session.factory import LiveSession, SessionInfrastructure, _compose_session
 from saitenka.app.session.routes import install_session_runtime
+from saitenka.mpvio.osd import Overlay
 from saitenka.panel import Definition, Entry
 
 if TYPE_CHECKING:
@@ -714,6 +715,7 @@ class _BenchmarkSession:
 
 def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> _BenchmarkSession:
     geometry = SubtitleGeometryOptions(native_visible=backend is not None, cache_max=3, lookahead=2)
+    options = ReaderOptions(subtitle_geometry=geometry, prefetch=False)
     typed_ipc = cast("MpvIPC", ipc)
     gateway = install_session_runtime(typed_ipc, startup_hint=False)
     try:
@@ -722,8 +724,22 @@ def _reader(ipc: _IPC, *, backend: LibassGeometryBackend | None = None) -> _Benc
             infrastructure=SessionInfrastructure(
                 renderer=None,
                 geometry=backend,
+                # Composition would otherwise build this itself and ask `_defer_interaction_for`,
+                # which answers False for every fake — so `show_bgra_interactive` would encode and
+                # write each tooltip frame INLINE on the thread this benchmark is timing, while
+                # production hands all of it to `_InteractionPresenter`. The two do not differ by a
+                # constant: deferring takes the tail off `scroll` and puts a little on `present`,
+                # because the presenter thread is now awake beside the subtitle render the way it is
+                # in the product. Measuring one path and gating the other is what made #516's
+                # scroll tail look like a product cost.
+                overlay=Overlay(
+                    typed_ipc,
+                    id_base=options.overlay_id_base,
+                    runtime_submit=typed_ipc.submit_runtime_mpv,
+                    defer_interaction=True,
+                ),
             ),
-            options=ReaderOptions(subtitle_geometry=geometry, prefetch=False),
+            options=options,
         )
     except BaseException:
         gateway.close()
