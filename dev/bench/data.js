@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789306903765,
+  "lastUpdate": 1789318930569,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15959,6 +15959,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.87573,
             "range": "3 replicas; min 1.0354; max 10.5763; MAD 0.840334; worst 10.5763",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4e3931d944dcd160bd28e47e7a40eefda976937f",
+          "message": "fix(telemetry): setting the tracing flag no longer turns tracing off (#522)\n\n`_resolve_trace_module` keyed its import on `_trace_available is None`,\nand that branch was the only thing that ever populated `_trace_module`.\nSo assigning `_trace_available = True` from outside skipped the import,\nleft the module at `None`, and the final `return _trace_module if\n_trace_available else None` handed back `None` — every span a silent\nno-op. Enabling tracing was a way to disable it.\n\nThe two globals answer different questions — \"may we trace\" and \"through\nwhat\" — so the import is keyed on the second now. `False` stays sticky,\nwhich is the whole point of the memo: a hot call site like `traced()`\nmust not re-attempt a failing import per call.\n\nThis is why `test_anki_failure_remains_diagnosable_without_payloads`\nfails on main today. It sets the flag, which is the documented seam, and\nthen asserts on spans that were never recorded — so it only passed when\nsome earlier test in the same process had already resolved the module.\nRun the file alone and both `tracing=True` parameters fail with\n`StopIteration` on an empty trace. `poe test` has no global timeout and\nrandom ordering, so it surfaced as an intermittent.\n\nTwo tests. `test_enabling_tracing_externally_still_resolves_the_module`\nis the direct oracle — it fails against the old resolver, as do the two\npre-existing parameters. `test_a_confirmed_absent_extra_is_still_never_\nre_imported` is the negative half: it passes either way by design, and\nguards the sticky `False` that a naive \"import whenever the module is\nNone\" would have thrown away.",
+          "timestamp": "2026-09-13T22:00:49+05:00",
+          "tree_id": "484625586223a927792843c679922a87d3df4470",
+          "url": "https://github.com/serjflint/saitenka/commit/4e3931d944dcd160bd28e47e7a40eefda976937f"
+        },
+        "date": 1789318929041,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.364013,
+            "range": "3 replicas; min 6.31374; max 6.39597; MAD 0.031956",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.923519,
+            "range": "3 replicas; min 8.67414; max 9.00195; MAD 0.078434; worst 9.00195",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.532806,
+            "range": "3 replicas; min 18.7905; max 20.6727; MAD 0.139853",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.70692,
+            "range": "3 replicas; min 19.2523; max 21.1344; MAD 0.42748; worst 21.1344",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.863598,
+            "range": "3 replicas; min 12.6499; max 15.5335; MAD 0.669926",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.122278,
+            "range": "3 replicas; min 0.088954; max 0.124382; MAD 0.002104; worst 0.124382",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.432992,
+            "range": "3 replicas; min 39.2628; max 45.6793; MAD 2.24635; worst 45.6793",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.030785,
+            "range": "3 replicas; min 2.77548; max 3.4218; MAD 0.255304; worst 3.4218",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.341489,
+            "range": "3 replicas; min 1.19976; max 2.36668; MAD 0.141725; worst 2.36668",
             "unit": "ms"
           }
         ]
