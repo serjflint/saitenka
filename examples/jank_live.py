@@ -38,24 +38,33 @@ _DELAY = (
 
 def reduce_jank_samples(samples: list[dict]) -> dict:
     """Turn a list of cumulative-counter snapshots (each ``{"step", "drop", "delay"}``) into per-step
-    dropped/delayed frames. Deltas are clamped at 0 so a counter reset (or a ``None`` from a build
-    lacking the property, recorded as 0) can never report negative jank. Pure — the unit-tested seam."""
+    dropped/delayed frames. Missing properties and an empty observation window remain unknown;
+    counter resets cannot report negative jank."""
     steps: list[dict] = []
+
+    def delta(previous, current):
+        return max(0, current - previous) if previous is not None and current is not None else None
+
     for prev, cur in pairwise(samples):
         steps.append(
             {
                 "step": cur["step"],
-                "dropped": max(0, cur["drop"] - prev["drop"]),
-                "delayed": max(0, cur["delay"] - prev["delay"]),
+                "dropped": delta(prev["drop"], cur["drop"]),
+                "delayed": delta(prev["delay"], cur["delay"]),
                 "interaction_ms": cur.get("interaction_ms", 0.0),
             }
         )
+
+    def aggregate(key, function):
+        values = [step[key] for step in steps]
+        return function(values) if values and all(value is not None for value in values) else None
+
     return {
         "steps": steps,
-        "total_dropped": sum(s["dropped"] for s in steps),
-        "total_delayed": sum(s["delayed"] for s in steps),
-        "max_step_dropped": max((s["dropped"] for s in steps), default=0),
-        "max_step_delayed": max((s["delayed"] for s in steps), default=0),
+        "total_dropped": aggregate("dropped", sum),
+        "total_delayed": aggregate("delayed", sum),
+        "max_step_dropped": aggregate("dropped", max),
+        "max_step_delayed": aggregate("delayed", max),
         "total_interaction_ms": sum(s["interaction_ms"] for s in steps),
         "max_interaction_ms": max((s["interaction_ms"] for s in steps), default=0.0),
     }
@@ -65,32 +74,36 @@ def to_bench_json(result: dict) -> list[dict]:
     """Trend observable interactions while retaining both mpv frame-counter sentinels."""
     latency = {step["step"]: step["interaction_ms"] for step in result["steps"]}
     return [
-        {
-            "name": "live jank: total dropped frames",
-            "unit": "frames",
-            "value": result["total_dropped"],
-        },
-        {
-            "name": "live jank: total delayed frames",
-            "unit": "frames",
-            "value": result["total_delayed"],
-        },
-        {
-            "name": "live: hover interaction latency",
-            "unit": "ms",
-            "value": latency["hover"],
-        },
-        {
-            "name": "live: four-scroll interaction latency",
-            "unit": "ms",
-            "value": latency["scroll"],
-        },
+        row
+        for row in [
+            {
+                "name": "live jank: total dropped frames",
+                "unit": "frames",
+                "value": result["total_dropped"],
+            },
+            {
+                "name": "live jank: total delayed frames",
+                "unit": "frames",
+                "value": result["total_delayed"],
+            },
+            {
+                "name": "live: hover interaction latency",
+                "unit": "ms",
+                "value": latency["hover"],
+            },
+            {
+                "name": "live: four-scroll interaction latency",
+                "unit": "ms",
+                "value": latency["scroll"],
+            },
+        ]
+        if row["value"] is not None
     ]
 
 
-def _counter(ipc, prop: str) -> int:
+def _counter(ipc, prop: str) -> int | None:
     data = ipc.query(prop)
-    return int(data) if isinstance(data, (int, float)) else 0
+    return int(data) if isinstance(data, (int, float)) else None
 
 
 def _why_stuck(tooltip) -> str:
@@ -282,11 +295,11 @@ def main() -> int:
     print("\nSaitenka overlay — LIVE interaction harness")
     for s in result["steps"]:
         print(
-            f"  {s['step']:10} dropped {s['dropped']:4}   delayed {s['delayed']:4}   "
+            f"  {s['step']:10} dropped {s['dropped']!s:4}   delayed {s['delayed']!s:4}   "
             f"interaction {s['interaction_ms']:8.2f} ms"
         )
     print(
-        f"  {'TOTAL':10} dropped {result['total_dropped']:4}   delayed {result['total_delayed']:4}  "
+        f"  {'TOTAL':10} dropped {result['total_dropped']!s:4}   delayed {result['total_delayed']!s:4}  "
         f"interaction {result['total_interaction_ms']:8.2f} ms "
         f"(worst: {result['max_step_dropped']} dropped, "
         f"{result['max_interaction_ms']:.2f} ms)"
@@ -301,6 +314,9 @@ def main() -> int:
         )
         print(f"wrote github-action-benchmark JSON → {args.bench_json}")
 
+    if args.max_drops is not None and result["total_dropped"] is None:
+        print("Cannot gate drops: player counter unavailable", file=sys.stderr)
+        return 2
     if args.max_drops is not None and result["total_dropped"] > args.max_drops:
         print(
             f"\nFAIL: {result['total_dropped']} dropped frames > --max-drops {args.max_drops}",

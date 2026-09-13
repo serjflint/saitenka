@@ -316,6 +316,10 @@ def test_a_deferred_span_ends_from_the_completion_not_the_submission(monkeypatch
             raise AssertionError("a deferred span must not become the ambient parent")
 
     class _Trace:
+        @staticmethod
+        def get_current_span():
+            return None
+
         def get_tracer(self, _name):
             return _Tracer()
 

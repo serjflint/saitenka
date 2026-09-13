@@ -12,6 +12,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka.otel_metrics import DeferredSpan, bind_context
 from saitenka.runtime.deadlines import DeadlineRegistry
 from saitenka.runtime.effects import (
     EffectDeadline,
@@ -43,6 +44,19 @@ class CommandAdapter(Protocol):
 
 class JobAdapter(Protocol):
     def dispatch(self, effect: SubmitJob) -> bool: ...
+
+
+def _observe_completion(name, effect_id, owner, callback, **attributes):
+    operation = DeferredSpan(name, effect_id=str(effect_id.value), owner=owner.value, **attributes)
+
+    def finished(completion):
+        operation.finish(
+            outcome=completion.outcome.value,
+            error=completion.error.value if completion.error is not None else "",
+        )
+        callback(completion)
+
+    return bind_context(finished)
 
 
 class EffectCorrelator:
@@ -77,6 +91,7 @@ class EffectCorrelator:
         on_finished: Callable[[EffectFinished], None],
     ) -> bool:
         effect_id = self._allocate_one()
+        on_finished = _observe_completion("runtime_job", effect_id, owner, on_finished, lane=lane)
         effect = SubmitJob(effect_id, owner, identity, lane, request)
         if self._job_adapter is None or not self._mailbox.reserve_terminal(effect_id):
             on_finished(
@@ -90,7 +105,7 @@ class EffectCorrelator:
             )
             return False
         with self._lock:
-            self._job_callbacks[effect_id] = on_finished
+            self._job_callbacks[effect_id] = bind_context(on_finished)
         if self._job_adapter.dispatch(effect):
             return True
         with self._lock:
@@ -122,6 +137,13 @@ class EffectCorrelator:
     ) -> bool:
         now = self._clock()
         target_id, timer_id = self._allocate_pair()
+        on_finished = _observe_completion(
+            "runtime_mpv",
+            target_id,
+            owner,
+            on_finished,
+            connection_epoch=str(self.connection_epoch),
+        )
         deadline = now + timeout_s
         target = SendMpvCommand(
             target_id,
@@ -152,7 +174,7 @@ class EffectCorrelator:
             )
             return False
         with self._lock:
-            self._callbacks[target_id] = on_finished
+            self._callbacks[target_id] = bind_context(on_finished)
             self._deadlines.register(target_id, timer)
             self._timers.schedule(timer)
         if self._command_adapter.dispatch(target):
@@ -200,7 +222,7 @@ class EffectCorrelator:
             )
             return False
         with self._lock:
-            self._timer_callbacks[effect_id] = on_finished
+            self._timer_callbacks[effect_id] = bind_context(on_finished)
             replaced = self._timers.schedule(effect)
         # The loop blocks under `next_deadline`, which this may have just moved earlier. A receiver
         # already blocked under the old one would sleep past the new timer, so it is released to

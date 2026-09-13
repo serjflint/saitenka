@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import zipfile
 from pathlib import Path
@@ -9,6 +10,115 @@ from pathlib import Path
 from saitenka_dict.schema import SCHEMA_VERSION
 
 from saitenka.app import report
+
+
+def test_rotation_losing_a_segment_does_not_abort_collection(monkeypatch, tmp_path):
+    _hermetic(monkeypatch, tmp_path)
+    active = tmp_path / "overlay.log"
+    active.write_text('{"session":"wanted"}\n')
+    rotated = tmp_path / "overlay.log.1"
+    rotated.write_text('{"session":"wanted"}\n')
+    original = Path.open
+
+    def open_during_rotation(path, *args, **kwargs):
+        if path == rotated:
+            raise FileNotFoundError("rotated during capture")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", open_during_rotation)
+    session, members = report._collect_logs(active, include=True)
+
+    assert session == "wanted"
+    sources = json.loads(members["logs/collection.json"])["sources"]
+    assert sources[0]["status"] == "collected"
+    assert sources[1]["status"] == "unavailable"
+    assert "logs/overlay.log.1" not in members
+
+
+def test_native_fault_is_bundled_redacted(monkeypatch, tmp_path):
+    _hermetic(monkeypatch, tmp_path)
+    from saitenka.app import paths
+
+    directory = tmp_path / "crashes"
+    directory.mkdir()
+    monkeypatch.setattr(paths, "crash_dir", lambda: directory)
+    (directory / "faulthandler.log").write_text(
+        "Fatal Python error: Segmentation fault\npassword=secretvalue99"
+    )
+
+    members = report.collect()
+
+    assert "Segmentation fault" in members["crashes/faulthandler.log"]
+    assert "secretvalue99" not in members["crashes/faulthandler.log"]
+
+
+def test_trace_selection_matches_log_session_not_newest_file(monkeypatch, tmp_path):
+    cfg = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    for number, session in enumerate(("wanted", "unrelated")):
+        (directory / f"trace-{number}.json").write_text(
+            json.dumps({"otherData": {"session": session}, "traceEvents": []})
+        )
+
+    members = report._collect_telemetry("wanted")
+
+    assert json.loads(members["telemetry/trace.json"])["otherData"]["session"] == "wanted"
+    assert (
+        json.loads(members["telemetry/collection.json"])["candidates"][0]["status"]
+        == "session-mismatch"
+    )
+
+
+def test_partial_trace_is_unavailable_not_empty_healthy(monkeypatch, tmp_path):
+    cfg = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    (directory / "trace-1.json").write_text('{"traceEvents":[')
+
+    members = report._collect_telemetry("wanted")
+
+    assert "telemetry/trace.json" not in members
+    assert (
+        json.loads(members["telemetry/collection.json"])["candidates"][0]["status"]
+        == "unreadable-or-concurrent-write"
+    )
+
+
+def test_health_survives_missing_trace(monkeypatch, tmp_path):
+    cfg = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    cfg.write_text(f'[telemetry]\nexport_dir = "{directory}"\n')
+    (directory / "trace-1.health.json").write_text(
+        json.dumps({"session": "wanted", "lost_events": 9})
+    )
+
+    members = report._collect_telemetry("wanted")
+
+    assert "telemetry/trace.json" not in members
+    assert json.loads(members["telemetry/health.json"])["lost_events"] == 9
+
+
+def test_fallback_trace_cannot_borrow_newer_sessions_health(monkeypatch, tmp_path):
+    cfg = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    cfg.write_text(f'[telemetry]\nexport_dir = "{directory}"\n')
+    (directory / "trace-2.json").write_text('{"traceEvents":[')
+    (directory / "trace-2.health.json").write_text(json.dumps({"session": "new", "lost_events": 0}))
+    (directory / "trace-1.json").write_text(
+        json.dumps({"otherData": {"session": "old"}, "traceEvents": []})
+    )
+    (directory / "trace-1.health.json").write_text(json.dumps({"session": "old", "lost_events": 9}))
+
+    members = report._collect_telemetry(None)
+
+    assert json.loads(members["telemetry/health.json"])["session"] == "old"
+    assert json.loads(members["telemetry/health.json"])["lost_events"] == 9
+    assert json.loads(members["telemetry/health-collection.json"])["trace_source"] == "trace-1.json"
 
 
 def test_redact_secrets_scrubs_keys_and_tokens():
@@ -174,7 +284,8 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
 def test_collect_omits_telemetry_when_disabled(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
     members = report.collect(include_log=True)
-    assert not any(name.startswith("telemetry/") for name in members)
+    assert "telemetry/trace.json" not in members
+    assert json.loads(members["telemetry/collection.json"])["status"] == "unavailable"
 
 
 def test_build_report_bundle_writes_timestamped_zip(monkeypatch, tmp_path):

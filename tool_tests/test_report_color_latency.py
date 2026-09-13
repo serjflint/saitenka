@@ -43,6 +43,32 @@ def read(events: list[dict]) -> list[latency.Appearance]:
     return latency.appearances(latency.draws(trace), latency.decisions(trace))
 
 
+def test_ack_readout_keeps_missing_repeated_and_unknown_arrivals():
+    def event(name, ts, revision=None, **attrs):
+        return {
+            "ph": "X",
+            "name": name,
+            "ts": ts * 1000,
+            "args": {"cue": "same-text", "cue_revision": revision, **attrs},
+        }
+
+    events = [
+        event("cue_reconcile", 0, "1"),
+        event("subtitle_draw", 1, "1", owed_color=2),
+        event("surface_write", 10, "1", slot=latency._COLOR_SLOT, events=2, outcome="failed"),
+        event("cue_reconcile", 100, "2"),
+        event("subtitle_draw", 101, "2", owed_color=2),
+        event("surface_write", 150, "2", slot=latency._COLOR_SLOT, events=2, outcome="succeeded"),
+        event("cue_reconcile", 200),
+    ]
+    rows = latency.color_arrivals({"traceEvents": events})
+    assert [(row["status"], row["wait_ms"]) for row in rows] == [
+        ("no-matching-ack", None),
+        ("acknowledged", 50.0),
+        ("unknown-correlation", None),
+    ]
+
+
 def test_the_wait_is_the_gap_to_the_first_draw_that_carried_boxes() -> None:
     """Not the last, and not the geometry's completion — the first draw color could be seen in."""
     shown = read([draw(100, "aa", 0), draw(140, "aa", 0), draw(180, "aa", 7), draw(220, "aa", 7)])

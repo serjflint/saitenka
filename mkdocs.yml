@@ -104,6 +104,7 @@ nav:
       - Architecture: contributing/architecture.md
       - Interactive runtime: contributing/runtime.md
       - Continuous benchmarks: contributing/continuous-benchmarks.md
+      - Diagnostic coverage: contributing/diagnostics-coverage.md
       - Rendering: contributing/rendering.md
       - Future native renderer: contributing/native-renderer.md
       - Development: contributing/development.md

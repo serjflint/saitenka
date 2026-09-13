@@ -141,6 +141,9 @@ Both are **local-only and off by default**:
 The overlay also writes a rotating JSON-lines debug log to `~/.cache/saitenka/overlay.log` (DEBUG in the
 file, WARNING+ to stderr) — `jq`-able, and read by `doctor`'s "recent errors" and `report`'s bundle.
 
+Evidence semantics, scenario coverage and the local character-mask runner:
+[Diagnostic coverage](diagnostics-coverage.md).
+
 ## Architecture
 
 Module map and data flow: the [Architecture](architecture.md) page. Shipped changes:

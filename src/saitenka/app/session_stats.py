@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 
+from saitenka import otel_metrics
 from saitenka.app import paths
 from saitenka.app.continuity import episode_identity
 from saitenka.sqlite_pool import close_when_collected, open_owner_connection
@@ -207,7 +208,9 @@ class AsyncSessionWriter:
         self._path = path
         self._queue: queue.SimpleQueue[SessionSnapshot | None] = queue.SimpleQueue()
         self._thread = threading.Thread(
-            target=self._run, name="saitenka-session-history", daemon=True
+            target=otel_metrics.bind_context(self._run, clear_span=True),
+            name="saitenka-session-history",
+            daemon=True,
         )
         self._thread.start()
 
@@ -215,11 +218,14 @@ class AsyncSessionWriter:
         self._queue.put(snapshot)
 
     def _run(self) -> None:
+        from saitenka.app.telemetry import save_operation_summary
+
         store = None
         try:
             store = SessionStore(self._path)
             while (item := self._queue.get()) is not None:
                 store.save(item)
+                save_operation_summary()
         except (OSError, sqlite3.Error):
             log.warning("session history unavailable", exc_info=True)
         finally:

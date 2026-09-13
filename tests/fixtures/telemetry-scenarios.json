@@ -1,0 +1,383 @@
+{
+  "schema": 1,
+  "scope": "Minimum diagnostic families; references locate tests, not proof that a configuration ran.",
+  "configurations": [
+    "tracing-on",
+    "tracing-off",
+    "missing-extra",
+    "pillow",
+    "libass-overprint",
+    "libass-overpaint",
+    "macos",
+    "linux",
+    "windows"
+  ],
+  "scenarios": [
+    {
+      "id": "startup",
+      "owner": "session",
+      "critical": true,
+      "trigger": "start session",
+      "evidence": [
+        {
+          "name": "startup.interactive_ready",
+          "fields": [
+            "since_ipc_ms"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_trace_report_cli.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "tooltip-quality",
+      "owner": "tooltip",
+      "critical": true,
+      "trigger": "open, warm, scroll, close each view",
+      "evidence": [
+        {
+          "name": "tooltip_quality_transition",
+          "fields": [
+            "view_id",
+            "quality",
+            "previous"
+          ]
+        },
+        {
+          "name": "tooltip_quality_submission",
+          "fields": [
+            "view_id",
+            "viewport_revision",
+            "outcome"
+          ]
+        },
+        {
+          "name": "tooltip_quality_end",
+          "fields": [
+            "upgrade_abandoned"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_trace_continuity.py",
+        "tests/test_render_cache.py"
+      ],
+      "join": "view_id",
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "tooltip-worker",
+      "owner": "tooltip",
+      "critical": true,
+      "trigger": "supersede queued scroll",
+      "evidence": [
+        {
+          "name": "render_ahead_request",
+          "fields": [
+            "view_id",
+            "job_id"
+          ]
+        },
+        {
+          "name": "scroll_request",
+          "fields": [
+            "job_id",
+            "outcome",
+            "latency_ms"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/features/tooltip/test_render_ahead_wiring.py"
+      ],
+      "join": "job_id",
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "cue-color",
+      "owner": "subtitle",
+      "critical": true,
+      "trigger": "observe cue then delayed color acknowledgment",
+      "evidence": [
+        {
+          "name": "cue_reconcile",
+          "fields": [
+            "cue",
+            "cue_revision"
+          ]
+        },
+        {
+          "name": "surface_write",
+          "fields": [
+            "cue_revision",
+            "effect_id",
+            "surface_revision",
+            "round_trip_ms",
+            "outcome"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/session/test_lifecycle_surfaces.py",
+        "tool_tests/test_report_color_latency.py",
+        "tests/session/test_surface_trace_bridge.py"
+      ],
+      "join": "cue_revision",
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "async-context",
+      "owner": "runtime",
+      "critical": true,
+      "trigger": "two unrelated requests on reused worker",
+      "evidence": [
+        {
+          "name": "runtime_job",
+          "fields": [
+            "effect_id",
+            "owner",
+            "outcome"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_trace_continuity.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "mpv-failure",
+      "owner": "runtime",
+      "critical": true,
+      "trigger": "refusal, timeout, disconnect, cancellation",
+      "evidence": [
+        {
+          "name": "runtime_mpv",
+          "fields": [
+            "effect_id",
+            "connection_epoch",
+            "outcome",
+            "error"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/session/test_session_runtime.py",
+        "tests/test_mpv_gateway.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "anki",
+      "owner": "mining",
+      "critical": true,
+      "trigger": "unavailable, protocol error, successful request",
+      "evidence": [
+        {
+          "name": "anki_request",
+          "fields": [
+            "action",
+            "outcome"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_anki_optional.py",
+        "tests/test_integration_telemetry.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "media-partial",
+      "owner": "mining",
+      "critical": true,
+      "trigger": "media failure after note validation",
+      "evidence": [
+        {
+          "name": "mining_media_result",
+          "fields": [
+            "picture_error",
+            "audio_error"
+          ],
+          "values": {
+            "outcome": [
+              "partial"
+            ]
+          }
+        }
+      ],
+      "tests": [
+        "tests/features/mining/test_mining.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "subtitle-fetch",
+      "owner": "subtitle-provider",
+      "critical": false,
+      "trigger": "Jimaku transport retry and failure",
+      "evidence": [
+        {
+          "name": "jimaku_attempt",
+          "fields": [
+            "status"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_jimaku_client.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "resync",
+      "owner": "subtitle-provider",
+      "critical": false,
+      "trigger": "resync unavailable or failed",
+      "evidence": [
+        {
+          "name": "subtitle.resync",
+          "fields": [
+            "outcome"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_resync.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "calibration",
+      "owner": "subtitle",
+      "critical": true,
+      "trigger": "valid, missing, stale bounds replies",
+      "evidence": [
+        {
+          "name": "subtitle_calibration",
+          "fields": [
+            "signature",
+            "comparison",
+            "outcome"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_subtitle_calibration.py",
+        "tests/test_calibration_telemetry.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "renderer-fallback",
+      "owner": "subtitle",
+      "critical": true,
+      "trigger": "native backend unavailable or geometry rejected",
+      "evidence": [
+        {
+          "name": "subtitle_geometry_decision",
+          "fields": [
+            "reason"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_native_subtitles.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "cache-pressure",
+      "owner": "tooltip",
+      "critical": false,
+      "trigger": "cold scrolling under bounded caches",
+      "evidence": [
+        {
+          "name": "tip_compose",
+          "fields": [
+            "kind",
+            "soft_reason"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_render_cache.py",
+        "tests/test_bench_render_devices.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "shutdown",
+      "owner": "session",
+      "critical": true,
+      "trigger": "close with pending operations",
+      "evidence": [
+        {
+          "name": "runtime_job",
+          "fields": [
+            "outcome"
+          ]
+        }
+      ],
+      "tests": [
+        "tests/test_progressive.py"
+      ],
+      "reader": "tools/telemetry_coverage.py",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "python-native-crash",
+      "owner": "diagnostics",
+      "critical": true,
+      "trigger": "isolated native fault",
+      "evidence": [],
+      "tests": [
+        "tests/test_crashlog.py",
+        "tests/test_report.py"
+      ],
+      "reader": "source-specific artifact assertions",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "telemetry-storage",
+      "owner": "diagnostics",
+      "critical": true,
+      "trigger": "lost or unwritable trace sink",
+      "evidence": [],
+      "tests": [
+        "tests/test_otel_export.py",
+        "tests/test_report.py"
+      ],
+      "reader": "source-specific artifact assertions",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    },
+    {
+      "id": "character-masks",
+      "owner": "subtitle",
+      "critical": true,
+      "trigger": "episode corpus and single interior character fault",
+      "evidence": [],
+      "tests": [
+        "tests/test_live_subtitle_pixel_differential.py",
+        "tool_tests/test_character_masks.py"
+      ],
+      "reader": "source-specific artifact assertions",
+      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
+    }
+  ]
+}

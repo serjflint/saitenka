@@ -58,6 +58,36 @@ def test_ctf_event_shape():
     assert "trace_id" not in event["args"]
 
 
+def test_exception_class_survives_export_without_private_message(tmp_path):
+    provider = TracerProvider(resource=Resource.create({}))
+    proc, _ = _on_gate(path=tmp_path / "trace.json")
+    provider.add_span_processor(proc)
+    with pytest.raises(ValueError), provider.get_tracer("test").start_as_current_span("failed"):
+        raise ValueError("password=never-export-this")
+    provider.shutdown()
+    raw = (tmp_path / "trace.json").read_text()
+    event = json.loads(raw)["traceEvents"][0]["args"]
+    assert event["status"] == "error"
+    assert event["otel_events"][0]["exception.type"] == "ValueError"
+    assert "never-export-this" not in raw
+
+
+def test_recreated_trace_reports_history_loss(tmp_path):
+    path = tmp_path / "trace.json"
+    proc, _ = _on_gate(path=path)
+    proc.on_end(_make_span())
+    proc.force_flush()
+    path.unlink()
+    proc.on_end(_make_span())
+
+    proc.shutdown()
+
+    health = json.loads(path.with_suffix(".health.json").read_text())
+    assert health["history_losses"] == 1
+    assert health["queue_dropped"] == 0
+    assert health["end"] == "clean"
+
+
 def test_ctf_event_tid_comes_from_thread_id_attribute_not_trace_id():
     """Regression: found by opening a real trace in Perfetto — every independently-started span (no
     parent-child relationship) has a different random trace_id, and the original code used a slice
@@ -150,7 +180,7 @@ def test_write_recreates_a_vanished_trace_directory(tmp_path):
     proc.on_end(_make_span())
     proc.force_flush()
 
-    for p in (path, path.parent):
+    for p in (path, path.with_suffix(".health.json"), path.parent):
         p.unlink() if p.is_file() else p.rmdir()
     proc.on_end(_make_span())
     proc.force_flush()

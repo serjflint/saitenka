@@ -55,6 +55,7 @@ class ActiveGate:
 
 
 _lock = threading.Lock()
+_summary_lock = threading.Lock()
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _span_processor: CTFSpanProcessor | None = None
@@ -73,17 +74,20 @@ def export_dir(options: TelemetryOptions) -> Path:
 def latest_trace(out_dir: Path) -> Path | None:
     """The most recent per-session CTF trace in *out_dir* (report/doctor/status read this), or None if
     none yet. Timestamped names sort chronologically, so the lexical max is the newest."""
-    traces = sorted(out_dir.glob("trace-*.json"))
+    traces = sorted(p for p in out_dir.glob("trace-*.json") if not p.name.endswith(".health.json"))
     return traces[-1] if traces else None
 
 
 def _rotate_traces(out_dir: Path, keep: int) -> None:
     """Prune the oldest per-session traces before a new session starts, keeping the newest ``keep``-1
     so the session about to begin brings the total to at most ``keep``."""
-    existing = sorted(out_dir.glob("trace-*.json"))
+    existing = sorted(
+        p for p in out_dir.glob("trace-*.json") if not p.name.endswith(".health.json")
+    )
     for old in existing[: max(0, len(existing) - (keep - 1))]:
         try:
             old.unlink()
+            old.with_suffix(".health.json").unlink(missing_ok=True)
         except OSError:
             log.debug("could not prune old trace %s", old, exc_info=True)
 
@@ -236,6 +240,7 @@ def configure(options: TelemetryOptions) -> None:
 def shutdown() -> None:
     """Flush + tear down the providers. Safe to call even when telemetry was never configured."""
     global _tracer_provider, _meter_provider, _span_processor
+    save_operation_summary(end="shutdown-observed")
     with _lock:
         if _tracer_provider is not None:
             try:
@@ -260,3 +265,41 @@ def shutdown() -> None:
             None
         )  # drop the SessionController's cache-gauge closure with the providers
         span_gate.set(value=False)
+
+
+def save_operation_summary(*, end: str = "unknown") -> None:
+    # The periodic writer and shutdown may overlap on a free-threaded interpreter.
+    with _summary_lock:
+        _save_operation_summary(end=end)
+
+
+def _save_operation_summary(*, end: str) -> None:
+    import json
+
+    from saitenka.operation_summary import operations
+    from saitenka.session import session_id
+    from saitenka.version import overlay_version
+
+    payload = operations.snapshot()
+    if not payload["outcomes"] and not payload["pending"]:
+        return
+    payload.update(
+        session=session_id(),
+        overlay_build=overlay_version(),
+        tracing=is_enabled(),
+        captured_ns=time.time_ns(),
+        end=end,
+    )
+    directory = cache_dir() / "diagnostics"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"session-{session_id()}.json"
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload), encoding="utf-8")
+        temporary.replace(path)
+        for old in sorted(directory.glob("session-*.json"), key=lambda item: item.stat().st_mtime)[
+            :-10
+        ]:
+            old.unlink()
+    except OSError:
+        log.warning("operation summary unavailable", exc_info=True)

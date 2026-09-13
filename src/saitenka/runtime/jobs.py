@@ -8,6 +8,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from saitenka.otel_metrics import bind_context
 from saitenka.runtime.effects import EffectError, EffectId, EffectOutcome, Owner, SubmitJob
 from saitenka.runtime.events import EffectFinished, EventOrigin
 
@@ -157,6 +158,8 @@ def configure_lane(
 class _Accepted:
     effect: SubmitJob
     cancelled: threading.Event
+    run: Callable
+    complete: Callable
 
 
 class _Lane:
@@ -177,7 +180,7 @@ class _Lane:
         self.closed = False
         self.threads = tuple(
             threading.Thread(
-                target=self._run,
+                target=bind_context(self._run, clear_span=True),
                 name=f"saitenka-job-{name}-{index}",
                 daemon=True,
             )
@@ -187,7 +190,9 @@ class _Lane:
             thread.start()
 
     def admit(self, effect: SubmitJob) -> bool:
-        accepted = _Accepted(effect, threading.Event())
+        accepted = _Accepted(
+            effect, threading.Event(), bind_context(self.handler), bind_context(self.complete)
+        )
         with self.condition:
             if self.closed or len(self.pending) >= self.policy.capacity:
                 return False
@@ -208,7 +213,7 @@ class _Lane:
                 job.cancelled.set()
             self.condition.notify_all()
         for job in accepted:
-            self.complete(
+            job.complete(
                 EffectFinished(
                     job.effect.effect_id,
                     job.effect.owner,
@@ -229,7 +234,7 @@ class _Lane:
                 accepted = self.queue.popleft()
             effect = accepted.effect
             try:
-                result = self.handler(effect.request, accepted.cancelled)
+                result = accepted.run(effect.request, accepted.cancelled)
                 outcome = (
                     EffectOutcome.CANCELLED
                     if accepted.cancelled.is_set()
@@ -244,7 +249,7 @@ class _Lane:
                 current = self.pending.pop(effect.effect_id.value, None)
             if current is None:
                 continue
-            self.complete(
+            accepted.complete(
                 EffectFinished(
                     effect.effect_id,
                     effect.owner,

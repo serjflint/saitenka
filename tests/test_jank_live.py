@@ -24,6 +24,12 @@ def _s(step, drop, delay, interaction_ms=0.0):
     return {"step": step, "drop": drop, "delay": delay, "interaction_ms": interaction_ms}
 
 
+def test_unavailable_player_counters_are_not_zero_cost():
+    result = _jank_module().reduce_jank_samples([_s("baseline", None, 0), _s("hover", None, 1)])
+    assert result["total_dropped"] is None
+    assert result["total_delayed"] == 1
+
+
 def test_reduce_computes_per_step_deltas_from_cumulative_counters():
     mod = _jank_module()
     out = mod.reduce_jank_samples(
@@ -51,7 +57,7 @@ def test_reduce_handles_too_few_samples():
     mod = _jank_module()
     out = mod.reduce_jank_samples([_s("baseline", 0, 0)])  # nothing to diff
     assert out["steps"] == []
-    assert out["total_dropped"] == 0 and out["max_step_dropped"] == 0
+    assert out["total_dropped"] is None and out["max_step_dropped"] is None
 
 
 def test_to_bench_json_keeps_the_frame_sentinel_and_trends_live_latency():

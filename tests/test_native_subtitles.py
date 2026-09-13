@@ -2942,6 +2942,7 @@ def test_the_layout_check_measures_once_per_face_set_while_paused(tmp_path: Path
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
     )
     ipc.props["pause"] = True
+    ipc.osd_bounds = osd_box(right=0.0)
 
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)

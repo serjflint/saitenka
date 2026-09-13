@@ -1,10 +1,7 @@
-"""How long each cue waited for its color, derived from a report bundle's trace.
+"""Cue arrival to mpv acknowledgment, with missing evidence retained in the denominator.
 
-    first draw of an appearance           -> the cue is on screen
-    first of that appearance with boxes   -> the color is on screen
-
-Derived rather than recorded, which keeps the renderer stateless and leaves the trace's other
-intervals derivable too. The cost: it needs a bundle, so `saitenka doctor` cannot print it live.
+Neither a draw nor an IPC acknowledgment establishes physical display presentation.
+Older draw-based helpers remain compatibility diagnostics, not acknowledgment latency.
 
     uv run python tools/report_color_latency.py <report.zip>
 """
@@ -77,7 +74,7 @@ def caused_by(trace: dict, name: str) -> dict[str, str]:
 
 
 def color_on_screen(trace: dict) -> list[tuple[str, float]]:
-    """Per cue arrival, how long until the colored overlay was ON SCREEN.
+    """Legacy heuristic mixing draw and write timestamps; not display or acknowledgment latency.
 
     Both ends of the older reading were ours rather than the viewer's, and both were early:
 
@@ -151,6 +148,68 @@ def color_on_screen(trace: dict) -> list[tuple[str, float]]:
         )
         result.append((cue, (acked or painted)["ts"] / 1000.0 - start))
     return result
+
+
+def color_arrivals(trace: dict) -> list[dict]:
+    """Occurrence-qualified overprint acknowledgments; no draw fallback in latency statistics."""
+    spans = sorted(
+        (event for event in trace.get("traceEvents", []) if event.get("ph") == "X"),
+        key=lambda event: event["ts"],
+    )
+    arrivals = [event for event in spans if event.get("name") == "cue_reconcile"]
+    results = []
+    for index, arrival in enumerate(arrivals):
+        args = arrival.get("args") or {}
+        revision = args.get("cue_revision")
+        row = {
+            "cue": args.get("cue"),
+            "cue_revision": revision,
+            "endpoint": "mpv-acknowledgment",
+            "wait_ms": None,
+            "status": "unknown-correlation",
+        }
+        if revision is not None:
+            horizon = arrivals[index + 1]["ts"] if index + 1 < len(arrivals) else float("inf")
+            candidates = [
+                event
+                for event in spans
+                if arrival["ts"] <= event["ts"] < horizon
+                and (event.get("args") or {}).get("cue_revision") == revision
+            ]
+            draws_for_cue = [
+                event.get("args") or {} for event in candidates if event["name"] == "subtitle_draw"
+            ]
+            owed = max(
+                (
+                    value["owed_color"]
+                    for value in draws_for_cue
+                    if isinstance(value.get("owed_color"), int)
+                ),
+                default=None,
+            )
+            row["owed_color"] = owed
+            row["status"] = (
+                "not-applicable"
+                if owed == 0
+                else "no-matching-ack"
+                if owed
+                else "unknown-eligibility"
+            )
+            ack = next((event for event in candidates if _is_color_ack(event)), None)
+            if ack is not None and owed:
+                row.update(status="acknowledged", wait_ms=(ack["ts"] - arrival["ts"]) / 1000)
+        results.append(row)
+    return results
+
+
+def _is_color_ack(event: dict) -> bool:
+    args = event.get("args") or {}
+    return (
+        event.get("name") == "surface_write"
+        and args.get("slot") == _COLOR_SLOT
+        and bool(args.get("events"))
+        and args.get("outcome") == "succeeded"
+    )
 
 
 #: The overlay slot the color payload is written to — the one write on the draw path whose cost is
@@ -369,13 +428,17 @@ def main(argv: list[str] | None = None) -> int:
     never = [item for item in owed if item.wait is None]
 
     print(f"{len(shown)} native appearances, {len(owed)} owed color, {len(measured)} colored")
-    on_screen = sorted(wait for _cue, wait in color_on_screen(trace))
+    arrival_records = color_arrivals(trace)
+    print(
+        f"  arrival outcomes (overprint acknowledgment): {dict(collections.Counter(row['status'] for row in arrival_records))}"
+    )
+    on_screen = sorted(row["wait_ms"] for row in arrival_records if row["wait_ms"] is not None)
     if on_screen:
         # The viewer's number: cue arrives -> mpv acknowledges the colored overlay. Printed first
         # because the reading below it measures from our own first draw to our own draw call, which
         # is both ends early and reported 0.0 ms for cues that took tens of milliseconds.
         print(
-            f"  arrival->on screen: n={len(on_screen)}"
+            f"  arrival->mpv acknowledgment (not display): n={len(on_screen)}"
             f"   p50 {statistics.median(on_screen):6.1f} ms"
             f"   p95 {on_screen[min(int(len(on_screen) * 0.95), len(on_screen) - 1)]:6.1f} ms"
             f"   max {on_screen[-1]:6.1f} ms"

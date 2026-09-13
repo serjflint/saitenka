@@ -54,6 +54,7 @@ if TYPE_CHECKING:
 
 LINE = "門前の小僧習わぬ経を読む"  # the fixed smoke line (examples/mpv_reader.DEMO_LINE)
 OSD = (1920, 1080)
+TIP_SCALE = 0.0
 # --stress uses a fixed cache cap so eviction pressure is independent of the user's configuration.
 _STRESS_CACHE_CAP = 24
 _SCROLL_JANK_STEPS = (
@@ -314,8 +315,15 @@ def runtime_info() -> dict:
     re-enables it on import — see AGENTS.md — which collapses worker scaling without any error), plus
     the worker capacity that scaling depends on. Recorded in every run so a result is never ambiguous
     about which runtime produced it."""
+    from saitenka.app.telemetry import is_enabled
+    from saitenka.version import overlay_version
+
     gil_enabled = _gil_enabled()
     return {
+        "build": overlay_version(),
+        "osd": OSD,
+        "tooltip_scale": TIP_SCALE,
+        "telemetry_enabled": is_enabled(),
         "python": sys.version.split()[0],
         "freethreaded_build": bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
         "gil_enabled": bool(gil_enabled),
@@ -1726,17 +1734,48 @@ def run_vocab(
     return gil_rc
 
 
-def _timeline_interact(reader) -> None:
+def _settle_interaction(reader, view, timeout: float = 0.5, *, previous_panel=None) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        reader.pump()
+        reader.graph.tooltip.publish_pending()
+        if (
+            view.state is not previous_panel
+            and view.rect is not None
+            and not view.crisp_pending
+            and view.desired_scroll == view.scroll
+        ):
+            return True
+        time.sleep(0.005)
+    return False
+
+
+def _timeline_interact(reader) -> dict[str, int]:
     """Exercise the nested scan popup + a clicked kanji open + a clicked cross-reference off the CURRENT
     base tooltip, so a --timeline run has realistic ``prefetch_decode``/``tip_compose``/``render``
     kind=nested|clicked|engaged_open latency — not only base hovers. Each deferred interaction is pumped
     through the runtime mailbox so the warm swap is measured rather than omitted. Best-effort: a word
     with no scan cells or kanji simply skips."""
     st = reader.graph.tooltip.surface_state().view.state
+    census = {
+        "nested_attempted": 0,
+        "nested_exercised": 0,
+        "nested_settled": 0,
+        "kanji_attempted": 0,
+        "kanji_exercised": 0,
+        "kanji_settled": 0,
+        "clicked_attempted": 0,
+        "clicked_exercised": 0,
+        "clicked_settled": 0,
+        "skipped_no_panel": 0,
+        "skipped_no_scan_boxes": 0,
+    }
     if st is None:
-        return
+        census["skipped_no_panel"] += 1
+        return census
     boxes = st.windowed.scan_boxes()
     if boxes:
+        census["nested_attempted"] += 1
         sb = boxes[len(boxes) // 2]  # a cell well inside the body
         nested_popup.show_nested(
             reader.graph.tooltip.tip_ports,
@@ -1744,7 +1783,7 @@ def _timeline_interact(reader) -> None:
             reader.graph.tooltip.word_lookup,
             sb,
         )  # cold inner word → off-thread compose (kind=engaged_nested / nested)
-        time.sleep(0.02)  # let the worker compose the nested head
+        _settle_interaction(reader, reader.graph.tooltip.surface_state().nest)
         nested_popup.show_nested(
             reader.graph.tooltip.tip_ports,
             reader.graph.tooltip.panel_ports,
@@ -1757,17 +1796,30 @@ def _timeline_interact(reader) -> None:
             reader.graph.tooltip.surface_state().nest,
             round(reader.graph.screen.osd[1] * 0.1),
         )
+        census["nested_settled"] += int(
+            _settle_interaction(reader, reader.graph.tooltip.surface_state().nest)
+        )
+        census["nested_exercised"] += int(
+            reader.graph.tooltip.surface_state().nest.rect is not None
+        )
         reader.graph.tooltip.hide_nested()
+    else:
+        census["skipped_no_scan_boxes"] += 1
     # a clicked/keyed kanji open (deferred, tier-3): warms off-thread → prefetch_decode[engaged_open]
+    census["kanji_attempted"] += 1
     reader.graph.tooltip.kanji_current()
-    time.sleep(0.02)
-    reader.pump()  # pump the typed completion and warm placement
+    census["kanji_settled"] += int(
+        _settle_interaction(reader, reader.graph.tooltip.surface_state().nest)
+    )
+    census["kanji_exercised"] += int(reader.graph.tooltip.surface_state().nest.rect is not None)
     reader.graph.tooltip.hide_nested()
     if (
         0
         <= reader.graph.tooltip.observation().selected
         < len(reader.graph.subtitle_presentation.cue.current.tokens)
     ):
+        census["clicked_attempted"] += 1
+        previous_panel = reader.graph.tooltip.surface_state().view.state
         tooltip.navigate_tip(
             reader.graph.tooltip.tip_ports,
             reader.graph.tooltip.panel_ports,
@@ -1775,8 +1827,15 @@ def _timeline_interact(reader) -> None:
                 reader.graph.tooltip.observation().selected
             ].surface,
         )  # in-place nav → kind="clicked"
-        time.sleep(0.02)
-        reader.pump()  # pump the typed completion and warm swap
+        census["clicked_settled"] += int(
+            _settle_interaction(
+                reader, reader.graph.tooltip.surface_state().view, previous_panel=previous_panel
+            )
+        )
+        census["clicked_exercised"] += int(
+            reader.graph.tooltip.tip_ports.nav_store.current.can_go_back
+        )
+    return census
 
 
 def run_timeline(
@@ -1790,6 +1849,7 @@ def run_timeline(
     lookahead: int = 3,
     head_prefetch: int = 0,
     interact: bool = True,
+    required_scenarios: tuple[str, ...] = (),
 ) -> int:
     """The idle-dominated ground truth (``vibe/hot-path-idle-spreading-plan.md`` Stage 1). Real usage
     is neither continuous churn (``--stress``) nor raw render throughput (``--vocab``) — it's mostly
@@ -1840,6 +1900,7 @@ def run_timeline(
             scorer=scorer,
         ),
         options=ReaderOptions().with_overrides(
+            tip_scale=TIP_SCALE,
             prefetch=True,
             prefetch_lookahead=lookahead,
             head_prefetch_lookahead=head_prefetch,
@@ -1866,6 +1927,7 @@ def run_timeline(
     render_cold_ms: list[float] = []  # hover latency, panel had to be built (head render) on hover
     misses = 0  # hovered while still cold, despite lookahead having reached the word already
     hovers = 0
+    scenario_census: dict[str, int] = {}
     rss_base = _rss_mb() if head_prefetch > 0 else 0.0
     rss_peak = rss_base
 
@@ -1914,9 +1976,8 @@ def run_timeline(
             elif not was_warm and enq is not None:
                 misses += 1  # the worker had idle time to warm it but hadn't finished yet
             if interact:
-                _timeline_interact(
-                    reader
-                )  # nested + clicked, off this base tooltip (realistic kinds)
+                for scenario_key, value in _timeline_interact(reader).items():
+                    scenario_census[scenario_key] = scenario_census.get(scenario_key, 0) + value
             reader.graph.tooltip.retire_hover()
     finally:
         reader.request_stop()
@@ -2005,6 +2066,8 @@ def run_timeline(
                     "runtime": rt,
                     "tag": tag,
                     "cues": len(cues),
+                    "scenario_census": scenario_census,
+                    "workload_kind": "synthetic-cue direct-install; not an async cue-observation replay",
                     "dwell_ms": dwell_s * 1000.0,
                     "lookahead": lookahead,
                     "hovers": hovers,
@@ -2019,6 +2082,15 @@ def run_timeline(
             encoding="utf-8",
         )
         print(f"\nwrote timeline baseline → {json_path}")
+    missing = [
+        name
+        for name in required_scenarios
+        if not scenario_census.get(f"{name}_exercised")
+        or not scenario_census.get(f"{name}_settled")
+    ]
+    if missing:
+        print(f"required scenarios not exercised: {', '.join(missing)}")
+        return 1
     return gil_rc
 
 
@@ -2050,7 +2122,12 @@ def _parse_trace_events(zip_path: str) -> tuple[list[dict], dict]:
         prev_end = e["ts"] + e["dur"]
         out.append({"kind": kind[e["name"]], "gap_ms": gap})
     mix = {k: sum(1 for x in out if x["kind"] == k) for k in ("cue", "hover", "scroll")}
-    meta = {"events": len(out), "mix": mix, "idle_total_s": sum(x["gap_ms"] for x in out) / 1000.0}
+    meta = {
+        "events": len(out),
+        "mix": mix,
+        "idle_total_s": sum(x["gap_ms"] for x in out) / 1000.0,
+        "replay_kind": "output-cadence approximation; substituted vocabulary, base scrolling",
+    }
     return out, meta
 
 
@@ -2301,7 +2378,24 @@ def run_trace(zip_path: str, rt: dict, params: TraceParams) -> int:
 
 
 def main() -> int:
+    global OSD, TIP_SCALE
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--osd", nargs=2, type=int, default=OSD, metavar=("WIDTH", "HEIGHT"))
+    ap.add_argument(
+        "--tooltip-scale", type=float, default=0.0, help="timeline tooltip scale (0=auto)"
+    )
+    ap.add_argument(
+        "--require-scenario",
+        action="append",
+        default=[],
+        choices=("nested", "kanji", "clicked"),
+        help="timeline: fail if the requested interaction did not open and settle",
+    )
+    ap.add_argument(
+        "--telemetry-dir",
+        type=str,
+        help="enable tracing into this directory for matched on/off runs",
+    )
     ap.add_argument("--reps", type=int, default=10)
     ap.add_argument(
         "--pathological",
@@ -2505,6 +2599,20 @@ def main() -> int:
         "0 = always compress (pre-1.3); a big value = keep all bands raw. Compare scroll jank + RSS.",
     )
     args = ap.parse_args()
+    if min(args.osd) <= 0 or not 0 <= args.tooltip_scale <= 4:
+        ap.error("OSD dimensions must be positive; tooltip scale must be in [0, 4]")
+    OSD = tuple(args.osd)
+    TIP_SCALE = args.tooltip_scale
+    if args.require_scenario and not args.timeline:
+        ap.error("--require-scenario requires --timeline")
+    if args.telemetry_dir:
+        import atexit
+
+        from saitenka.app.config import TelemetryOptions
+        from saitenka.app.telemetry import configure, shutdown
+
+        configure(TelemetryOptions(enabled=True, export_dir=args.telemetry_dir))
+        atexit.register(shutdown)
 
     # Snapshot the runtime; the GIL state is re-read AFTER the workload (finalize_runtime), because
     # fugashi re-enables the GIL only when first USED, not at startup — a start-of-run check would
@@ -2540,6 +2648,7 @@ def main() -> int:
             lookahead=args.timeline_lookahead,
             head_prefetch=args.timeline_head_prefetch,
             interact=args.timeline_interact,
+            required_scenarios=tuple(args.require_scenario),
         )
     if args.stress:
         return run_stress(
