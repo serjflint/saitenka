@@ -182,6 +182,38 @@ def ink_bounds(frame: np.ndarray) -> tuple[int, int, int, int]:
     )
 
 
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("perturb_margin", [False, True])
+def test_converted_srt_pixels_match_mpv_unless_the_margin_is_perturbed(
+    workspace: Path, *, perturb_margin: bool
+) -> None:
+    from saitenka_subtitles import converted
+
+    srt = workspace / "reference.srt"
+    srt.write_text("1\n00:00:00,500 --> 00:00:08,000\nHello world\n", encoding="utf-8")
+    candidate = workspace / "converted.ass"
+    source = converted.document(
+        "Dialogue: 0,0:00:00.50,0:00:08.00,Default,,0,0,0,,Hello world",
+        converted.RenderSpace(WIDTH, HEIGHT),
+    ).decode()
+    if perturb_margin:
+        lines = source.splitlines()
+        for index, line in enumerate(lines):
+            if line.startswith("Style:"):
+                fields = line.split(",")
+                fields[21] = str(int(fields[21]) + 1)
+                lines[index] = ",".join(fields)
+        source = "\n".join(lines)
+    candidate.write_text(source, encoding="utf-8")
+
+    mpv_ink(workspace, srt)
+    reference = np.array(_open(workspace / "frame.png"))
+    mpv_ink(workspace, candidate)
+    actual = np.array(_open(workspace / "frame.png"))
+
+    assert np.array_equal(reference, actual) is not perturb_margin
+
+
 def our_word_boxes(
     source: bytes,
     event_row: str,
