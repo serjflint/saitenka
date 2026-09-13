@@ -46,7 +46,7 @@ def _defer_interaction_for(ipc: object) -> bool:
     """Whether interaction pixels go to the presenter thread, for a caller that did not say.
 
     The probe answers for production and for the ad-hoc fakes that only want the inline path. It
-    cannot answer for a stand-in that is deliberately modelling the deferred one, because no fake
+    cannot answer for a stand-in that is deliberately modeling the deferred one, because no fake
     is an ``MpvIPC`` — which is what ``Overlay(defer_interaction=…)`` is for.
     """
     from saitenka.mpvio.ipc import MpvIPC
