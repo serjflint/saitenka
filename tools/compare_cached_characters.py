@@ -20,13 +20,20 @@ from types import SimpleNamespace
 
 import numpy as np
 import pysubs2
-from character_masks import clusters, compare_mask, digest, manifest, results_summary
+from character_masks import (
+    clusters,
+    compare_mask,
+    digest,
+    green_coverage,
+    manifest,
+    reference_mask,
+    results_summary,
+)
 from PIL import Image
 from saitenka_subtitles import (
     Cue,
     GeometryRequest,
     SubtitleTrackId,
-    TokenAnnotation,
     converted,
     font_names,
     subrip,
@@ -51,6 +58,9 @@ from saitenka.mpvio.osd import Overlay
 from saitenka.version import overlay_version
 
 PROFILE = (
+    "--osc=no",
+    "--load-scripts=no",
+    "--osd-bar=no",
     "--sub-ass-override=no",
     "--sub-ass-scale-with-window=no",
     "--sub-scale=1",
@@ -164,7 +174,16 @@ def request_for(
         TRACK,
         active_rows=rows,
         text=text,
-        tokens=[TokenAnnotation(i, token.start, token.end) for i, token in enumerate(tokens)],
+        tokens=[
+            annotation
+            for i, token in enumerate(tokens)
+            if (
+                annotation := native_subtitles._annotation_for_token(
+                    token, i, text, 0, lambda _token: False
+                )[0]
+            )
+            is not None
+        ],
     )
     palette = native_subtitles._palette_in_frame_units(
         prepared,
@@ -253,6 +272,7 @@ class Captures:
         request: DrawRequest | None = None,
         *,
         suffix: str = ".ass",
+        reference_coverage: np.ndarray | None = None,
     ) -> np.ndarray:
         source_path = self.directory / f"capture{suffix}"
         source_path.write_text(source, encoding="utf-8")
@@ -275,6 +295,11 @@ class Captures:
             raster = overpaint_image(request)
             if raster is not None:
                 self.overlay.show(Image.fromarray(raster.rgba), raster.x, raster.y, oid=62)
+        if reference_coverage is not None:
+            rgba = np.zeros((*reference_coverage.shape, 4), dtype=np.uint8)
+            rgba[:, :, 1] = 255
+            rgba[:, :, 3] = reference_coverage
+            self.overlay.show(Image.fromarray(rgba), 0, 0, oid=62)
         target = self.directory / "capture.png"
         response = self.ipc.command("screenshot-to-file", str(target), "window")
         if response.get("error") != "success":
@@ -426,27 +451,25 @@ def coordinate_result(
             "verdict": "inconclusive",
             "reason": "converted-document-pixels-disagree-with-mpv",
         }, ()
+    request = request_for(source, time_ms, capture.size, capture.fonts)
+    ours = capture.frame(native, time_ms, request, suffix=suffix)
     red = capture.frame(recolor(source), time_ms)
     blue = capture.frame(
         recolor(source, target=(coordinate["event"], coordinate["start"], coordinate["end"])),
         time_ms,
     )
-    # This feasibility check intentionally declines colored outlines/opaque panels/changed shaping.
-    if not (
-        np.array_equal(original.max(axis=2), red.max(axis=2))
-        and np.array_equal(red.max(axis=2), blue.max(axis=2))
-    ):
+    mask, reason = reference_mask(original, red, blue)
+    if reason:
+        return {"verdict": "inconclusive", "reason": reason}, (original, ours, mask)
+    expected = capture.frame(native, time_ms, suffix=suffix, reference_coverage=original[:, :, 0])
+    context = green_coverage(expected)
+    if not np.array_equal(context > 32, original[:, :, 0] > 32):
         return {
             "verdict": "inconclusive",
-            "reason": "recoloring-does-not-preserve-reference-intensity",
-        }, ()
-    if np.any(red[:, :, 1:]):
-        return {"verdict": "inconclusive", "reason": "non-primary-reference-channels"}, ()
-    mask = blue[:, :, 2]
-    request = request_for(source, time_ms, capture.size, capture.fonts)
-    ours = capture.frame(recolor(source), time_ms, request)
-    green = ours[:, :, 1]
-    verdict = compare_mask(mask, green, red[:, :, 0])
+            "reason": "calibration-does-not-preserve-native-ink",
+        }, (original, ours, mask)
+    verdict = compare_mask(np.where(mask > 0, context, 0), green_coverage(ours), context)
+    verdict["ownership"] = "isolated-native-ink-cell-with-whole-cue-check"
     verdict.update(coordinate_devices(source, coordinate, request))
     return verdict, (original, ours, mask)
 
