@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789233013977,
+  "lastUpdate": 1789285711611,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -15569,6 +15569,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 9.340311,
             "range": "3 replicas; min 1.48305; max 19.0312; MAD 7.85726; worst 19.0312",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "be264552a07c8091d92db0d947f4c1ded3149fc2",
+          "message": "Merge pull request #515 from serjflint/fix/bench-counterbalance-and-gate-d\n\nfix(bench): gate the geometry lane on invariants, not on the harness's wall time",
+          "timestamp": "2026-09-13T12:46:59+05:00",
+          "tree_id": "18788ece0c223a385ea5674c5fadfe25d5944330",
+          "url": "https://github.com/serjflint/saitenka/commit/be264552a07c8091d92db0d947f4c1ded3149fc2"
+        },
+        "date": 1789285710021,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.403539,
+            "range": "3 replicas; min 6.3533; max 6.48358; MAD 0.050238",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.813982,
+            "range": "3 replicas; min 8.73785; max 8.85017; MAD 0.036186; worst 8.85017",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 20.483508,
+            "range": "3 replicas; min 18.6005; max 20.8764; MAD 0.392928",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 20.725912,
+            "range": "3 replicas; min 18.697; max 21.3263; MAD 0.600382; worst 21.3263",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.813133,
+            "range": "3 replicas; min 12.0194; max 15.0082; MAD 0.195057",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.121727,
+            "range": "3 replicas; min 0.088984; max 0.121729; MAD 2e-06; worst 0.121729",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.889758,
+            "range": "3 replicas; min 38.6849; max 44.3497; MAD 0.459924; worst 44.3497",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.923609,
+            "range": "3 replicas; min 2.56142; max 3.1898; MAD 0.266193; worst 3.1898",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.310061,
+            "range": "3 replicas; min 1.1095; max 1.3896; MAD 0.079535; worst 1.3896",
             "unit": "ms"
           }
         ]
