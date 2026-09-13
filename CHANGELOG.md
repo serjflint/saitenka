@@ -7,6 +7,23 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- Local diagnostic reports retain trace-write losses, unfinished operations and native fault logs;
+  bounded operation outcomes remain available without the tracing extra.
+- Tooltip quality timelines distinguish soft/crisp submission from mpv acknowledgment, independently
+  for main and nested views. An opt-in cached-subtitle comparison tool reports per-character masks
+  with explicit incomplete and unsupported results.
+
+### Fixed
+
+- Converted subtitles use mpv's integer margin and display-aspect arithmetic, avoiding shifted
+  hit boxes and color overlays caused by rounding before mpv does.
+- Background jobs and delayed surface replies preserve their initiating trace context instead of
+  inheriting startup context. Report readers separate composition counts, callback time and
+  acknowledgment latency, and keep missing color evidence out of success-only percentiles.
+- Missing subtitle calibration replies no longer permanently count a signature as checked.
+
 ## [4.4.0] - 2026-09-12
 
 ### Added

@@ -412,6 +412,7 @@ def click_kanji_fallback(ports: TipPorts, panel: PanelPorts, x: float, y: float)
 
 
 def hide_nested(ports: TipPorts) -> None:
+    ports.tip.nest.quality.close()
     if ports.tip.nest.state is not None or ports.tip.nest.rect is not None:
         ports.surfaces.remove(OverlayId.NESTED)
     ports.tip.nest = PopupView(OverlayId.NESTED)

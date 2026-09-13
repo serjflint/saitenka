@@ -69,10 +69,10 @@ class _InteractionPresenter:
             if self._closed:
                 return
             self._sequence += 1
-            self._desired[oid] = (self._sequence, operation)
+            self._desired[oid] = (self._sequence, otel_metrics.bind_context(operation))
             if self._thread is None:
                 self._thread = threading.Thread(
-                    target=self._run,
+                    target=otel_metrics.bind_context(self._run, clear_span=True),
                     name="saitenka-interaction-presenter",
                     daemon=True,
                 )

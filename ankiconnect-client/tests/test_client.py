@@ -88,4 +88,4 @@ def test_urllib_transport_observes_http_and_json_parse_separately(monkeypatch):
     )
 
     assert result == 6
-    assert phases == [("http_call", "version"), ("json_parse", "version")]
+    assert phases == [("attempt", "version"), ("http_call", "version"), ("json_parse", "version")]

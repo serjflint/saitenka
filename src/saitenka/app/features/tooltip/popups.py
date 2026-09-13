@@ -432,6 +432,9 @@ class PopupView:
     while their state stays independent — a nested soft paint no longer flips the base's crisp flag."""
 
     def __init__(self, oid: int = OverlayId.TIP):
+        from saitenka.app.features.tooltip.quality import ViewQuality
+
+        self.quality = ViewQuality()
         self.oid = oid  # which overlay this view composites to (TIP / NESTED)
         self.state: Panel | None = None  # Panel of the shown word
         self.key: tuple | None = None  # its panel-cache key

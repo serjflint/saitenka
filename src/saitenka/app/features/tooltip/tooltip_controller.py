@@ -225,6 +225,7 @@ class TooltipSessionView:
     subtitle_language: str
     navigation: TooltipNavigationView
     playback_cue_text: str
+    cue_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -345,14 +346,22 @@ class TooltipController:
         )
 
     def set_hover(self, index: int) -> None:
-        tooltip.set_hover(
-            self.tip_ports,
-            self.panel_ports,
-            self.word_lookup,
-            self.hover_inputs,
-            self.show_actions,
-            index,
-        )
+        from saitenka.app.subtitle_geometry_diagnostics import cue_digest
+
+        observation = self._session().observe()
+        with otel_metrics.traced(
+            "tooltip_input",
+            cue=cue_digest(observation.playback_cue_text),
+            cue_revision=str(observation.cue_revision),
+        ):
+            tooltip.set_hover(
+                self.tip_ports,
+                self.panel_ports,
+                self.word_lookup,
+                self.hover_inputs,
+                self.show_actions,
+                index,
+            )
 
     def update_hover(self) -> None:
         """Apply the current pointer observation through the tooltip's hover policy."""
@@ -695,13 +704,23 @@ class TooltipController:
         )
 
     def submit_render_ahead(self, view: PopupView, direction: int) -> bool:
-        return self.request_render_ahead(
-            view,
-            direction,
-            generation=self._preparation.generation,
-            scale=self.scale().raster,
-            on_finished=self.finish_render_ahead_completion,
+        view.quality.prepare(
+            view.key if view.key is not None else view.state,
+            (view.desired_scroll, view.view_h, self.scale().display),
         )
+        with otel_metrics.traced(
+            "render_ahead_request",
+            view_id=view.quality.view_id,
+            viewport_revision=str(view.quality.generation),
+            job_id=str(view.job_id),
+        ):
+            return self.request_render_ahead(
+                view,
+                direction,
+                generation=self._preparation.generation,
+                scale=self.scale().raster,
+                on_finished=self.finish_render_ahead_completion,
+            )
 
     def request_engaged_tooltip(self, request: tooltip_engaged.EngagedRequest) -> bool:
         scale = self.scale()
@@ -989,6 +1008,7 @@ class TooltipController:
 
     def retire_state(self) -> None:
         """Clear mutable tooltip facts after their physical surfaces and keys retire."""
+        self._state.view.quality.close()
         self._state.view.rect = None
         self._state.view.state = None
         self._state.view.key = None

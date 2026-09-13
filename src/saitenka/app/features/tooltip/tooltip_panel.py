@@ -504,7 +504,15 @@ def blit_panel(
 
 
 def decorate_and_upload(
-    ports: TipPorts, view, y0: int, full_h: int, xy, oid: int, *, prescaled: bool = False
+    ports: TipPorts,
+    view,
+    y0: int,
+    full_h: int,
+    xy,
+    oid: int,
+    *,
+    prescaled: bool = False,
+    cached_key: object = None,
 ):
     """Draw the scrollbar thumb and the copy-flash border onto a REFERENCE-sized viewport BGRA array,
     then upscale by ``TipScale.display`` to the live display and upload. Decorations are drawn in
@@ -518,7 +526,6 @@ def decorate_and_upload(
         th = max(28, int(track * vh / full_h))
         tyb = 4 + int((track - th) * (y0 / max(1, full_h - vh)))
         view[tyb : tyb + th, full_w - 7 : full_w - 3] = (99, 99, 99, 210)
-    tip = ports.tip
     if ports.pulse_store.current.overlay == oid:  # the deadline owns when this stops being true
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
@@ -529,19 +536,41 @@ def decorate_and_upload(
 
         view = scale_bgra(view, s)
     tx, ty = xy
-    popup = tip.nest if oid == OverlayId.NESTED else tip.view
+    settled = _quality_submission(ports, oid, prescaled=prescaled, cached_key=cached_key)
+    ports.surfaces.present_bgra(view, tx, ty, oid=oid, on_settled=settled)
+    return (tx, ty, view.shape[1], view.shape[0])
+
+
+def _quality_submission(ports: TipPorts, oid: int, *, prescaled: bool, cached_key: object):
+    popup = ports.tip.nest if oid == OverlayId.NESTED else ports.tip.view
+    s = ports.scale.display
     kind = popup.job_kind
     job_id = popup.job_id
+    partial = cached_key is None and popup.state is not None and popup.state.missed_last_assemble
+    quality = "partial" if partial else "crisp" if prescaled or abs(s - 1.0) < 1e-3 else "soft"
+    content = (
+        cached_key
+        if cached_key is not None
+        else popup.key
+        if popup.key is not None
+        else popup.state
+    )
+    operation = popup.quality.submit(
+        content,
+        (popup.scroll, popup.view_h, s),
+        kind=compose_kind(oid, navigated=ports.nav_store.current.can_go_back),
+        state=quality,
+        reason=popup.crisp_miss,
+        job_id=job_id,
+    )
 
     def settled(*, painted: bool) -> None:
+        popup.quality.settle(operation, accepted=painted, state=quality)
         if job_id is None:
             return
         ports.tip.jobs.finish(kind, "painted" if painted else "failed", job_id=job_id)
 
-    # Fenced: a paint acknowledged after a newer paint or a hide settles nobody, so the intent's
-    # latency is never closed out against pixels something else has already replaced.
-    ports.surfaces.present_bgra(view, tx, ty, oid=oid, on_settled=settled)
-    return (tx, ty, view.shape[1], view.shape[0])
+    return settled
 
 
 def dispatch_hover(ports: TipPorts, event) -> tuple[hover.Decision, ...]:
@@ -595,7 +624,16 @@ def render_view(ports: TipPorts, view: PopupView) -> None:
     st = view.state
     if st is None:
         return
-    view.rect = _blit_crisp_or_soft(ports, view, st)
+    view.quality.prepare(
+        view.key if view.key is not None else st, (view.scroll, view.view_h, ports.scale.display)
+    )
+    with otel_metrics.traced(
+        "tooltip_view",
+        view_id=view.quality.view_id,
+        viewport_revision=str(view.quality.generation),
+        job_id=str(view.job_id),
+    ):
+        view.rect = _blit_crisp_or_soft(ports, view, st)
 
 
 def apply_pending_crisp(ports: TipPorts, view: PopupView) -> None:
@@ -666,13 +704,16 @@ def _blit_native(ports: TipPorts, view: PopupView, st: Panel):
             soft_reason="",
             scale=f"{scale:.4f}",
             kind=compose_kind(oid, navigated=ports.nav_store.current.can_go_back),
-        ):
+        ) as span:
             arr = st.viewport(y0, vh, overscan=vh, scale=scale, warm_only=True)  # native, no raster
+            span.set("partial", st.missed_last_assemble)
     except Exception:  # a composite failure falls back to the soft upscale (never a blank tooltip)
         log.debug("native compose failed", exc_info=True)
+        view.crisp_miss = "composition_failed"
+        view.crisp_pending = True
         return blit_panel(ports, st, scroll, view_h, xy, oid, soft_reason=view.crisp_miss)
     view.crisp_miss = ""
-    view.crisp_pending = False
+    view.crisp_pending = st.missed_last_assemble
     if otel_metrics.crisp_swaps is not None:
         otel_metrics.crisp_swaps.add(1)
     # y0/full_h are display px so decorate_and_upload's scrollbar-thumb geometry stays right; the array

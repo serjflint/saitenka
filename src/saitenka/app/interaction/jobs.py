@@ -5,6 +5,10 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from saitenka import otel_metrics
 
@@ -13,6 +17,8 @@ from saitenka import otel_metrics
 class _Active:
     job_id: int
     started: float
+    span: otel_metrics.DeferredSpan
+    terminal: Callable
 
 
 class InteractionJobs:
@@ -25,7 +31,17 @@ class InteractionJobs:
         self.finish(kind, "superseded")
         with self._lock:
             self._next += 1
-            self._active[kind] = _Active(self._next, time.monotonic())
+
+            def terminal(**attrs):
+                with otel_metrics.traced(f"{kind}_request", **attrs):
+                    pass
+
+            self._active[kind] = _Active(
+                self._next,
+                time.monotonic(),
+                otel_metrics.DeferredSpan(f"{kind}_lifetime", job_id=str(self._next)),
+                otel_metrics.bind_context(terminal),
+            )
             return self._next
 
     def finish(self, kind: str, outcome: str, *, job_id: int | None = None) -> None:
@@ -35,13 +51,11 @@ class InteractionJobs:
                 return
             self._active.pop(kind, None)
         latency_ms = (time.monotonic() - active.started) * 1_000.0
-        with otel_metrics.traced(
-            f"{kind}_request",
-            job_id=str(active.job_id),
+        active.span.finish(
             outcome=outcome,
-            latency_ms=f"{latency_ms:.3f}",
-        ):
-            pass
+            latency_ms=round(latency_ms, 3),
+        )
+        active.terminal(job_id=str(active.job_id), outcome=outcome, latency_ms=round(latency_ms, 3))
 
     def cancel_all(self) -> None:
         with self._lock:

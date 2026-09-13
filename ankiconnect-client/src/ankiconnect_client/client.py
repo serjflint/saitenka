@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -53,12 +54,8 @@ class AnkiConnectClient:
             if self.observer is not None:
                 self.observer.request_started(action)
             try:
-                if phase_observer is not None and isinstance(self.transport, PhasedTransport):
-                    response = self.transport.send_phased(
-                        payload, timeout=timeout, observer=phase_observer
-                    )
-                else:
-                    response = self.transport.send(payload, timeout=timeout)
+                with phase_observer.phase("attempt", action) if phase_observer else nullcontext():
+                    result = self._attempt(payload, action, timeout, phase_observer)
             except OSError as exc:
                 if attempt + 1 == attempts:
                     raise AnkiConnectUnavailable(
@@ -66,14 +63,23 @@ class AnkiConnectClient:
                     ) from exc
                 time.sleep(min(0.3 * (attempt + 1), 1.0))
                 continue
-            if not isinstance(response, dict) or "result" not in response:
-                raise AnkiConnectProtocolError(f"malformed response for {action!r}")
-            if self.observer is not None:
-                self.observer.response_received(action, len(repr(response)))
-            if response.get("error") is not None:
-                raise AnkiConnectError(str(response["error"]))
-            return response["result"]
+            return result
         raise AssertionError("unreachable")
+
+    def _attempt(
+        self, payload: dict, action: str, timeout: float, observer: PhaseObserver | None
+    ) -> Any:
+        if observer is not None and isinstance(self.transport, PhasedTransport):
+            response = self.transport.send_phased(payload, timeout=timeout, observer=observer)
+        else:
+            response = self.transport.send(payload, timeout=timeout)
+        if not isinstance(response, dict) or "result" not in response:
+            raise AnkiConnectProtocolError(f"malformed response for {action!r}")
+        if self.observer is not None:
+            self.observer.response_received(action, len(repr(response)))
+        if response.get("error") is not None:
+            raise AnkiConnectError(str(response["error"]))
+        return response["result"]
 
     def multi(self, actions: list[dict[str, Any]], **call_options: Any) -> list[Any]:
         result = self.call("multi", actions=actions, **call_options)

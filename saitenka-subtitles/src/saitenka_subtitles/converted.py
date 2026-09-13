@@ -262,7 +262,7 @@ def play_res_x(space: RenderSpace) -> int:
     `PlayResX` affects border and shadow widths, so mpv rewrites it from the display aspect; the
     height stays at libavcodec's 288.
     """
-    return round(PLAYRES_Y * space.video_width / max(space.video_height, 1))
+    return int(PLAYRES_Y * space.video_width / max(space.video_height, 1))
 
 
 def _alignment(style: SubStyle) -> int:
@@ -279,8 +279,9 @@ def style_row(style: SubStyle, res_y: float, space: RenderSpace, *, scale: float
     scale — mpv's own asymmetry (`sd_ass.c:630-635`), not a transcription slip.
     """
     reference = res_y / 720.0
-    margin_x = round(style.margin_x * reference)
-    margin_v = round((style.margin_y + style.margin_y_offset) * reference)
+    # mp_ass_set_style assigns to int fields; configure_ass subsequently uses lrint.
+    margin_x = int(style.margin_x * reference)
+    margin_v = int((style.margin_y + style.margin_y_offset) * reference)
     fix_margins = play_res_x(space) / PLAYRES_X
     fields = (
         "Default",

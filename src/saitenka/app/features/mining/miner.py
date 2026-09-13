@@ -392,6 +392,18 @@ def _capture_audio(
 
 
 def _warn_capture_failure(p: MiningTransaction, pic_err, audio_err) -> None:
+    from saitenka import otel_metrics
+
+    outcome = (
+        "failed"
+        if pic_err and audio_err
+        else "partial"
+        if pic_err or audio_err
+        else "no-reported-error"
+    )
+    with otel_metrics.traced("mining_media_result", outcome=outcome) as span:
+        span.set("picture_error", type(pic_err).__name__ if pic_err else "")
+        span.set("audio_error", type(audio_err).__name__ if audio_err else "")
     message = _capture_failure_message(pic_err, audio_err)
     if message is not None:
         p.apply.toast(*message)

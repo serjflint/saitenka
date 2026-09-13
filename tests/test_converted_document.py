@@ -89,6 +89,10 @@ def test_the_document_carries_libavcodecs_header_and_mpvs_style() -> None:
     assert text.rstrip().endswith(EVENTS)
 
 
+def test_playres_x_truncates_a_fractional_display_aspect() -> None:
+    assert converted.play_res_x(converted.RenderSpace(1001, 700)) == 411
+
+
 def test_the_style_carries_mpvs_defaults_translated_to_the_track_resolution() -> None:
     """`mp_ass_set_style` scales every size from a reference `PlayResY` of 720 to the track's 288."""
     row = converted.style_row(converted.SubStyle(), converted.PLAYRES_Y, HD, scale=1.0)
@@ -132,10 +136,21 @@ def test_the_vertical_margin_scales_with_the_font_and_the_horizontal_with_playre
     moved, `MarginV` by the font scale (`sd_ass.c:630-635`)."""
     row = converted.style_row(converted.SubStyle(), converted.PLAYRES_Y, HD, scale=2.0)
     fields = row.removeprefix("Style: ").split(",")
-    reference = 288 / 720
+    assert int(fields[19]) == 9
+    assert int(fields[21]) == 26
 
-    assert int(fields[19]) == round(round(19 * reference) * converted.play_res_x(HD) / 384)
-    assert int(fields[21]) == round(round(34 * reference) * 2.0)
+
+@pytest.mark.parametrize(
+    ("margin_x", "margin_y", "scale", "expected"),
+    [(19, 34, 1.0, [9, 9, 13]), (21, 39, 1.5, [11, 11, 22])],
+)
+def test_mpv_margin_assignment_truncates_before_rounded_rescaling(
+    margin_x: int, margin_y: int, scale: float, expected: list[int]
+) -> None:
+    style = SubStyle(margin_x=margin_x, margin_y=margin_y)
+    row = converted.style_row(style, converted.PLAYRES_Y, HD, scale=scale)
+
+    assert [int(value) for value in row.split(",")[19:22]] == expected
 
 
 def test_the_style_row_states_alpha_the_way_a_style_row_states_it() -> None:

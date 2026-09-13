@@ -5,7 +5,40 @@ from __future__ import annotations
 import sys
 import threading
 
+import pytest
+
 from saitenka.app import crashlog
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fault injection disables core files")
+def test_isolated_native_fault_reaches_the_report_bundle(monkeypatch, tmp_path):
+    import os
+    import subprocess
+
+    from test_report import _hermetic
+
+    from saitenka.app import report
+
+    _hermetic(monkeypatch, tmp_path)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import resource, os; resource.setrlimit(resource.RLIMIT_CORE, (0, 0)); "
+                "from saitenka.app import crashlog; crashlog.install(); os.abort()"
+            ),
+        ],
+        env=dict(os.environ),
+        capture_output=True,
+        timeout=3,
+        check=False,
+    )
+    members = report.collect()
+    assert result.returncode < 0
+    assert "Fatal Python error" in members["crashes/faulthandler.log"]
 
 
 def _isolate(monkeypatch, tmp_path):
