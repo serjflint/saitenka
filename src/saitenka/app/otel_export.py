@@ -57,6 +57,27 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
     ids: dict[str, object] = {"span_id": format(ctx.span_id, "016x") if ctx else ""}
     if span.parent is not None:
         ids["parent_id"] = format(span.parent.span_id, "016x")
+    ids["status"] = span.status.status_code.name.lower()
+    if span.events:
+        # Exception text/stack can contain subtitle text or credentials; retain classification only.
+        ids["otel_events"] = [
+            {
+                "name": event.name[:128],
+                "ts": event.timestamp / 1000,
+                "exception.type": str((event.attributes or {}).get("exception.type", ""))[:128],
+            }
+            for event in span.events[:16]
+        ]
+        ids["events_omitted"] = max(0, len(span.events) - 16)
+    if span.links:
+        ids["links"] = [
+            {
+                "span_id": format(link.context.span_id, "016x"),
+                "trace_id": format(link.context.trace_id, "032x"),
+            }
+            for link in span.links[:16]
+        ]
+        ids["links_omitted"] = max(0, len(span.links) - 16)
     return {
         "name": span.name,
         "cat": "span",
@@ -65,7 +86,7 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
         "dur": max(end_ns - start_ns, 0) / 1000,
         "pid": 1,
         "tid": tid,
-        "args": {**ids, **attrs},
+        "args": {**attrs, **ids},
     }
 
 
@@ -112,7 +133,16 @@ class CTFSpanProcessor(SpanProcessor):
         self._io_lock = threading.Lock()
         self._dropped_lock = threading.Lock()
         self._dropped = 0
+        self._pending: dict[str, str] = {}
+        self._pending_overflow = 0
         self._initialized = False
+        self._health = {
+            "write_failures": 0,
+            "history_losses": 0,
+            "sample_failures": 0,
+            "lost_events": 0,
+        }
+        self._ended = False
         self._last_sample = time.monotonic()
         self._last_counter: dict[
             str, float
@@ -129,6 +159,10 @@ class CTFSpanProcessor(SpanProcessor):
             return self._dropped
 
     def on_end(self, span: ReadableSpan) -> None:
+        context = span.get_span_context()
+        if context is not None:
+            with self._dropped_lock:
+                self._pending.pop(format(context.span_id, "016x"), None)
         if not self._gate:
             return
         try:
@@ -136,6 +170,15 @@ class CTFSpanProcessor(SpanProcessor):
         except queue.Full:
             with self._dropped_lock:
                 self._dropped += 1
+
+    def on_start(self, span, parent_context=None) -> None:  # noqa: ARG002 -- SDK callback signature
+        if not self._gate:
+            return
+        with self._dropped_lock:
+            if len(self._pending) < 256:
+                self._pending[format(span.get_span_context().span_id, "016x")] = span.name[:128]
+            else:
+                self._pending_overflow += 1
 
     def _run(self) -> None:  # pragma: no cover — timing-dependent background loop
         while not self._stop.is_set():
@@ -163,6 +206,28 @@ class CTFSpanProcessor(SpanProcessor):
                     events.extend(self._sample_counter_events())
             if events:
                 self._write_events(events)
+            self._write_health()
+
+    def _write_health(self) -> None:
+        from saitenka.session import session_id
+
+        payload: dict[str, object] = {
+            **self._health,
+            "queue_dropped": self.dropped_count,
+            "session": session_id(),
+            "end": "clean" if self._ended else "unknown",
+            "captured_ns": time.time_ns(),
+        }
+        with self._dropped_lock:
+            payload["pending"] = dict(self._pending)
+            payload["pending_admissions_omitted"] = self._pending_overflow
+        path = self._path.with_suffix(".health.json")
+        try:
+            temporary = path.with_suffix(".tmp")
+            temporary.write_bytes(msgspec.json.encode(payload))
+            temporary.replace(path)
+        except OSError:
+            log.warning("telemetry health unavailable: %s", payload)
 
     def _sample_counter_events(self) -> list[dict[str, object]]:
         """Only series whose value MOVED since the last sample. Perfetto holds a counter track's last
@@ -172,6 +237,7 @@ class CTFSpanProcessor(SpanProcessor):
         try:
             values = self._sample_fn() if self._sample_fn is not None else {}
         except Exception:
+            self._health["sample_failures"] += 1
             log.debug("counter sample failed", exc_info=True)
             return []
         ts_ns = time.time_ns()
@@ -184,8 +250,11 @@ class CTFSpanProcessor(SpanProcessor):
         """Chrome-trace's document-level metadata slot. The session id belongs here, not stamped onto
         every span: it is what ties the trace to ``overlay.log``, and it is one value per file."""
         from saitenka.session import session_id
+        from saitenka.version import overlay_version
 
-        return msgspec.json.encode({"session": session_id()})
+        return msgspec.json.encode(
+            {"session": session_id(), "overlay_build": overlay_version(), "schema_version": 2}
+        )
 
     def _write_events(self, events: list[dict[str, object]]) -> None:
         """One open + one write for the whole batch. First call (or after the file vanishes) creates the
@@ -195,6 +264,9 @@ class CTFSpanProcessor(SpanProcessor):
         try:
             self._splice(chunk)
         except OSError:
+            self._health["write_failures"] += 1
+            if self._initialized:
+                self._health["history_losses"] += 1
             # The trace file (or its dir) vanished mid-run — a cache cleanup or a session rotation
             # removed it out from under us. Recreate it and re-write THIS batch, instead of retrying the
             # dead ``r+b`` append every tick forever (seen ~579×/run at debug). Only a second, immediate
@@ -203,6 +275,7 @@ class CTFSpanProcessor(SpanProcessor):
             try:
                 self._splice(chunk)
             except OSError:
+                self._health["lost_events"] += len(events)
                 log.debug("CTF write failed", exc_info=True)
 
     def _splice(self, chunk: bytes) -> None:
@@ -230,4 +303,5 @@ class CTFSpanProcessor(SpanProcessor):
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
+        self._ended = self._thread is None or not self._thread.is_alive()
         self._flush([])

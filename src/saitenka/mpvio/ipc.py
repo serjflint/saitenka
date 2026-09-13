@@ -177,7 +177,7 @@ class MpvIPC:
         self._intentional = False  # close() vs a dropped pipe — only the latter reconnects
         self._reconnects_left = _MAX_RECONNECTS
         self._writer = threading.Thread(
-            target=self._write_loop,
+            target=otel_metrics.bind_context(self._write_loop, clear_span=True),
             name="mpv-ipc-writer",
             daemon=True,
         )
@@ -214,7 +214,7 @@ class MpvIPC:
         closed = self._closed
         epoch = self._connection_epoch
         self._reader = threading.Thread(
-            target=self._read_loop,
+            target=otel_metrics.bind_context(self._read_loop, clear_span=True),
             args=(transport, closed, epoch),
             name="mpv-ipc-reader",
             daemon=True,

@@ -8,6 +8,24 @@ from saitenka.app.commands.diagnostics import trace_report
 from saitenka.app.subtitle_report import load_trace
 from saitenka.app.trace_report import latency_summary, startup_json, startup_records
 
+
+def test_summary_uses_full_population_not_fast_retained_tail():
+    events = [
+        {
+            "name": "tooltip_request",
+            "ph": "X",
+            "ts": index,
+            "dur": 1000,
+            "args": {"latency_ms": 250.0 if index < 300 else 1.0},
+        }
+        for index in range(400)
+    ]
+    result = json.loads(startup_json(events))
+    assert result["interaction_latency"]["tooltip_request"]["count"] == 400
+    assert result["interaction_latency"]["tooltip_request"]["p50_ms"] == 250.0
+    assert len(result["startup"]) < 400
+
+
 if TYPE_CHECKING:
     from pathlib import Path
 

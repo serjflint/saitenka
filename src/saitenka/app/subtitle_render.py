@@ -699,6 +699,10 @@ class NativeVisibleRenderer:
         #: Payload shapes already measured against mpv's OSD renderer, so a stall is paid once per
         #: face set per surface rather than once per cue.
         self._calibrated: set[str] = set()
+        self._calibration_attempts: dict[str, int] = {}
+        self._calibration_pending: set[str] = set()
+        self._calibration_generation = 0
+        self._calibration_osd: tuple[int, int] | None = None
         #: One check this track may spend without waiting to be paused. Armed at a track load, where
         #: the session is already stalling, so a session that never pauses still measures once.
         self._calibrate_unpaused = False
@@ -1099,6 +1103,10 @@ class NativeVisibleRenderer:
         if selection == self._selection:
             return
         self._selection = selection
+        self._calibration_generation += 1
+        self._calibrated.clear()
+        self._calibration_attempts.clear()
+        self._calibration_pending.clear()
         # A new track brings a new font set, so the previous track's answers say nothing about it.
         self._calibrate_unpaused = True
         # A source geometry can never accept (an .srt, say) would otherwise leave the episode with
@@ -1332,15 +1340,20 @@ class NativeVisibleRenderer:
         # The payload the cue is drawing, handed in rather than rebuilt. Building it again here
         # was an identical second pass on every draw — and it ran ahead of the guards below, which
         # decline the check on most of them.
-        if not (request.paused or self._calibrate_unpaused) or ipc is None:
+        candidate = self._calibration_candidate(request, payload, ipc)
+        if candidate is None:
             return
-        signature = subtitle_calibration.payload_signature(payload, request.osd)
-        if signature is None:
-            return
-        measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)
-        if measured is None or signature in self._calibrated:
-            return
+        signature, measured = candidate
         families = subtitle_calibration.payload_families(payload)
+        generation = self._calibration_generation
+        self._calibration_attempts[signature] = self._calibration_attempts.get(signature, 0) + 1
+        self._calibration_pending.add(signature)
+        operation = otel_metrics.DeferredSpan(
+            "subtitle_calibration",
+            signature=signature,
+            comparison="union-bounds",
+            endpoint="post-submission",
+        )
 
         # Started before the submit, not inside the callback: what this has to price is mpv's own
         # layout on its core thread, and the queue wait ahead of it is part of what the stall costs.
@@ -1348,6 +1361,26 @@ class NativeVisibleRenderer:
 
         def finished(completion: EffectFinished) -> None:
             elapsed_ms = (time.perf_counter() - submitted_at) * 1000.0
+            if generation != self._calibration_generation:
+                operation.finish(outcome="stale", round_trip_ms=elapsed_ms)
+                return
+            self._calibration_pending.discard(signature)
+            drift = (
+                subtitle_calibration.drift_of(measured, completion.result, border=OVERPRINT_BORDER)
+                if completion.outcome is EffectOutcome.SUCCEEDED
+                and isinstance(completion.result, dict)
+                else None
+            )
+            operation.finish(
+                outcome="inconclusive"
+                if drift is None
+                else "agrees"
+                if drift.agrees
+                else "disagrees",
+                round_trip_ms=elapsed_ms,
+            )
+            if drift is not None:
+                self._calibrated.add(signature)
             if otel_metrics.subtitle_calibration_ms is not None:
                 otel_metrics.subtitle_calibration_ms.record(elapsed_ms)
             self._record_drift(completion, measured, signature, families, elapsed_ms)
@@ -1373,8 +1406,39 @@ class NativeVisibleRenderer:
             timeout_s=10.0,
             on_finished=finished,
         ):
-            self._calibrated.add(signature)
             self._calibrate_unpaused = False  # the track's one free check, spent
+        else:
+            self._calibration_pending.discard(signature)
+            operation.finish(outcome="not-admitted")
+
+    def _calibration_candidate(self, request: DrawRequest, payload: str, ipc):
+        if self._calibration_osd != request.osd:
+            self._calibration_generation += 1
+            self._calibration_pending.clear()
+            self._calibration_osd = request.osd
+        with otel_metrics.traced("subtitle_calibration_considered") as span:
+            if not (request.paused or self._calibrate_unpaused) or ipc is None:
+                span.set("reason", "playing-budget-or-unavailable")
+                return None
+            signature = subtitle_calibration.payload_signature(payload, request.osd)
+            measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)
+            if signature is None or measured is None:
+                span.set("reason", "unmeasurable")
+                return None
+            reason = self._calibration_budget_reason(signature)
+            span.set("reason", reason)
+            return (signature, measured) if reason == "eligible" else None
+
+    def _calibration_budget_reason(self, signature: str) -> str:
+        if signature in self._calibrated:
+            return "already-measured"
+        if signature in self._calibration_pending:
+            return "pending"
+        if self._calibration_attempts.get(signature, 0) >= 2:
+            return "attempts-exhausted"
+        if signature not in self._calibration_attempts and len(self._calibration_attempts) >= 128:
+            return "signature-capacity"
+        return "eligible"
 
     def _record_drift(
         self,

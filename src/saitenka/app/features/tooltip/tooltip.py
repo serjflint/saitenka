@@ -922,7 +922,7 @@ def _paint_from_cache(ports: TipPorts, key, cap: int, anchor) -> bool:
         kind=compose_kind(OverlayId.TIP, navigated=ports.nav_store.current.can_go_back),
     ):
         pixels = loaded.array.copy()
-    tip.view.rect = decorate_and_upload(ports, pixels, 0, full_h, xy, OverlayId.TIP)
+    tip.view.rect = decorate_and_upload(ports, pixels, 0, full_h, xy, OverlayId.TIP, cached_key=key)
     return True
 
 

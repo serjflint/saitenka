@@ -9,6 +9,7 @@ from collections import deque
 from typing import TYPE_CHECKING
 
 from saitenka.app.subtitle_report import load_trace
+from saitenka.trace_analysis import parent_tree_health, tooltip_lifecycles, tooltip_quality
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -36,6 +37,7 @@ _SPAN_NAMES = frozenset(
         "render_ahead",
         "subtitle_geometry_cache",
         "mpv_effect",
+        "surface_write",
     }
 )
 _FIELDS = frozenset(
@@ -77,6 +79,7 @@ _FIELDS = frozenset(
         "layout_backend",
         "job_id",
         "latency_ms",
+        "round_trip_ms",
         "scale",
         "crisp_miss",
         "reason",
@@ -108,22 +111,31 @@ def _safe_number(value: object) -> int | float | None:
     return value if math.isfinite(value) and abs(value) <= _MAX_ABS_NUMBER else None
 
 
+def _safe_field(key: str, field: object) -> object:
+    if not isinstance(field, _SCALAR):
+        return None
+    if isinstance(field, str) and len(field) > _MAX_STRING_CHARS:
+        return None
+    if key in {"latency_ms", "round_trip_ms"}:
+        try:
+            return _safe_number(float(field)) if not isinstance(field, bool) else None
+        except ValueError:
+            return None
+    return field if isinstance(field, (str, bool)) else _safe_number(field)
+
+
 def _safe_args(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
-    result = {}
-    for key in _FIELDS:
-        field = value.get(key)
-        if not isinstance(field, _SCALAR):
-            continue
-        if isinstance(field, str) and len(field) > _MAX_STRING_CHARS:
-            continue
-        if key == "latency_ms" and _safe_number(field) is None:
-            continue
-        if not isinstance(field, (str, bool)) and _safe_number(field) is None:
-            continue
-        result[key] = field
-    return result
+    return {
+        key: field for key in _FIELDS if (field := _safe_field(key, value.get(key))) is not None
+    }
+
+
+def _is_known_span(event: dict, name: str) -> bool:
+    return event.get("ph") == "X" and (
+        name in _SPAN_NAMES or name.startswith(("startup.first_tick.", "startup.reader_setup."))
+    )
 
 
 def _retain_record(
@@ -144,7 +156,9 @@ def _retain_record(
         records.append(record)
 
 
-def _startup_records(events: Sequence[object]) -> tuple[list[dict], int]:
+def _startup_records(
+    events: Sequence[object], *, retain_all: bool = False
+) -> tuple[list[dict], int]:
     records: list[dict] = []
     terminals: deque[dict] = deque(maxlen=_TERMINAL_RECORDS)
     samples: deque[dict] = deque(maxlen=_SAMPLED_INTERACTION_RECORDS)
@@ -165,9 +179,7 @@ def _startup_records(events: Sequence[object]) -> tuple[list[dict], int]:
             or timestamp is None
         ):
             continue
-        if event.get("ph") != "X" or not (
-            name in _SPAN_NAMES or name.startswith(("startup.first_tick.", "startup.reader_setup."))
-        ):
+        if not _is_known_span(event, name):
             continue
         total += 1
         record = {
@@ -176,7 +188,10 @@ def _startup_records(events: Sequence[object]) -> tuple[list[dict], int]:
             "duration_ms": round(float(duration) / 1_000, 3),
             "args": _safe_args(event.get("args", {})),
         }
-        _retain_record(name, record, records, terminals, samples, provenance)
+        if retain_all:
+            records.append(record)
+        else:
+            _retain_record(name, record, records, terminals, samples, provenance)
     provenance_records = [record for retained in provenance.values() for record in retained]
     interaction_count = len(terminals) + len(provenance_records) + len(samples)
     if interaction_count:
@@ -221,10 +236,16 @@ def latency_summary(records: Sequence[dict]) -> dict[str, dict]:
         "render_ahead",
         "subtitle_geometry_cache",
         "mpv_effect",
+        "surface_write",
     ):
         selected = [record for record in records if record["name"] == name]
         values = sorted(
-            float(record["args"].get("latency_ms", record["duration_ms"])) for record in selected
+            float(
+                record["args"].get(
+                    "round_trip_ms", record["args"].get("latency_ms", record["duration_ms"])
+                )
+            )
+            for record in selected
         )
         if not values:
             continue
@@ -257,7 +278,7 @@ def render_startup(source: Path, events: list[dict]) -> str:
     for record in ranked[:12]:
         attrs = " ".join(f"{key}={value}" for key, value in sorted(record["args"].items()))
         lines.append(f"  {record['duration_ms']:9.3f} ms  {record['name']} {attrs}".rstrip())
-    phases = latency_summary(records)
+    phases = latency_summary(_startup_records(events, retain_all=True)[0])
     if phases:
         lines.append("interaction latency:")
         for name, values in phases.items():
@@ -311,7 +332,15 @@ def startup_json(events: Sequence[object]) -> str:
     return json.dumps(
         {
             "startup": records,
-            "interaction_latency": latency_summary(records),
+            "interaction_latency": latency_summary(_startup_records(events, retain_all=True)[0]),
+            "summary_population": "all qualifying exported spans",
+            "tooltip_lifecycles": tooltip_lifecycles(events),
+            "tooltip_quality": tooltip_quality(
+                [event for event in events if isinstance(event, dict)]
+            ),
+            "parent_tree": parent_tree_health(
+                [event for event in events if isinstance(event, dict)]
+            ),
             "total": total,
             "dropped": total - len(records),
         },

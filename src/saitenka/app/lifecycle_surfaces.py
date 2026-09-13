@@ -224,13 +224,15 @@ class LifecycleSurfaces:
                 )
                 span.set("command", str(command[0]))
                 span.set("slot", str(transaction.slot))
+                span.set("surface_revision", transaction.revision)
+                span.set("effect_id", completion.effect_id.value)
                 span.set("outcome", completion.outcome.value)
                 # The payload's size in the unit mpv pays per: an ASS write is parsed event by
                 # event, so bytes alone would say nothing about a cue with four underlines.
                 span.set("events", _payload_events(command))
             settle(completion)
 
-        finished = timed
+        finished = otel_metrics.bind_context(timed)
 
         submit = self._overlay.runtime_submit
         if submit is None:

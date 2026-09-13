@@ -58,6 +58,7 @@ def send_correlated(ipc, identity: str, *command: object, owner: Owner = Owner.S
         timeout_s=10.0,
         on_finished=finished,
     ):
+        span.finish(outcome="not-admitted")
         if otel_metrics.mpv_effect_outcome is not None:
             otel_metrics.mpv_effect_outcome.add(
                 1, {"identity": identity, "outcome": "not-admitted"}

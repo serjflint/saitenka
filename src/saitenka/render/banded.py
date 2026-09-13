@@ -1017,6 +1017,7 @@ class WindowedPanel:
         """
         dev_w, dev_vh, _dev_scroll = v.dims(self.width)
         with self._lock:
+            self._missed_last_assemble = not self.native_viewport_warm(v.scroll, v.view_h, v.scale)
             plan = [
                 ((i, span[0], v.skey), band_top)
                 for i, span, cb, band_top in self._scaled_placements(v, warm_only=True)

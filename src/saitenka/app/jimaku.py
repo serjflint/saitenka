@@ -287,6 +287,8 @@ class JimakuClient:
         return JimakuError(f"jimaku {e.code} for {path}: {e.reason}{detail}{hint}")
 
     def _get(self, path: str, **params):
+        from saitenka import otel_metrics
+
         url = f"{self.base}{path}"
         q = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
         if q:
@@ -299,7 +301,7 @@ class JimakuClient:
         for attempt in stamina.retry_context(
             on=_JimakuRetryable, attempts=4, wait_initial=1.0, wait_max=8.0
         ):
-            with attempt:
+            with attempt, otel_metrics.traced("jimaku_attempt"):
                 try:
                     with urllib.request.urlopen(  # noqa: S310  # jimaku.moe HTTPS API - fixed scheme
                         req, timeout=20, context=_ssl_context()

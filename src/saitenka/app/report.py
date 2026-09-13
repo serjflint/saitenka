@@ -246,9 +246,21 @@ def _collect_crashes() -> dict[str, str]:
     members: dict[str, str] = {}
     cd = crash_dir()
     if cd.exists():
-        for pattern in ("crash-*.log", "shutdown-hang-*.log"):
+        for pattern in ("crash-*.log", "shutdown-hang-*.log", "faulthandler.log"):
             for c in sorted(cd.glob(pattern))[-5:]:
-                members[f"crashes/{c.name}"] = c.read_text(encoding="utf-8", errors="replace")
+                with c.open("rb") as stream:
+                    size = c.stat().st_size
+                    stream.seek(max(0, size - 1024 * 1024))
+                    text = stream.read(1024 * 1024).decode("utf-8", errors="replace")
+                members[f"crashes/{c.name}"] = redact(text)
+                members[f"crashes/{c.name}.metadata.json"] = json.dumps(
+                    {
+                        "session": "unknown",
+                        "scope": "historical",
+                        "source_bytes": size,
+                        "truncated": size > 1024 * 1024,
+                    }
+                )
     return members
 
 
@@ -286,22 +298,101 @@ def _collect_player_crashes() -> dict[str, str]:
     }
 
 
-def _collect_telemetry() -> dict[str, str]:
+def _trace_session(doc: dict) -> str | None:
+    value = doc.get("otherData", {}).get("session")
+    return value if isinstance(value, str) and value else None
+
+
+def _collect_telemetry(session: str | None = None) -> dict[str, str]:
     """The CTF trace file the LIVE overlay session wrote to disk, if telemetry was enabled for it —
     `report` runs in its own short-lived process, so it can only see what made it to disk, not the
     in-memory metrics snapshot of a session that has already exited (metrics stay pull-based /
     process-local by design, see otel_metrics.snapshot)."""
     from saitenka.app.config import load_config, resolve_telemetry
-    from saitenka.app.telemetry import export_dir, latest_trace
+    from saitenka.app.telemetry import export_dir
 
-    trace_path = latest_trace(
-        export_dir(resolve_telemetry(load_config()))
-    )  # newest per-session trace
-    if trace_path is None or not trace_path.exists():
-        return {}
-    return {  # stable member name inside the zip, regardless of the on-disk timestamped filename
-        "telemetry/trace.json": redact(trace_path.read_text(encoding="utf-8", errors="replace"))
-    }
+    directory = export_dir(resolve_telemetry(load_config()))
+    candidates = sorted(
+        p for p in directory.glob("trace-*.json") if not p.name.endswith(".health.json")
+    )
+    accounting: dict[str, object] = {"session": session, "status": "unavailable", "candidates": []}
+    attempts: list[dict[str, object]] = []
+    members: dict[str, str] = {}
+    health_session = session
+    selected_source: Path | None = None
+    for path in reversed(candidates[-10:]):
+        entry: dict[str, object] = {"source": path.name}
+        attempts.append(entry)
+        try:
+            with path.open("rb") as stream:
+                raw = stream.read(64 * 1024 * 1024 + 1)
+            if len(raw) > 64 * 1024 * 1024:
+                entry["status"] = "too-large"
+                continue
+            doc = json.loads(raw)
+            recorded = _trace_session(doc)
+            entry["session"] = recorded
+            if session is not None and recorded != session:
+                entry["status"] = "session-mismatch"
+                continue
+            if not isinstance(doc.get("traceEvents"), list):
+                entry["status"] = "invalid"
+                continue
+            entry["status"] = "collected"
+            members["telemetry/trace.json"] = redact(raw.decode("utf-8"))
+            health_session = recorded
+            selected_source = path
+            accounting["status"] = "collected" if recorded else "unknown-provenance"
+            break
+        except (OSError, ValueError, AttributeError, UnicodeError):
+            entry["status"] = "unreadable-or-concurrent-write"
+    accounting["candidates"] = attempts
+    members.update(_collect_trace_health(directory, health_session, source=selected_source))
+    members["telemetry/collection.json"] = json.dumps(accounting)
+    return members
+
+
+def _diagnostic_json(path: Path) -> tuple[str, dict]:
+    with path.open("rb") as stream:
+        raw = stream.read(128 * 1024 + 1)
+    if len(raw) > 128 * 1024:
+        raise ValueError("diagnostic exceeds size limit")
+    doc = json.loads(raw)
+    if not isinstance(doc, dict):
+        raise TypeError("diagnostic must be an object")
+    return raw.decode("utf-8"), doc
+
+
+def _collect_trace_health(
+    directory: Path, session: str | None, *, source: Path | None = None
+) -> dict[str, str]:
+    attempts = []
+    members: dict[str, str] = {}
+    candidates = (
+        [source.with_suffix(".health.json")]
+        if source
+        else sorted(directory.glob("trace-*.health.json"), reverse=True)[:10]
+    )
+    for path in candidates:
+        try:
+            raw, health = _diagnostic_json(path)
+            if session is not None and health.get("session") != session:
+                attempts.append({"source": path.name, "status": "session-mismatch"})
+                continue
+            members["telemetry/health.json"] = redact(raw)
+            attempts.append({"source": path.name, "status": "collected"})
+            break
+        except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
+            attempts.append({"source": path.name, "status": "unreadable"})
+    members["telemetry/health-collection.json"] = json.dumps(
+        {
+            "sources": attempts,
+            "session": session,
+            "trace_source": source.name if source else None,
+            "scope": "selected-trace" if source else "standalone-health",
+        }
+    )
+    return members
 
 
 def _latest_session(log_text: str) -> str | None:
@@ -315,6 +406,76 @@ def _latest_session(log_text: str) -> str | None:
         if sid:
             return str(sid)
     return None
+
+
+def _collect_operation_summary(session: str | None) -> dict[str, str]:
+    from saitenka.app.paths import cache_dir
+
+    if session is None or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
+        return {}
+    summary = cache_dir() / "diagnostics" / f"session-{session}.json"
+    if not summary.is_file():
+        return {}
+    try:
+        raw, doc = _diagnostic_json(summary)
+        if doc.get("session") != session:
+            return {"diagnostics/collection.json": json.dumps({"status": "session-mismatch"})}
+        return {"diagnostics/session.json": redact(raw)}
+    except (OSError, ValueError, TypeError, AttributeError, UnicodeError):
+        return {"diagnostics/collection.json": json.dumps({"status": "summary-unavailable"})}
+
+
+def _read_log_snapshot(path: Path) -> tuple[str, dict]:
+    info: dict[str, object] = {"source": path.name, "status": "unavailable"}
+    try:
+        before = path.stat()
+        with path.open("rb") as stream:
+            stream.seek(max(0, before.st_size - 4 * 1024 * 1024))
+            raw = stream.read(4 * 1024 * 1024)
+        after = path.stat()
+        changed = (before.st_ino, before.st_size, before.st_mtime_ns) != (
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+        )
+        info.update(
+            status="changed-during-capture" if changed else "collected",
+            source_bytes=before.st_size,
+            captured_bytes=len(raw),
+            truncated=before.st_size > len(raw),
+            captured_ns=time.time_ns(),
+            session_scope="mixed-or-unknown",
+            interval_completeness="unknown",
+        )
+        return raw.decode("utf-8", errors="replace"), info
+    except OSError:
+        return "", info
+
+
+def _collect_logs(log_path: Path, *, include: bool) -> tuple[str | None, dict[str, str]]:
+    text, current = _read_log_snapshot(log_path)
+    session = _latest_session(text)
+    if not include:
+        return session, {"logs/collection.json": json.dumps({"status": "opted-out"})}
+    sources = [current]
+    members = {"overlay.log": redact(text)} if text else {}
+    segments = sorted(log_path.parent.glob("overlay.log.*"))
+    for segment in segments[-5:]:
+        text, info = _read_log_snapshot(segment)
+        if text and session and any(_latest_session(line) == session for line in text.splitlines()):
+            members[f"logs/{segment.name}"] = redact(text)
+        elif text:
+            info["status"] = "no-matching-session"
+        sources.append(info)
+    members["logs/collection.json"] = json.dumps(
+        {
+            "session": session,
+            "sources": sources,
+            "segments_omitted": max(0, len(segments) - 5),
+            "scope": "best-effort rotating snapshots; complete session intervals not established",
+        }
+    )
+    return session, members
 
 
 def collect(*, include_log: bool = True) -> dict[str, str]:
@@ -332,21 +493,23 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     members.update(_collect_scripts())
 
     # The rotating overlay log — redacted; opt-out via --no-log (may contain filenames/sentences).
-    session: str | None = None
-    if include_log and log_path.exists():
-        members["overlay.log"] = redact(log_path.read_text(encoding="utf-8", errors="replace"))
-        session = _latest_session(members["overlay.log"])
+    session, logs = _collect_logs(log_path, include=include_log)
+    members.update(logs)
 
     # mpv's own log (run launches mpv with --log-file) — the codec / sub-load / track-select side that
     # the overlay log can't see. Redacted + gated like the overlay log (it holds the video path).
     mpv_log = cache_dir() / "mpv.log"
     if include_log and mpv_log.exists():
-        members["mpv.log"] = redact(mpv_log.read_text(encoding="utf-8", errors="replace"))
+        text, info = _read_log_snapshot(mpv_log)
+        if text is not None:
+            members["mpv.log"] = redact(text)
+        members["logs/mpv.collection.json"] = json.dumps(info)
 
     members.update(_collect_dict_inventory())
     members.update(_collect_crashes())
     members.update(_collect_player_crashes())
-    members.update(_collect_telemetry())
+    members.update(_collect_telemetry(session))
+    members.update(_collect_operation_summary(session))
 
     members["MANIFEST.txt"] = _manifest(members, include_log=include_log, session=session)
     return members

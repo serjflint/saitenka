@@ -212,6 +212,10 @@ class _FakeTracer:
 
 
 class _FakeTraceModule:
+    @staticmethod
+    def get_current_span():
+        return None
+
     def __init__(self):
         self.tracer = _FakeTracer()
 

@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import copy_context
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -235,10 +236,8 @@ mask_atlas_misses: Counter | None = None  # atlas active but glyph absent → ra
 mask_atlas_writebacks: Counter | None = (
     None  # rasterised glyph persisted to the atlas for next session
 )
-# Idle crisp post-render (hi-dpi): swaps = a native re-render replaced the soft upscale; stale = it
-# finished after the user switched word / scrolled, so it was discarded (idle work that didn't pay off).
+# Crisp composition census; per-view submission/acknowledgment lives in tooltip quality events.
 crisp_swaps: Counter | None = None
-crisp_stale: Counter | None = None
 subtitle_geometry_failures: Counter | None = None
 subtitle_geometry_decisions: Counter | None = None
 subtitle_geometry_owner_transitions: Counter | None = None
@@ -356,6 +355,7 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
     if trace is None:
         yield _NOOP_SPAN
         return
+    inherited = _causal_attributes(trace)
     with trace.get_tracer("saitenka.overlay").start_as_current_span(name) as span:
         # otel_export._span_to_ctf_event reads this back for the CTF event's "tid" — without it,
         # every independently-started span (no parent) gets a random trace_id, and using THAT for
@@ -364,7 +364,7 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
         span.set_attribute("thread.id", threading.get_native_id())
         # No `session` here: it is one value for the whole run, so the exporter writes it once into
         # the document's `otherData`. Stamped per span it was 5.5% of a real trace file.
-        for k, v in attributes.items():
+        for k, v in {**inherited, **attributes}.items():
             span.set_attribute(k, v)
         # Per-thread CPU time across the span. wall (the span's dur) ≫ cpu_ms ⇒ the thread was
         # descheduled inside the span — GIL contention, a lock, or I/O wait — not doing work. This is
@@ -417,6 +417,39 @@ class _GeometryTelemetry:
 geometry_telemetry = _GeometryTelemetry()
 
 
+def _causal_attributes(trace) -> dict:
+    attributes = getattr(trace.get_current_span(), "attributes", None) or {}
+    return {
+        key: attributes[key]
+        for key in (
+            "cue",
+            "cue_revision",
+            "connection_epoch",
+            "view_id",
+            "viewport_revision",
+            "job_id",
+        )
+        if key in attributes
+    }
+
+
+def bind_context(callback, *, clear_span: bool = False):
+    """Capture submission context; each invocation enters its own copy, including on FT workers."""
+    captured = copy_context()
+
+    def invoke(*args, **kwargs):
+        def run():
+            trace = _resolve_trace_module() if clear_span else None
+            if trace is not None:
+                with trace.use_span(trace.INVALID_SPAN):
+                    return callback(*args, **kwargs)
+            return callback(*args, **kwargs)
+
+        return captured.copy().run(run)
+
+    return invoke
+
+
 class DeferredSpan:
     """A span whose end arrives on someone else's thread, later.
 
@@ -430,26 +463,49 @@ class DeferredSpan:
     submitting thread does next, and it outlives that scope anyway.
     """
 
-    __slots__ = ("_span",)
+    __slots__ = ("_finished", "_lock", "_operation", "_span")
 
     def __init__(self, name: str, **attributes: str) -> None:
+        from saitenka.operation_summary import operations
+
+        self._operation = operations.start(name)
+        self._finished = False
+        self._lock = threading.Lock()
         trace = _resolve_trace_module()
         if trace is None:
             self._span: Any | None = None
             return
         span = trace.get_tracer("saitenka.overlay").start_span(name)
         span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
-        for k, v in attributes.items():
+        span.set_attribute("timing", "operation-lifetime")
+        for k, v in {**_causal_attributes(trace), **attributes}.items():
             span.set_attribute(k, v)
         self._span = span
 
     def finish(self, **attributes: object) -> None:
-        if self._span is None:
+        from saitenka.operation_summary import operations
+
+        with self._lock:
+            if self._finished:
+                return
+            self._finished = True
+            span, self._span = self._span, None
+        operations.finish(self._operation, str(attributes.get("outcome", "unknown")))
+        if span is None:
             return
         for k, v in attributes.items():
-            self._span.set_attribute(k, v)
-        self._span.end()
-        self._span = None
+            span.set_attribute(k, v)
+        span.end()
+
+    @contextmanager
+    def activate(self):
+        """Make explicitly scoped work a child; never carry ambient scope between callbacks."""
+        trace = _resolve_trace_module()
+        if trace is None or self._span is None:
+            yield
+            return
+        with trace.use_span(self._span):
+            yield
 
 
 @contextmanager
@@ -532,7 +588,7 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
-    global crisp_swaps, crisp_stale, subtitle_geometry_failures
+    global crisp_swaps, subtitle_geometry_failures
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
@@ -734,11 +790,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.mask_atlas.writebacks", description="rasterised glyphs persisted to the atlas"
         )
         crisp_swaps = meter.create_counter(
-            "saitenka.crisp.swaps", description="native re-renders swapped in over the soft upscale"
-        )
-        crisp_stale = meter.create_counter(
-            "saitenka.crisp.stale",
-            description="native re-renders discarded (word switched/scrolled)",
+            "saitenka.crisp.compositions",
+            description="native viewport compositions, not quality transitions",
         )
         subtitle_geometry_failures = meter.create_counter(
             "saitenka.subtitle_geometry.failures",
@@ -883,7 +936,7 @@ def unregister() -> None:
     global osd_paused_draw, osd_paused_nudge, scroll_frame_jank
     global render_cache_hits, render_cache_misses, render_cache_writebacks, render_cache_evictions
     global mask_atlas_hits, mask_atlas_misses, mask_atlas_writebacks
-    global crisp_swaps, crisp_stale, subtitle_geometry_failures
+    global crisp_swaps, subtitle_geometry_failures
     global subtitle_geometry_decisions, subtitle_geometry_owner_transitions
     global subtitle_geometry_recoveries
     global subtitle_pixel_catastrophic_fallbacks, subtitle_pixel_retry_exhausted
@@ -954,7 +1007,6 @@ def unregister() -> None:
         mask_atlas_misses = None
         mask_atlas_writebacks = None
         crisp_swaps = None
-        crisp_stale = None
         subtitle_geometry_failures = None
         subtitle_geometry_decisions = None
         subtitle_geometry_owner_transitions = None

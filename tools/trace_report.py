@@ -1,14 +1,10 @@
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-# ///
 """Turn a `saitenka report` bundle into a readable performance/diagnostics report.
 
 `saitenka report` zips a Chrome-trace `telemetry/trace.json` (X = complete spans, C = counter
 samples) plus the JSONL `overlay.log`. This distills them into: a span table with self-time
-(inferred by time-containment per thread — the tracer emits no parent id), the final value of every
+(explicit parent edges, with time-containment fallback for legacy traces), the final value of every
 pull-based counter grouped by subsystem, derived health signals (crisp vs soft ratio, cache hit
-rates, scroll jank, cold vs warm shows), and the notable events from the log. stdlib-only; run it on
+rates, scroll jank, cold vs warm shows), and the notable events from the log. Run from this checkout on
 a `.zip` or an already-unzipped directory:
 
     uv run tools/trace_report.py ~/.local/share/saitenka/reports/saitenka-report-*.zip
@@ -23,6 +19,8 @@ import zipfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from saitenka.trace_analysis import parent_tree_health, tooltip_quality
 
 
 def _pct(sorted_vals: list[float], q: float) -> float:
@@ -123,6 +121,12 @@ def _self_times(spans: list[dict]) -> dict[str, float]:
                 cs = child["ts"]
                 if cs >= end:
                     break
+                args = sp.get("args", {})
+                if (
+                    args.get("span_id")
+                    and child.get("args", {}).get("parent_id") != args["span_id"]
+                ):
+                    continue
                 ce = min(child["ts"] + child.get("dur", 0.0), end)
                 if cs >= cursor:  # a direct child (not already inside a counted one)
                     covered += ce - cs
@@ -151,7 +155,16 @@ def attr_breakdowns(events: list[dict]) -> dict[str, Counter]:
         if e.get("ph") != "X":
             continue
         for k, v in e.get("args", {}).items():
-            if k in {"span_id", "trace_id", "cpu_ms"}:
+            if k in {
+                "span_id",
+                "parent_id",
+                "trace_id",
+                "cpu_ms",
+                "events",
+                "links",
+                "cue",
+                "job_id",
+            }:
                 continue
             out[f"{e['name']}.{k}"][str(v)] += 1
     return out
@@ -222,15 +235,13 @@ def print_report(
     )
 
     print("## diagnostics")
-    swaps = counters.get("crisp.swaps", 0.0)
-    soft = next(
-        (sum(1 for e in events if e.get("ph") == "X" and e["name"] == "tip_compose") for _ in [0]),
-        0,
-    )
-    print(f"  crisp swaps (native composites)      {int(swaps)}")
+    for kind, counts in tooltip_quality(events).items():
+        print(f"  tooltip compositions {kind}: {counts} (not presentation/transition counts)")
+    tree = parent_tree_health(events)
     print(
-        f"  soft tip_compose (upscaled blits)    {soft}"
-        f"   → {'mostly crisp' if swaps > soft else 'MOSTLY SOFT — check keyless/navigated views'}"
+        f"  parent tree: duplicate IDs={tree['duplicate_ids']}, "
+        f"unresolved={len(tree['unresolved_parents'])}, cycles={len(tree['cycles'])}, "
+        f"suspected startup-context leaks={len(tree['suspected_startup_context_leaks'])}"
     )
     breaks = attr_breakdowns(events)
     reasons = breaks.get("tip_compose.soft_reason")
@@ -314,6 +325,9 @@ def print_report(
         print()
 
     print("## spans by total time (ms)")
+    print(
+        "  self = same-thread child-subtracted wall estimate, not CPU or blocking time; legacy IDs use containment"
+    )
     print(
         f"  {'name':<22}{'n':>5}{'total':>9}{'self':>9}{'cpu':>8}{'p50':>8}{'p95':>8}{'p99':>8}{'max':>8}"
     )

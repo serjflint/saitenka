@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -219,27 +220,39 @@ class Anki:
         self, action: str, *, timeout: float = 20, attempts: int = 2, trace: bool = False, **params
     ):
         """Compatibility seam over the extracted AnkiConnect client."""
+        from saitenka import otel_metrics
+
+        operation = otel_metrics.DeferredSpan("anki_request", action=action, attempts=str(attempts))
+        outcome = "failed"
         try:
-            if not trace:
-                return self._client.call(action, timeout=timeout, attempts=attempts, **params)
-            from saitenka import otel_metrics
 
             class _PhaseObserver:
                 @staticmethod
                 def phase(name: str, action: str):
-                    return otel_metrics.traced(f"anki_{name}", action=action)
+                    return (
+                        otel_metrics.traced(f"anki_{name}", action=action)
+                        if trace or name == "attempt"
+                        else nullcontext()
+                    )
 
-            return self._client.call(
-                action,
-                timeout=timeout,
-                attempts=attempts,
-                phase_observer=_PhaseObserver(),
-                **params,
-            )
+            with operation.activate():
+                result = self._client.call(
+                    action,
+                    timeout=timeout,
+                    attempts=attempts,
+                    phase_observer=_PhaseObserver(),
+                    **params,
+                )
+            outcome = "succeeded"
+            return result
         except AnkiConnectUnavailable as exc:
+            outcome = "unavailable"
             raise _AnkiRetryable(str(exc)) from exc
         except AnkiConnectError as exc:
+            outcome = type(exc).__name__
             raise AnkiError(str(exc)) from exc
+        finally:
+            operation.finish(outcome=outcome)
 
     def store_media(self, filename: str, path: str | Path) -> str:
         return self._call("storeMediaFile", filename=filename, path=str(Path(path).resolve()))
