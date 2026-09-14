@@ -12,6 +12,9 @@ from saitenka.operation_summary import OperationSummary
 
 
 def _environment(monkeypatch, tmp_path):
+    from saitenka.app import render_evidence
+
+    monkeypatch.setattr(render_evidence, "registry", render_evidence.EvidenceRegistry())
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     config = tmp_path / "overlay.toml"
     monkeypatch.setenv("SAITENKA_CONFIG", str(config))

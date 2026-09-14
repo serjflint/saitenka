@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Reports retain native geometry request configurations and distinguish current from historical
+  publication. Render/prefetch/publication spans identify the consumed configuration revision;
+  uncaptured player settings and pixel fidelity remain explicitly unknown.
 - Reports default to allowlisted metadata with separate producer/collector build identities and
   explicit unknown runtime/pixel evidence. Sensitive detail requires `report --diagnostic-detail`;
   report publication no longer overwrites an existing timestamped bundle.

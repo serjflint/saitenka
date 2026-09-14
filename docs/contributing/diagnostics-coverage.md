@@ -12,8 +12,22 @@ It separates the collector build from the producer recorded in the latest log se
 Missing, malformed, mismatched-session and unsupported-schema summaries cannot establish healthy
 operation counts. Matching identity fields do not prove identical loaded code: editable source can
 change while a process is running. The config subset is attributed to the collector's file, not the
-player's effective configuration. Runtime configuration, loaded native libraries and pixel fidelity
-remain unknown in this envelope.
+player's effective configuration.
+
+Native geometry contributes a separate producer-side configuration history: frame/storage dimensions,
+aspect, margins, renderer parameters, feature flags and text-free font-setup metadata. Foreground and
+prefetch render spans identify their owner and configuration revision; accepted publication has its
+own span, including cache-served geometry. These are the request values consumed by the geometry
+boundary, not backend readback or independently observed mpv values. Loaded native libraries, resolved
+font faces, font-content identity, CLI/profile origins and other player settings remain unknown.
+
+The history retains four configurations per owner and four owners, with eviction counts. A revision
+identifies changes in the recorded subset or configured font paths, not every possible renderer input.
+`requested` and `published` describe the current generation; `last_published` is historical and can
+survive invalidation/close. Evicted references are marked rather than silently joined to newer values.
+Retained spans may reference owners or revisions no longer present in the bounded report.
+No publication record certifies displayed pixels. Collection adds no IPC queries, pixel probes or
+font hashing; the existing background summary writer persists the bounded snapshot.
 
 For the trace-based tools below, collect with `saitenka report --diagnostic-detail`.
 That opt-in includes redacted raw configuration, logs, traces and crash reports, which can still contain

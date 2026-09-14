@@ -276,17 +276,20 @@ def save_operation_summary(*, end: str = "unknown") -> None:
 def _save_operation_summary(*, end: str) -> None:
     import json
 
+    from saitenka.app.render_evidence import registry
     from saitenka.app.report_schema import SCHEMA_VERSION, build_identity
     from saitenka.operation_summary import operations
     from saitenka.session import session_id
 
     payload = operations.snapshot()
+    runtime_configuration = registry.snapshot()
     directory = cache_dir() / "diagnostics"
     path = directory / f"session-{session_id()}.json"
     # Empty one-shot CLI invocations must not evict playback summaries.
     if (
         not payload["outcomes"]
         and not payload["pending"]
+        and not runtime_configuration["owners"]
         and end == "shutdown-observed"
         and not path.exists()
     ):
@@ -300,6 +303,7 @@ def _save_operation_summary(*, end: str) -> None:
         tracing=is_enabled(),
         captured_ns=time.time_ns(),
         end=end,
+        runtime_configuration=runtime_configuration,
     )
     try:
         directory.mkdir(parents=True, exist_ok=True)

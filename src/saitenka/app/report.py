@@ -538,9 +538,13 @@ def _collect_metadata() -> dict[str, str]:
         pass
     text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
     session = _latest_session(text)
-    producer, health = _metadata_producer(session)
+    producer, health, runtime = _metadata_producer(session)
     payload = envelope(
-        collector=build_identity(), producer=producer, configuration=configuration, health=health
+        collector=build_identity(),
+        producer=producer,
+        configuration=configuration,
+        health=health,
+        runtime=runtime,
     )
     return {
         "diagnostics/envelope.json": json.dumps(payload, ensure_ascii=False, indent=2),
@@ -553,12 +557,14 @@ def _collect_metadata() -> dict[str, str]:
     }
 
 
-def _metadata_producer(session: str | None) -> tuple[dict, dict]:
+def _metadata_producer(session: str | None) -> tuple[dict, dict, dict]:
     from saitenka.app.paths import cache_dir
+    from saitenka.app.render_evidence import safe_runtime_configuration
     from saitenka.app.report_schema import SCHEMA_VERSION, count, operation_health, safe_identity
 
     producer: dict = {"status": "unavailable"}
     health: dict = {"status": "unavailable"}
+    runtime: dict = {"status": "unknown"}
     if session is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
         path = cache_dir() / "diagnostics" / f"session-{session}.json"
         try:
@@ -579,9 +585,10 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict]:
                     else "unknown",
                 }
                 health = operation_health(raw)
+                runtime = safe_runtime_configuration(raw.get("runtime_configuration"))
         except (OSError, ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
             producer = {"status": "unreadable-or-too-large"}
-    return producer, health
+    return producer, health, runtime
 
 
 def _manifest(members: dict[str, str], *, include_log: bool, session: str | None = None) -> str:

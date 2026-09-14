@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
+from saitenka.app.render_evidence import GeometryEvidence
 from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
@@ -82,6 +83,7 @@ class CurrentSubtitleRenderer(Protocol):
 class GeometryTicket:
     sequence: int
     request: GeometryRequest
+    configuration_revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +131,7 @@ class SubtitleModeCoordinator:
         self._current: GeometrySnapshot | None = None
         self._last_error: str | None = None
         self._closed = False
+        self._evidence = GeometryEvidence()
 
     @property
     def renderer(self) -> CurrentSubtitleRenderer:
@@ -253,6 +256,7 @@ class SubtitleModeCoordinator:
             self._generation += 1
             self._current = None
             self._last_error = None
+            self._evidence.invalidate(self._generation)
             return self._generation
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot | None:
@@ -267,6 +271,10 @@ class SubtitleModeCoordinator:
     def resolve_outcome(self, ticket: GeometryTicket) -> GeometryResolution:
         request = ticket.request
         with otel_metrics.traced("subtitle_geometry_render") as span:
+            span.set("configuration_owner", self._evidence.owner)
+            span.set("configuration_revision", ticket.configuration_revision)
+            span.set("generation", request.generation)
+            span.set("request_sequence", ticket.sequence)
             span.set("active_events", len(request.frame_id.active_event_ids))
             span.set("requested_tokens", len(request.palette))
             span.set("frame_width", request.frame_size[0])
@@ -315,7 +323,9 @@ class SubtitleModeCoordinator:
                 or request.generation != reservation.generation
             ):
                 return None
-            return GeometryTicket(reservation.sequence, request)
+            revision = self._evidence.describe(request)
+            self._evidence.requested(revision, request.generation, reservation.sequence)
+            return GeometryTicket(reservation.sequence, request, revision)
 
     def publish(self, ticket: GeometryTicket, result: GeometrySnapshot) -> bool:
         request = ticket.request
@@ -336,7 +346,16 @@ class SubtitleModeCoordinator:
                 return False
             self._current = result
             self._last_error = None
-            return True
+            self._evidence.published(
+                ticket.configuration_revision, request.generation, ticket.sequence
+            )
+        with otel_metrics.traced("subtitle_geometry_publish") as span:
+            span.set("configuration_owner", self._evidence.owner)
+            span.set("configuration_revision", ticket.configuration_revision)
+            span.set("generation", request.generation)
+            span.set("request_sequence", ticket.sequence)
+            span.set("outcome", "published")
+        return True
 
     def record_error(self, reservation: GeometryReservation, error: Exception) -> bool:
         with self._state_lock:
@@ -348,6 +367,7 @@ class SubtitleModeCoordinator:
                 return False
             self._last_error = str(error)
             self._current = None
+            self._evidence.clear_published()
             return True
 
     def render_prefetch(self, request: GeometryRequest) -> GeometrySnapshot | None:
@@ -361,12 +381,21 @@ class SubtitleModeCoordinator:
                 # it was queued behind is the point. `publish` still holds the fence.
                 if self._closed:
                     return GeometryPrefetchResolution(None)
+                revision = self._evidence.describe(request)
             if self._backend is None:
                 return GeometryPrefetchResolution(None)
-            try:
-                return GeometryPrefetchResolution(self._backend.render(request))
-            except Exception as error:  # noqa: BLE001 -- caller decides whether work has a waiter
-                return GeometryPrefetchResolution(None, error)
+            with otel_metrics.traced("subtitle_geometry_prefetch_render") as span:
+                span.set("configuration_owner", self._evidence.owner)
+                span.set("configuration_revision", revision)
+                span.set("generation", request.generation)
+                try:
+                    result = self._backend.render(request)
+                except Exception as error:  # noqa: BLE001 -- caller decides whether work has a waiter
+                    span.set("outcome", "failed")
+                    span.set("error_code", geometry_error_code(error))
+                    return GeometryPrefetchResolution(None, error)
+                span.set("outcome", "ready")
+                return GeometryPrefetchResolution(result)
 
     def close(self) -> None:
         with self._state_lock:
@@ -375,6 +404,7 @@ class SubtitleModeCoordinator:
             self._closed = True
             self._generation += 1
             self._current = None
+            self._evidence.invalidate(self._generation, closed=True)
         # The renderer is a close participant alongside the geometry backend: quarantining geometry
         # while the raster surface stays live leaves a late annotation able to publish pixels.
         self._renderer.close()
