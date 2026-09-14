@@ -155,6 +155,7 @@ def envelope(
     configuration: dict,
     health: dict,
     runtime: dict | None = None,
+    player: dict | None = None,
 ) -> dict:
     collector = safe_identity(collector)
     identity = producer.get("identity", {})
@@ -181,5 +182,6 @@ def envelope(
         if runtime is not None
         else {"status": "unknown"},
         "pixel_fidelity": {"status": "unknown", "scope": "not-validated"},
+        "player_configuration": player if player is not None else {"status": "unknown"},
         "omitted": ["raw-config", "logs", "traces", "crashes", "paths", "text", "pixels"],
     }

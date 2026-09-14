@@ -9,6 +9,8 @@ logs.
 
 ### Added
 
+- Reports retain privacy-bounded player options consumed by native geometry decisions, including
+  rejected configurations, with trace references and explicit unavailable/invalid values.
 - Reports retain native geometry request configurations and distinguish current from historical
   publication. Render/prefetch/publication spans identify the consumed configuration revision;
   uncaptured player settings and pixel fidelity remain explicitly unknown.
