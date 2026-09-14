@@ -1,0 +1,66 @@
+name: Character corpus
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: character-corpus-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [ass, srt]
+        size: ['1280 720', '3440 1440']
+    env:
+      UV_PYTHON: '3.13'
+      SAITENKA_CONFIG: /dev/null
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: true
+      - name: Install display and video tools
+        run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg
+      - name: Install pinned native-geometry mpv
+        run: |
+          curl -fsSL -o mpv.AppImage https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.40.0-30-g5ba7ee513/mpv-v0.40.0-30-g5ba7ee513-anylinux-x86_64.AppImage
+          echo 'e7691d61e961507a282cbce56560168b99773647ab05189931abf24e71c4820e  mpv.AppImage' | sha256sum -c -
+          chmod +x mpv.AppImage
+          ./mpv.AppImage --appimage-extract >/dev/null
+          sudo ln -s "$PWD/squashfs-root/AppRun" /usr/local/bin/mpv
+      - name: Install runtime
+        run: |
+          uv sync --locked --extra full
+          uv pip install --no-deps --only-binary libasslite-bundle --no-sources-package libasslite-bundle libasslite-bundle==0.1.3
+      - name: Generate original public corpora
+        run: uv run --no-sync tools/synthetic_characters.py --output character-input
+      - name: Qualify every character and negative control
+        env:
+          FORMAT: ${{ matrix.format }}
+          SIZE: ${{ matrix.size }}
+        run: |
+          xvfb-run -a -s '-screen 0 4000x2000x24' \
+            uv run --no-sync tools/compare_cached_characters.py \
+            --cached-subtitles "character-input/original.$FORMAT" \
+            --synthetic --output character-evidence --size $SIZE --execute
+      - name: Upload public census, environment and failure witnesses
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: character-${{ matrix.format }}-${{ matrix.size }}
+          path: |
+            character-input/
+            character-evidence/
+          if-no-files-found: error
