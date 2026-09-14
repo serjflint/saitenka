@@ -331,18 +331,25 @@ class MpvGateway:
 
     def _publish_observation(self, message: dict, connection_epoch: int) -> None:
         with self._lock:
-            if self._closed or connection_epoch != self._connection_epoch:
+            if self._closed:
+                self._query_evidence.ingress(message, connection_epoch, "closed")
+                return
+            if connection_epoch != self._connection_epoch:
+                self._query_evidence.ingress(message, connection_epoch, "stale-epoch")
                 return
             if self._connection_phase is ConnectionPhase.REPLAYING:
                 if len(self._candidate_events) >= _CANDIDATE_EVENT_LIMIT:
                     self._inbound_overloads += 1
+                    self._query_evidence.ingress(message, connection_epoch, "candidate-full")
                     overloaded = True
                 else:
                     self._candidate_events.append(dict(message))
+                    self._query_evidence.ingress(message, connection_epoch, "buffered")
                     overloaded = False
                 if not overloaded:
                     return
             elif self._connection_phase is not ConnectionPhase.READY:
+                self._query_evidence.ingress(message, connection_epoch, "not-ready")
                 return
             else:
                 overloaded = False
@@ -357,17 +364,25 @@ class MpvGateway:
         connection_epoch: int,
         *,
         lock_held: bool = False,
+        source: str = "wire",
     ) -> None:
         payload = self._observation_payload(message, lock_held=lock_held)
+        outcome, sequence = "exception", None
         try:
-            self._publish_observation_payload(payload, connection_epoch)
+            sequence = self._publish_observation_payload(payload, connection_epoch)
+            outcome = "queued"
         except MailboxFull:
+            outcome = "mailbox-full"
             self._record_inbound_overload(lock_held=lock_held)
             self._mailbox.publish(
                 CloseRequested("runtime-overloaded"),
                 origin=EventOrigin.LIFECYCLE,
                 traffic=TrafficClass.LIFECYCLE,
                 connection_epoch=connection_epoch,
+            )
+        finally:
+            self._query_evidence.ingress(
+                message, connection_epoch, outcome, source=source, mailbox_sequence=sequence
             )
 
     def _observation_payload(self, message: dict, *, lock_held: bool) -> RuntimeEvent:
@@ -392,20 +407,21 @@ class MpvGateway:
             return UserCommand("", command_id=command_id)
         return RawMpvEvent(name, message)
 
-    def _publish_observation_payload(self, payload: RuntimeEvent, connection_epoch: int) -> None:
+    def _publish_observation_payload(self, payload: RuntimeEvent, connection_epoch: int) -> int:
         if isinstance(payload, UserCommand):
-            self._mailbox.publish_command(
+            envelope = self._mailbox.publish_command(
                 payload,
                 origin=EventOrigin.MPV,
                 connection_epoch=connection_epoch,
             )
         else:
-            self._mailbox.publish(
+            envelope = self._mailbox.publish(
                 payload,
                 origin=EventOrigin.MPV,
                 traffic=TrafficClass.NORMAL,
                 connection_epoch=connection_epoch,
             )
+        return envelope.sequence
 
     def _record_inbound_overload(self, *, lock_held: bool) -> None:
         if lock_held:
@@ -477,7 +493,11 @@ class MpvGateway:
                 traffic=TrafficClass.LIFECYCLE,
                 connection_epoch=connection_epoch,
             )
-            for message in (*replay, {"event": "file-loaded"}, *candidate):
+            for message in replay:
+                self._publish_ready_observation(
+                    message, connection_epoch, lock_held=True, source="replay-read"
+                )
+            for message in ({"event": "file-loaded"}, *candidate):
                 self._publish_ready_observation(message, connection_epoch, lock_held=True)
             self._mailbox.publish(
                 ConnectionReady(connection_epoch),

@@ -207,6 +207,9 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
     for _ in range(6):
         queries = query_evidence.QueryEvidence()
         for name in sorted(query_evidence.PROPERTIES):
+            queries.ingress(
+                {"event": "property-change", "name": name}, 0, "queued", mailbox_sequence=1
+            )
             queries.command(
                 lambda *_args: {"error": "success"}, "observe_property", 1, name, epoch=0
             )

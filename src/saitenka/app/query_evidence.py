@@ -1,9 +1,10 @@
-"""Bounded reply evidence for the gateway's rendering-property subscriptions."""
+"""Bounded command and ingress evidence for gateway rendering properties."""
 
 from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
@@ -21,6 +22,19 @@ PROPERTIES = frozenset(f"options/{name}" for name in OPTIONS) | {
 }
 _VERBS = frozenset({"observe_property", "get_property"})
 MAX_OWNERS = 2
+INGRESS_HISTORY = 8
+INGRESS_OUTCOMES = frozenset(
+    {
+        "queued",
+        "buffered",
+        "stale-epoch",
+        "closed",
+        "not-ready",
+        "candidate-full",
+        "mailbox-full",
+        "exception",
+    }
+)
 _ERRORS = {
     "property not found": "property-not-found",
     "property unavailable": "property-unavailable",
@@ -104,7 +118,65 @@ def _safe_owner(raw: object) -> dict:
         "connection_epoch": count(raw.get("connection_epoch")),
         "closed": raw.get("closed") if type(raw.get("closed")) is bool else None,
         "stale_completions": count(raw.get("stale_completions")),
+        "ingress": _safe_ingress(raw.get("ingress")),
     }
+
+
+def _safe_ingress_row(row: object) -> dict | None:
+    if not isinstance(row, dict):
+        return None
+    name, source, outcome = row.get("property"), row.get("source"), row.get("outcome")
+    if (
+        not isinstance(name, str)
+        or name not in PROPERTIES
+        or not isinstance(source, str)
+        or source not in {"wire", "replay-read"}
+        or not isinstance(outcome, str)
+        or outcome not in INGRESS_OUTCOMES
+    ):
+        return None
+    fields = {key: count(row.get(key)) for key in ("sequence", "connection_epoch", "recorded_ns")}
+    mailbox_sequence = count(row.get("mailbox_sequence"))
+    if any(value is None for value in fields.values()) or (
+        outcome == "queued" and mailbox_sequence is None
+    ):
+        return None
+    return {
+        **fields,
+        "property": name,
+        "source": source,
+        "outcome": outcome,
+        "mailbox_sequence": mailbox_sequence if outcome == "queued" else None,
+    }
+
+
+def _safe_ingress(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {"status": "unknown"}
+    rows, counts = raw.get("recent"), raw.get("counts")
+    if not isinstance(rows, list) or len(rows) > INGRESS_HISTORY or not isinstance(counts, dict):
+        return {"status": "invalid"}
+    totals = {key: count(counts.get(key)) for key in sorted(INGRESS_OUTCOMES)}
+    if any(value is None for value in totals.values()):
+        return {"status": "invalid"}
+    sanitized = [_safe_ingress_row(row) for row in rows]
+    if None in sanitized:
+        return {"status": "invalid"}
+    retained = [row for row in sanitized if row is not None]
+    evicted = count(raw.get("evicted"))
+    total = sum(value for value in totals.values() if value is not None)
+    if (
+        evicted != max(0, total - INGRESS_HISTORY)
+        or [row["sequence"] for row in retained]
+        != list(range(max(0, total - INGRESS_HISTORY) + 1, total + 1))
+        or any(
+            sum(row["outcome"] == key for row in retained) > value
+            for key, value in totals.items()
+            if value is not None
+        )
+    ):
+        return {"status": "invalid"}
+    return {"status": "collected", "counts": totals, "recent": sanitized, "evicted": evicted}
 
 
 def safe_snapshot(raw: object) -> dict:
@@ -125,7 +197,7 @@ def safe_snapshot(raw: object) -> dict:
         "status": "partial",
         "schema": 1,
         "clock": "unix-nanoseconds",
-        "scope": "latest gateway subscription/read attempts for rendering properties; not all IPC",
+        "scope": "gateway rendering-property commands and ingress; not all IPC or application",
         "applied": "unknown",
         "missing_command": "not-recorded",
         "owners": sanitized,
@@ -146,6 +218,9 @@ class QueryEvidence:
         self._epoch = 0
         self._closed = False
         self._stale = 0
+        self._ingress: deque[dict] = deque(maxlen=INGRESS_HISTORY)
+        self._ingress_counts = dict.fromkeys(sorted(INGRESS_OUTCOMES), 0)
+        self._ingress_sequence = 0
 
     def _save(self) -> None:
         self._registry.update(
@@ -156,8 +231,55 @@ class QueryEvidence:
                 "connection_epoch": self._epoch,
                 "closed": self._closed,
                 "stale_completions": self._stale,
+                "ingress": {
+                    "recent": list(self._ingress),
+                    "counts": self._ingress_counts,
+                    "evicted": max(0, self._ingress_sequence - INGRESS_HISTORY),
+                },
             },
         )
+
+    def ingress(
+        self,
+        message: dict,
+        epoch: int,
+        outcome: str,
+        *,
+        source: str = "wire",
+        mailbox_sequence: int | None = None,
+    ) -> None:
+        name = message.get("name")
+        if (
+            message.get("event") != "property-change"
+            or not isinstance(name, str)
+            or name not in PROPERTIES
+        ):
+            return
+        with self._lock:
+            self._ingress_sequence += 1
+            sequence = self._ingress_sequence
+            self._ingress_counts[outcome] += 1
+            self._ingress.append(
+                {
+                    "sequence": sequence,
+                    "property": name,
+                    "connection_epoch": epoch,
+                    "source": source,
+                    "outcome": outcome,
+                    "recorded_ns": time.time_ns(),
+                    "mailbox_sequence": mailbox_sequence,
+                }
+            )
+            self._save()
+        with otel_metrics.traced("player_property_ingress") as span:
+            span.set("query_owner", self.owner)
+            span.set("ingress_sequence", sequence)
+            span.set("connection_epoch", epoch)
+            span.set("property", name)
+            span.set("source", source)
+            span.set("outcome", outcome)
+            if mailbox_sequence is not None:
+                span.set("mailbox_sequence", mailbox_sequence)
 
     def command(self, send: Callable[..., dict], verb: str, *args: object, epoch: int) -> dict:
         name = args[-1] if args else None
@@ -207,5 +329,5 @@ class QueryEvidence:
     def close(self) -> None:
         with self._lock:
             self._closed = True
-            if self._rows:
+            if self._rows or self._ingress:
                 self._save()
