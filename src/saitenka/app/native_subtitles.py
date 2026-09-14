@@ -1314,6 +1314,8 @@ class NativeSubtitleGeometry:
             # a render space the inputs refuse must still fall through and degrade.
             return
         identity = self._observation_key(seen)
+        if identity is not None and self._pending_key == (self.worker.generation, identity):
+            return
         snapshot = self._ports.pipeline.current
         if (
             identity is not None
@@ -2067,7 +2069,11 @@ class NativeSubtitleGeometry:
 
         def settled() -> None:
             """The lane terminal is what publishes the result — nothing polls for it."""
-            self.apply(seen)
+            try:
+                self.apply(seen)
+            finally:
+                if self._pending_key == (inputs.generation, inputs.observation_key):
+                    self._pending_key = None
 
         # Everything the result will be judged against is established BEFORE the work is queued.
         # These used to run after, which reads fine while a completion is guaranteed to be later —
@@ -2090,6 +2096,8 @@ class NativeSubtitleGeometry:
                 inputs.render,
                 inputs.cue.timestamp_ms,
             )
+        elif self._pending_key == (inputs.generation, inputs.observation_key):
+            self._pending_key = None
         return accepted
 
     def apply(self, seen: GeometryObservation) -> bool:

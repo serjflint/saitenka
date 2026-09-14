@@ -2099,6 +2099,60 @@ def test_a_geometry_result_that_lands_while_ownership_is_undecided_is_not_lost(
     result.close()
 
 
+def test_ownership_ack_before_geometry_does_not_present_the_cue_twice(tmp_path: Path) -> None:
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.graph.cue.settle()
+
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")
+    settle_jobs(result, ipc)
+
+    assert native.status.geometry_ready
+    assert native.worker.stats.presented == 1
+    assert native.worker.stats.superseded == 0
+    assert result.graph.subtitle_presentation.cue.current.boxes
+    result.close()
+
+
+def test_failed_geometry_can_retry_the_same_observation(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    backend.error = RuntimeError("font provider unavailable")
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.graph.cue.settle()
+    settle_jobs(result, ipc)
+    assert not native.status.geometry_ready
+    backend.error = None
+
+    native.refresh(result.graph.cue.geometry_observation())
+    settle_jobs(result, ipc)
+
+    assert native.status.geometry_ready
+    assert result.graph.subtitle_presentation.cue.current.boxes
+    result.close()
+
+
+def test_changed_render_space_replaces_pending_geometry(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.graph.cue.settle()
+    ipc.props["osd-dimensions"] = {"w": 1920, "h": 1080}
+
+    assert result.graph.presentation.refresh_osd()
+    native.refresh(result.graph.cue.geometry_observation())
+    settle_jobs(result, ipc)
+
+    assert native.status.geometry_ready
+    assert backend.requests[-1].frame_size == (1920, 1080)
+    result.close()
+
+
 def test_a_false_readback_hands_pixels_to_legacy_rather_than_native(tmp_path: Path) -> None:
     result, ipc, _backend = _correlated_reader(tmp_path)
     result.graph.cue.set_subtitle("猫を見る")
