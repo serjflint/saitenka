@@ -148,7 +148,14 @@ def _configured_geometry(geometry: object) -> dict:
     return fields
 
 
-def envelope(*, collector: dict, producer: dict, configuration: dict, health: dict) -> dict:
+def envelope(
+    *,
+    collector: dict,
+    producer: dict,
+    configuration: dict,
+    health: dict,
+    runtime: dict | None = None,
+) -> dict:
     collector = safe_identity(collector)
     identity = producer.get("identity", {})
     differing = [
@@ -170,7 +177,9 @@ def envelope(*, collector: dict, producer: dict, configuration: dict, health: di
         },
         "configuration": configuration,
         "operation_health": health,
-        "effective_runtime_configuration": {"status": "unknown"},
+        "effective_runtime_configuration": runtime
+        if runtime is not None
+        else {"status": "unknown"},
         "pixel_fidelity": {"status": "unknown", "scope": "not-validated"},
         "omitted": ["raw-config", "logs", "traces", "crashes", "paths", "text", "pixels"],
     }
