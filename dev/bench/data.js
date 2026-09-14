@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789383946568,
+  "lastUpdate": 1789384830867,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17857,6 +17857,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 8.777728,
             "range": "3 replicas; min 8.45005; max 8.99891; MAD 0.221184",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2d0ee846a792d1ba7cd17b2f873cedba1c6d1c5e",
+          "message": "Merge pull request #526 from serjflint/feat/diagnostic-evidence\n\nfeat: make diagnostic reports metadata-only by default",
+          "timestamp": "2026-09-14T11:04:11Z",
+          "url": "https://github.com/serjflint/saitenka/commit/2d0ee846a792d1ba7cd17b2f873cedba1c6d1c5e"
+        },
+        "date": 1789384829135,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 25.995152,
+            "range": "3 replicas; min 24.076; max 148.45; MAD 1.91913; worst 148.45",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 30.535491,
+            "range": "3 replicas; min 27.0098; max 712.346; MAD 3.5257; worst 712.346",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 9.744384,
+            "range": "3 replicas; min 9.13818; max 9.78125; MAD 0.036864",
             "unit": "MB"
           }
         ]
