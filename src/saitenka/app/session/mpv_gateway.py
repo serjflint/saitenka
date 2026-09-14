@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from saitenka.app.query_evidence import QueryEvidence
 from saitenka.runtime import (
     CloseRequested,
     CommandHandled,
@@ -78,6 +79,7 @@ class MpvGateway:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._ipc = ipc
+        self._query_evidence = QueryEvidence()
         self._mailbox = mailbox
         self._clock = clock
         self._lock = threading.Lock()
@@ -226,10 +228,15 @@ class MpvGateway:
             if self._closed:
                 return {}
             self._observers = tuple(names)
+            epoch = self._connection_epoch
         replies: dict[str, dict] = {}
         for observer_id, name in enumerate(names, 1):
-            self._ipc.command("observe_property", observer_id, name)
-            replies[name] = self._ipc.command("get_property", name)
+            self._query_evidence.command(
+                self._ipc.command, "observe_property", observer_id, name, epoch=epoch
+            )
+            replies[name] = self._query_evidence.command(
+                self._ipc.command, "get_property", name, epoch=epoch
+            )
         return replies
 
     def close(self) -> None:
@@ -238,6 +245,7 @@ class MpvGateway:
             if self._closed:
                 return
             self._closed = True
+            self._query_evidence.close()
             self._connection_phase = ConnectionPhase.CLOSED
             self._candidate_events.clear()
             thread = self._reconnect_thread
@@ -569,9 +577,16 @@ class MpvGateway:
                 return None
         replay: list[dict] = []
         for observer_id, name in enumerate(names, 1):
-            if self._ipc.command("observe_property", observer_id, name).get("error") != "success":
+            if (
+                self._query_evidence.command(
+                    self._ipc.command, "observe_property", observer_id, name, epoch=connection_epoch
+                ).get("error")
+                != "success"
+            ):
                 return None
-            reply = self._ipc.command("get_property", name)
+            reply = self._query_evidence.command(
+                self._ipc.command, "get_property", name, epoch=connection_epoch
+            )
             if reply.get("error") != "success":
                 return None
             replay.append({"event": "property-change", "name": name, "data": reply.get("data")})

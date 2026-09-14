@@ -538,7 +538,7 @@ def _collect_metadata() -> dict[str, str]:
         pass
     text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
     session = _latest_session(text)
-    producer, health, runtime, player = _metadata_producer(session)
+    producer, health, runtime, player, queries = _metadata_producer(session)
     payload = envelope(
         collector=build_identity(),
         producer=producer,
@@ -546,6 +546,7 @@ def _collect_metadata() -> dict[str, str]:
         health=health,
         runtime=runtime,
         player=player,
+        queries=queries,
     )
     return {
         "diagnostics/envelope.json": json.dumps(payload, ensure_ascii=False, indent=2),
@@ -558,9 +559,10 @@ def _collect_metadata() -> dict[str, str]:
     }
 
 
-def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict]:
+def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict]:
     from saitenka.app.paths import cache_dir
     from saitenka.app.player_evidence import safe_snapshot
+    from saitenka.app.query_evidence import safe_snapshot as safe_queries
     from saitenka.app.render_evidence import safe_runtime_configuration
     from saitenka.app.report_schema import SCHEMA_VERSION, count, operation_health, safe_identity
 
@@ -568,6 +570,7 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict]:
     health: dict = {"status": "unavailable"}
     runtime: dict = {"status": "unknown"}
     player: dict = {"status": "unknown"}
+    queries: dict = {"status": "unknown"}
     if session is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
         path = cache_dir() / "diagnostics" / f"session-{session}.json"
         try:
@@ -590,9 +593,10 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict]:
                 health = operation_health(raw)
                 runtime = safe_runtime_configuration(raw.get("runtime_configuration"))
                 player = safe_snapshot(raw.get("player_configuration"))
+                queries = safe_queries(raw.get("player_queries"))
         except (OSError, ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
             producer = {"status": "unreadable-or-too-large"}
-    return producer, health, runtime, player
+    return producer, health, runtime, player, queries
 
 
 def _manifest(members: dict[str, str], *, include_log: bool, session: str | None = None) -> str:

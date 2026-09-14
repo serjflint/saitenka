@@ -43,6 +43,21 @@ closed owners retain history. Values may come from the observation cache or a qu
 atomic mpv snapshot, backend readback, or a join to a particular published geometry request. Retained
 traces may outlive the corresponding history. Collection introduces no additional player queries.
 
+`player_query_health` records the gateway's startup and reconnect attempts to subscribe to and read
+rendering properties. Observer-registration replies are separate from query replies. Timeout,
+disconnect, missing property, unavailable property, malformed reply, exception and successful null
+or missing-data replies remain distinct. Reply values and freeform errors are never retained.
+
+Each of two retained gateway owners keeps its latest attempt per property/verb in the latest
+recorded connection epoch. A newer epoch replaces prior rows; superseded or post-close completions
+cannot overwrite them. `player_property_command` spans join by owner/sequence/epoch. Absent rows are
+not recorded, not successful. A pending row on a closed owner is historical unfinished evidence,
+not a claim that a command still runs. This is neither all IPC nor live property-observation health:
+the minimal no-gateway adapter and later direct queries remain unmeasured. Successful subscription
+does not prove delivery or application; applied settings and pixels remain unknown.
+The producer-summary reader accepts at most 128 KiB; an oversized summary yields
+`unreadable-or-too-large`, not healthy or zero activity. Combined-history tests guard this budget.
+
 For the trace-based tools below, collect with `saitenka report --diagnostic-detail`.
 That opt-in includes redacted raw configuration, logs, traces and crash reports, which can still contain
 private paths and text. `--no-log` excludes logs only; it does not sanitize the other detail.
