@@ -33,6 +33,12 @@ def _ignore_second_slang(_second_slang: str) -> None:
     return None
 
 
+def next_profile_index(profile_count: int, profile_index: int) -> int | None:
+    if profile_count <= 1:
+        return None
+    return (profile_index + 1) % profile_count
+
+
 @dataclass(frozen=True, slots=True)
 class ProfileInvalidation:
     """Cache and warm-state invalidation applied after profile preflight."""
@@ -162,6 +168,11 @@ class ProfileController:
         self._tokenizer = tokenizer
         self._evidence.applied(self._profile, getattr(tokenizer, "name", "unknown"))
         self._invalidation.invalidate_tokenizer()
+
+    def cycle(self) -> None:
+        index = next_profile_index(len(self._profiles), self._profile_index)
+        if index is not None:
+            self.switch_to(index)
 
     def switch_to(self, index: int) -> ProfileSwitchOutcome:
         target = self._profiles[index]

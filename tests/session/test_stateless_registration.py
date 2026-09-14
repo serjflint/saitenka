@@ -52,7 +52,6 @@ def _bindings():
         adapter,  # type: ignore[arg-type]
         adapter,  # type: ignore[arg-type]
         adapter,  # type: ignore[arg-type]
-        adapter,  # type: ignore[arg-type]
     )
 
 

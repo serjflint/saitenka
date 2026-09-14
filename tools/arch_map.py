@@ -318,7 +318,6 @@ def _registered_policies() -> list[str]:
             adapter,
             adapter,
             adapter,
-            adapter,
         )
     )
 

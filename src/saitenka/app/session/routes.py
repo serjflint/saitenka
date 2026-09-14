@@ -32,7 +32,6 @@ from saitenka.app.bindings import (
     OVERLAY_TOGGLE_MSG,
     PREVIEW_CLOSE_MSG,
     PREVIEW_MSG,
-    PROFILE_CYCLE_MSG,
     SCROLL_DOWN_MSG,
     SCROLL_UP_MSG,
     SIDEBAR_MSG,
@@ -56,7 +55,6 @@ from saitenka.app.feature_bindings import (
     ordered_stateful_bindings,
 )
 from saitenka.app.features.mining import mine_intents
-from saitenka.app.features.profiles import profile_intents
 from saitenka.app.features.tooltip import hover_intents
 from saitenka.app.session import interaction_intents, panel_intents
 from saitenka.app.session.resources import ResourceRetirementError
@@ -111,7 +109,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.features.mining.mine_adapter import MineCommandCoordinator
-    from saitenka.app.features.profiles.profile_adapter import ProfileCommandEndpoint
     from saitenka.app.features.tooltip.hover_adapter import HoverCommandCoordinator
     from saitenka.app.session.adapter import SessionCommandCoordinator
     from saitenka.app.session.interaction_adapter import InteractionCommandCoordinator
@@ -477,7 +474,6 @@ def stateless_features(
     hover: HoverCommandCoordinator,
     mine: MineCommandCoordinator,
     panel: PanelCommandCoordinator,
-    profile: ProfileCommandEndpoint,
     session: SessionCommandCoordinator,
     subtitle: SubtitleCommandCoordinator,
     interaction: InteractionCommandCoordinator,
@@ -492,7 +488,6 @@ def stateless_features(
         bind_stateless("hover", hover_intents.HoverCommand, hover_intents.reduce, hover),
         bind_stateless("mine", mine_intents.MineCommand, mine_intents.reduce, mine),
         bind_stateless("panel", panel_intents.PanelCommand, panel_intents.reduce, panel),
-        bind_stateless("profile", profile_intents.ProfileCommand, profile_intents.reduce, profile),
         bind_stateless("session", session_intents.SessionCommand, session_intents.reduce, session),
         bind_stateless(
             "subtitle", subtitle_intents.SubtitleCommand, subtitle_intents.reduce, subtitle
@@ -533,7 +528,6 @@ STATELESS_COMMANDS = (
     StatelessCommandRegistration(MINE_VIDEO_MSG, mine_intents.MineCommand.WORD_VIDEO),
     StatelessCommandRegistration(MINE_ALL_MSG, mine_intents.MineCommand.EPISODE),
     StatelessCommandRegistration(BOOKMARK_MSG, mine_intents.MineCommand.BOOKMARK_CUE),
-    StatelessCommandRegistration(PROFILE_CYCLE_MSG, profile_intents.ProfileCommand.CYCLE),
     StatelessCommandRegistration(SIDEBAR_MSG, panel_intents.PanelCommand.TOGGLE_SIDEBAR),
     StatelessCommandRegistration(SUB_PICKER_MSG, panel_intents.PanelCommand.TOGGLE_SUBTITLE_PICKER),
     StatelessCommandRegistration(ANALYSIS_MSG, panel_intents.PanelCommand.TOGGLE_ANALYSIS),

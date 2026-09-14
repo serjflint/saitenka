@@ -141,7 +141,11 @@ place to remember that does not exist yet.
 - **Stateless** — it is a pure policy over a snapshot, `reduce(command, inputs)`. Routing that
   through the mailbox would add sequencing to a decision with nothing to sequence.
 
-Both join through typed registration rows. Stateless inputs read bounded owners such as playback,
+Stateful slices and snapshot policies join through typed registration rows. A synchronous action
+already owned by one bounded controller can bind its method directly through the existing command
+handler merge, as profile cycling does. It still uses the same command spec, admission, exception
+handling, and terminal accounting; it does not need an input/effect pair solely to call that owner.
+Stateless inputs read bounded owners such as playback,
 tooltip, picker, or cue presentation stores. Cross-feature operations are named acts; replaceable
 episode state is reached through `EpisodeSlot`. Which files, and in what order, is
 [Adding a feature](docs/contributing/runtime.md#adding-a-feature).
@@ -150,6 +154,7 @@ episode state is reached through `EpisodeSlot`. Which files, and in what order, 
 flowchart TB
     key(["mpv script-message"]) --> exec["CommandExecutor<br/>spec + bound handler"]
     exec -->|command type| srouter["StatelessCommandGraph"]
+    exec -->|bound action| action["Bounded feature owner"]
     obs(["mpv property change"]) --> mailbox["SessionMailbox"]
     mailbox --> reactor["SessionReactor"]
     reactor -->|"RouteKey(event, owner)"| slice["SliceReducer"]
@@ -179,7 +184,8 @@ flowchart TB
 ```
 
 The asymmetry is lifetime, not authority. Stateful features store facts in an owner slice;
-stateless policies sample existing owners for one synchronous command. Both keep decisions pure.
+stateless policies sample existing owners for one synchronous command. Their reducers stay pure;
+direct actions keep feature policy in the bounded owner.
 Impure coordinators may reach only the owners and named acts declared by their capability value.
 The command graph rejects missing policies and messages, and its composition rejects deferred
 session reads.
