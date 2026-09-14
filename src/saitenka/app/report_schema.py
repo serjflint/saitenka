@@ -22,6 +22,8 @@ def build_identity() -> dict:
 
     editable = None
     try:
+        # Distribution.read_text owns UTF-8 decoding and accepts no encoding argument.
+        # ast-grep-ignore: read-text-utf8-encoding
         direct = distribution("saitenka").read_text("direct_url.json")
         if direct is not None:
             editable = json.loads(direct).get("dir_info", {}).get("editable", False)
