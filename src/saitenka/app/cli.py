@@ -7,9 +7,8 @@ import subprocess
 import sys
 import sysconfig
 
-import cyclopts
-
 from saitenka import __version__
+from saitenka.app.cli_provenance import DiagnosticApp, DiagnosticToml
 from saitenka.app.commands import attach as attach_commands
 from saitenka.app.commands import configuration as configuration_commands
 from saitenka.app.commands import diagnostics as diagnostics_commands
@@ -48,12 +47,12 @@ def _argv_config_override(argv: list[str]) -> str | None:
     return None
 
 
-def create_app() -> cyclopts.App:
-    app = cyclopts.App(
+def create_app() -> DiagnosticApp:
+    app = DiagnosticApp(
         name="saitenka",
         help="Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict tooltip, mining.",
         version=__version__,
-        config=cyclopts.config.Toml(
+        config=DiagnosticToml(
             config_path(), must_exist=False, use_commands_as_keys=False, allow_unknown=True
         ),
     )
@@ -104,7 +103,7 @@ def main() -> None:  # pragma: no cover
         install_shutdown_signals()
         override = _argv_config_override(sys.argv[1:])
         if override:
-            app.config = cyclopts.config.Toml(
+            app.config = DiagnosticToml(
                 override, must_exist=False, use_commands_as_keys=False, allow_unknown=True
             )
         sys.exit(app())

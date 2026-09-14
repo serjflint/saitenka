@@ -172,6 +172,9 @@ def _compose_session(
         ),
     )
     controller = SessionController(graph)
+    from saitenka.app.option_evidence import record
+
+    record(resolved_options)
     prepared = PreparedSession(
         live=controller,
         profile=graph.profile,

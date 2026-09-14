@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from saitenka_tokenize.registry import Tokenizer, get_tokenizer
 
 from saitenka import fonts
+from saitenka.app.profile_evidence import ProfileEvidence
 from saitenka.app.profiles import (
     DEFAULT_PROFILE,
     Profile,
@@ -106,6 +107,7 @@ class ProfileController:
         self._tokenizer = get_tokenizer(self._profile.tokenizer)
         self._dict_set = dict_set
         self._apply_font_mode(self._profile)
+        self._evidence = ProfileEvidence(self._profile)
 
     @property
     def profile(self) -> Profile:
@@ -158,13 +160,16 @@ class ProfileController:
 
     def use_tokenizer(self, tokenizer: Tokenizer) -> None:
         self._tokenizer = tokenizer
+        self._evidence.applied(self._profile, getattr(tokenizer, "name", "unknown"))
         self._invalidation.invalidate_tokenizer()
 
     def switch_to(self, index: int) -> ProfileSwitchOutcome:
         target = self._profiles[index]
+        self._evidence.request(target)
         try:
             tokenizer = get_tokenizer(target.tokenizer)
         except ValueError:
+            self._evidence.finish("rejected")
             self._aftermath.notify(
                 f"profile {target.name!r}: unknown tokenizer {target.tokenizer!r}", "warn"
             )
@@ -179,6 +184,7 @@ class ProfileController:
             try:
                 dictionary_set = self._dict_scoper(target)
             except Exception:  # noqa: BLE001 -- preserve the active environment on preflight failure
+                self._evidence.finish("rejected")
                 self._aftermath.notify(
                     f"profile {target.name!r}: dictionary rescope failed", "warn"
                 )
@@ -212,6 +218,7 @@ class ProfileController:
             if track is _TrackSwitch.MISSING
             else ProfileSwitchStatus.COMMITTED
         )
+        self._evidence.finish(status.value)
         return ProfileSwitchOutcome(status, target, index)
 
     def _switch_subtitle_track(self, slang: str) -> _TrackSwitch:

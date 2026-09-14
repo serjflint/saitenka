@@ -209,6 +209,8 @@ def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual par
     ] = None,
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
+    from saitenka.app.cli_provenance import current_sources
+
     return run_impl(
         video,
         config=config,
@@ -256,6 +258,7 @@ def run(  # noqa: PLR0913  # cyclopts CLI signature — flags are individual par
         layout_engine=layout_engine,
         mpv_arg=mpv_arg,
         profile=profile,
+        diagnostic_origins=current_sources(),
     )
 
 

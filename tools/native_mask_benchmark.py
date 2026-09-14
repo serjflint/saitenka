@@ -17,6 +17,7 @@ from saitenka_subtitles.geometry import FontProvider, FontSetup, GeometryPalette
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
 from synthetic_characters import ROOT, SPEC, documents
 
+from saitenka import otel_metrics
 from saitenka.app.subtitle_fonts import FontEnvironment
 
 
@@ -28,15 +29,17 @@ class Evidence:
     def span(self, name):
         values = {}
         self.spans[name] = values
+        with otel_metrics.geometry_telemetry.span(name) as emitted:
 
-        class Span:
-            def set(self, key, value):
-                values[key] = value
+            class Span:
+                def set(self, key, value):
+                    values[key] = value
+                    emitted.set(key, value)
 
-        yield Span()
+            yield Span()
 
-    def record(self, _name, _milliseconds):
-        pass
+    def record(self, name, milliseconds):
+        otel_metrics.geometry_telemetry.record(name, milliseconds)
 
 
 def canvas(snapshot, size):
@@ -145,14 +148,48 @@ def main():
     parser.add_argument("--cycles", type=int, default=3)
     parser.add_argument("--track-copies", type=int, default=25)
     parser.add_argument("--output", type=Path, required=True, help="new local JSON evidence file")
+    parser.add_argument(
+        "--trace-output",
+        type=Path,
+        help="new synthetic trace file; enables the production exporter for matched on/off runs",
+    )
     args = parser.parse_args()
     if not 1 <= args.cycles <= 100 or not 1 <= args.track_copies <= 100:
         parser.error("cycles and track copies must be between 1 and 100")
-    result = benchmark(cycles=args.cycles, track_copies=args.track_copies)
+    if args.output.exists() or (args.trace_output is not None and args.trace_output.exists()):
+        parser.error("evidence outputs must be new files")
+    with trace_capture(args.trace_output) as capture:
+        result = benchmark(cycles=args.cycles, track_copies=args.track_copies)
+    result["trace_capture"] = capture
     with args.output.open("x", encoding="utf-8") as stream:
         json.dump(result, stream, indent=2)
     print(json.dumps({"rows": len(result["rows"]), "output": str(args.output)}))
     return int(any(row["corrected"].get("native_differing_pixels") != 0 for row in result["rows"]))
+
+
+@contextmanager
+def trace_capture(path):
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    from saitenka.app.otel_export import CTFSpanProcessor
+    from saitenka.app.telemetry import ActiveGate
+
+    if path is None:
+        yield {"enabled": False, "scope": "production span calls, no configured exporter"}
+        return
+    gate = ActiveGate()
+    gate.set(value=True)
+    processor = CTFSpanProcessor(path, gate)
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    trace.set_tracer_provider(provider)
+    capture = {"enabled": True, "scope": "production exporter; synthetic worker only"}
+    try:
+        yield capture
+    finally:
+        provider.shutdown()
+        capture.update(dropped_events=processor.dropped_count, bytes=path.stat().st_size)
 
 
 if __name__ == "__main__":

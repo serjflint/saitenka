@@ -39,6 +39,7 @@ from saitenka.runtime import EffectError, EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.surfaces import (
     SurfaceAction,
     SurfaceRuntime,
+    SurfaceStatus,
     SurfaceTransactionOutcome,
 )
 
@@ -211,6 +212,7 @@ class ColorLadder:
     #: calibration probe all ask for it), so incrementing a counter here would report a multiple of
     #: the cue's token count that moves with the calibration cadence.
     devices: tuple[str, ...] = ()
+    reasons: tuple[str, ...] = ()
 
 
 def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()) -> ColorLadder:
@@ -236,16 +238,19 @@ def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()
     masks: list[overpaint.TokenMask] = []
     rules: list[decoration.TokenRule] = []
     devices: list[str] = []
+    reasons: list[str] = []
     for box in request.boxes:
         if box.index >= len(surfaces) or not surfaces[box.index].strip():
             continue
         color = _token_color(request, box.index)
         if color is not None:
-            devices.append(_assign_rung(box, surfaces[box.index], color, drifting, paints, masks))
+            device, reason = _assign_rung(box, surfaces[box.index], color, drifting, paints, masks)
+            devices.append(device)
+            reasons.append(reason)
         underline = _token_underline(request, box.index)
         if underline is not None:
             rules.append(decoration.TokenRule(box.x, box.y, box.w, box.h, underline))
-    return ColorLadder(tuple(paints), tuple(masks), tuple(rules), tuple(devices))
+    return ColorLadder(tuple(paints), tuple(masks), tuple(rules), tuple(devices), tuple(reasons))
 
 
 def _assign_rung(
@@ -255,7 +260,7 @@ def _assign_rung(
     drifting: frozenset[str],
     paints: list[overprint.TokenPaint],
     masks: list[overpaint.TokenMask],
-) -> str:
+) -> tuple[str, str]:
     """Best color device this token can hold, appended to that device's list, or neither."""
     font_name = "" if font_names.key(box.font_name) in drifting else box.font_name
     # `\an7` anchors the line box and `box` is ink, so the measured origin is not the position that
@@ -280,11 +285,27 @@ def _assign_rung(
     mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
     if box.overprint_safe and paint.drawable:
         paints.append(paint)
-        return "overprint"
+        return "overprint", "eligible"
+    reason = _overprint_reason(box, drifting)
     if mask.usable:
         masks.append(mask)
-        return "overpaint"
-    return "none"
+        return "overpaint", reason
+    return "none", "coverage-evicted" if box.coverage_evicted else "coverage-unavailable"
+
+
+def _overprint_reason(box: WordBox, drifting: frozenset[str]) -> str:
+    if font_names.key(box.font_name) in drifting:
+        return "calibrated-font-drift"
+    if not box.font_name or box.font_size <= 0:
+        return "font-unreachable"
+    if not box.overprint_safe:
+        return (
+            box.overprint_verdict
+            if box.overprint_verdict
+            in {"exact-mask-mismatch", "probe-error", "probe-budget-exceeded", "unsupported-text"}
+            else "unvalidated"
+        )
+    return "unsupported-fragmentation"
 
 
 def overprint_payload(
@@ -315,6 +336,9 @@ def overprint_payload(
         span.set("tokens", len(ladder.devices))
         for device in ("overprint", "overpaint", "none"):
             span.set(device, ladder.devices.count(device))
+        for reason in sorted(set(ladder.reasons)):
+            span.set(f"reason.{reason}", ladder.reasons.count(reason))
+        span.set("validation_scope", "device-eligibility-not-upload-or-pixels")
         span.set("rules", len(ladder.rules))
         # Events, not tokens: a spaced token is drawn one event per glyph, so the two diverge exactly
         # when the per-glyph path runs. Nothing else reports whether it did.
@@ -365,6 +389,7 @@ def overpaint_image(
         # rather than lumped into one cue-redraw number.
         span.set("pixels", 0 if image is None else int(image.rgba.shape[0] * image.rgba.shape[1]))
         span.set("outcome", "empty" if image is None else "composed")
+        span.set("reason", "composite-budget-exceeded" if masks and image is None else "none")
         return image
 
 
@@ -413,6 +438,32 @@ def focus_drawing(rect: tuple[int, int, int, int]) -> str:
         rf"\1c&H5AD6FF&\1a&HDF&\3c&H5AD6FF&\3a&H23&\p1}}"
         f"m 0 0 l {width} 0 l {width} {height} l 0 {height}"
     )
+
+
+def _trace_focus_write(
+    transaction: SurfaceTransaction,
+    completion: EffectFinished | None,
+    tail: tuple[object, ...],
+    started: float,
+    *,
+    accepted: bool,
+    colored: bool,
+) -> None:
+    with otel_metrics.traced("surface_write") as span:
+        span.set("round_trip_ms", round((time.perf_counter() - started) * 1000.0, 3))
+        span.set("route", "correlated")
+        span.set("command", "osd-overlay")
+        span.set("slot", _FOCUS_SLOT)
+        span.set("surface_revision", transaction.revision)
+        if completion is not None:
+            span.set("effect_id", completion.effect_id.value)
+        span.set("admitted", completion is not None)
+        span.set("accepted", accepted)
+        span.set("device", "overprint" if colored else "focus")
+        span.set("validation_scope", "upload-acknowledgment-not-pixels")
+        span.set("outcome", completion.outcome.value if completion is not None else "not-admitted")
+        payload = next((part for part in tail[2:3] if isinstance(part, str)), "")
+        span.set("events", len(payload.splitlines()) if payload else 0)
 
 
 class NoPixelOwnership:
@@ -694,6 +745,7 @@ class NativeVisibleRenderer:
         #: Placement and pixels of the raster currently on the slot, so a redraw that changes
         #: neither can skip the upload. `None` whenever the slot is down — see `_drop_overpaint`.
         self._overpaint_published: tuple[int, int, bytes] | None = None
+        self._overpaint_operation: otel_metrics.DeferredSpan | None = None
         #: Payload shapes already measured against mpv's OSD renderer, so a stall is paid once per
         #: face set per surface rather than once per cue.
         self._calibrated: set[str] = set()
@@ -1528,8 +1580,15 @@ class NativeVisibleRenderer:
         a tooltip closed.
         """
         self._overpaint_shown = False
+        self._end_overpaint_operation("cancelled")
+
+    def _end_overpaint_operation(self, outcome: str) -> None:
+        if self._overpaint_operation is not None:
+            self._overpaint_operation.finish(outcome=outcome)
+            self._overpaint_operation = None
 
     def close(self) -> None:
+        self._end_overpaint_operation("shutdown-aborted")
         self._fallback.close()
 
     @property
@@ -1595,10 +1654,30 @@ class NativeVisibleRenderer:
         self._overpaint_shown = True
         self._overpaint_published = published
         _trace_overpaint_placement(request, image)
+        self._end_overpaint_operation("superseded")
+        operation = otel_metrics.DeferredSpan(
+            "subtitle_device_upload",
+            device="overpaint",
+            validation_scope="upload-acknowledgment-not-pixels",
+        )
+        self._overpaint_operation = operation
+
+        def settled(accepted: bool) -> None:  # noqa: FBT001 -- surface settlement callback contract
+            operation.finish(
+                outcome="acknowledged" if accepted else "failed", bytes=len(published[2])
+            )
+            if not accepted and self._overpaint_published is published:
+                self._overpaint_published = None
+
         # The array path, not `present`: these pixels were composited into numpy and never were a
         # PIL image. Wrapping one to unwrap it again is two copies of every cue.
         surfaces.present_rgba(
-            image.rgba, image.x, image.y, oid=OverlayId.OVERPAINT, owner=Owner.SUBTITLE
+            image.rgba,
+            image.x,
+            image.y,
+            oid=OverlayId.OVERPAINT,
+            owner=Owner.SUBTITLE,
+            on_settled=otel_metrics.bind_context(settled),
         )
         if otel_metrics.subtitle_overpaint_frames is not None:
             otel_metrics.subtitle_overpaint_frames.add(1)
@@ -1632,7 +1711,9 @@ class NativeVisibleRenderer:
                 otel_metrics.subtitle_focus_writes_skipped.add(1)
             # The pixels this cue wants are already up — a seek pre-armed them. The wait ends
             # here, not at a write that never had to happen.
-            _color_is_up(self._color_wait_cue(colored=colored), landed=True)
+            settled = self._focus.snapshot(_FOCUS_SLOT)
+            if settled is not None and settled.status is SurfaceStatus.PRESENT:
+                _color_is_up(self._color_wait_cue(colored=colored), landed=True)
             # What is up is what this cue wants: a removal the cue change deferred is not owed.
             self._focus_clear_pending = False
             self._defer_focus_clear = False
@@ -1646,22 +1727,19 @@ class NativeVisibleRenderer:
         started = time.perf_counter()
 
         def finished(completion: EffectFinished) -> None:
-            with otel_metrics.traced("surface_write") as span:
-                span.set("round_trip_ms", round((time.perf_counter() - started) * 1000.0, 3))
-                span.set("route", "correlated")
-                span.set("command", "osd-overlay")
-                span.set("slot", _FOCUS_SLOT)
-                span.set("outcome", completion.outcome.value)
-                payload = next((part for part in tail[2:3] if isinstance(part, str)), "")
-                span.set("events", len(payload.splitlines()) if payload else 0)
+            accepted = self._focus.finish(
+                SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
+            )
+            _trace_focus_write(
+                transaction, completion, tail, started, accepted=accepted, colored=colored
+            )
+            if not accepted:
+                return
             _color_is_up(colored_cue, landed=completion.outcome is EffectOutcome.SUCCEEDED)
             if completion.outcome is not EffectOutcome.SUCCEEDED:
                 self._focus_payload = None  # never skip against a write that did not land
                 self._focus_cue = None  # nor keep a color the slot may not hold
                 self._focus_up = True  # nor a removal against a slot whose state is unknown
-            self._focus.finish(
-                SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
-            )
 
         self._focus_payload = tail if action is SurfaceAction.PRESENT else None
         self._focus_clear_pending = False
@@ -1672,8 +1750,9 @@ class NativeVisibleRenderer:
             identity=transaction,
             command=("osd-overlay", *tail),
             timeout_s=10.0,
-            on_finished=finished,
+            on_finished=otel_metrics.bind_context(finished),
         ):
+            _trace_focus_write(transaction, None, tail, started, accepted=False, colored=colored)
             self._focus_payload = None
             self._focus_cue = None
             self._focus_up = True  # the write never left: the slot holds whatever it held

@@ -2743,6 +2743,40 @@ def presented_overpaints(ipc) -> list[tuple[int, int, int, int]]:
     ]
 
 
+@pytest.mark.timeout(5)
+def test_failed_overpaint_upload_does_not_suppress_identical_retry(monkeypatch, tmp_path):
+    from saitenka import operation_summary
+
+    summary = operation_summary.OperationSummary()
+    monkeypatch.setattr(operation_summary, "operations", summary)
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_fonts(attachment_supplying(ipc, "arial"))
+    ipc.overlay_add_error = "invalid parameter"
+    try:
+        result.graph.playback.observe("sub-text", "猫を見る")
+        result.graph.cue.settle()
+        settle_jobs(result, ipc)
+        ipc.commands.clear()
+        ipc.overlay_add_error = None
+
+        result.graph.subtitle_presentation.draw()
+        settle_jobs(result, ipc)
+
+        assert presented_overpaints(ipc)
+        outcomes = {
+            row["outcome"]
+            for row in summary.snapshot()["outcomes"]
+            if row["operation"] == "subtitle_device_upload"
+        }
+        assert "failed" in outcomes
+        assert "acknowledged" in outcomes
+    finally:
+        result.close()
+
+
 def test_a_face_the_osd_library_cannot_load_is_colored_as_a_raster_instead(tmp_path: Path) -> None:
     """The point of the second device: a signs-and-songs release keeps its color.
 

@@ -4,6 +4,64 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
+from character_masks import compare_mask, manifest, qualification_counts, results_summary
+
+
+def qualified_artifact():
+    frozen = manifest([(1000, 2000, "猫")], {})
+    alpha = np.full((2, 2), 255, dtype=np.uint8)
+    row = compare_mask(alpha, alpha, alpha)
+    row["controls"] = {"positive": "passed", "displaced": "failed", "wrong-color": "failed"}
+    return frozen, results_summary(frozen, {frozen["coordinates"][0]["key"]: row})
+
+
+def test_antialiased_fringe_loss_and_spill_cannot_qualify_as_exact():
+    reference = np.array([[0, 16, 255, 16, 0]], dtype=np.uint8)
+    actual = np.array([[16, 0, 255, 0, 16]], dtype=np.uint8)
+
+    result = compare_mask(reference, actual, reference)
+
+    assert result["verdict"] == "failed"
+    assert result["missing_pixels"] == result["frame_spill_pixels"] == 2
+    assert result["intensity_error"] == 16
+
+
+@pytest.mark.parametrize(
+    "fault", ["none", "missing-control", "numeric-disagreement", "unattempted"]
+)
+def test_execution_controls_and_pixel_numbers_are_separate_qualification_axes(fault):
+    frozen, result = qualified_artifact()
+    row = result["results"][0]
+    if fault == "missing-control":
+        del row["controls"]
+    elif fault == "numeric-disagreement":
+        row["frame_missing_pixels"] = 1
+    elif fault == "unattempted":
+        row["verdict"] = "unattempted"
+        del row["controls"]
+
+    evidence = qualification_counts(frozen, result)
+
+    assert evidence["denominator"] == 1
+    assert evidence["qualified"] == (fault == "none")
+    assert evidence["oracle_execution"]["valid_controls"] == int(
+        fault in {"none", "numeric-disagreement"}
+    )
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "other-manifest"])
+def test_qualification_rejects_shrunk_duplicated_or_mismatched_census(fault):
+    frozen, result = qualified_artifact()
+    if fault == "missing":
+        result["results"] = []
+    elif fault == "duplicate":
+        result["results"] *= 2
+    else:
+        result["manifest_sha256"] = "other"
+
+    with pytest.raises(ValueError, match="qualification"):
+        qualification_counts(frozen, result)
 
 
 def module():
@@ -132,6 +190,21 @@ def test_target_recoloring_cannot_move_the_native_reference_mask():
     assert reason == ""
     assert np.array_equal(mask, original[:, :, 0])
     assert oracle.compare_mask(mask, blue[:, :, 2], original[:, :, 0])["verdict"] == "failed"
+
+
+def test_adjacent_ink_columns_do_not_merge_distinct_characters():
+    original = np.zeros((8, 12, 3), dtype=np.uint8)
+    original[1:4, 2:5] = 255
+    original[4:7, 5:8] = 255
+    red = original.copy()
+    red[:, :, 1:] = 0
+    blue = red.copy()
+    blue[1:4, 2:5] = (0, 0, 255)
+
+    mask, reason = module().reference_mask(original, red, blue)
+
+    assert reason == ""
+    assert np.array_equal(mask, blue[:, :, 2])
 
 
 def test_native_white_ink_cannot_pass_as_green_overpaint():

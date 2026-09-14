@@ -36,12 +36,27 @@ _SPAN_NAMES = frozenset(
         "subtitle_geometry_cache",
         "mpv_effect",
         "surface_write",
+        "mining_media_result",
+        "jimaku_attempt",
+        "subtitle.resync",
+        "subtitle_calibration",
     }
 )
 _FIELDS = frozenset(
     {
         "operation",
+        "status",
+        "picture_error",
+        "audio_error",
+        "reference_fmt",
+        "comparison",
+        "signature",
         "outcome",
+        "accepted",
+        "effect_id",
+        "surface_revision",
+        "cue_revision",
+        "validation_scope",
         "connection_epoch",
         "reply_latency_ms",
         "priority",

@@ -24,3 +24,4 @@ PN = "PN"                     # proper-noun pos tag / notation, not "ON"
 Hime = "Hime"                 # TsukiHime — a subtitle source's proper name, not "Him"
 BA = "BA"                     # UAX #14 Line_Break class code (Break After), used in render.linebreak
 fre = "fre"                   # ISO 639-2/B code for French, alongside the terminology code fra
+bord = "bord"                 # ASS border-width override tag

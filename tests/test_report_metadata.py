@@ -12,9 +12,17 @@ from saitenka.operation_summary import OperationSummary
 
 
 def _environment(monkeypatch, tmp_path):
-    from saitenka.app import player_evidence, query_evidence, render_evidence
+    from saitenka.app import (
+        option_evidence,
+        player_evidence,
+        profile_evidence,
+        query_evidence,
+        render_evidence,
+    )
 
     monkeypatch.setattr(render_evidence, "registry", render_evidence.EvidenceRegistry())
+    monkeypatch.setattr(option_evidence, "registry", render_evidence.EvidenceRegistry())
+    monkeypatch.setattr(profile_evidence, "registry", render_evidence.EvidenceRegistry())
     monkeypatch.setattr(player_evidence, "registry", render_evidence.EvidenceRegistry())
     monkeypatch.setattr(
         query_evidence,

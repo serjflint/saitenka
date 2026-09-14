@@ -123,6 +123,8 @@ class TokenGeometry:
     glyph_dy: tuple[float, ...] = ()
     #: False when native coverage cannot be reproduced by the fractional redraw; use its mask.
     overprint_safe: bool = True
+    overprint_verdict: str = "unvalidated"
+    coverage_evicted: bool = False
 
 
 class GeometryVariant(StrEnum):
@@ -229,6 +231,8 @@ class GeometryRequest:
     keep_coverage: bool = False
     #: Unmodified native track; the colored document supplies ownership hints only.
     native_ass: bytes = b""
+    document_metadata: tuple[tuple[str, int], ...] = field(default=(), compare=False)
+    source_kind: str = field(default="unknown", compare=False)
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -328,7 +332,17 @@ class GeometrySnapshot:
         stripped snapshot costs those tokens a plainer mark and nothing else. That is what makes it
         the right thing to evict under memory pressure — evicting the entry would cost a re-render.
         """
-        return replace(self, tokens=tuple(replace(token, coverage=b"") for token in self.tokens))
+        return replace(
+            self,
+            tokens=tuple(
+                replace(
+                    token,
+                    coverage=b"",
+                    coverage_evicted=token.coverage_evicted or bool(token.coverage),
+                )
+                for token in self.tokens
+            ),
+        )
 
 
 class GeometryBackend(Protocol):

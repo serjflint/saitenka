@@ -537,7 +537,7 @@ def _collect_metadata(session: str | None) -> dict[str, str]:
         configuration = {"status": "invalid"}
     except OSError:
         pass
-    producer, health, runtime, player, queries = _metadata_producer(session)
+    producer, health, runtime, player, queries, options = _metadata_producer(session)
     payload = envelope(
         collector=build_identity(),
         producer=producer,
@@ -546,6 +546,7 @@ def _collect_metadata(session: str | None) -> dict[str, str]:
         runtime=runtime,
         player=player,
         queries=queries,
+        options=options,
     )
     return {
         "diagnostics/envelope.json": json.dumps(payload, ensure_ascii=False, indent=2),
@@ -558,7 +559,8 @@ def _collect_metadata(session: str | None) -> dict[str, str]:
     }
 
 
-def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict]:
+def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict, dict]:
+    from saitenka.app.option_evidence import safe_snapshot as safe_options
     from saitenka.app.paths import cache_dir
     from saitenka.app.player_evidence import safe_snapshot
     from saitenka.app.query_evidence import safe_snapshot as safe_queries
@@ -570,6 +572,7 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dic
     runtime: dict = {"status": "unknown"}
     player: dict = {"status": "unknown"}
     queries: dict = {"status": "unknown"}
+    options: dict = {"status": "unknown"}
     if session is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
         path = cache_dir() / "diagnostics" / f"session-{session}.json"
         try:
@@ -593,9 +596,10 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dic
                 runtime = safe_runtime_configuration(raw.get("runtime_configuration"))
                 player = safe_snapshot(raw.get("player_configuration"))
                 queries = safe_queries(raw.get("player_queries"))
+                options = safe_options(raw.get("session_configuration"))
         except (OSError, ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
             producer = {"status": "unreadable-or-too-large"}
-    return producer, health, runtime, player, queries
+    return producer, health, runtime, player, queries, options
 
 
 def _manifest(members: dict[str, str], *, include_log: bool, session: str | None = None) -> str:

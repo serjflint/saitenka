@@ -10,13 +10,9 @@ from saitenka.app.otel_export import CTFSpanProcessor
 from saitenka.app.telemetry import ActiveGate
 
 
-def test_missing_bounds_are_retried_and_valid_reply_closes_the_signature(monkeypatch, tmp_path):
-    gate = ActiveGate()
-    gate.set(value=True)
-    path = tmp_path / "trace.json"
-    provider = TracerProvider()
-    provider.add_span_processor(CTFSpanProcessor(path, gate, start_thread=False))
-    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+def test_missing_bounds_are_retried_and_valid_reply_closes_the_signature(
+    tmp_path, diagnostic_trace
+):
     session, ipc, _backend = reader(
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
     )
@@ -29,13 +25,20 @@ def test_missing_bounds_are_retried_and_valid_reply_closes_the_signature(monkeyp
         settle_jobs(session, ipc)
     finally:
         session.close()
-        provider.shutdown()
 
-    events = json.loads(path.read_text())["traceEvents"]
+    events, analysis = diagnostic_trace()
     outcomes = [
         event["args"]["outcome"] for event in events if event["name"] == "subtitle_calibration"
     ]
     assert outcomes == ["inconclusive", "agrees"]
+    assert [
+        row["args"]["outcome"]
+        for row in analysis["startup"]
+        if row["name"] == "subtitle_calibration"
+    ] == outcomes
+    assert all(
+        event["args"]["signature"] for event in events if event["name"] == "subtitle_calibration"
+    )
 
 
 def test_missing_bounds_cannot_create_an_unbounded_probe_loop(monkeypatch, tmp_path):

@@ -353,6 +353,54 @@ def test_a_color_for_another_cue_leaves_the_wait_open(color_clock):
     assert "saitenka.subtitle.color_latency_ms" not in otel_metrics.snapshot()
 
 
+@pytest.mark.timeout(5)
+@pytest.mark.usefixtures("registered")
+@pytest.mark.parametrize("acknowledge", [False, True])
+def test_identical_overprint_does_not_promote_a_pending_upload(
+    monkeypatch, tmp_path, color_clock, acknowledge
+):
+    from test_native_subtitles import Coloring, FakeIPC, KnownWords, Scorer, reader, settle_jobs
+
+    from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
+
+    pending = []
+    submit = FakeIPC.submit_runtime_mpv
+
+    def defer_focus(ipc, **kwargs):
+        command = kwargs["command"]
+        if command[:2] == ("osd-overlay", NATIVE_FOCUS_ID) and command[2] == "ass-events":
+            pending.append((ipc, kwargs))
+            return True
+        return submit(ipc, **kwargs)
+
+    monkeypatch.setattr(FakeIPC, "submit_runtime_mpv", defer_focus)
+    session, ipc, _backend = reader(
+        tmp_path,
+        correlated_surfaces=True,
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    try:
+        session.graph.playback.observe("sub-text", "猫を見る")
+        session.graph.cue.settle()
+        settle_jobs(session, ipc)
+        assert pending
+        color_clock[0] += 0.025
+        if acknowledge:
+            for target, arguments in pending:
+                submit(target, **arguments)
+
+        presentation = session.graph.subtitle_presentation
+        presentation.pipeline.draw_current(presentation.target())
+
+        snapshot = otel_metrics.snapshot()
+        if acknowledge:
+            assert snapshot["saitenka.subtitle.color_latency_ms"]["count"] == 1
+        else:
+            assert "saitenka.subtitle.color_latency_ms" not in snapshot
+    finally:
+        session.close()
+
+
 @pytest.mark.usefixtures("registered")
 def test_re_observing_one_cue_keeps_the_wait_it_opened(color_clock):
     # mpv reports a cue in halves, so the same digest arrives twice. The viewer has been waiting

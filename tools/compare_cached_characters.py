@@ -60,6 +60,8 @@ from saitenka.mpvio.osd import Overlay
 from saitenka.version import overlay_version
 
 PROFILE = (
+    "--force-render=yes",
+    "--gpu-sw=yes",
     "--osc=no",
     "--load-scripts=no",
     "--osd-bar=no",
@@ -80,7 +82,7 @@ PROFILE = (
     "--icc-profile-auto=no",
     "--dither-depth=no",
     "--zimg-dither=no",
-)
+) + (("--macos-render-timer=system",) if platform.system() == "Darwin" else ())
 TRACK = SubtitleTrackId("character-corpus")
 
 
@@ -203,6 +205,8 @@ def geometry_request_for(
         size,
         prepared.ass,
         native_ass=source.encode(),
+        document_metadata=prepared.document_metadata,
+        source_kind="authored-ass",
         palette=palette,
         reserved_rgb=prepared.reserved_rgb,
         keep_coverage=True,
@@ -261,6 +265,8 @@ def request_for(
 class Captures:
     def __init__(self, directory: Path, ipc, size: tuple[int, int]):
         self.directory, self.ipc, self.size = directory, ipc, size
+        self._positioned = False
+        self.command("get_property", "mpv-version")
         self.overlay = Overlay(ipc)
         self.fonts = subtitle_fonts.resolve(
             expand=ipc.expand_path,
@@ -290,19 +296,22 @@ class Captures:
     ) -> np.ndarray:
         source_path = self.directory / f"capture{suffix}"
         source_path.write_text(source, encoding="utf-8")
-        self.ipc.command("osd-overlay", 61, "none", "")
+        self.command("osd-overlay", 61, "none", "")
         self.overlay.hide(62)
         old = self.ipc.query("sid")
-        if isinstance(old, int):
-            self.ipc.command("sub-remove", old)
+        if type(old) is int:
+            self.command("sub-remove", old)
         self.command("sub-add", str(source_path), "select")
         self.command("set_property", "sub-delay", 2 - sample_ms / 1000)
-        self.command("seek", 2, "absolute+exact")
+        if not self._positioned:
+            # Repeated same-PTS seeks can poison gpu-next's screenshot frame queue.
+            self.command("seek", 2, "absolute+exact")
         deadline = time.monotonic() + 5
         while self.command("get_property", "seeking"):
             if time.monotonic() >= deadline:
                 raise TimeoutError("seek did not settle")
             time.sleep(0.005)
+        self._positioned = True
         if request is not None:
             payload = overprint_payload(request)
             self.command("osd-overlay", 61, "ass-events", payload, *self.size, 1)
@@ -315,6 +324,7 @@ class Captures:
             rgba[:, :, 3] = reference_coverage
             self.overlay.show(Image.fromarray(rgba), 0, 0, oid=62)
         target = self.directory / "capture.png"
+        target.unlink(missing_ok=True)
         response = self.ipc.command("screenshot-to-file", str(target), "window")
         if response.get("error") != "success":
             raise RuntimeError("screenshot refused")
@@ -389,8 +399,8 @@ def captures(
     ipc = gateway = capture = None
     try:
         ipc = MpvIPC(socket).connect(timeout=10)
-        gateway = install_session_runtime(ipc, startup_hint=False)
         capture = Captures(directory, ipc, size)
+        gateway = install_session_runtime(ipc, startup_hint=False)
         yield capture
     finally:
         if capture is not None:
@@ -488,7 +498,7 @@ def coordinate_result(
         return {"verdict": "inconclusive", "reason": reason}, (original, ours, mask)
     expected = capture.frame(native, time_ms, suffix=suffix, reference_coverage=original[:, :, 0])
     context = green_coverage(expected)
-    if not np.array_equal(context > 32, original[:, :, 0] > 32):
+    if not np.array_equal(context > 0, original[:, :, 0] > 0):
         return {
             "verdict": "inconclusive",
             "reason": "calibration-does-not-preserve-native-ink",

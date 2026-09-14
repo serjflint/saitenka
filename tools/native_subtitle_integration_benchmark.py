@@ -902,6 +902,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         native_first_flags: list[bool] = []
         offcpu_samples: list[float] = []
         worker_completions: list[int] = []
+        presentation_observations: list[dict] = []
         cadence_misses = 0
         geometry_apply_count = 0
         hit_test_count = 0
@@ -940,6 +941,11 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                 assert worker is not None
                 return worker.worker.stats.completed
 
+            def _presentation_count() -> int:
+                worker = native_graph.subtitle_presentation.native
+                assert worker is not None
+                return worker.worker.stats.presented
+
             def _pair(
                 phase: str,
                 baseline_call: Callable[[], object],
@@ -949,6 +955,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                 after_baseline: Callable[[object], None] | None = None,
                 after_native: Callable[[object], None] | None = None,
                 first: bool = native_first,
+                occurrence: int = cue_index,
             ) -> tuple[object, object]:
                 """Both sides of one interaction, recorded into the shared series.
 
@@ -972,6 +979,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                 # Read outside the timed region on both sides, so the attribution costs the
                 # measurement nothing.
                 completed_before = _worker_completed()
+                presented_before = _presentation_count()
                 if first:
                     native_side = _side(native_call, before_native, after_native)
                     baseline_side = _side(baseline_call, None, after_baseline)
@@ -979,6 +987,24 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
                     baseline_side = _side(baseline_call, None, after_baseline)
                     native_side = _side(native_call, before_native, after_native)
                 worker_completions.append(_worker_completed() - completed_before)
+                presentation_observations.append(
+                    {
+                        "cue_index": occurrence,
+                        "phase": phase,
+                        "before": presented_before,
+                        "after": _presentation_count(),
+                        "decisions": [
+                            {
+                                "sequence": item.sequence,
+                                "generation": item.generation,
+                                "ready": item.ready,
+                                "reason": item.reason,
+                            }
+                            for item in native_graph.subtitle_presentation.native.worker.presentation_history
+                            if item.sequence > presented_before
+                        ],
+                    }
+                )
                 phase_labels.append(phase)
                 native_first_flags.append(first)
                 baseline_result, baseline_wall, baseline_cpu = baseline_side
@@ -1126,6 +1152,7 @@ def run(manifest: dict, *, library_path: Path | None = None) -> dict:
         "last_error": last_error,
         "prefetch_dropped": stats.prefetch_dropped,
         "presented": stats.presented,
+        "presentation_observations": presentation_observations,
         "cadence_misses": cadence_misses,
         "result_cache_entries": stats.result_cache_entries,
         "prefetch_cache_entries": stats.prefetch_cache_entries,

@@ -10,10 +10,46 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from saitenka_subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.geometry import GeometryRequest, GeometrySnapshot
 
 _OWNERS = 4
 _CONFIGURATIONS = 4
+VALIDATION_VERDICTS = (
+    "mask-exact",
+    "probe-error",
+    "probe-budget-exceeded",
+    "unsupported-text",
+    "exact-mask-mismatch",
+    "unvalidated",
+)
+
+
+def validation_summary(snapshot: GeometrySnapshot) -> dict:
+    return {
+        "tokens": len(snapshot.tokens),
+        "retained_mask_tokens": sum(bool(token.coverage) for token in snapshot.tokens),
+        "evicted_mask_tokens": sum(token.coverage_evicted for token in snapshot.tokens),
+        "verdicts": {
+            verdict: sum(token.overprint_verdict == verdict for token in snapshot.tokens)
+            for verdict in VALIDATION_VERDICTS
+        },
+    }
+
+
+def _validation(raw: object) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    verdicts = raw.get("verdicts")
+    verdicts = verdicts if isinstance(verdicts, dict) else {}
+    return {
+        "scope": "same-renderer eligibility and retained masks; not uploaded pixels",
+        **{
+            key: _count(raw.get(key))
+            for key in ("tokens", "retained_mask_tokens", "evicted_mask_tokens")
+        },
+        "verdicts": {key: _count(verdicts.get(key)) for key in VALIDATION_VERDICTS},
+    }
+
+
 _BOOL_FIELDS = frozenset(
     {
         "use_margins",
@@ -52,6 +88,56 @@ _NUMBER_FIELDS = frozenset(
 )
 
 
+_DOCUMENT_FIELDS = frozenset(
+    {
+        "summary_version",
+        "style_count",
+        "active_event_count",
+        "playresx",
+        "playresy",
+        "layoutresx",
+        "layoutresy",
+        "wrapstyle",
+    }
+    | {
+        f"tag_{tag}"
+        for tag in (
+            "pos",
+            "move",
+            "org",
+            "clip",
+            "iclip",
+            "t",
+            "fad",
+            "fade",
+            "fsp",
+            "fscx",
+            "fscy",
+            "fn",
+            "fs",
+            "b",
+            "i",
+            "k",
+            "kf",
+            "ko",
+            "p",
+            "bord",
+            "shad",
+            "blur",
+        )
+    }
+)
+
+
+def _document_fields(raw: object) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    return {key: _count(raw.get(key)) for key in sorted(_DOCUMENT_FIELDS)}
+
+
+def _source_kind(value: object) -> str:
+    return value if isinstance(value, str) and value in {"authored-ass", "converted"} else "unknown"
+
+
 def configuration_fields(request: GeometryRequest) -> dict:
     state, fonts = request.renderer_state, request.font_setup
     features = dict(state.features)
@@ -87,6 +173,8 @@ def configuration_fields(request: GeometryRequest) -> dict:
         "default_family_configured": bool(fonts.default_family),
         "fontconfig_configured": bool(fonts.fontconfig_config),
         "attachment_count": len(request.attachments),
+        "document": _document_fields(dict(request.document_metadata)),
+        "source_kind": _source_kind(request.source_kind),
     }
 
 
@@ -112,6 +200,8 @@ def _fields(raw: object) -> dict:
             )
             else None
         )
+    result["document"] = _document_fields(raw.get("document"))
+    result["source_kind"] = _source_kind(raw.get("source_kind"))
     return result
 
 
@@ -132,10 +222,43 @@ def _reference(raw: object, revisions: set[int], *, generation: int | None = Non
         "unknown",
     }:
         runtime["mask_source"] = mask_source
+    if "validation" in raw:
+        runtime["validation"] = _validation(raw["validation"])
     return {
         **values,
         **runtime,
         "status": "retained" if values["revision"] in revisions else "evicted",
+    }
+
+
+def _selection(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {"status": "unknown"}
+    rows = raw.get("history")
+    if not isinstance(rows, list) or len(rows) > _CONFIGURATIONS:
+        return {"status": "invalid"}
+    history = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return {"status": "invalid"}
+        owner = row.get("pixel_owner")
+        history.append(
+            {
+                "revision": _count(row.get("revision")),
+                "captured_ns": _count(row.get("captured_ns")),
+                "pixel_owner": owner
+                if isinstance(owner, str) and owner in {"unknown", "none", "native", "legacy"}
+                else "unknown",
+                "legacy_forced": row.get("legacy_forced")
+                if type(row.get("legacy_forced")) is bool
+                else None,
+            }
+        )
+    return {
+        "status": "partial",
+        "scope": "post-draw ownership state; not pixel validation",
+        "history": history,
+        "evicted": _count(raw.get("evicted")),
     }
 
 
@@ -170,6 +293,7 @@ def _owner(raw: dict) -> dict:
         "requested": _reference(raw.get("requested"), revisions, generation=generation),
         "published": _reference(raw.get("published"), revisions, generation=generation),
         "last_published": _reference(raw.get("last_published"), revisions),
+        "renderer_selection": _selection(raw.get("renderer_selection")),
     }
 
 
@@ -260,7 +384,29 @@ class GeometryEvidence:
             "requested": None,
             "published": None,
             "last_published": None,
+            "renderer_selection": {"history": [], "evicted": 0},
         }
+
+    def selection(self, *, pixel_owner: str, legacy_forced: bool) -> None:
+        selection = self._state["renderer_selection"]
+        history = selection["history"]
+        if history and (history[-1]["pixel_owner"], history[-1]["legacy_forced"]) == (
+            pixel_owner,
+            legacy_forced,
+        ):
+            return
+        history.append(
+            {
+                "revision": selection["evicted"] + len(history) + 1,
+                "captured_ns": time.time_ns(),
+                "pixel_owner": pixel_owner,
+                "legacy_forced": legacy_forced,
+            }
+        )
+        if len(history) > _CONFIGURATIONS:
+            history.pop(0)
+            selection["evicted"] += 1
+        self._registry.update(self.owner, self._state)
 
     def describe(self, request: GeometryRequest) -> int:
         fields = _fields(configuration_fields(request))
@@ -296,6 +442,7 @@ class GeometryEvidence:
         *,
         libass_version: int | None = None,
         mask_source: str = "unknown",
+        validation: dict | None = None,
     ) -> None:
         publication: dict[str, object] = {
             "revision": revision,
@@ -306,6 +453,8 @@ class GeometryEvidence:
             publication["libass_version"] = libass_version
         if mask_source != "unknown":
             publication["mask_source"] = mask_source
+        if validation is not None:
+            publication["validation"] = _validation(validation)
         self._state["published"] = publication
         self._state["last_published"] = publication
         self._registry.update(self.owner, self._state)

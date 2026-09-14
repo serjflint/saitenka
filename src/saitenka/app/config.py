@@ -402,6 +402,7 @@ class ReaderOptions:
     prefetch: bool = True
     resync: bool = True  # auto-resync jimaku-sourced subs via alass/ffsubsync
     overlay_id_base: int = 1  # shift physical mpv overlay ids to coexist with other scripts
+    diagnostic_origins: tuple[tuple[str, str], ...] = field(default=(), compare=False, repr=False)
 
     def with_overrides(self, **kw) -> ReaderOptions:
         """Route flat legacy kwargs (``mine_key=…``, ``tip_max_frac=…``) onto the right group.
@@ -415,8 +416,10 @@ class ReaderOptions:
         )
         perf, subtitle_geometry = self.perf, self.subtitle_geometry
         prefetch, resync, overlay_id_base = self.prefetch, self.resync, self.overlay_id_base
+        origins = dict(self.diagnostic_origins)
         for name, value in kw.items():
             group = _OPTION_GROUPS.get(name)
+            origins[f"{group}.{name}" if group else name] = "programmatic-override"
             if name == "prefetch":
                 prefetch = bool(value)
             elif name == "resync":
@@ -451,6 +454,7 @@ class ReaderOptions:
             prefetch=prefetch,
             resync=resync,
             overlay_id_base=overlay_id_base,
+            diagnostic_origins=tuple(sorted(origins.items())),
         )
 
 

@@ -176,7 +176,7 @@ class LifecycleSurfaces:
         owner: Owner = Owner.PRESENTATION,
         on_settled: Callable[[bool], None] | None = None,
     ) -> None:
-        def finished(completion: EffectFinished) -> None:
+        def finished(completion: EffectFinished) -> bool:
             accepted = self._runtime.finish(
                 SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
             )
@@ -185,7 +185,7 @@ class LifecycleSurfaces:
                 # to commit, and its caller is no longer waiting on an answer.
                 if prepared is not None:
                     self._overlay.discard_prepared(prepared)
-                return
+                return False
             committed = completion.outcome is EffectOutcome.SUCCEEDED
             if committed:
                 if prepared is None:
@@ -196,6 +196,7 @@ class LifecycleSurfaces:
                 self._overlay.discard_prepared(prepared)
             if on_settled is not None:
                 on_settled(committed)
+            return True
 
         self._route(owner, transaction, command, finished)
 
@@ -204,7 +205,7 @@ class LifecycleSurfaces:
         owner: Owner,
         transaction: SurfaceTransaction,
         command: tuple[object, ...],
-        finished: Callable[[EffectFinished], None],
+        finished: Callable[[EffectFinished], bool],
     ) -> None:
         """Hand the command to the correlated-command port, or issue it inline and settle here.
 
@@ -227,12 +228,13 @@ class LifecycleSurfaces:
                 span.set("surface_revision", transaction.revision)
                 span.set("effect_id", completion.effect_id.value)
                 span.set("outcome", completion.outcome.value)
+                span.set("validation_scope", "upload-acknowledgment-not-pixels")
                 # The payload's size in the unit mpv pays per: an ASS write is parsed event by
                 # event, so bytes alone would say nothing about a cue with four underlines.
                 span.set("events", _payload_events(command))
-            settle(completion)
+                span.set("accepted", settle(completion))
 
-        finished = otel_metrics.bind_context(timed)
+        callback = otel_metrics.bind_context(timed)
 
         submit = self._overlay.runtime_submit
         if submit is None:
@@ -244,12 +246,12 @@ class LifecycleSurfaces:
             identity=transaction,
             command=command,
             timeout_s=_SURFACE_TIMEOUT_S,
-            on_finished=finished,
+            on_finished=callback,
         ):
             return
         else:
             succeeded = False  # the port refused — mpv is gone, and nothing was issued
-        finished(self._inline_completion(owner, transaction, succeeded=succeeded))
+        callback(self._inline_completion(owner, transaction, succeeded=succeeded))
 
     def _inline_completion(
         self, owner: Owner, transaction: SurfaceTransaction, *, succeeded: bool

@@ -100,6 +100,17 @@ def _set_video_engagement(reader: BenchmarkSession, engaged: bool) -> None:
         "mouse-pos",
         {"hover": engaged, "x": 1 if engaged else -1, "y": 1 if engaged else -1},
     )
+    reader.graph.tooltip.update_hover()
+
+
+def _hover_word(reader: BenchmarkSession, index: int) -> None:
+    cue = reader.graph.subtitle_presentation.cue.current
+    box = next(box for box in cue.boxes if box.index == index)
+    x, y = cue.origin
+    reader.graph.playback.observe(
+        "mouse-pos", {"hover": True, "x": x + box.x + box.w / 2, "y": y + box.y + box.h / 2}
+    )
+    reader.graph.tooltip.update_hover()
 
 
 # Hand-picked multi-sense words Serj still sees pathological first lookups on: very polysemous
@@ -203,10 +214,16 @@ class FakeIPC:
         reactor.close()
         return True
 
+    def session_runtime_census(self) -> dict[str, int]:
+        gateway = self._runtime_gateway
+        return {} if gateway is None else gateway.runtime_census()
+
     def command(self, *args):
         if args and args[0] == "get_property":
-            return {"data": self.props.get(args[1])}
-        return {"data": None}
+            return {"error": "success", "data": self.props.get(args[1])}
+        if args[:1] == ("set_property",):
+            self.props[args[1]] = args[2]
+        return {"error": "success", "data": None}
 
     # Delegates rather than answering alongside `command`: two write paths for one channel is how a
     # fake starts disagreeing with production about what was sent.
@@ -399,6 +416,9 @@ def _load_dict_set():
 
 class _SyntheticDS:
     """Fallback when no real dicts are configured: a tall multi-section CJK entry."""
+
+    def kanji_for(self, _char, **_kwargs):
+        return None
 
     def entry_for(self, tok, _inflected=None, **_kwargs):
         para = "とても長い定義の本文でありスクロールが必要になるほど縦に伸びる説明文です。" * 3
@@ -1756,8 +1776,12 @@ def _timeline_interact(reader) -> dict[str, int]:
     kind=nested|clicked|engaged_open latency — not only base hovers. Each deferred interaction is pumped
     through the runtime mailbox so the warm swap is measured rather than omitted. Best-effort: a word
     with no scan cells or kanji simply skips."""
-    st = reader.graph.tooltip.surface_state().view.state
+    view = reader.graph.tooltip.surface_state().view
+    settled = _settle_interaction(reader, view)
+    st = view.state
     census = {
+        "base_attempted": 1,
+        "base_settled": int(settled),
         "nested_attempted": 0,
         "nested_exercised": 0,
         "nested_settled": 0,
@@ -1770,13 +1794,28 @@ def _timeline_interact(reader) -> dict[str, int]:
         "skipped_no_panel": 0,
         "skipped_no_scan_boxes": 0,
     }
-    if st is None:
+    if st is None or not settled:
         census["skipped_no_panel"] += 1
         return census
-    boxes = st.windowed.scan_boxes()
+    boxes = [
+        box
+        for box in st.windowed.scan_boxes()
+        if view.scroll <= box.y and box.y + box.h <= view.scroll + view.view_h
+    ]
     if boxes:
         census["nested_attempted"] += 1
         sb = boxes[len(boxes) // 2]  # a cell well inside the body
+        sx, sy = view.xy
+        scale = reader.graph.tooltip.scale().raster
+        reader.graph.playback.observe(
+            "mouse-pos",
+            {
+                "hover": True,
+                "x": sx + (sb.x + sb.w / 2) * scale,
+                "y": sy + (sb.y - view.scroll + sb.h / 2) * scale,
+            },
+        )
+        reader.graph.tooltip.update_hover()
         nested_popup.show_nested(
             reader.graph.tooltip.tip_ports,
             reader.graph.tooltip.panel_ports,
@@ -1908,7 +1947,7 @@ def run_timeline(
     )
     reader.graph.screen.osd = OSD
     reader.graph.track_commands.navigation.current.sub_index = CueIndex(cues)
-    reader.graph.tooltip.start_prefetch()
+    reader.live.start()
 
     from saitenka_tokenize.japanese import SKIP_POS
 
@@ -1933,7 +1972,8 @@ def run_timeline(
 
     try:
         for i, cue in enumerate(cues):
-            reader.graph.cue.set_subtitle(cue.text)
+            reader.graph.playback.observe("sub-text", cue.text)
+            reader.graph.cue.settle()
             now = time.monotonic()
             for j in range(i + 1, min(len(cues), i + 1 + lookahead)):
                 for lemma in _content_lemmas(cues[j].text):
@@ -1965,7 +2005,7 @@ def run_timeline(
             panel_already_warm = key in reader.graph.tooltip.surface_state().panel_cache
             hovers += 1
             t0 = time.perf_counter()
-            reader.graph.tooltip.set_hover(idx)
+            _hover_word(reader, idx)
             dt = (time.perf_counter() - t0) * 1000.0
             (warm_ms if was_warm else cold_ms).append(dt)
             if head_prefetch > 0:
@@ -1980,8 +2020,8 @@ def run_timeline(
                     scenario_census[scenario_key] = scenario_census.get(scenario_key, 0) + value
             reader.graph.tooltip.retire_hover()
     finally:
-        reader.request_stop()
-        gateway.close()  # its worker threads outlive the SessionController otherwise
+        reader.close()
+        gateway.close()
 
     # `runtime_info()` ran before any tokenizer existed, so its GIL reading (and the worker count
     # derived from it) predates fugashi silently re-enabling the GIL — the exact collapse its own
@@ -2067,7 +2107,7 @@ def run_timeline(
                     "tag": tag,
                     "cues": len(cues),
                     "scenario_census": scenario_census,
-                    "workload_kind": "synthetic-cue direct-install; not an async cue-observation replay",
+                    "workload_kind": "synthetic cue observations and pointer polling; fake player transport",
                     "dwell_ms": dwell_s * 1000.0,
                     "lookahead": lookahead,
                     "hovers": hovers,

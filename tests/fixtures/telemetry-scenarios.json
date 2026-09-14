@@ -1,6 +1,25 @@
 {
   "schema": 1,
   "scope": "Minimum diagnostic families; references locate tests, not proof that a configuration ran.",
+  "execution_scope": "Exact bridge test functions; execute all parameterized cases and retain pytest results. References alone establish no execution. Character qualification is a separate pinned artifact denominator.",
+  "bridge_cases": [
+    {"scenario": "startup", "test": "tests/test_progressive.py::test_owned_startup_hint_clears_after_the_first_completed_turn", "endpoint": "production-export-zip-reader"},
+    {"scenario": "tooltip-quality", "test": "tests/test_trace_continuity.py::test_failed_crisp_submission_does_not_claim_an_acknowledged_upgrade", "endpoint": "production-export-zip-reader"},
+    {"scenario": "tooltip-worker", "test": "tests/features/tooltip/test_render_ahead_wiring.py::test_render_ahead_failure_retires_the_scroll_intent", "endpoint": "production-export-zip-reader"},
+    {"scenario": "cue-color", "test": "tests/session/test_surface_trace_bridge.py::test_retired_surface_late_ack_is_exported_as_rejected", "endpoint": "production-export-zip-reader"},
+    {"scenario": "async-context", "test": "tests/test_trace_continuity.py::test_reused_lane_exports_each_requests_parent_and_restores_context", "endpoint": "production-export-tree-analyzer"},
+    {"scenario": "mpv-failure", "test": "tests/test_diagnostic_findings.py::test_gateway_fault_is_diagnosable_from_default_zip_without_trace", "endpoint": "production-metadata-zip-diagnosis"},
+    {"scenario": "anki", "test": "tests/test_integration_telemetry.py::test_anki_failure_remains_diagnosable_without_payloads", "endpoint": "production-metadata-zip-diagnosis"},
+    {"scenario": "media-partial", "test": "tests/features/mining/test_mining.py::test_capture_media_reports_audio_subprocess_failure", "endpoint": "production-export-zip-reader"},
+    {"scenario": "subtitle-fetch", "test": "tests/test_jimaku_client.py::test_get_transient_http_is_retried_then_raises_retryable", "endpoint": "production-export-zip-reader"},
+    {"scenario": "resync", "test": "tests/test_resync.py::TestResyncTelemetry::test_failed_span_carries_the_aligner_error_and_reference_format", "endpoint": "production-export-zip-reader"},
+    {"scenario": "calibration", "test": "tests/test_calibration_telemetry.py::test_missing_bounds_are_retried_and_valid_reply_closes_the_signature", "endpoint": "production-export-zip-reader"},
+    {"scenario": "renderer-fallback", "test": "tests/test_diagnostic_findings.py::test_native_worker_fault_contract_survives_default_zip", "endpoint": "production-metadata-zip-diagnosis"},
+    {"scenario": "cache-pressure", "test": "tests/test_render_cache.py::test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster", "endpoint": "production-export-zip-reader"},
+    {"scenario": "shutdown", "test": "tests/test_progressive.py::test_reader_close_cancels_accepted_interaction_jobs", "endpoint": "production-export-zip-reader; accepted tooltip interaction, not all broker jobs"},
+    {"scenario": "python-native-crash", "test": "tests/test_crashlog.py::test_isolated_native_fault_reaches_the_report_bundle", "endpoint": "isolated-process-fault-zip-diagnosis"},
+    {"scenario": "telemetry-storage", "test": "tests/test_diagnostic_findings.py::test_trace_capture_fault_survives_collection_zip_and_diagnosis", "endpoint": "injected-capture-artifact-collector-zip-diagnosis"}
+  ],
   "configurations": [
     "tracing-on",
     "tracing-off",
@@ -15,6 +34,7 @@
   "scenarios": [
     {
       "id": "startup",
+      "diagnostic_contract": {"category": "startup-evidence-incomplete", "severity": "warning", "uncertainty": "readiness unknown", "next_evidence": "same-session interactive-ready boundary"},
       "owner": "session",
       "critical": true,
       "trigger": "start session",
@@ -34,6 +54,7 @@
     },
     {
       "id": "tooltip-quality",
+      "diagnostic_contract": {"category": "tooltip-quality-evidence-incomplete", "severity": "warning", "uncertainty": "display quality unknown", "next_evidence": "per-view transition, submission terminal and close"},
       "owner": "tooltip",
       "critical": true,
       "trigger": "open, warm, scroll, close each view",
@@ -71,6 +92,7 @@
     },
     {
       "id": "tooltip-worker",
+      "diagnostic_contract": {"category": "tooltip-worker-evidence-incomplete", "severity": "warning", "uncertainty": "worker completion unknown", "next_evidence": "request and terminal joined by job identity"},
       "owner": "tooltip",
       "critical": true,
       "trigger": "supersede queued scroll",
@@ -100,6 +122,7 @@
     },
     {
       "id": "cue-color",
+      "diagnostic_contract": {"category": "cue-color-evidence-incomplete", "severity": "warning", "uncertainty": "uploaded and displayed colors unknown", "next_evidence": "cue revision and accepted surface terminal"},
       "owner": "subtitle",
       "critical": true,
       "trigger": "observe cue then delayed color acknowledgment",
@@ -118,8 +141,10 @@
             "effect_id",
             "surface_revision",
             "round_trip_ms",
-            "outcome"
-          ]
+            "outcome",
+            "accepted"
+          ],
+          "values": {"accepted": [true], "outcome": ["succeeded"]}
         }
       ],
       "tests": [
@@ -133,6 +158,7 @@
     },
     {
       "id": "async-context",
+      "diagnostic_contract": {"category": "async-context-evidence-incomplete", "severity": "warning", "uncertainty": "worker causality unknown", "next_evidence": "operation identity and originating parent"},
       "owner": "runtime",
       "critical": true,
       "trigger": "two unrelated requests on reused worker",
@@ -154,6 +180,13 @@
     },
     {
       "id": "mpv-failure",
+      "diagnostic_contract": {"category": "mpv-evidence-incomplete", "severity": "warning", "uncertainty": "player operation outcome unknown", "next_evidence": "effect terminal in the originating connection epoch"},
+      "fault_evidence": "player-query",
+      "fault_cases": [
+        {"id": "query-timeout", "injection": "timeout", "expected_categories": ["player-query-timeout"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "subsequent query and projection in the same connection epoch"},
+        {"id": "query-disconnected", "injection": "disconnected", "expected_categories": ["player-query-disconnected"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "subsequent query and projection in the same connection epoch"},
+        {"id": "query-unavailable", "injection": "property unavailable", "expected_categories": ["player-query-property-unavailable"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "subsequent query and projection in the same connection epoch"}
+      ],
       "owner": "runtime",
       "critical": true,
       "trigger": "refusal, timeout, disconnect, cancellation",
@@ -177,6 +210,7 @@
     },
     {
       "id": "anki",
+      "diagnostic_contract": {"category": "anki-evidence-incomplete", "severity": "warning", "uncertainty": "integration outcome unknown", "next_evidence": "Anki operation summary or request terminal"},
       "owner": "mining",
       "critical": true,
       "trigger": "unavailable, protocol error, successful request",
@@ -198,6 +232,7 @@
     },
     {
       "id": "media-partial",
+      "diagnostic_contract": {"category": "media-evidence-incomplete", "severity": "warning", "uncertainty": "media completeness unknown", "next_evidence": "picture and audio results for the mining operation"},
       "owner": "mining",
       "critical": true,
       "trigger": "media failure after note validation",
@@ -223,6 +258,7 @@
     },
     {
       "id": "subtitle-fetch",
+      "diagnostic_contract": {"category": "subtitle-fetch-evidence-incomplete", "severity": "warning", "uncertainty": "provider attempt outcome unknown", "next_evidence": "provider attempt status without credentials or query text"},
       "owner": "subtitle-provider",
       "critical": false,
       "trigger": "Jimaku transport retry and failure",
@@ -242,6 +278,7 @@
     },
     {
       "id": "resync",
+      "diagnostic_contract": {"category": "resync-evidence-incomplete", "severity": "warning", "uncertainty": "resync outcome unknown", "next_evidence": "resync terminal or missing-dependency status"},
       "owner": "subtitle-provider",
       "critical": false,
       "trigger": "resync unavailable or failed",
@@ -261,6 +298,7 @@
     },
     {
       "id": "calibration",
+      "diagnostic_contract": {"category": "calibration-evidence-incomplete", "severity": "warning", "uncertainty": "layout agreement unknown", "next_evidence": "current signature, bounds comparison and terminal"},
       "owner": "subtitle",
       "critical": true,
       "trigger": "valid, missing, stale bounds replies",
@@ -283,6 +321,14 @@
     },
     {
       "id": "renderer-fallback",
+      "diagnostic_contract": {"category": "renderer-evidence-incomplete", "severity": "warning", "uncertainty": "selected renderer and pixel fidelity unknown", "next_evidence": "current geometry decision or retained publication validation"},
+      "fault_evidence": "geometry-history",
+      "fault_cases": [
+        {"id": "native-probe-budget", "injection": "budget", "expected_categories": ["geometry-probe-budget-exceeded"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "final device/upload outcome and independent pixel comparison"},
+        {"id": "native-probe-error", "injection": "probe-error", "expected_categories": ["geometry-probe-error"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "final device/upload outcome and independent pixel comparison"},
+        {"id": "native-mask-eviction", "injection": "eviction", "expected_categories": ["geometry-probe-budget-exceeded", "geometry-coverage-evicted"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "final device/upload outcome and independent pixel comparison"},
+        {"id": "native-stale-result", "injection": "stale", "expected_categories": [], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "current-generation publication"}
+      ],
       "owner": "subtitle",
       "critical": true,
       "trigger": "native backend unavailable or geometry rejected",
@@ -302,6 +348,7 @@
     },
     {
       "id": "cache-pressure",
+      "diagnostic_contract": {"category": "cache-evidence-incomplete", "severity": "warning", "uncertainty": "cache pressure and viewport quality unknown", "next_evidence": "view kind, composition reason and cache budget counters"},
       "owner": "tooltip",
       "critical": false,
       "trigger": "cold scrolling under bounded caches",
@@ -323,15 +370,18 @@
     },
     {
       "id": "shutdown",
+      "diagnostic_contract": {"category": "shutdown-evidence-incomplete", "severity": "warning", "uncertainty": "operation retirement unknown", "next_evidence": "pending-operation summary and cancellation terminals"},
       "owner": "session",
       "critical": true,
-      "trigger": "close with pending operations",
+      "trigger": "close with an accepted tooltip interaction; other pending operations require their own terminals",
       "evidence": [
         {
-          "name": "runtime_job",
+          "name": "tooltip_request",
           "fields": [
+            "job_id",
             "outcome"
-          ]
+          ],
+          "values": {"outcome": ["cancelled"]}
         }
       ],
       "tests": [
@@ -342,6 +392,7 @@
     },
     {
       "id": "python-native-crash",
+      "diagnostic_contract": {"category": "native-fault-evidence-unqualified", "severity": "warning", "uncertainty": "native fault and current session attribution unknown", "next_evidence": "bounded fault artifact with process and session identity"},
       "owner": "diagnostics",
       "critical": true,
       "trigger": "isolated native fault",
@@ -355,6 +406,7 @@
     },
     {
       "id": "telemetry-storage",
+      "diagnostic_contract": {"category": "capture-evidence-unqualified", "severity": "warning", "uncertainty": "capture completeness unknown", "next_evidence": "trace collection accounting and exporter loss counters"},
       "owner": "diagnostics",
       "critical": true,
       "trigger": "lost or unwritable trace sink",
@@ -368,6 +420,7 @@
     },
     {
       "id": "character-masks",
+      "diagnostic_contract": {"category": "character-evidence-unqualified", "severity": "warning", "uncertainty": "independent pixel fidelity unknown", "next_evidence": "pinned corpus results with positive and displaced controls"},
       "owner": "subtitle",
       "critical": true,
       "trigger": "episode corpus and single interior character fault",

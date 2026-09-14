@@ -652,12 +652,11 @@ class TestResyncTelemetry:
         assert span.attrs["src_cue_ms"] == span.attrs["out_cue_ms"] == [1000]  # no-op detectable
 
     def test_failed_span_carries_the_aligner_error_and_reference_format(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, diagnostic_trace
     ):
         """A failed resync span records WHY (the aligner's own stdout) and the reference FORMAT — the
         exact pair that root-caused ep02 (alass-cli exit 1 parsing an srt-converted .ass reference)."""
         resync = _import_resync()
-        recorded = _patch_recording_traced(monkeypatch)
         video = tmp_path / "ep02.mkv"
         video.touch()
         src = tmp_path / "ep02.srt"
@@ -673,12 +672,18 @@ class TestResyncTelemetry:
             patch("subprocess.run", return_value=run),
         ):
             resync.maybe_resync(video, src, enabled=True, trigger="retry")
-        (span,) = recorded
-        assert span.attrs["outcome"] == "failed"
-        assert "parse error at line 1164" in span.attrs["fail_reason"]
-        assert span.attrs["reference"] == "embedded"
-        assert span.attrs["reference_fmt"] == ".ass"
-        assert span.attrs["ref_cue_ms"] == [41410]  # the reference fingerprint, even on failure
+        events, analysis = diagnostic_trace()
+        attrs = next(event["args"] for event in events if event["name"] == "subtitle.resync")
+        assert attrs["outcome"] == "failed"
+        assert "parse error at line 1164" in attrs["fail_reason"]
+        assert attrs["reference"] == "embedded"
+        assert attrs["reference_fmt"] == ".ass"
+        assert attrs["ref_cue_ms"] == [41410]
+        assert src.read_text(encoding="utf-8") == "1\n00:00:06,106 --> 00:00:16,116\nJP\n"
+        record = next(row for row in analysis["startup"] if row["name"] == "subtitle.resync")
+        assert record["args"]["outcome"] == "failed"
+        assert record["args"]["reference_fmt"] == ".ass"
+        assert "fail_reason" not in record["args"]
 
 
 # ---------------------------------------------------------------------------

@@ -114,6 +114,7 @@ def test_fractional_redraw_matches_same_renderer_native_coverage(origin, spacing
     finally:
         backend.close()
     assert token.overprint_safe
+    assert token.overprint_verdict == "mask-exact"
     assert warm == token
     paint = TokenPaint(
         request.palette[0].text,
@@ -160,6 +161,35 @@ def test_warm_glyph_atlas_does_not_reuse_another_native_phase():
     assert warm.tokens[0].overprint_safe
 
 
+def test_integer_serialization_perturbation_changes_native_pixels():
+    inputs = replace(native_request((64.375, 40.875)), keep_coverage=True)
+    backend = LibassGeometryBackend()
+    try:
+        token = backend.render(inputs).tokens[0]
+        paint = TokenPaint(
+            inputs.palette[0].text,
+            round(token.bounds.x - token.anchor_dx),
+            round(token.bounds.y - token.anchor_dy),
+            token.font_name,
+            token.font_size,
+            0xFFFFFF,
+            spacing=4,
+            glyph_dx=tuple(round(value) for value in token.glyph_dx),
+            glyph_dy=tuple(round(value) for value in token.glyph_dy),
+        )
+        document = probe_document((), (), inputs.frame_size).document + "\n".join(
+            f"Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,{line}" for line in event_lines(paint)
+        )
+
+        perturbed = backend.render(replace(inputs, ass=document.encode())).tokens[0]
+
+        assert token.overprint_safe
+        assert token.coverage and perturbed.coverage
+        assert (perturbed.bounds, perturbed.coverage) != (token.bounds, token.coverage)
+    finally:
+        backend.close()
+
+
 def test_phase_probe_budget_failure_retains_native_mask(monkeypatch):
     monkeypatch.setattr("saitenka_subtitles.geometry.MAX_FRAME_PIXELS", 600_000)
     backend = LibassGeometryBackend()
@@ -169,7 +199,31 @@ def test_phase_probe_budget_failure_retains_native_mask(monkeypatch):
         backend.close()
 
     assert not token.overprint_safe
+    assert token.overprint_verdict == "probe-error"
     assert len(token.coverage) == token.bounds.width * token.bounds.height
+
+
+@pytest.mark.parametrize("clip", [r"\clip(0,70,960,540)", r"\iclip(64,40,90,60)"])
+def test_clipped_native_ink_refuses_an_unclipped_overprint(clip):
+    inputs = native_request()
+    document = inputs.ass.replace("ださい".encode(), ("{" + clip + "}ださい").encode())
+    backend = LibassGeometryBackend()
+    try:
+        unclipped = backend.render(
+            replace(inputs, native_ass=inputs.ass, keep_coverage=True)
+        ).tokens[0]
+        snapshot = backend.render(
+            replace(inputs, ass=document, native_ass=document, keep_coverage=True)
+        )
+
+        token = snapshot.tokens[0]
+        assert snapshot.mask_source == "native-original"
+        assert token.coverage and any(token.coverage)
+        assert token.coverage != unclipped.coverage
+        assert not token.overprint_safe
+        assert token.overprint_verdict == "exact-mask-mismatch"
+    finally:
+        backend.close()
 
 
 def test_missing_native_runtime_is_not_a_successful_mask_fallback(tmp_path):
@@ -177,6 +231,29 @@ def test_missing_native_runtime_is_not_a_successful_mask_fallback(tmp_path):
     try:
         with pytest.raises(RuntimeError, match="could not load libass"):
             backend.render(native_request())
+    finally:
+        backend.close()
+
+
+@pytest.mark.parametrize(
+    "quota", ["PHASE_BUILD_BUDGET", "PHASE_PIXEL_BUDGET", "PHASE_CPU_BUDGET_NS"]
+)
+def test_exhausted_probe_budget_retains_ink_and_does_not_poison_future_probes(monkeypatch, quota):
+    backend = LibassGeometryBackend()
+    inputs = replace(native_request(), keep_coverage=True)
+    try:
+        with monkeypatch.context() as limited:
+            limited.setattr(f"saitenka_subtitles.libass_backend.{quota}", 0)
+            constrained = backend.render(inputs).tokens[0]
+
+        recovered = backend.render(inputs).tokens[0]
+
+        assert constrained.overprint_verdict == "probe-budget-exceeded"
+        assert not constrained.overprint_safe
+        assert recovered.overprint_verdict == "mask-exact"
+        assert recovered.overprint_safe
+        assert constrained.coverage == recovered.coverage
+        assert len(constrained.coverage) == constrained.bounds.width * constrained.bounds.height
     finally:
         backend.close()
 

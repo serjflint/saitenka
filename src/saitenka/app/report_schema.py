@@ -23,6 +23,7 @@ _OPERATIONS = frozenset(
         "scroll_lifetime",
         "tooltip_quality_submission",
         "subtitle_calibration",
+        "subtitle_device_upload",
     }
 )
 _OUTCOMES = frozenset(
@@ -203,6 +204,7 @@ def envelope(
     runtime: dict | None = None,
     player: dict | None = None,
     queries: dict | None = None,
+    options: dict | None = None,
 ) -> dict:
     collector = safe_identity(collector)
     identity = producer.get("identity", {})
@@ -231,5 +233,6 @@ def envelope(
         "pixel_fidelity": {"status": "unknown", "scope": "not-validated"},
         "player_configuration": player if player is not None else {"status": "unknown"},
         "player_query_health": queries if queries is not None else {"status": "unknown"},
+        "session_configuration": options if options is not None else {"status": "unknown"},
         "omitted": ["raw-config", "logs", "traces", "crashes", "paths", "text", "pixels"],
     }

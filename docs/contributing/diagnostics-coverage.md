@@ -23,7 +23,23 @@ version used by that geometry backend and the mask source (`native-original`, `r
 or unknown for older results). `subtitle_geometry_native_reference` separates reference-render and
 attribution cost, retained mask bytes and bounded attribution-failure reasons. These measure worker
 work, not display presentation. Other loaded native libraries, resolved font faces,
-font-content identity, CLI/profile origins and other player settings remain unknown.
+font-content identity and other player settings remain unknown. The text-free document summary
+records source kind, declared script/layout resolution, style/event counts and allowlisted tag
+presence; missing declarations stay absent rather than becoming inferred defaults.
+
+`session_configuration` records selected session-construction options with their actual CLI,
+configuration-file, default or programmatic origin. It does not claim live renderer readback.
+Its profile history separates requested language/tokenizer from the committed values, including
+rejected switches and incomplete post-commit work. Profile names and arbitrary option strings are
+not shared. Both histories are bounded to four owners; process-local construction evidence is not
+a reconstruction of every later override.
+
+Accepted geometry also retains aggregate same-renderer verdicts and mask-eviction counts. These
+survive tracing-off collection and warm-cache publication; stale generations cannot become current
+findings. They describe redraw eligibility and retained coverage, not upload or physical pixels.
+The bounded `renderer_selection` history distinguishes an explicit legacy-mode request from the
+post-draw ownership state. Repeated unchanged draws do not consume history; missing older records
+remain unknown. Ownership is not a screenshot or an independent fidelity verdict.
 
 The history retains four configurations per owner and four owners, with eviction counts. A revision
 identifies changes in the recorded subset or configured font paths, not every possible renderer input.
@@ -84,6 +100,8 @@ oversized compressed or expanded input.
 Trace readers distinguish missing, readable-empty, partially malformed and invalid captures. Valid
 rows in a partial capture remain usable, with the rejected-row census retained; an unsupported trace
 schema cannot establish current evidence.
+The diagnostic analyzer also reads collection rejections and exporter loss counters. A truncated
+source rejected before ZIP inclusion remains incomplete capture evidence, not an empty healthy trace.
 
 The producer-summary reader accepts at most 128 KiB; an oversized summary yields
 `unreadable-or-too-large`, not healthy or zero activity. Combined-history tests guard this budget.
@@ -104,6 +122,20 @@ uv run python tools/telemetry_coverage.py report.zip --require tooltip-quality
 ```
 
 The coverage command reports required evidence present/absent and optional identity joins.
+Joined scenarios also count started, incomplete, orphan, unidentified and schema-invalid events.
+`--require` gates presence; `--require-complete` gates the declared joined chain. Neither can infer
+events lost before collection, and neither certifies pixels. Identity types remain distinct.
+Each scenario declares its missing-evidence category, uncertainty and next required evidence. The
+inventory's evidence-loss controls check the reader schema; they do not count as runtime fault
+injections. Explicit fault contracts separately check production-to-report diagnoses.
+Repeat `--character-corpus DIRECTORY` to account separate pinned corpora; add
+`--require-character-qualification` to reject absent, malformed, incomplete or failing results.
+This validates supplied manifests, controls and exact numerical verdicts; it does not rerun mpv.
+`--fault-case ID` evaluates a declared injected-fault contract from the same inventory: expected
+categories, severity, retained evidence and required uncertainty/next evidence. A report matching
+that contract does not itself prove the fault was injected. Missing evidence cannot satisfy the
+stale-result control. The reported fault denominator is separate from the larger scenario inventory;
+families without a declared executed fault contract remain unqualified.
 The detail tier includes the same metadata envelope as the default report, selected from the same
 log session as its trace. Allowlisted per-operation health counts identify failing boundaries even
 without tracing; pending work is not proof of a crash and a failed boundary is not its root cause.
@@ -118,6 +150,18 @@ not executed configuration cells. Preserve untested cells rather than extrapolat
 document swaps. It reports native-pixel disagreement alongside phase cost, token census and font/runtime
 provenance; faster incorrect masks are not a performance improvement. This is an offline same-renderer
 comparison, not an mpv qualification or a machine-independent timing gate.
+Use separate serial runs with and without `--trace-output NEW_TRACE` to compare the production span
+path with its exporter enabled. Output records exporter drops and bytes; worker thread-CPU does not
+include the writer thread's CPU. Compare identical case/geometry/cycle rows, not only maxima.
+
+Fractional probes have explicit build, pixel and cooperative CPU quotas in `libass_backend.py`.
+Exhaustion retains native masks and cannot poison later probe eligibility. An in-progress native call
+is not preempted. Stale source work is canceled at worker preparation boundaries; publication fences
+still reject results retired during rendering. Failure histories and phase caches are bounded.
+Device eligibility reasons are separate from `subtitle_device_upload` terminal outcomes: an accepted
+upload is not proof of physical presentation. A failed upload permits retry of identical pixels.
+The integration benchmark retains per-occurrence phase counter deltas and bounded generation/reason
+records. Its strict cue census is unchanged; an extra redraw is not silently deduplicated.
 
 ## Local replay and reduction
 
@@ -157,6 +201,8 @@ Telemetry disabled, unavailable SDK, dropped samples, absent fields, and measure
 - Complete-span `dur` measures its named scope. Deferred operation spans measure wall-clock
   lifetime, not a busy thread. `cpu_ms` is separate. `surface_write.round_trip_ms` measures
   submission to terminal reply; the completion callback's duration is not that wait.
+  Surface records retain acceptance separately from the reply: a successful but stale acknowledgment
+  rejected after removal or shutdown cannot establish current pixels.
 - Cue revisions distinguish repeated text. The acknowledgment readout retains unknown eligibility
   and missing acknowledgments, and never inserts a draw estimate into acknowledgment percentiles.
   Its current strict readout covers the native overprint slot, not every color device.
@@ -186,6 +232,12 @@ Bridge tests in `tests/test_trace_continuity.py`, `tests/session/test_surface_tr
 export/collection. Analyzer controls also cover missing fields, broken trees, repeated cues and
 biased retained tails. These complement rather than replace the existing runtime fault tests.
 
+The scenario inventory's `bridge_cases` names exact production-to-reader tests and their endpoints.
+Run every parameterized case and retain the pytest result; `telemetry-coverage` lists these contracts
+but never turns their presence into execution evidence. These differ from the narrower `--fault-case`
+report-matching denominator and from independent character qualification. Shutdown's bridge covers an
+accepted tooltip interaction; it does not certify every broker lane's retirement.
+
 ## Workloads and calibration
 
 The responsiveness timeline accepts `--osd 3440 1440 --tooltip-scale 1.5` and reports attempted,
@@ -195,7 +247,9 @@ not open and settle. Compare serial tracing-off/on repetitions with identical in
 and `BENCHMARKS.md` for existing budgets and profiler selection. Missing player frame counters
 are unavailable measurements, not zero dropped frames.
 
-Timeline/direct cue setup is a synthetic workload, not an observation-pipeline integration test.
+The timeline starts the session lifecycle and feeds synthetic cue/pointer observations through a fake
+player. Nested work uses visible scan-cell coordinates; a submitted request alone is not a settlement.
+It does not measure real player event delivery or display pixels.
 Trace replay substitutes vocabulary and infers actions from output cadence; it is not exact
 incident replay. Passing an existing speed gate does not certify quality settling or telemetry overhead.
 
@@ -205,6 +259,56 @@ agreement. This is neither a screenshot probe nor a per-kanji oracle. No heavy p
 sampling is enabled by the character tool below.
 
 ## Local character comparison
+
+### Corpus domains
+
+The original corpus's required pixel domain is locked in
+`tests/fixtures/character_corpus/cases.json`: twelve cases generated separately as ASS and SRT.
+The targeted comparison matrix is both formats × 1280×720/3440×1440. Styles and fractional placement
+are ASS-specific; SRT conversion is a separate arm, not equivalent styled coverage. Phase/origin
+sweeps are separate same-renderer invariants. This is targeted pairwise coverage, not the unrestricted
+product of fonts, effects, displays and text.
+
+The `Character corpus` CI workflow runs these four cells under Xvfb with pinned mpv and the
+bundled licensed font. It uploads the generated inputs, exact manifests, results and bounded
+failure images even when qualification fails. Private media is never an input to this workflow.
+The capture profile forces rendering when the diagnostic window is obscured; an unresponsive
+player fails startup rather than supplying unknown font settings. On macOS the profile uses the
+system render timer, avoiding dependence on a paused diagnostic window's display-link callback.
+
+For a local public run, generate inputs with
+`uv run --extra full tools/synthetic_characters.py --output /absolute/new-corpus`, then run
+`uv run --extra full tools/compare_cached_characters.py --cached-subtitles /absolute/new-corpus/original.ass --synthetic --size 1280 720 --output /absolute/new-ass-1280 --execute`.
+Repeat for `original.srt` and for `--size 3440 1440`, using a new output directory for each of the
+four cells. Do not add `--limit` or `--only-kanji` when qualifying the full census.
+
+Broader domains reuse existing corpora rather than silently enlarging the pixel-qualified claim:
+
+| Domain | Existing discriminator | Qualification scope |
+|---|---|---|
+| Simultaneous events, automatic wrapping, font substitution, styles | `tests/fixtures/libass_token_matrix.json` | Locked native capability/support contract; not strict mpv pixels |
+| Clipping and inverse clipping | `test_clipped_native_ink_refuses_an_unclipped_overprint` in `tests/test_fractional_overprint.py` | Changed native coverage retained; unclipped redraw refused |
+| Missing native runtime | `test_missing_native_runtime_is_not_a_successful_mask_fallback` in the same file | Dependency failure, never oracle success |
+| Animation, bidi, ligature boundaries, drawing runs | Existing token-matrix fallback candidates | Explicit capability results; no animation/cluster ownership certification |
+| Detached/combining marks, interior dakuten, repeated text, fractional sizes/scales | Original character corpus and fractional tests | Same-renderer invariants plus separately executed mpv qualification |
+
+No domain changes from failed to unsupported merely to clear a run. Non-ink coordinates remain in
+the overall character census. Corpus generation and local minimization require no episode or network;
+the minimizer's regression preserves an injected native-mask-authority defect after reduction.
+
+### Invariant controls
+
+These controls have distinct scopes; a fast matcher test cannot qualify the independent capture path.
+
+| Invariant | Positive control and deliberate fault | Environment |
+|---|---|---|
+| Fractional placement survives serialization | Native phase match versus integer-position reconstruction in `tests/test_fractional_overprint.py` | Same-host libass and bundled font |
+| Marks and glyph phase belong to the matched mask | Matching mask versus removed/extra mark and same-sized wrong phase in that file | Pure matcher |
+| Original pixels remain authoritative | Unmodified native reference versus token-color run splitting; production upload versus one-pixel displacement in `tests/test_native_pixel_assembly.py` | Native library, no player |
+| Cached/stale work cannot certify a new occurrence | Warm/cold agreement versus generation, variant and superseded-result rejection in `tests/test_subtitle_pipeline.py` | Worker/fake boundary |
+| Accepted reply is distinct from arrival | Current reply versus post-remove/shutdown late reply in `tests/session/test_surface_trace_bridge.py` | Real runtime, deferred fake player |
+| Coverage needs a complete declared chain | Complete schema versus lost terminal, missing identity and rejected acknowledgment in `tool_tests/test_telemetry_coverage.py` | Offline report reader |
+| Independent composite detects incorrect output | Correct composite versus displaced and wrong-color captures in the character runner | Explicit real-mpv execution |
 
 ```sh
 uv run --extra full python tools/compare_cached_characters.py \
@@ -220,8 +324,10 @@ No subtitle is downloaded or re-extracted. Inputs remain read-only; font attachm
 to a local black reference container. All source text, fonts and images stay in local output.
 
 The manifest binds subtitle/video hashes, implementation identity, rendering profile, geometry,
-coordinate key-set, mpv build and macOS ambient font-file inventory. Other providers remain
-unqualified. Exact matching manifests allow resume; already classified rows are retained. Delete
+coordinate key-set and mpv build. Private runs inventory macOS ambient font files; other ambient
+providers remain unqualified. Public synthetic runs instead pin the bundled font and disable system
+font providers, including on Linux. Exact matching manifests allow resume; already classified rows
+are retained. Delete
 nothing to retry a changed profile: use a new output directory. Results checkpoint after each
 coordinate; interruption retains the original denominator and leaves unfinished work unattempted.
 

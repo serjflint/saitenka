@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 from saitenka_subtitles import (
@@ -289,6 +289,61 @@ def test_worker_cache_rebinds_generation_after_invalidation() -> None:
     worker.close()
 
 
+def test_warm_geometry_preserves_native_pixel_provenance() -> None:
+    class NativeEvidenceBackend(FakeGeometryBackend):
+        def render(self, inputs: GeometryRequest) -> GeometrySnapshot:
+            return replace(
+                super().render(inputs), libass_version=0x01704000, mask_source="native-original"
+            )
+
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), NativeEvidenceBackend())
+    worker = SubtitleGeometryWorker(coordinator)
+    try:
+        assert worker.submit(request(coordinator.generation)) and worker.wait_idle()
+        cold = coordinator.current
+        coordinator.invalidate()
+
+        assert worker.submit(request(coordinator.generation)) and worker.wait_idle()
+
+        assert cold is not None
+        assert coordinator.current == replace(cold, generation=coordinator.generation)
+        assert coordinator.current.libass_version == 0x01704000
+        assert coordinator.current.mask_source == "native-original"
+        assert worker.stats.cache_hits == 1
+    finally:
+        worker.close()
+
+
+def test_source_change_during_prefetch_build_cancels_native_work() -> None:
+    rendered: list[int] = []
+
+    class RecordingBackend(FakeGeometryBackend):
+        def render(self, inputs: GeometryRequest) -> GeometrySnapshot:
+            rendered.append(inputs.timestamp_ms)
+            return super().render(inputs)
+
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), RecordingBackend())
+    worker = SubtitleGeometryWorker(coordinator)
+
+    def build() -> GeometryRequest:
+        inputs = request(coordinator.generation)
+        worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
+        return inputs
+
+    try:
+        assert worker.prefetch("retired-source", build) and worker.wait_idle()
+
+        assert rendered == []
+        assert worker.stats.prefetch_dropped == 1
+        assert (
+            worker.prefetch_miss_reason("retired-source") == GeometryCacheReason.PREFETCH_SUPERSEDED
+        )
+        assert worker.filed_keys() == ()
+        assert coordinator.current is None
+    finally:
+        worker.close()
+
+
 def test_worker_readiness_instrument_rejects_stale_geometry() -> None:
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator)
@@ -303,6 +358,24 @@ def test_worker_readiness_instrument_rejects_stale_geometry() -> None:
     assert worker.stats.ready_before_presented == 1
     assert worker.stats.presented == 3
     worker.close()
+
+
+def test_presentation_attempt_history_is_bounded_without_hiding_the_total() -> None:
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator)
+    try:
+        for _ in range(140):
+            worker.mark_not_ready("geometry-cache-miss")
+
+        history = worker.presentation_history
+        assert len(history) == 128
+        assert [item.sequence for item in history] == list(range(13, 141))
+        assert {item.generation for item in history} == {coordinator.generation}
+        assert {item.reason for item in history} == {"geometry-cache-miss"}
+        assert not any(item.ready for item in history)
+        assert worker.stats.presented == 140
+    finally:
+        worker.close()
 
 
 def test_worker_contains_provider_failure_and_stops() -> None:

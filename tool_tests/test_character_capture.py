@@ -3,9 +3,53 @@ from __future__ import annotations
 import numpy as np
 import pysubs2
 import pytest
-from compare_cached_characters import coordinate_result, request_for
+from compare_cached_characters import Captures, coordinate_result, request_for
+from PIL import Image
 
 from saitenka.app.subtitle_fonts import FontEnvironment
+
+
+def test_unresponsive_player_aborts_before_font_configuration(tmp_path):
+    class Player:
+        def command(self, *_args, **_kwargs):
+            return {"error": "timeout"}
+
+    with pytest.raises(RuntimeError, match="mpv get_property: timeout"):
+        Captures(tmp_path, Player(), (1280, 720))
+
+
+def test_captures_reuse_one_paused_frame_and_reject_a_stale_screenshot(tmp_path):
+    class Player:
+        def __init__(self):
+            self.commands = []
+            self.write_screenshot = True
+
+        def expand_path(self, path):
+            return path
+
+        def query(self, name):
+            return False if name == "sid" else None
+
+        def command(self, *args, **_kwargs):
+            self.commands.append(args)
+            if args[0] == "screenshot-to-file" and self.write_screenshot:
+                Image.new("RGB", (8, 8)).save(args[1])
+            return {"error": "success", "data": False}
+
+    ipc = Player()
+    capture = Captures(tmp_path, ipc, (8, 8))
+    try:
+        frames = [capture.frame("", sample) for sample in (1000, 2000)]
+        assert np.array_equal(*frames)
+        assert [command for command in ipc.commands if command[0] == "seek"] == [
+            ("seek", 2, "absolute+exact")
+        ]
+        assert not any(command[0] == "sub-remove" for command in ipc.commands)
+        ipc.write_screenshot = False
+        with pytest.raises(FileNotFoundError):
+            capture.frame("", 3000)
+    finally:
+        capture.overlay.close()
 
 
 def test_whitespace_does_not_require_ink_or_remove_neighboring_token_identity():

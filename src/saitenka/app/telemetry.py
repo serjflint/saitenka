@@ -276,7 +276,9 @@ def save_operation_summary(*, end: str = "unknown") -> None:
 def _save_operation_summary(*, end: str) -> None:
     import json
 
+    from saitenka.app.option_evidence import registry as option_registry
     from saitenka.app.player_evidence import registry as player_registry
+    from saitenka.app.profile_evidence import registry as profile_registry
     from saitenka.app.query_evidence import registry as query_registry
     from saitenka.app.render_evidence import registry
     from saitenka.app.report_schema import SCHEMA_VERSION, build_identity
@@ -287,6 +289,8 @@ def _save_operation_summary(*, end: str) -> None:
     runtime_configuration = registry.snapshot()
     player_configuration = player_registry.snapshot()
     player_queries = query_registry.snapshot()
+    session_configuration = option_registry.snapshot()
+    session_configuration["profiles"] = profile_registry.snapshot()
     directory = cache_dir() / "diagnostics"
     path = directory / f"session-{session_id()}.json"
     # Empty one-shot CLI invocations must not evict playback summaries.
@@ -296,6 +300,8 @@ def _save_operation_summary(*, end: str) -> None:
         and not runtime_configuration["owners"]
         and not player_configuration["owners"]
         and not player_queries["owners"]
+        and not session_configuration["owners"]
+        and not session_configuration["profiles"]["owners"]
         and end == "shutdown-observed"
         and not path.exists()
     ):
@@ -312,6 +318,7 @@ def _save_operation_summary(*, end: str) -> None:
         runtime_configuration=runtime_configuration,
         player_configuration=player_configuration,
         player_queries=player_queries,
+        session_configuration=session_configuration,
     )
     try:
         directory.mkdir(parents=True, exist_ok=True)

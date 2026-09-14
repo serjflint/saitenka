@@ -120,6 +120,33 @@ def test_prepare_frame_marks_karaoke_for_raster_tinting() -> None:
     )
 
     assert prepared.requires_coverage is True
+    assert dict(prepared.document_metadata)["tag_k"] == 1
+
+
+def test_document_metadata_omits_text_names_and_undeclared_resolution():
+    source = ASS.decode().replace("PlayResX: 1280", "LayoutResX: 3440")
+    source = (
+        source.replace("Arial", "PRIVATE-FONT")
+        .replace(",,猫を見る\n", r",,{\fsp1.5}猫を見る" + "\n")
+        .encode()
+    )
+    track = SubtitleTrackId("PRIVATE-TRACK")
+    rows, text = authored_ass_rows_at(source, track, 1500)
+
+    prepared = prepare_ass_hit_map_frame(
+        source, track, active_rows=rows, text=text, tokens=(TokenAnnotation(0, 0, 1),)
+    )
+
+    metadata = dict(prepared.document_metadata)
+    assert metadata == {
+        "layoutresx": 3440,
+        "playresy": 720,
+        "style_count": 1,
+        "summary_version": 1,
+        "active_event_count": 1,
+        "tag_fsp": 1,
+    }
+    assert "PRIVATE" not in repr(metadata)
 
 
 def test_prepare_frame_rejects_unmatched_active_event() -> None:

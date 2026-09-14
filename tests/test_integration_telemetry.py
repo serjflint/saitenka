@@ -6,6 +6,7 @@ import pytest
 from ankiconnect_client import AnkiConnectClient
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
+from test_diagnostic_findings import _load_findings
 from test_report import _hermetic
 
 from saitenka import operation_summary, otel_metrics
@@ -52,6 +53,15 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
     archive = report.build_report_bundle(
         tmp_path / "reports", timestamp="integration", diagnostic_detail=True
     )
+    diagnosis = _load_findings().diagnose_report(archive)
+    assert any(
+        finding["category"]
+        == ("operation-unavailable" if failure == "unavailable" else "operation-other")
+        and finding["evidence"]["operation"] == "anki_request"
+        and finding["severity"] == "warning"
+        for finding in diagnosis["findings"]
+    )
+    assert diagnosis["fidelity"]["status"] == "unknown"
     import zipfile
 
     with zipfile.ZipFile(archive) as bundle:

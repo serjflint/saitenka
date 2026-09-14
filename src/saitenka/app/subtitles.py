@@ -73,6 +73,8 @@ class WordBox:
     #: legacy renderer, which lays the text out itself and has no document to attribute to.
     event_id: SubtitleEventId | None = None
     overprint_safe: bool = True
+    overprint_verdict: str = "unvalidated"
+    coverage_evicted: bool = False
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h

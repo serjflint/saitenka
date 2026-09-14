@@ -915,6 +915,7 @@ class NativeSubtitleGeometry:
     def sync_pixel_owner(self, renderer) -> None:
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", self._owner)
+        self._ports.pipeline.record_pixel_owner(owner)
         if owner != self._owner:
             self._transition_owner(owner, self._last_decision)
 
@@ -1524,6 +1525,7 @@ class NativeSubtitleGeometry:
             cue.storage_size,
             prepared.ass,
             native_ass=source,
+            document_metadata=prepared.document_metadata,
             pixel_aspect=cue.pixel_aspect,
             margins=cue.margins,
             use_margins=cue.use_margins,
@@ -1666,6 +1668,7 @@ class NativeSubtitleGeometry:
                 state: RendererState = state,
                 fonts: subtitle_fonts.FontEnvironment = self._fonts,
                 unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
+                source_kind: str = self.source_kind,
             ) -> GeometryRequest:
                 tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = self._annotations(
@@ -1676,7 +1679,7 @@ class NativeSubtitleGeometry:
                 )
                 if not selection.annotations:
                     raise UnpaintableFrame("prefetched frame has no interaction-eligible tokens")
-                return self._build(
+                request = self._build(
                     document,
                     track_id,
                     generation,
@@ -1686,6 +1689,7 @@ class NativeSubtitleGeometry:
                     state,
                     unreachable,
                 )
+                return replace(request, source_kind=source_kind)
 
             self.worker.prefetch(key, build)
             if len(queued_keys) >= self.lookahead:
@@ -1695,7 +1699,7 @@ class NativeSubtitleGeometry:
         try:
             return self._schedule(seen)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
-            self.worker.mark_not_ready()
+            self.worker.mark_not_ready("schedule-error")
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
                 reason,
@@ -1887,13 +1891,13 @@ class NativeSubtitleGeometry:
         try:
             render = self._render_inputs(seen.prop, seen.osd)
         except (TypeError, ValueError) as error:
-            self.worker.mark_not_ready()
+            self.worker.mark_not_ready("unsupported-render-input")
             self._set_fallback("subtitle-render-input-unsupported", log_detail=str(error))
             self._ports.degrade()
             return None
         self._last_render_inputs = render
         if not self._fonts_are_current(render):
-            self.worker.mark_not_ready()
+            self.worker.mark_not_ready("font-environment-not-current")
             # Never read and changed under us are different facts with different advice. An unread
             # environment is the ordinary race at a track load — it resolves a moment later — and
             # reporting it as a mid-track change told the user to reselect a track that was fine,
@@ -2011,14 +2015,14 @@ class NativeSubtitleGeometry:
                 seen.is_skippable,
             )
         except ValueError:
-            self.worker.mark_not_ready()
+            self.worker.mark_not_ready("invalid-token-annotation")
             self._degrade_geometry("subtitle-token-annotation-invalid")
             return False
         self._last_selection = selection
         self._eligible_tokens = len(selection.annotations)
         if not selection.annotations:
             self._ports.publish([], None)
-            self.worker.mark_not_ready()
+            self.worker.mark_not_ready("no-eligible-tokens")
             if self._ports.use_native():
                 self._published_key = inputs.observation_key
                 self._set_ready()
@@ -2047,8 +2051,9 @@ class NativeSubtitleGeometry:
             fonts: subtitle_fonts.FontEnvironment = self._fonts,
             state: RendererState = renderer_state,
             unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
+            source_kind: str = self.source_kind,
         ) -> GeometryRequest:
-            return self._build(
+            request = self._build(
                 inputs.source,
                 inputs.track_id,
                 inputs.generation,
@@ -2058,6 +2063,7 @@ class NativeSubtitleGeometry:
                 state,
                 unreachable,
             )
+            return replace(request, source_kind=source_kind)
 
         def settled() -> None:
             """The lane terminal is what publishes the result — nothing polls for it."""
@@ -2070,7 +2076,7 @@ class NativeSubtitleGeometry:
         if inputs.observation_key is not None:
             self._pending_key = (inputs.generation, inputs.observation_key)
         self._submitted_at = (inputs.generation, time.perf_counter())
-        self.worker.mark_not_ready()
+        self.worker.mark_not_ready("geometry-cache-miss")
         self._degrade_geometry("subtitle-geometry-cache-miss")
         accepted = self.worker.submit_job(
             inputs.generation, build, work_key=inputs.key, on_settled=settled
@@ -2165,6 +2171,8 @@ class NativeSubtitleGeometry:
                 item.glyph_dy,
                 item.event_id,
                 item.overprint_safe,
+                item.overprint_verdict,
+                item.coverage_evicted,
             )
             for item in snapshot.tokens
         ]

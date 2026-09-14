@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Reports retain option origins, profile changes, renderer selection and bounded redraw-validation
+  outcomes without tracing. Diagnostic coverage tools distinguish missing causal boundaries,
+  known-fault expectations and independently qualified character results.
 - Reports accept explicitly selected local attachments and retain native mask provenance and
   projection outcomes. Bounded archive readers and a redistributable synthetic character corpus
   support offline diagnosis without requiring an episode download.
@@ -37,6 +40,8 @@ logs.
 
 ### Fixed
 
+- Failed subtitle raster uploads can retry identical pixels; pending overprints no longer count as
+  acknowledged color. Late surface replies retain their rejected status in diagnostic reports.
 - Subtitle color masks preserve the unmodified native render instead of relying on pixels changed
   by token-color tagging. Ambiguous attribution fails explicitly; overprints retain the native
   outline without adding a second border.

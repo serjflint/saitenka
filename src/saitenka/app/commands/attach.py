@@ -23,7 +23,9 @@ if TYPE_CHECKING:
     from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
 
 
-def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
+def _build_attach_options(
+    cfg: dict, *, mine: dict, config_source: str = "config-object"
+) -> ReaderOptions:
     from saitenka.app.config import (
         KeyOptions,
         MiningOptions,
@@ -34,6 +36,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         TranslationOptions,
         subtitle_geometry_options,
     )
+    from saitenka.app.option_evidence import origins
 
     ko, tt, mo, po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
     raw_stats = cfg.get("stats")
@@ -96,6 +99,7 @@ def _build_attach_options(cfg: dict, *, mine: dict) -> ReaderOptions:
         ),
         subtitle_geometry=subtitle_geometry_options(cfg),
         overlay_id_base=int(cfg.get("overlay_id_base", 1)),
+        diagnostic_origins=origins(cfg, config_source=config_source),
     )
 
 
@@ -387,7 +391,7 @@ def attach(  # noqa: PLR0913  # cyclopts CLI signature — each flag must stay a
     # with none configured, attach stays a working subtitle renderer (jamdict-fallback tooltips).
     _mc = cfg.get("mine")
     mc = _mc if isinstance(_mc, dict) else {}
-    opts = _build_attach_options(cfg, mine=mc)
+    opts = _build_attach_options(cfg, mine=mc, config_source="config-file")
 
     with otel_metrics.traced("startup.reader_create"):
         prepared = prepare_session_controller(

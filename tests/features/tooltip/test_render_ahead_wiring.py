@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import threading
 from dataclasses import replace
 from weakref import WeakKeyDictionary
@@ -12,7 +11,6 @@ import util
 from session_builder import TestSession, build_session
 from util import ManualRenderAheadSubmitter
 
-from saitenka import otel_metrics
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.tooltip import prefetch, tooltip_panel, tooltip_raster
 from saitenka.app.features.tooltip.popups import Panel
@@ -210,25 +208,16 @@ def test_worker_actually_warms_a_real_panel():
     )  # blocks warmed without any viewport() call
 
 
-def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
+def test_render_ahead_failure_retires_the_scroll_intent(diagnostic_trace):
     class BrokenPanel(_RecordingPanel):
         def render_ahead(self, *_args, **_kwargs):
             raise RuntimeError("broken band")
 
-    spans = []
-
-    @contextlib.contextmanager
-    def traced(name, **attrs):
-        spans.append((name, attrs))
-        yield None
-
-    monkeypatch.setattr(otel_metrics, "traced", traced)
     r = _reader()
     panel = BrokenPanel()
     r.graph.tooltip.surface_state().view.state = panel  # type: ignore[assignment]
-    r.graph.tooltip.surface_state().view.job_id = r.graph.tooltip.surface_state().jobs.begin(
-        "scroll"
-    )
+    job_id = r.graph.tooltip.surface_state().jobs.begin("scroll")
+    r.graph.tooltip.surface_state().view.job_id = job_id
     r.graph.tooltip.submit_render_ahead(r.graph.tooltip.surface_state().view, 1)
     _submitter(r).finish(outcome=EffectOutcome.FAILED, run=False)
 
@@ -236,8 +225,11 @@ def test_render_ahead_failure_retires_the_scroll_intent(monkeypatch):
         r.graph.tooltip.surface_state().view.desired_scroll
         == r.graph.tooltip.surface_state().view.scroll
     )
-    assert spans[-1][0] == "scroll_request"
-    assert spans[-1][1]["outcome"] == "failed"
+    events, analysis = diagnostic_trace()
+    terminal = [event["args"] for event in events if event["name"] == "scroll_request"]
+    assert terminal[-1]["outcome"] == "failed"
+    assert terminal[-1]["job_id"] == str(job_id)
+    assert analysis["interaction_latency"]["scroll_request"]["outcomes"] == {"failed": 1}
 
 
 def test_old_failure_cannot_roll_back_a_new_scroll_to_the_same_coordinate() -> None:

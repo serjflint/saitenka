@@ -39,6 +39,18 @@ def test_isolated_native_fault_reaches_the_report_bundle(monkeypatch, tmp_path):
     members = report.collect(diagnostic_detail=True)
     assert result.returncode < 0
     assert "Fatal Python error" in members["crashes/faulthandler.log"]
+    from test_diagnostic_findings import _load_findings
+
+    bundle = report.build_report_bundle(
+        tmp_path / "reports", timestamp="native-fault", diagnostic_detail=True
+    )
+    diagnosis = _load_findings().diagnose_report(bundle)
+    fault = next(
+        row for row in diagnosis["findings"] if row["category"] == "historical-native-fault"
+    )
+    assert fault["severity"] == "warning"
+    assert fault["evidence"] == {"scope": "historical", "session": "unknown"}
+    assert diagnosis["fidelity"]["status"] == "unknown"
 
 
 def _isolate(monkeypatch, tmp_path):
