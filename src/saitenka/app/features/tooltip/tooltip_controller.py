@@ -56,7 +56,7 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.runtime import Owner, events
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection
+    from collections.abc import Callable
 
     from saitenka_subtitles import CueIndex
     from saitenka_tokenize.registry import Tokenizer
@@ -82,7 +82,6 @@ if TYPE_CHECKING:
     from saitenka.app.features.tooltip.tooltip_panel import PanelKey, PanelPorts, PanelStyle
     from saitenka.app.interaction.presentation import InteractionSurfaces
     from saitenka.app.lifecycle_timers import LifecycleTimers
-    from saitenka.app.render_cache import LoadedView
     from saitenka.app.scoring import Coloring
     from saitenka.app.subtitle_presentation import CueRenderState
     from saitenka.render.layout_backend import LayoutBackend
@@ -188,21 +187,6 @@ class TooltipVisualSettings:
             backend,
             backend_label(backend),
         )
-
-
-@dataclass(frozen=True, slots=True)
-class TooltipPresentation:
-    """Fresh physical capabilities bound to one Tooltip presentation turn."""
-
-    scale: TipScale
-    surfaces: InteractionSurfaces
-    request_render_ahead: Callable[[PopupView, int], bool]
-    osd: tuple[int, int]
-    nested_max_frac: float
-    peek_render_cache: Callable[[object], LoadedView | None]
-    schedule_flash_expiry: Callable[[], bool]
-    toast: Callable[..., None]
-    request_engaged_tooltip: Callable[[tooltip_engaged.EngagedRequest], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -567,11 +551,12 @@ class TooltipController:
     @property
     def panel_ports(self) -> PanelPorts:
         view = self._session().observe()
-        return self.build_panel_ports(
-            style=self.panel_style,
-            mined_set=view.mined,
-            during_scroll=self._scrolled_this_turn,
-            cap=self.scale().cap,
+        return tooltip_panel.PanelPorts(
+            self.panel_style,
+            view.mined,
+            self._scrolled_this_turn,
+            self._state.panel_cache,
+            self.scale().cap,
         )
 
     @property
@@ -677,20 +662,24 @@ class TooltipController:
     @property
     def tip_ports(self) -> TipPorts:
         context = self._session()
-        return self.build_tip_ports(
-            TooltipPresentation(
-                scale=self.navigation_endpoint.scale(),
-                surfaces=context.surfaces,
-                request_render_ahead=self.submit_render_ahead,
-                osd=self._screen.osd,
-                nested_max_frac=self.visual.nested_height_fraction,
-                peek_render_cache=lambda key: self._preparation.cache.peek(
-                    self.preparation_inputs, key
-                ),
-                schedule_flash_expiry=self.schedule_flash_expiry,
-                toast=context.actions.toast,
-                request_engaged_tooltip=self.request_engaged_tooltip,
-            )
+        return TipPorts(
+            tip=self._state,
+            hover_store=self._hover_store,
+            nav_store=self._nav_store,
+            pulse_store=self._pulse_store,
+            pause_store=self._pause_store,
+            word_store=self._word_store,
+            scale=self.navigation_endpoint.scale(),
+            surfaces=context.surfaces,
+            request_render_ahead=self.submit_render_ahead,
+            osd=self._screen.osd,
+            nested_max_frac=self.visual.nested_height_fraction,
+            peek_render_cache=lambda key: self._preparation.cache.peek(
+                self.preparation_inputs, key
+            ),
+            schedule_flash_expiry=self.schedule_flash_expiry,
+            toast=context.actions.toast,
+            request_engaged_tooltip=self.request_engaged_tooltip,
         )
 
     def request_interaction_metadata(self, request) -> bool:
@@ -943,39 +932,6 @@ class TooltipController:
     @property
     def flash_seconds(self) -> float:
         return self._flash_seconds
-
-    def build_tip_ports(self, presentation: TooltipPresentation) -> TipPorts:
-        """Bind Tooltip-private state to fresh owner-thread presentation capabilities."""
-        return TipPorts(
-            tip=self._state,
-            scale=presentation.scale,
-            surfaces=presentation.surfaces,
-            hover_store=self._hover_store,
-            nav_store=self._nav_store,
-            pulse_store=self._pulse_store,
-            pause_store=self._pause_store,
-            word_store=self._word_store,
-            request_render_ahead=presentation.request_render_ahead,
-            osd=presentation.osd,
-            nested_max_frac=presentation.nested_max_frac,
-            peek_render_cache=presentation.peek_render_cache,
-            schedule_flash_expiry=presentation.schedule_flash_expiry,
-            toast=presentation.toast,
-            request_engaged_tooltip=presentation.request_engaged_tooltip,
-        )
-
-    def build_panel_ports(
-        self,
-        *,
-        style: PanelStyle,
-        mined_set: Collection[str],
-        during_scroll: bool,
-        cap: int,
-    ) -> PanelPorts:
-        """Bind Tooltip's cache to the fresh facts for one panel build."""
-        return tooltip_panel.PanelPorts(
-            style, mined_set, during_scroll, self._state.panel_cache, cap
-        )
 
     def has_cached_panel(self, key: object) -> bool:
         return key in self._state.panel_cache

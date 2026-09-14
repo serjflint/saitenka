@@ -83,10 +83,10 @@ _OWNER_MUTABLE_CHAINS = {(attribute,) for attribute in _OWNER_STATE_ATTRIBUTES} 
     ("_state", "view"),
 }
 _OWNER_MUTABLE_BRIDGES = {
-    "build_panel_ports",
-    "build_tip_ports",
     "cache_setdefault",
+    "panel_ports",
     "surface_state",
+    "tip_ports",
 }
 _OWNER_DECLARED_RESULTS = {
     "cache_limit",
