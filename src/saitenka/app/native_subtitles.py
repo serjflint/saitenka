@@ -2158,6 +2158,7 @@ class NativeSubtitleGeometry:
                 item.glyph_dx,
                 item.glyph_dy,
                 item.event_id,
+                item.overprint_safe,
             )
             for item in snapshot.tokens
         ]

@@ -110,8 +110,8 @@ class TokenGeometry:
     #: How far this token's ink falls from the position an ``\an7\pos`` event is given, measured by
     #: drawing it alone. ``bounds`` is ink and ``\an7`` anchors the line box, so a redraw that does
     #: not subtract these lands an ascent-gap low. Zero when unprobed, which keeps today's placement.
-    anchor_dx: int = 0
-    anchor_dy: int = 0
+    anchor_dx: float = 0
+    anchor_dy: float = 0
     #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
     spacing: float = 0.0
     scale_x: float = 100.0
@@ -119,8 +119,10 @@ class TokenGeometry:
     italic: bool = False
     #: Per-glyph offsets from this token's anchor, when the token has to be redrawn one event per
     #: glyph — see `saitenka_subtitles.fragments`. Empty means one event for the whole token.
-    glyph_dx: tuple[int, ...] = ()
-    glyph_dy: tuple[int, ...] = ()
+    glyph_dx: tuple[float, ...] = ()
+    glyph_dy: tuple[float, ...] = ()
+    #: False when native coverage cannot be reproduced by the fractional redraw; use its mask.
+    overprint_safe: bool = True
 
 
 class GeometryVariant(StrEnum):

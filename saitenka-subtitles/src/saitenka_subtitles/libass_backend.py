@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING, Protocol, cast
 import numpy as np
 
 from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+from saitenka_subtitles.fractional import PhaseMask, match_phases
 from saitenka_subtitles.fragments import (
     ROW_PITCH,
     FragmentRequest,
     ProbeLayout,
     fragments_from,
+    phase_document,
     probe_colour_count,
     probe_document,
     probe_rows,
@@ -114,10 +116,10 @@ _AnchorKey = tuple[str, str, float, float, float, bool, bool]
 class _Anchor:
     """A measured correction: the token's own origin, plus its glyphs' when it is drawn per glyph."""
 
-    dx: int
-    dy: int
-    glyph_dx: tuple[int, ...] = ()
-    glyph_dy: tuple[int, ...] = ()
+    dx: float
+    dy: float
+    glyph_dx: tuple[float, ...] = ()
+    glyph_dy: tuple[float, ...] = ()
 
 
 #: How many measured anchors to keep. One per distinct (word, face, frame size); a film's vocabulary
@@ -433,6 +435,10 @@ class LibassGeometryBackend:
         #: float per pixel of height and every one of them misses. Unbounded, a resize would leave
         #: an entry per (word, transient size) for the life of the session.
         self._anchors: OrderedDict[_AnchorKey, _Anchor] = OrderedDict()
+        self._phases: OrderedDict[
+            tuple[str, RendererState, FragmentRequest], tuple[PhaseMask, ...]
+        ] = OrderedDict()
+        self._phase_bytes = 0
         self._closed = False
 
     @property
@@ -497,6 +503,25 @@ class LibassGeometryBackend:
         frame: tuple[int, int],
     ) -> list[tuple[int, int, int, int, int]]:
         """Ink rectangles for the probe document, through this font environment's probe renderer."""
+        return [
+            (
+                token.token_index,
+                token.bounds.x,
+                token.bounds.y,
+                token.bounds.width,
+                token.bounds.height,
+            )
+            for token in self._probe_tokens(request, layout, frame, keep_coverage=False)
+        ]
+
+    def _probe_tokens(
+        self,
+        request: GeometryRequest,
+        layout: ProbeLayout,
+        frame: tuple[int, int],
+        *,
+        keep_coverage: bool,
+    ) -> tuple[TokenGeometry, ...]:
         key = request.renderer_key()
         probe_event = _probe_event(request.track_id)
         encoded = layout.document.encode()
@@ -537,16 +562,92 @@ class LibassGeometryBackend:
             # so measuring without them would return an offset for a render nobody performs.
             style=_render_style(request.renderer_state),
         )
-        return [
-            (
-                token.token_index,
-                token.bounds.x,
-                token.bounds.y,
+        return extract_token_geometry(result, probe, keep_coverage=keep_coverage)
+
+    def _phase_atlas(
+        self, request: GeometryRequest, fragment: FragmentRequest
+    ) -> tuple[PhaseMask, ...]:
+        key = (f"{request.track_id}:{request.renderer_key()}", request.renderer_state, fragment)
+        if key in self._phases:
+            self._phases.move_to_end(key)
+            return self._phases[key]
+        try:
+            atlas = self._build_phase_atlas(request, fragment)
+        except Exception:
+            log.debug("fractional probe unavailable; using native mask", exc_info=True)
+            atlas = ()
+        size = sum(len(phase.coverage) for phase in atlas)
+        if size <= MAX_BITMAP_BYTES:
+            self._phases[key] = atlas
+            self._phase_bytes += size
+            while self._phase_bytes > MAX_BITMAP_BYTES or len(self._phases) > ANCHOR_CACHE_MAX:
+                _, evicted = self._phases.popitem(last=False)
+                self._phase_bytes -= sum(len(phase.coverage) for phase in evicted)
+        return atlas
+
+    def _build_phase_atlas(
+        self, request: GeometryRequest, fragment: FragmentRequest
+    ) -> tuple[PhaseMask, ...]:
+        layout, frame = phase_document(fragment, _probe_rgbs(64))
+        measured = self._probe_tokens(request, layout, frame, keep_coverage=True)
+        pitch_x, pitch_y = frame[0] // 8, frame[1] // 8
+        for token in measured:
+            x = token.token_index % 8 * pitch_x
+            y = token.token_index // 8 * pitch_y
+            bounds = token.bounds
+            if not (
+                x < bounds.x
+                and bounds.x + bounds.width < x + pitch_x
+                and y < bounds.y
+                and bounds.y + bounds.height < y + pitch_y
+            ):
+                raise ValueError("fractional glyph escapes its probe cell")
+        return tuple(
+            PhaseMask(
                 token.bounds.width,
                 token.bounds.height,
+                token.coverage,
+                token.bounds.x - layout.slots[token.token_index].anchor[0],
+                token.bounds.y - layout.slots[token.token_index].anchor[1],
             )
-            for token in extract_token_geometry(result, probe, keep_coverage=False)
-        ]
+            for token in measured
+        )
+
+    def _fractional_token(
+        self, request: GeometryRequest, token: TokenGeometry, text: str
+    ) -> TokenGeometry:
+        positions = None
+        if text and not (set(text) & set("{}\\\n")) and not any(c.isspace() for c in text):
+            try:
+                atlases = (
+                    self._phase_atlas(
+                        request,
+                        FragmentRequest(
+                            0,
+                            character,
+                            token.font_name,
+                            token.font_size,
+                            scale_x=token.scale_x,
+                            bold=token.bold,
+                            italic=token.italic,
+                        ),
+                    )
+                    for character in text
+                )
+                positions = match_phases(
+                    token.coverage, token.bounds.width, token.bounds.height, atlases
+                )
+            except Exception:
+                log.debug("fractional probe unavailable; using native mask", exc_info=True)
+        if positions is None:
+            return replace(token, overprint_safe=False)
+        return replace(
+            token,
+            anchor_dx=0,
+            anchor_dy=0,
+            glyph_dx=tuple(x for x, _ in positions),
+            glyph_dy=tuple(y for _, y in positions),
+        )
 
     def _anchored(
         self, request: GeometryRequest, tokens: tuple[TokenGeometry, ...]
@@ -571,7 +672,7 @@ class LibassGeometryBackend:
                 ),
             )
             for token in tokens
-            if (text := texts.get((token.event_id, token.token_index)))
+            if token.spacing <= 0 and (text := texts.get((token.event_id, token.token_index)))
         ]
         unseen = [
             (token, key)
@@ -589,7 +690,7 @@ class LibassGeometryBackend:
             # requires the pair to be unique. Keyed on the index alone, two events whose first
             # tokens differ would hand each other's correction over.
             offsets[token.event_id, token.token_index] = offset
-        return tuple(
+        anchored = tuple(
             replace(
                 token,
                 anchor_dx=anchor.dx,
@@ -601,6 +702,21 @@ class LibassGeometryBackend:
             else token
             for token in tokens
         )
+        if not any(token.spacing > 0 for token in tokens):
+            return anchored
+        with self._telemetry.span("subtitle_geometry_fractional") as span:
+            resolved = tuple(
+                self._fractional_token(
+                    request, token, texts.get((token.event_id, token.token_index), "")
+                )
+                if token.spacing > 0
+                else token
+                for token in anchored
+            )
+            span.set("tokens", sum(token.spacing > 0 for token in resolved))
+            span.set("mask_fallbacks", sum(not token.overprint_safe for token in resolved))
+            span.set("atlas_bytes", self._phase_bytes)
+            return resolved
 
     def _measure_anchors(
         self, request: GeometryRequest, unseen: list[tuple[TokenGeometry, _AnchorKey]]
@@ -678,11 +794,15 @@ class LibassGeometryBackend:
                 extract_token_geometry(
                     result,
                     request,
-                    keep_coverage=request.keep_coverage,
+                    keep_coverage=request.keep_coverage
+                    or any(entry.spacing > 0 for entry in request.palette),
                     telemetry=self._telemetry,
                 ),
             )
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
+            span.set("fractional_tokens", sum(token.spacing > 0 for token in tokens))
+            span.set("fractional_mask_fallbacks", sum(not token.overprint_safe for token in tokens))
+            span.set("fractional_atlas_bytes", self._phase_bytes)
             span.set("extract_ms", extract_ms)
             span.set("found_tokens", len(tokens))
             self._telemetry.record(EXTRACT_MS, extract_ms)
@@ -701,6 +821,8 @@ class LibassGeometryBackend:
         self._closed = True
         self._documents.clear()
         self._anchors.clear()
+        self._phases.clear()
+        self._phase_bytes = 0
         self._unprobeable.clear()
         while self._probes:
             _probe_key, probe = self._probes.popitem(last=False)

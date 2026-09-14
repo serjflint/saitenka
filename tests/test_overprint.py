@@ -120,6 +120,18 @@ def measured_boxes(*, font: str = "Arial", size: float = 48.0):
     return [WordBox(index, 100 + index * 60, 600, 50, 40, font, size) for index in range(3)]
 
 
+def test_unmatched_fractional_redraw_uses_its_native_mask_despite_reachable_font() -> None:
+    from saitenka.app.subtitle_render import color_ladder
+
+    box = dataclasses.replace(measured_boxes()[0], coverage=b"\xff" * 2000, overprint_safe=False)
+
+    ladder = color_ladder(draw_request(styles=[Style((0, 255, 0, 255))], boxes=[box]))
+
+    assert ladder.devices == ("overpaint",)
+    assert ladder.masks[0].coverage == box.coverage
+    assert not ladder.paints
+
+
 def test_the_cue_is_drawn_once_per_token_in_its_own_color() -> None:
     """The feature: mpv keeps drawing the cue, and each token is drawn again over it in the color
     its reading state calls for — one `\\pos`-ed event per token, at the measured origin."""

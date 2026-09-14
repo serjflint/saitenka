@@ -57,8 +57,8 @@ class WordBox:
     #: Where this token's ink falls relative to an ``\an7\pos`` anchor — see
     #: `TokenGeometry.anchor_dx`. The overprint subtracts these; the raster device ignores them,
     #: since it tints the coverage in place rather than redrawing anything.
-    anchor_dx: int = 0
-    anchor_dy: int = 0
+    anchor_dx: float = 0
+    anchor_dy: float = 0
     #: The run metrics this token was laid out with — see `TokenGeometry.spacing`. Like the anchors,
     #: only the overprint reads them: the raster device tints coverage in place and redraws nothing.
     spacing: float = 0.0
@@ -66,12 +66,13 @@ class WordBox:
     bold: bool = False
     italic: bool = False
     #: See `TokenGeometry.glyph_dx` — the overprint draws a spaced token one event per glyph.
-    glyph_dx: tuple[int, ...] = ()
-    glyph_dy: tuple[int, ...] = ()
+    glyph_dx: tuple[float, ...] = ()
+    glyph_dy: tuple[float, ...] = ()
     #: Which authored event this token was measured in. Two speakers on screen are two events and
     #: one flat token list, so the index alone cannot say whose word was clicked. `None` from the
     #: legacy renderer, which lays the text out itself and has no document to attribute to.
     event_id: SubtitleEventId | None = None
+    overprint_safe: bool = True
 
     def contains(self, px: float, py: float) -> bool:
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
