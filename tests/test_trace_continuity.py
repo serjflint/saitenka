@@ -134,11 +134,21 @@ def test_malformed_exported_attributes_remain_unknown():
 
 
 def test_failed_crisp_submission_does_not_claim_an_acknowledged_upgrade(monkeypatch, tmp_path):
-    from saitenka.app.features.tooltip.quality import ViewQuality
+    from test_report import _hermetic
 
+    from saitenka.app import report
+    from saitenka.app.features.tooltip.quality import ViewQuality
+    from saitenka.app.trace_report import load_startup_trace, startup_json
+
+    config = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    config.write_text(
+        f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n', encoding="utf-8"
+    )
     gate = ActiveGate()
     gate.set(value=True)
-    path = tmp_path / "trace.json"
+    path = directory / "trace-1.json"
     provider = TracerProvider()
     provider.add_span_processor(CTFSpanProcessor(path, gate, start_thread=False))
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
@@ -152,7 +162,9 @@ def test_failed_crisp_submission_does_not_claim_an_acknowledged_upgrade(monkeypa
     quality.close()
     provider.shutdown()
 
-    events = json.loads(path.read_text())["traceEvents"]
+    archive = report.build_report_bundle(tmp_path / "reports", diagnostic_detail=True)
+    events = load_startup_trace(archive)
+    diagnosis = json.loads(startup_json(events))
     end = next(event["args"] for event in events if event["name"] == "tooltip_quality_end")
     assert end["acknowledged_quality"] == "soft"
     assert end["upgrade_abandoned"]
@@ -160,6 +172,10 @@ def test_failed_crisp_submission_does_not_claim_an_acknowledged_upgrade(monkeypa
         event["name"] == "tooltip_quality_acknowledged" and event["args"]["quality"] == "crisp"
         for event in events
     )
+    records = next(iter(diagnosis["tooltip_lifecycles"]["views"].values()))
+    assert any(row.get("outcome") == "failed" and row.get("quality") == "crisp" for row in records)
+    assert any(row.get("upgrade_abandoned") is True for row in records)
+    assert "display unmeasured" in diagnosis["tooltip_lifecycles"]["endpoint"]
 
 
 def test_old_viewport_ack_cannot_settle_a_new_scroll_destination(monkeypatch, tmp_path):

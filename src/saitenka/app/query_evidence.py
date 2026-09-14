@@ -33,7 +33,14 @@ INGRESS_OUTCOMES = frozenset(
         "candidate-full",
         "mailbox-full",
         "exception",
+        "reduced",
+        "projection-closed",
+        "projection-stale-epoch",
+        "projection-exception",
     }
+)
+_PROJECTION_OUTCOMES = frozenset(
+    {"reduced", "projection-closed", "projection-stale-epoch", "projection-exception"}
 )
 _ERRORS = {
     "property not found": "property-not-found",
@@ -130,7 +137,7 @@ def _safe_ingress_row(row: object) -> dict | None:
         not isinstance(name, str)
         or name not in PROPERTIES
         or not isinstance(source, str)
-        or source not in {"wire", "replay-read"}
+        or source not in {"wire", "replay-read", "projection-mailbox", "projection-direct"}
         or not isinstance(outcome, str)
         or outcome not in INGRESS_OUTCOMES
     ):
@@ -146,23 +153,42 @@ def _safe_ingress_row(row: object) -> dict | None:
         "property": name,
         "source": source,
         "outcome": outcome,
-        "mailbox_sequence": mailbox_sequence if outcome == "queued" else None,
+        "mailbox_sequence": mailbox_sequence
+        if outcome == "queued" or source == "projection-mailbox"
+        else None,
     }
+
+
+def _ingress_totals(raw: dict) -> tuple[int, dict] | None:
+    schema = raw.get("schema", 1)
+    if type(schema) is not int or schema not in {1, 2}:
+        return None
+    counts = raw.get("counts")
+    if not isinstance(counts, dict):
+        return None
+    totals = {key: count(counts.get(key)) for key in sorted(INGRESS_OUTCOMES)}
+    required = INGRESS_OUTCOMES if schema == 2 else INGRESS_OUTCOMES - _PROJECTION_OUTCOMES
+    if any(totals[key] is None for key in required):
+        return None
+    if schema == 1:
+        totals.update(dict.fromkeys(_PROJECTION_OUTCOMES))
+    return schema, totals
 
 
 def _safe_ingress(raw: object) -> dict:
     if not isinstance(raw, dict):
         return {"status": "unknown"}
-    rows, counts = raw.get("recent"), raw.get("counts")
-    if not isinstance(rows, list) or len(rows) > INGRESS_HISTORY or not isinstance(counts, dict):
+    parsed = _ingress_totals(raw)
+    rows = raw.get("recent")
+    if parsed is None or not isinstance(rows, list) or len(rows) > INGRESS_HISTORY:
         return {"status": "invalid"}
-    totals = {key: count(counts.get(key)) for key in sorted(INGRESS_OUTCOMES)}
-    if any(value is None for value in totals.values()):
-        return {"status": "invalid"}
+    schema, totals = parsed
     sanitized = [_safe_ingress_row(row) for row in rows]
     if None in sanitized:
         return {"status": "invalid"}
     retained = [row for row in sanitized if row is not None]
+    if any(totals[row["outcome"]] is None for row in retained):
+        return {"status": "invalid"}
     evicted = count(raw.get("evicted"))
     total = sum(value for value in totals.values() if value is not None)
     if (
@@ -176,7 +202,13 @@ def _safe_ingress(raw: object) -> dict:
         )
     ):
         return {"status": "invalid"}
-    return {"status": "collected", "counts": totals, "recent": sanitized, "evicted": evicted}
+    return {
+        "status": "collected",
+        "schema": schema,
+        "counts": totals,
+        "recent": sanitized,
+        "evicted": evicted,
+    }
 
 
 def safe_snapshot(raw: object) -> dict:
@@ -232,6 +264,7 @@ class QueryEvidence:
                 "closed": self._closed,
                 "stale_completions": self._stale,
                 "ingress": {
+                    "schema": 2,
                     "recent": list(self._ingress),
                     "counts": self._ingress_counts,
                     "evicted": max(0, self._ingress_sequence - INGRESS_HISTORY),

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app.render_evidence import GeometryEvidence
+from saitenka.app.render_evidence import GeometryEvidence, validation_summary
 from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
@@ -158,6 +158,10 @@ class SubtitleModeCoordinator:
             )
         self._renderer.activate(target)
         return forced
+
+    def record_pixel_owner(self, owner: str) -> None:
+        with self._state_lock:
+            self._evidence.selection(pixel_owner=owner, legacy_forced=self.legacy_forced)
 
     def draw_current(self, target: SubtitleTarget) -> DrawResult | None:
         """Draw the current cue and hand the geometry back. The one place a draw is staged.
@@ -347,7 +351,12 @@ class SubtitleModeCoordinator:
             self._current = result
             self._last_error = None
             self._evidence.published(
-                ticket.configuration_revision, request.generation, ticket.sequence
+                ticket.configuration_revision,
+                request.generation,
+                ticket.sequence,
+                libass_version=result.libass_version,
+                mask_source=result.mask_source,
+                validation=validation_summary(result),
             )
         with otel_metrics.traced("subtitle_geometry_publish") as span:
             span.set("configuration_owner", self._evidence.owner)
@@ -355,6 +364,7 @@ class SubtitleModeCoordinator:
             span.set("generation", request.generation)
             span.set("request_sequence", ticket.sequence)
             span.set("outcome", "published")
+            span.set("mask_source", result.mask_source)
         return True
 
     def record_error(self, reservation: GeometryReservation, error: Exception) -> bool:

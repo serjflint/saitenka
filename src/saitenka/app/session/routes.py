@@ -443,6 +443,7 @@ def install_session_reactor(gateway: MpvGateway, *, startup_hint: bool = True) -
         _dispatcher(gateway),
         diagnostics=ledger.diagnostic,
         control=control,
+        event_observer=gateway.record_projection,
     )
     control.reactor = reactor
     # Attaching is part of installing, not a step the caller adds: every port that reaches the

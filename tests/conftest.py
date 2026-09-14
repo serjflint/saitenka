@@ -207,3 +207,45 @@ def close_built_sessions():
     """
     yield
     session_builder.drain_and_close(session_builder.BUILT_SESSIONS)
+
+
+@pytest.fixture
+def diagnostic_trace(monkeypatch, tmp_path):
+    """Export production spans and return the collected bundle's reader output."""
+    import json
+
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from test_report import _hermetic
+
+    from saitenka.app import report
+    from saitenka.app.otel_export import CTFSpanProcessor
+    from saitenka.app.telemetry import ActiveGate
+    from saitenka.app.trace_report import load_startup_trace, startup_json
+
+    config = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "bridge-telemetry"
+    directory.mkdir()
+    config.write_text(f'[telemetry]\nexport_dir = "{directory}"\n', encoding="utf-8")
+    gate = ActiveGate()
+    gate.set(value=True)
+    provider = TracerProvider()
+    provider.add_span_processor(
+        CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
+    )
+    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+    finished = False
+
+    def collect():
+        nonlocal finished
+        provider.shutdown()
+        finished = True
+        archive = report.build_report_bundle(tmp_path / "bridge-reports", diagnostic_detail=True)
+        events = load_startup_trace(archive)
+        return events, json.loads(startup_json(events))
+
+    try:
+        yield collect
+    finally:
+        if not finished:
+            provider.shutdown()

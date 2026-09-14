@@ -132,6 +132,23 @@ def test_unmatched_fractional_redraw_uses_its_native_mask_despite_reachable_font
     assert not ladder.paints
 
 
+@pytest.mark.parametrize("reason", ["exact-mask-mismatch", "probe-error", "unsupported-text"])
+def test_fallback_reason_survives_device_selection(reason):
+    from saitenka.app.subtitle_render import color_ladder
+
+    box = dataclasses.replace(
+        measured_boxes()[0],
+        coverage=b"\xff" * 2000,
+        overprint_safe=False,
+        overprint_verdict=reason,
+    )
+
+    ladder = color_ladder(draw_request(styles=[Style((0, 255, 0, 255))], boxes=[box]))
+
+    assert ladder.devices == ("overpaint",)
+    assert ladder.reasons == (reason,)
+
+
 def test_the_cue_is_drawn_once_per_token_in_its_own_color() -> None:
     """The feature: mpv keeps drawing the cue, and each token is drawn again over it in the color
     its reading state calls for — one `\\pos`-ed event per token, at the measured origin."""
@@ -146,6 +163,7 @@ def test_the_cue_is_drawn_once_per_token_in_its_own_color() -> None:
     assert r"\pos(100,600)" in lines[0] and r"\1c&H0000FF&" in lines[0]
     assert r"\pos(220,600)" in lines[2] and r"\1c&HFF0000&" in lines[2]
     assert lines[0].endswith("}猫")
+    assert all(r"\bord0\shad0" in line for line in lines)
 
 
 def test_a_cue_the_measurement_gave_no_face_for_is_left_uncolored() -> None:
@@ -295,8 +313,10 @@ class FakeSurfaces:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, object]] = []
 
-    def present_rgba(self, rgba, x, y, *, oid, owner) -> None:
+    def present_rgba(self, rgba, x, y, *, oid, owner, on_settled=None) -> None:
         self.calls.append(("present", oid, (x, y, len(rgba.tobytes()), owner)))
+        if on_settled is not None:
+            on_settled(True)  # noqa: FBT003 -- surface settlement callback contract
 
     def remove(self, oid, *, owner) -> None:
         self.calls.append(("remove", oid, owner))

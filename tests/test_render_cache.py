@@ -535,7 +535,7 @@ def test_the_raster_oracle_can_fire():
         banded.guard_main_render(on=False)
 
 
-def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
+def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster(diagnostic_trace):
     # Phase A: the nested popup finally gets render-ahead + crisp-poll. After a scroll records a warm and
     # the worker drains it, the poll tick assembles the crisp viewport from warm native bands with ZERO
     # synchronous raster on the interactive thread — the guarantee the base tooltip already had.
@@ -567,6 +567,11 @@ def test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster():
         r.graph.tooltip.surface_state().nest.crisp_miss == ""
         and not r.graph.tooltip.surface_state().nest.crisp_pending
     )  # upgraded soft → crisp
+    events, analysis = diagnostic_trace()
+    compositions = [event["args"] for event in events if event["name"] == "tip_compose"]
+    assert any(row["kind"] == "nested" and row["soft_reason"] for row in compositions)
+    assert analysis["tooltip_quality"]["nested"]["crisp"] > 0
+    assert analysis["tooltip_quality"]["nested"]["soft"] > 0
 
 
 def test_nested_scroll_requests_render_ahead_for_the_nested_view():

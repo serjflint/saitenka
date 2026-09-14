@@ -19,6 +19,7 @@ def _trace(path: Path) -> Path:
                         "name": "subtitle_pixel_ownership",
                         "ph": "X",
                         "ts": 1,
+                        "dur": 0,
                         "args": {
                             "event": "legacy-stage-result",
                             "owner_before": "unknown",

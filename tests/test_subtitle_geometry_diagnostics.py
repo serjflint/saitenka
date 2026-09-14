@@ -93,6 +93,8 @@ def test_the_classifier_reads_the_message_the_rewrite_actually_raises(
     [
         ("missing libass token colors", GeometryErrorCode.MISSING_PALETTE_PIXELS),
         ("ambiguous libass token overlap", GeometryErrorCode.OVERLAPPING_PALETTE_PIXELS),
+        ("native mask attribution: token has no native ink", GeometryErrorCode.NATIVE_ATTRIBUTION),
+        ("native mask attribution: run budget exhausted", GeometryErrorCode.NATIVE_ATTRIBUTION),
         ("private subtitle text and /a/path", GeometryErrorCode.PROVIDER),
     ],
 )

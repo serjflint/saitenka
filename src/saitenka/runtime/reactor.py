@@ -74,6 +74,7 @@ class SessionReactor[StateT]:
         *,
         diagnostics: Callable[[EmitDiagnostic], None] | None = None,
         control: ControlDispatcher | None = None,
+        event_observer: Callable[[EventEnvelope, str], None] | None = None,
     ) -> None:
         self._state = state
         self._reducer = reducer
@@ -81,6 +82,7 @@ class SessionReactor[StateT]:
         self._dispatch = dispatch
         self._diagnostics = diagnostics
         self._control = control
+        self._event_observer = event_observer
         self._lifecycle = Lifecycle.OPEN
         self._connection_epoch = 0
         self._pending: dict[EffectId, AsyncEffect] = {}
@@ -105,23 +107,32 @@ class SessionReactor[StateT]:
         )
 
     def handle(self, envelope: EventEnvelope) -> bool:
+        outcome = "exception"
+        try:
+            result, outcome = self._handle(envelope)
+            return result
+        finally:
+            if self._event_observer is not None:
+                self._event_observer(envelope, outcome)
+
+    def _handle(self, envelope: EventEnvelope) -> tuple[bool, str]:
         payload = envelope.payload
         if self._lifecycle != Lifecycle.OPEN and not isinstance(payload, EffectFinished):
-            return False
+            return False, "closed"
         if isinstance(payload, ConnectionReplaced):
             if not self._replace_connection(payload):
-                return False
+                return False, "stale-epoch"
         elif not isinstance(payload, EffectFinished) and (
             envelope.connection_epoch is not None
             and envelope.connection_epoch != self._connection_epoch
         ):
-            return False
+            return False, "stale-epoch"
         if isinstance(payload, EffectFinished):
             completion = self._finish(payload)
             if completion is None:
-                return False
+                return False, "unowned-completion"
             payload = completion
-        return self._reduce(payload)
+        return self._reduce(payload), "reduced"
 
     def owns(self, effect_id: EffectId) -> bool:
         """Did this reactor dispatch that effect and is it still awaiting its completion?

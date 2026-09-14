@@ -6,7 +6,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from saitenka_subtitles.geometry import FontSetup, RendererState
+from saitenka_subtitles.geometry import FontProvider, FontSetup, RendererState
 from test_report_metadata import _environment
 from test_subtitle_pipeline import FakeCurrentRenderer, FakeGeometryBackend, request
 
@@ -32,6 +32,33 @@ def _owner():
     return render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())[
         "owners"
     ][0]
+
+
+@pytest.mark.timeout(5)
+def test_renderer_toggle_preserves_requested_mode_and_post_draw_owner_in_zip(monkeypatch, tmp_path):
+    from test_diagnostic_findings import read_envelope
+    from test_native_subtitles import reader, settle_jobs
+
+    _setup(monkeypatch, tmp_path)
+    session, ipc, _backend = reader(tmp_path)
+    try:
+        presentation = session.graph.subtitle_presentation
+        session.graph.playback.observe("sub-text", "猫を見る")
+        session.graph.cue.settle()
+        settle_jobs(session, ipc)
+
+        presentation.toggle_renderer()
+        telemetry.save_operation_summary()
+        bundle = report.build_report_bundle(tmp_path / "reports")
+        owners = read_envelope(bundle)["effective_runtime_configuration"]["owners"]
+        history = owners[0]["renderer_selection"]["history"]
+
+        assert (history[0]["pixel_owner"], history[0]["legacy_forced"]) == ("native", False)
+        assert (history[-1]["pixel_owner"], history[-1]["legacy_forced"]) == ("legacy", True)
+        assert history[-1]["revision"] > history[0]["revision"]
+        assert "not pixel validation" in owners[0]["renderer_selection"]["scope"]
+    finally:
+        session.close()
 
 
 def test_backend_request_parameters_survive_metadata_export(monkeypatch, tmp_path):
@@ -63,9 +90,67 @@ def test_backend_request_parameters_survive_metadata_export(monkeypatch, tmp_pat
         14,
         15,
     ]
-    assert owner["published"] == owner["requested"]
+    assert {key: owner["published"][key] for key in owner["requested"]} == owner["requested"]
+    assert owner["published"]["validation"]["tokens"] == 1
     assert payload["configuration"]["fields"]["tip_scale"]["value"] == 9.0
     assert payload["pixel_fidelity"]["status"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("changes", "field", "before", "after"),
+    [
+        ({"frame_size": (3440, 1440)}, "frame_width", 1920, 3440),
+        ({"renderer_state": RendererState(font_scale=1.5)}, "font_scale", 1.0, 1.5),
+        ({"font_setup": FontSetup(font_provider=FontProvider.NONE)}, "font_provider", 1, 0),
+        ({"attachments": (("PRIVATE.ttf", b"PRIVATE"),)}, "attachment_count", 0, 1),
+    ],
+)
+def test_configuration_transition_preserves_both_revisions_in_zip(
+    monkeypatch, tmp_path, changes, field, before, after
+):
+    import zipfile
+
+    _setup(monkeypatch, tmp_path)
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    try:
+        pipeline.render(request(0))
+        generation = pipeline.invalidate()
+
+        pipeline.render(replace(request(generation), **changes))
+        telemetry.save_operation_summary()
+        bundle = report.build_report_bundle(tmp_path / "reports", timestamp="transition")
+
+        with zipfile.ZipFile(bundle) as archive:
+            payload = json.loads(archive.read("diagnostics/envelope.json"))
+            assert b"PRIVATE" not in b"".join(archive.read(name) for name in archive.namelist())
+        owner = payload["effective_runtime_configuration"]["owners"][0]
+        assert [(row["revision"], row["fields"][field]) for row in owner["configurations"]] == [
+            (1, before),
+            (2, after),
+        ]
+        assert owner["published"]["revision"] == 2
+        assert owner["published"]["generation"] == generation
+        assert payload["pixel_fidelity"]["status"] == "unknown"
+    finally:
+        pipeline.close()
+
+
+def test_native_version_is_from_the_accepted_result_not_collector(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+
+    class VersionedBackend(FakeGeometryBackend):
+        def render(self, request):
+            return replace(
+                super().render(request), libass_version=0x01704000, mask_source="native-original"
+            )
+
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), VersionedBackend())
+    pipeline.render(request(0))
+
+    publication = _export()["effective_runtime_configuration"]["owners"][0]["published"]
+    assert publication["libass_version"] == 0x01704000
+    assert publication["mask_source"] == "native-original"
+    assert publication["status"] == "retained"
 
 
 def test_stale_publish_cannot_claim_new_configuration_has_rendered(monkeypatch, tmp_path):
@@ -140,6 +225,24 @@ def test_same_configuration_across_cues_reuses_revision(monkeypatch, tmp_path):
     assert len(owner["configurations"]) == 1
     assert owner["published"]["revision"] == 1
     assert owner["published"]["generation"] == generation
+
+
+def test_renderer_history_is_bounded_and_unchanged_draws_do_not_evict(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    try:
+        for owner in ["native", "legacy"] * 5:
+            pipeline.record_pixel_owner(owner)
+        for _ in range(20):
+            pipeline.record_pixel_owner("legacy")
+
+        selection = _export()["effective_runtime_configuration"]["owners"][0]["renderer_selection"]
+
+        assert selection["evicted"] == 6
+        assert [row["revision"] for row in selection["history"]] == [7, 8, 9, 10]
+        assert [row["pixel_owner"] for row in selection["history"]] == ["native", "legacy"] * 2
+    finally:
+        pipeline.close()
 
 
 def test_font_path_changes_advance_revision_without_exporting_paths_or_text(monkeypatch, tmp_path):
@@ -302,6 +405,11 @@ def test_observed_ultrawide_cue_exports_consumed_configuration(monkeypatch, tmp_
     )
     assert fields["margin_top"] == 10
     assert fields["margin_bottom"] == 11
+    assert fields["source_kind"] == "authored-ass"
+    assert fields["document"]["playresx"] == 1280
+    assert fields["document"]["playresy"] == 720
+    assert fields["document"]["style_count"] == 1
+    assert fields["document"]["active_event_count"] == 1
     assert owner["published"]["status"] == "retained"
     render = next(span["attrs"] for span in spans if span["name"] == "subtitle_geometry_render")
     publication = next(

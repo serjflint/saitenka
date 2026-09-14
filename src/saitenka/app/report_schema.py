@@ -8,9 +8,39 @@ import platform
 import re
 import subprocess
 import sys
+from collections import Counter
 from importlib.metadata import PackageNotFoundError, distribution
 
 SCHEMA_VERSION = 1
+_OPERATIONS = frozenset(
+    {
+        "anki_request",
+        "mpv_effect",
+        "runtime_job",
+        "runtime_mpv",
+        "surface_write",
+        "tooltip_lifetime",
+        "scroll_lifetime",
+        "tooltip_quality_submission",
+        "subtitle_calibration",
+        "subtitle_device_upload",
+    }
+)
+_OUTCOMES = frozenset(
+    {
+        "succeeded",
+        "acknowledged",
+        "failed",
+        "cancelled",
+        "superseded",
+        "stale",
+        "not-admitted",
+        "unavailable",
+        "timeout",
+        "disconnected",
+        "shutdown-aborted",
+    }
+)
 _VERSION = re.compile(
     r"[0-9]+(?:\.[0-9]+){1,3}(?:(?:a|b|rc)[0-9]+)?"
     r"(?:\.post[0-9]+)?(?:\.dev[0-9]+)?(?:\+g[0-9a-f]{7,40}(?:-dirty)?)?"
@@ -105,7 +135,24 @@ def operation_health(raw: dict) -> dict:
         "status": "collected",
         "pending_total": sum(value for value in pending_counts if value is not None),
         "terminal_totals": terminal,
+        "by_operation": _operation_counts(pending, outcomes),
     }
+
+
+def _operation_counts(pending: dict, outcomes: list) -> dict:
+    grouped: dict[str, Counter] = {}
+    for row in outcomes:
+        operation = row.get("operation")
+        operation = (
+            operation if isinstance(operation, str) and operation in _OPERATIONS else "other"
+        )
+        outcome = row.get("outcome")
+        outcome = outcome if isinstance(outcome, str) and outcome in _OUTCOMES else "other"
+        grouped.setdefault(operation, Counter())[outcome] += row["count"]
+    for operation, pending_count in pending.items():
+        name = operation if operation in _OPERATIONS else "other"
+        grouped.setdefault(name, Counter())["pending"] += pending_count
+    return {key: dict(values) for key, values in sorted(grouped.items())}
 
 
 def configured_metadata(raw: dict) -> dict:
@@ -157,6 +204,7 @@ def envelope(
     runtime: dict | None = None,
     player: dict | None = None,
     queries: dict | None = None,
+    options: dict | None = None,
 ) -> dict:
     collector = safe_identity(collector)
     identity = producer.get("identity", {})
@@ -185,5 +233,6 @@ def envelope(
         "pixel_fidelity": {"status": "unknown", "scope": "not-validated"},
         "player_configuration": player if player is not None else {"status": "unknown"},
         "player_query_health": queries if queries is not None else {"status": "unknown"},
+        "session_configuration": options if options is not None else {"status": "unknown"},
         "omitted": ["raw-config", "logs", "traces", "crashes", "paths", "text", "pixels"],
     }

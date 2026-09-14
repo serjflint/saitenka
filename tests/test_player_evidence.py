@@ -30,7 +30,10 @@ def test_rejected_native_configuration_still_exports_its_player_inputs(monkeypat
     fields = payload["player_configuration"]["owners"][0]["configurations"][-1]["fields"]
     assert fields["sub-ass-video-aspect-override"] == {"status": "available", "value": 1.25}
     assert backend.requests == []
-    assert payload["effective_runtime_configuration"] == {"status": "unknown"}
+    geometry = payload["effective_runtime_configuration"]["owners"][0]
+    assert geometry["configurations"] == []
+    assert geometry["requested"] == geometry["published"] == {"status": "unknown"}
+    assert geometry["renderer_selection"]["history"]
 
 
 @pytest.mark.timeout(5)

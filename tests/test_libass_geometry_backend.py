@@ -672,6 +672,47 @@ def test_a_batch_the_probe_cannot_measure_is_not_re_rendered_every_frame() -> No
     assert probes == 1, f"a permanent probe failure re-rendered {probes} times"
 
 
+def test_novel_probe_failure_storm_evicts_bounded_history(monkeypatch) -> None:
+    monkeypatch.setattr("saitenka_subtitles.libass_backend.ANCHOR_CACHE_MAX", 2)
+    spans: list[dict[str, object]] = []
+    created: list[FakeRenderer] = []
+
+    class Telemetry:
+        @contextmanager
+        def span(self, name: str):
+            values: dict[str, object] = {"name": name}
+            spans.append(values)
+            yield SimpleNamespace(set=values.__setitem__)
+
+        def record(self, _metric: str, _milliseconds: float) -> None:
+            pass
+
+    def failing_factory(ass, **kwargs):
+        renderer = _recording_factory(created)(ass, **kwargs)
+        renderer.probe_result = Result(())
+        return renderer
+
+    backend = LibassGeometryBackend(renderer_factory=failing_factory, telemetry=Telemetry())
+    try:
+        for size in (40, 41, 42):
+            inputs = probeable_request(keep_coverage=True)
+            backend.render(
+                replace(inputs, palette=tuple(replace(p, font_size=size) for p in inputs.palette))
+            )
+
+        retained = [s for s in spans if s["name"] == "subtitle_geometry_fractional"]
+        assert [s["retained_probe_failures"] for s in retained] == [2, 2, 2]
+        assert [s["probe_failures_evicted"] for s in retained] == [0, 2, 4]
+        assert all(s["mask_fallbacks"] == 2 for s in retained)
+        assert all(s["sample_token_indices"] == (0, 1) for s in retained)
+        assert all(s["sample_event_orders"] == (0, 0) for s in retained)
+        assert all(len(s["sample_native_rectangles"]) == 8 for s in retained)
+        assert all(len(s["sample_anchor_offsets"]) == 4 for s in retained)
+        assert all(s["native_glyph_census"] == "unavailable" for s in retained)
+    finally:
+        backend.close()
+
+
 def test_the_extraction_reports_the_four_phases_it_spends_its_time_in() -> None:
     """`extract_ms` is ~99% of a geometry render — libass's own render is ~0.1 ms against ~12 ms
     here — so one number for it said only "the slow part is ours", which nobody can act on.

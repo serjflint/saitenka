@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import threading
 import time
@@ -14,7 +13,6 @@ from saitenka_tokenize.japanese import Token
 from util import FakeIPC, await_ready, bare_gateway, drain_for, session_gateway
 
 import saitenka.app.features.mining.mined_seed as mined_seed_lane
-from saitenka import otel_metrics
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.config import PerfOptions, ReaderOptions
 from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec, MiningTarget
@@ -171,22 +169,16 @@ def test_mined_seed_retries_after_a_transient_failure(monkeypatch, make_session)
         gateway.close()
 
 
-def test_reader_close_cancels_accepted_interaction_jobs(monkeypatch, make_session):
-    spans = []
-
-    @contextlib.contextmanager
-    def traced(name, **attrs):
-        spans.append((name, attrs))
-        yield None
-
-    monkeypatch.setattr(otel_metrics, "traced", traced)
+def test_reader_close_cancels_accepted_interaction_jobs(make_session, diagnostic_trace):
     r = make_session(FakeIPC())
     r.graph.tooltip.surface_state().jobs.begin("tooltip")
 
     r.close()
 
-    assert spans[-1][0] == "tooltip_request"
-    assert spans[-1][1]["outcome"] == "cancelled"
+    events, analysis = diagnostic_trace()
+    terminal = [event["args"] for event in events if event["name"] == "tooltip_request"]
+    assert terminal[-1]["outcome"] == "cancelled"
+    assert analysis["interaction_latency"]["tooltip_request"]["outcomes"] == {"cancelled": 1}
 
 
 def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, make_session):
@@ -246,10 +238,17 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
-def test_owned_startup_hint_clears_after_the_first_completed_turn(request, make_session):
+def test_owned_startup_hint_clears_after_the_first_completed_turn(
+    request, make_session, diagnostic_trace, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from saitenka.app.session import controller
     from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
+    ipc.connected_at = 1.0
+    monkeypatch.setattr(controller, "time", SimpleNamespace(monotonic=lambda: 2.0))
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
@@ -265,6 +264,10 @@ def test_owned_startup_hint_clears_after_the_first_completed_turn(request, make_
     before = ipc.commands.count(("show-text", "", 1))
     r.pump()
     assert ipc.commands.count(("show-text", "", 1)) == before
+    events, analysis = diagnostic_trace()
+    ready = [event for event in events if event["name"] == "startup.interactive_ready"]
+    assert len(ready) == 1 and ready[0]["args"]["since_ipc_ms"] == 1000.0
+    assert any(row["name"] == "startup.interactive_ready" for row in analysis["startup"])
 
 
 def test_first_batch_command_dispatches_before_readiness_clears_the_hint(

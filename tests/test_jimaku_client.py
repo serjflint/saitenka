@@ -113,7 +113,7 @@ def test_get_401_names_the_key_command(monkeypatch):
 
 
 @pytest.mark.parametrize("code", [429, 500, 503])
-def test_get_transient_http_is_retried_then_raises_retryable(monkeypatch, code):
+def test_get_transient_http_is_retried_then_raises_retryable(monkeypatch, code, diagnostic_trace):
     calls = {"n": 0}
 
     def _open(_req, **_kwargs):
@@ -128,6 +128,12 @@ def test_get_transient_http_is_retried_then_raises_retryable(monkeypatch, code):
     finally:
         stamina.set_testing(False)
     assert calls["n"] == 3  # exhausted the (test-capped) retry budget
+    events, analysis = diagnostic_trace()
+    attempts = [event["args"] for event in events if event["name"] == "jimaku_attempt"]
+    assert len(attempts) == 3
+    assert all(attempt["status"] == "error" for attempt in attempts)
+    records = [row for row in analysis["startup"] if row["name"] == "jimaku_attempt"]
+    assert len(records) == 3 and all(row["args"]["status"] == "error" for row in records)
 
 
 def test_get_network_error_is_retryable(monkeypatch):

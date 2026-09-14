@@ -123,6 +123,8 @@ class TokenGeometry:
     glyph_dy: tuple[float, ...] = ()
     #: False when native coverage cannot be reproduced by the fractional redraw; use its mask.
     overprint_safe: bool = True
+    overprint_verdict: str = "unvalidated"
+    coverage_evicted: bool = False
 
 
 class GeometryVariant(StrEnum):
@@ -227,6 +229,10 @@ class GeometryRequest:
     #: Keep each token's coverage mask, for the raster device. Asked for per frame rather than
     #: always, because a cue whose color the text device can draw has no use for the bytes.
     keep_coverage: bool = False
+    #: Unmodified native track; the colored document supplies ownership hints only.
+    native_ass: bytes = b""
+    document_metadata: tuple[tuple[str, int], ...] = field(default=(), compare=False)
+    source_kind: str = field(default="unknown", compare=False)
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -267,6 +273,8 @@ class GeometryRequest:
             digest.update(value.encode())
             digest.update(b"\0")
         digest.update(self.ass)
+        digest.update(b"\0native\0")
+        digest.update(self.native_ass)
         for name, data in self.attachments:
             digest.update(name.encode())
             digest.update(b"\0")
@@ -308,6 +316,8 @@ class GeometrySnapshot:
     timestamp_ms: int
     variant: GeometryVariant
     tokens: tuple[TokenGeometry, ...]
+    libass_version: int | None = field(default=None, compare=False, kw_only=True)
+    mask_source: str = field(default="unknown", compare=False, kw_only=True)
 
     @property
     def coverage_bytes(self) -> int:
@@ -322,7 +332,17 @@ class GeometrySnapshot:
         stripped snapshot costs those tokens a plainer mark and nothing else. That is what makes it
         the right thing to evict under memory pressure — evicting the entry would cost a re-render.
         """
-        return replace(self, tokens=tuple(replace(token, coverage=b"") for token in self.tokens))
+        return replace(
+            self,
+            tokens=tuple(
+                replace(
+                    token,
+                    coverage=b"",
+                    coverage_evicted=token.coverage_evicted or bool(token.coverage),
+                )
+                for token in self.tokens
+            ),
+        )
 
 
 class GeometryBackend(Protocol):

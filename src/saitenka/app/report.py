@@ -476,7 +476,8 @@ def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dic
     from saitenka.app.paths import cache_dir
 
     if not diagnostic_detail:
-        return _collect_metadata()
+        text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
+        return _collect_metadata(_latest_session(text))
 
     log_path = cache_dir() / "overlay.log"  # resolve dynamically (respects $SAITENKA_CACHE_DIR)
 
@@ -505,16 +506,16 @@ def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dic
     members.update(_collect_player_crashes())
     members.update(_collect_telemetry(session))
     members.update(_collect_operation_summary(session))
+    members.update(_collect_metadata(session))
 
     members["MANIFEST.txt"] = _manifest(members, include_log=include_log, session=session)
     return members
 
 
-def _collect_metadata() -> dict[str, str]:
+def _collect_metadata(session: str | None) -> dict[str, str]:
     import tomllib
 
     from saitenka.app.config import config_path
-    from saitenka.app.paths import cache_dir
     from saitenka.app.report_schema import (
         build_identity,
         configured_metadata,
@@ -536,9 +537,7 @@ def _collect_metadata() -> dict[str, str]:
         configuration = {"status": "invalid"}
     except OSError:
         pass
-    text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
-    session = _latest_session(text)
-    producer, health, runtime, player, queries = _metadata_producer(session)
+    producer, health, runtime, player, queries, options = _metadata_producer(session)
     payload = envelope(
         collector=build_identity(),
         producer=producer,
@@ -547,6 +546,7 @@ def _collect_metadata() -> dict[str, str]:
         runtime=runtime,
         player=player,
         queries=queries,
+        options=options,
     )
     return {
         "diagnostics/envelope.json": json.dumps(payload, ensure_ascii=False, indent=2),
@@ -559,7 +559,8 @@ def _collect_metadata() -> dict[str, str]:
     }
 
 
-def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict]:
+def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict, dict]:
+    from saitenka.app.option_evidence import safe_snapshot as safe_options
     from saitenka.app.paths import cache_dir
     from saitenka.app.player_evidence import safe_snapshot
     from saitenka.app.query_evidence import safe_snapshot as safe_queries
@@ -571,6 +572,7 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dic
     runtime: dict = {"status": "unknown"}
     player: dict = {"status": "unknown"}
     queries: dict = {"status": "unknown"}
+    options: dict = {"status": "unknown"}
     if session is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
         path = cache_dir() / "diagnostics" / f"session-{session}.json"
         try:
@@ -594,9 +596,10 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dic
                 runtime = safe_runtime_configuration(raw.get("runtime_configuration"))
                 player = safe_snapshot(raw.get("player_configuration"))
                 queries = safe_queries(raw.get("player_queries"))
+                options = safe_options(raw.get("session_configuration"))
         except (OSError, ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
             producer = {"status": "unreadable-or-too-large"}
-    return producer, health, runtime, player, queries
+    return producer, health, runtime, player, queries, options
 
 
 def _manifest(members: dict[str, str], *, include_log: bool, session: str | None = None) -> str:
@@ -628,11 +631,14 @@ def build_report_bundle(
     include_log: bool = True,
     diagnostic_detail: bool = False,
     timestamp: str | None = None,
+    attachments: tuple[Path, ...] = (),
 ) -> Path:
     """Write the diagnostics zip and return its path. ``dest_dir`` defaults to a dedicated reports dir
     under the platform data dir (``%LOCALAPPDATA%\\saitenka\\reports`` on Windows) instead of cluttering
     the home root; a ``timestamp`` (``YYYYMMDD-HHMMSS``) can be injected for deterministic tests."""
     from saitenka.app.paths import data_dir
+    from saitenka.app.report_attachments import collect_attachments
+    from saitenka.app.report_reader import MAX_ARCHIVE_BYTES
 
     ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", ts):
@@ -641,6 +647,19 @@ def build_report_bundle(
     base.mkdir(parents=True, exist_ok=True)
     dest = base / f"saitenka-report-{ts}.zip"
     members = collect(include_log=include_log, diagnostic_detail=diagnostic_detail)
+    attachment_members = collect_attachments(attachments)
+    if attachment_members:
+        members["MANIFEST.txt"] = (
+            "Local diagnostic export with UNREDACTED user attachments.\n"
+            "Attachment inventory and privacy: attachments/manifest.json\n"
+            "Never uploaded automatically. User-owned exports never expire.\n"
+            "Review all contents before sharing.\n"
+        )
+    size = sum(len(content.encode("utf-8")) for content in members.values()) + sum(
+        len(content) for content in attachment_members.values()
+    )
+    if size > MAX_ARCHIVE_BYTES:
+        raise ValueError("diagnostic archive exceeds expanded byte limit")
     fd, temporary_name = tempfile.mkstemp(prefix=".saitenka-report-", suffix=".tmp", dir=base)
     temporary = Path(temporary_name)
     try:
@@ -650,6 +669,8 @@ def build_report_bundle(
         ):
             for name, content in members.items():
                 zf.writestr(name, content)
+            for name, attachment in attachment_members.items():
+                zf.writestr(name, attachment)
         # A timestamp collision must not silently destroy an earlier user-owned bundle.
         os.link(temporary, dest)
     finally:

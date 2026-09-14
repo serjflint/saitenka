@@ -86,6 +86,7 @@ class RunFlags:
     auto_translate: bool
     prefetch: bool
     layout_engine: Literal["default", "taffy"]
+    diagnostic_origins: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -501,7 +502,7 @@ def _launch_mpv_and_connect(
     return proc, ipc
 
 
-def _build_run_options(cfg: dict, flags: RunFlags):
+def _build_run_options(cfg: dict, flags: RunFlags, *, config_source: str = "config-object"):
     from saitenka.app.config import (
         KeyOptions,
         MiningOptions,
@@ -513,6 +514,7 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         TranslationOptions,
         subtitle_geometry_options,
     )
+    from saitenka.app.option_evidence import origins
 
     _ko, _tt, _mo, _po = KeyOptions(), TooltipOptions(), MiningOptions(), PerfOptions()
     raw_stats = cfg.get("stats")
@@ -576,6 +578,9 @@ def _build_run_options(cfg: dict, flags: RunFlags):
         ),
         subtitle_geometry=subtitle_geometry_options(cfg),
         prefetch=flags.prefetch,
+        diagnostic_origins=origins(
+            cfg, parsed=flags.diagnostic_origins, config_source=config_source
+        ),
     )
 
 
@@ -1039,6 +1044,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
     layout_engine: Literal["default", "taffy"] = "default",
     mpv_arg: list[str] | None = None,
     profile: str | None = None,
+    diagnostic_origins: tuple[tuple[str, str], ...] = (),
 ) -> int:  # pragma: no cover — launches real mpv/ffmpeg (parse layer covered by test_cli)
     """Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv."""
     from saitenka.app.features.profiles.dependencies import begin_deps_build, begin_tokenizer_warm
@@ -1191,7 +1197,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             auto_translate=auto_translate,
             prefetch=prefetch,
             layout_engine=layout_engine,
+            diagnostic_origins=diagnostic_origins,
         ),
+        config_source="config-file",
     )
 
     # Demo/screenshot modes force-hover a word the instant mpv is up, so they need the dict set /

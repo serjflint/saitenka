@@ -9,6 +9,16 @@ logs.
 
 ### Added
 
+- Reports retain option origins, profile changes, renderer selection and bounded redraw-validation
+  outcomes without tracing. Diagnostic coverage tools distinguish missing causal boundaries,
+  known-fault expectations and independently qualified character results.
+- Reports accept explicitly selected local attachments and retain native mask provenance and
+  projection outcomes. Bounded archive readers and a redistributable synthetic character corpus
+  support offline diagnosis without requiring an episode download.
+- Local tools replay retained renderer settings on synthetic text and reduce ASS/SRT reproducers
+  against an explicit failure checker. Reports retain per-operation health without tracing and
+  distinguish missing, malformed and empty trace evidence.
+
 - Rendering-property ingress evidence distinguishes wire notifications, reconnect readbacks and
   rejected mailbox admission without retaining property values.
 
@@ -29,6 +39,14 @@ logs.
   with explicit incomplete and unsupported results.
 
 ### Fixed
+
+- Failed subtitle raster uploads can retry identical pixels; pending overprints no longer count as
+  acknowledged color. Late surface replies retain their rejected status in diagnostic reports.
+- Subtitle color masks preserve the unmodified native render instead of relying on pixels changed
+  by token-color tagging. Ambiguous attribution fails explicitly; overprints retain the native
+  outline without adding a second border.
+- Decomposed Japanese voicing marks retain dictionary matching and inflection merging while
+  preserving original subtitle offsets.
 
 - Positive-spaced subtitle color overprints preserve fractional glyph positions, avoiding displaced
   characters on ultrawide displays. Runs that cannot be matched exactly use their native masks.

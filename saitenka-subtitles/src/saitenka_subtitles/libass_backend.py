@@ -6,7 +6,7 @@ import importlib
 import logging
 import time
 from collections import OrderedDict, defaultdict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
@@ -31,6 +31,7 @@ from saitenka_subtitles.geometry import (
     RendererState,
     TokenGeometry,
 )
+from saitenka_subtitles.native_masks import NativeAttributionError, attribute_native_masks
 from saitenka_subtitles.telemetry import (
     EXTRACT_COLLECT_MS,
     EXTRACT_COVERAGE_MS,
@@ -125,6 +126,34 @@ class _Anchor:
 #: How many measured anchors to keep. One per distinct (word, face, frame size); a film's vocabulary
 #: is far smaller, and the bound exists for the resize case rather than the reading one.
 ANCHOR_CACHE_MAX = 4096
+PHASE_BUILD_BUDGET = 32
+PHASE_PIXEL_BUDGET = 8 * 1024 * 1024
+PHASE_CPU_BUDGET_NS = 50_000_000
+
+
+class PhaseBudgetExceeded(ValueError):
+    pass
+
+
+@dataclass
+class _PhaseBudget:
+    builds: int = 0
+    pixels: int = 0
+    started: int = field(default_factory=time.thread_time_ns)
+
+    def check(self) -> None:
+        # Cooperative: a native call already in progress is not preempted.
+        if time.thread_time_ns() - self.started >= PHASE_CPU_BUDGET_NS:
+            raise PhaseBudgetExceeded("fractional probe CPU budget exceeded")
+
+    def consume(self, pixels: int) -> None:
+        self.check()
+        if self.builds >= PHASE_BUILD_BUDGET or self.pixels + pixels > PHASE_PIXEL_BUDGET:
+            raise PhaseBudgetExceeded("fractional probe work budget exceeded")
+        self.builds += 1
+        self.pixels += pixels
+
+
 #: The probe's own event identity and colour range. Distinct from anything a cue uses, because the
 #: probe document is rendered through the same token-recovery code as a real frame.
 _PROBE_RGB_BASE = 0x010000
@@ -426,7 +455,8 @@ class LibassGeometryBackend:
         #: Keys a probe could not measure. `extract_token_geometry` refuses a palette colour that
         #: drew nothing, so one inkless token — text the overprint would refuse anyway — fails the
         #: whole batch; remembering them keeps that from re-rendering once per frame forever.
-        self._unprobeable: set[_AnchorKey] = set()
+        self._unprobeable: OrderedDict[_AnchorKey, None] = OrderedDict()
+        self._probe_failures_evicted = 0
         #: `(text, face, size) -> (dx, dy)`, least-recently-used last. The offset is a property of
         #: exactly those three, so a repeated cue and a recurring word cost a dict lookup.
         #:
@@ -439,6 +469,7 @@ class LibassGeometryBackend:
             tuple[str, RendererState, FragmentRequest], tuple[PhaseMask, ...]
         ] = OrderedDict()
         self._phase_bytes = 0
+        self._phase_budget: _PhaseBudget | None = None
         self._closed = False
 
     @property
@@ -567,12 +598,18 @@ class LibassGeometryBackend:
     def _phase_atlas(
         self, request: GeometryRequest, fragment: FragmentRequest
     ) -> tuple[PhaseMask, ...]:
+        if self._phase_budget is not None:
+            self._phase_budget.check()
         key = (f"{request.track_id}:{request.renderer_key()}", request.renderer_state, fragment)
         if key in self._phases:
             self._phases.move_to_end(key)
+            if not self._phases[key]:
+                raise ValueError("fractional probe previously unavailable")
             return self._phases[key]
         try:
             atlas = self._build_phase_atlas(request, fragment)
+        except PhaseBudgetExceeded:
+            raise
         except Exception:
             log.debug("fractional probe unavailable; using native mask", exc_info=True)
             atlas = ()
@@ -583,12 +620,16 @@ class LibassGeometryBackend:
             while self._phase_bytes > MAX_BITMAP_BYTES or len(self._phases) > ANCHOR_CACHE_MAX:
                 _, evicted = self._phases.popitem(last=False)
                 self._phase_bytes -= sum(len(phase.coverage) for phase in evicted)
+        if not atlas:
+            raise ValueError("fractional probe unavailable")
         return atlas
 
     def _build_phase_atlas(
         self, request: GeometryRequest, fragment: FragmentRequest
     ) -> tuple[PhaseMask, ...]:
         layout, frame = phase_document(fragment, _probe_rgbs(64))
+        if self._phase_budget is not None:
+            self._phase_budget.consume(frame[0] * frame[1])
         measured = self._probe_tokens(request, layout, frame, keep_coverage=True)
         pitch_x, pitch_y = frame[0] // 8, frame[1] // 8
         for token in measured:
@@ -617,7 +658,9 @@ class LibassGeometryBackend:
         self, request: GeometryRequest, token: TokenGeometry, text: str
     ) -> TokenGeometry:
         positions = None
+        verdict = "unsupported-text"
         if text and not (set(text) & set("{}\\\n")) and not any(c.isspace() for c in text):
+            verdict = "exact-mask-mismatch"
             try:
                 atlases = (
                     self._phase_atlas(
@@ -637,16 +680,20 @@ class LibassGeometryBackend:
                 positions = match_phases(
                     token.coverage, token.bounds.width, token.bounds.height, atlases
                 )
+            except PhaseBudgetExceeded:
+                verdict = "probe-budget-exceeded"
             except Exception:
+                verdict = "probe-error"
                 log.debug("fractional probe unavailable; using native mask", exc_info=True)
         if positions is None:
-            return replace(token, overprint_safe=False)
+            return replace(token, overprint_safe=False, overprint_verdict=verdict)
         return replace(
             token,
             anchor_dx=0,
             anchor_dy=0,
             glyph_dx=tuple(x for x, _ in positions),
             glyph_dy=tuple(y for _, y in positions),
+            overprint_verdict="mask-exact",
         )
 
     def _anchored(
@@ -702,20 +749,59 @@ class LibassGeometryBackend:
             else token
             for token in tokens
         )
-        if not any(token.spacing > 0 for token in tokens):
+        if not any(token.coverage for token in tokens):
             return anchored
         with self._telemetry.span("subtitle_geometry_fractional") as span:
+            budget = self._phase_budget = _PhaseBudget()
             resolved = tuple(
                 self._fractional_token(
                     request, token, texts.get((token.event_id, token.token_index), "")
                 )
-                if token.spacing > 0
+                if token.coverage and token.font_name and token.font_size > 0
                 else token
                 for token in anchored
             )
-            span.set("tokens", sum(token.spacing > 0 for token in resolved))
+            span.set("tokens", sum(bool(token.coverage) for token in resolved))
             span.set("mask_fallbacks", sum(not token.overprint_safe for token in resolved))
             span.set("atlas_bytes", self._phase_bytes)
+            span.set("atlas_builds", budget.builds)
+            span.set("probe_pixels", budget.pixels)
+            span.set("cpu_ms", (time.thread_time_ns() - budget.started) / 1_000_000)
+            span.set("cpu_budget_ms", PHASE_CPU_BUDGET_NS / 1_000_000)
+            span.set("retained_probe_failures", len(self._unprobeable))
+            span.set("probe_failures_evicted", self._probe_failures_evicted)
+            sampled = resolved[:4]
+            span.set("sample_event_orders", tuple(token.event_id.source_order for token in sampled))
+            span.set("sample_token_indices", tuple(token.token_index for token in sampled))
+            span.set(
+                "sample_native_rectangles",
+                tuple(
+                    value
+                    for token in sampled
+                    for value in (
+                        token.bounds.x,
+                        token.bounds.y,
+                        token.bounds.width,
+                        token.bounds.height,
+                    )
+                ),
+            )
+            span.set(
+                "sample_anchor_offsets",
+                tuple(value for token in sampled for value in (token.anchor_dx, token.anchor_dy)),
+            )
+            span.set("sample_fragment_counts", tuple(len(token.glyph_dx) for token in sampled))
+            span.set("native_glyph_census", "unavailable")
+            for verdict in (
+                "mask-exact",
+                "probe-error",
+                "probe-budget-exceeded",
+                "unsupported-text",
+                "exact-mask-mismatch",
+                "unvalidated",
+            ):
+                span.set(verdict, sum(token.overprint_verdict == verdict for token in resolved))
+            self._phase_budget = None
             return resolved
 
     def _measure_anchors(
@@ -748,7 +834,10 @@ class LibassGeometryBackend:
             self._probe_failed = True
             # Without this the batch is retried on every geometry render for the rest of the
             # session: nothing records the attempt, so `unseen` keeps returning the same keys.
-            self._unprobeable.update(key for _token, key in unseen)
+            self._unprobeable.update((key, None) for _token, key in unseen)
+            while len(self._unprobeable) > ANCHOR_CACHE_MAX:
+                self._unprobeable.popitem(last=False)
+                self._probe_failures_evicted += 1
             return
         for index, fragment in fragments_from(measured, requests, layout).items():
             self._anchors[unseen[index][1]] = _Anchor(
@@ -757,50 +846,77 @@ class LibassGeometryBackend:
         while len(self._anchors) > ANCHOR_CACHE_MAX:
             self._anchors.popitem(last=False)
 
+    @staticmethod
+    def _render_frame(renderer: NativeRenderer, request: GeometryRequest) -> RenderResult:
+        return renderer.render(
+            request.timestamp_ms,
+            request.frame_size,
+            request.storage_size,
+            pixel_aspect=request.pixel_aspect,
+            margins=request.margins,
+            use_margins=request.use_margins,
+            max_bitmap_bytes=min(
+                2 * request.frame_size[0] * request.frame_size[1], MAX_BITMAP_BYTES
+            ),
+            style=_render_style(request.renderer_state),
+        )
+
+    def _native_tokens(
+        self, request: GeometryRequest, hints: RenderResult, tokens: tuple[TokenGeometry, ...]
+    ) -> tuple[TokenGeometry, ...]:
+        with self._telemetry.span("subtitle_geometry_native_reference") as span:
+            started = time.perf_counter_ns()
+            renderer, _built_ms = self._renderer(replace(request, ass=request.native_ass))
+            native = self._render_frame(renderer, request)
+            span.set("render_ms", (time.perf_counter_ns() - started) / 1_000_000)
+            span.set("layer_count", len(native.layers))
+            started = time.perf_counter_ns()
+            try:
+                result = attribute_native_masks(native.layers, hints.layers, request, tokens)
+            except NativeAttributionError as error:
+                span.set("outcome", "unattributable")
+                span.set("reason", error.reason.value)
+                raise
+            finally:
+                span.set("attribution_ms", (time.perf_counter_ns() - started) / 1_000_000)
+            span.set("outcome", "attributed")
+            span.set("mask_bytes", sum(len(token.coverage) for token in result))
+            return result
+
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
             raise RuntimeError("libass geometry backend is closed")
         if not request.palette:
             raise ValueError("hit-map request needs a token palette")
         renderer, built_ms = self._renderer(request)
+        library_version = renderer.library_version()
         with self._telemetry.span("subtitle_geometry_libass") as span:
             span.set("provider", "libasslite")
             span.set("renderer_built_ms", built_ms)
             span.set("renderer_cache_size", len(self._renderers))
             if built_ms:
                 self._telemetry.record(RENDERER_BUILD_MS, built_ms)
-            span.set("libass_version", f"0x{renderer.library_version():x}")
+            span.set("libass_version", f"0x{library_version:x}")
             span.set("timestamp_ms", request.timestamp_ms)
             started = time.perf_counter_ns()
-            result = renderer.render(
-                request.timestamp_ms,
-                request.frame_size,
-                request.storage_size,
-                pixel_aspect=request.pixel_aspect,
-                margins=request.margins,
-                use_margins=request.use_margins,
-                max_bitmap_bytes=min(
-                    2 * request.frame_size[0] * request.frame_size[1], MAX_BITMAP_BYTES
-                ),
-                style=_render_style(request.renderer_state),
-            )
+            result = self._render_frame(renderer, request)
             render_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("render_ms", render_ms)
             span.set("layer_count", len(result.layers))
             self._telemetry.record(RENDER_MS, render_ms)
             started = time.perf_counter_ns()
-            tokens = self._anchored(
+            tokens = extract_token_geometry(
+                result,
                 request,
-                extract_token_geometry(
-                    result,
-                    request,
-                    keep_coverage=request.keep_coverage
-                    or any(entry.spacing > 0 for entry in request.palette),
-                    telemetry=self._telemetry,
-                ),
+                keep_coverage=not request.native_ass
+                and (request.keep_coverage or any(entry.spacing > 0 for entry in request.palette)),
+                telemetry=self._telemetry,
             )
+            if request.native_ass:
+                tokens = self._native_tokens(request, result, tokens)
+            tokens = self._anchored(request, tokens)
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
-            span.set("fractional_tokens", sum(token.spacing > 0 for token in tokens))
+            span.set("fractional_tokens", sum(bool(token.coverage) for token in tokens))
             span.set("fractional_mask_fallbacks", sum(not token.overprint_safe for token in tokens))
             span.set("fractional_atlas_bytes", self._phase_bytes)
             span.set("extract_ms", extract_ms)
@@ -813,6 +929,8 @@ class LibassGeometryBackend:
             request.timestamp_ms,
             request.variant,
             tokens,
+            libass_version=library_version,
+            mask_source="native-original" if request.native_ass else "request-document",
         )
 
     def close(self) -> None:

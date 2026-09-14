@@ -18,10 +18,14 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.telemetry import ActiveGate
 from saitenka.app.trace_report import load_startup_trace, startup_json
 from saitenka.mpvio.osd import Overlay
+from saitenka.runtime import SurfaceStatus
 
 
 @pytest.mark.timeout(5)
-def test_observed_cue_carries_revision_through_geometry_and_color_export(monkeypatch, tmp_path):
+@pytest.mark.parametrize("refused", [False, True])
+def test_observed_cue_carries_revision_through_geometry_and_color_export(
+    monkeypatch, tmp_path, refused
+):
     from test_native_subtitles import Coloring, FakeIPC, KnownWords, Scorer, reader, settle_jobs
 
     from saitenka.runtime import SessionMailbox
@@ -71,6 +75,8 @@ def test_observed_cue_carries_revision_through_geometry_and_color_export(monkeyp
         scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
     )
     try:
+        if refused:
+            ipc.refused_identities = ("subtitle-native-focus",)
         session.graph.playback.observe("sub-text", "猫を見る")
         session.graph.cue.settle()
         settle_jobs(session, ipc)
@@ -95,7 +101,12 @@ def test_observed_cue_carries_revision_through_geometry_and_color_export(monkeyp
     ]
     assert geometry and colors
     assert all(event["args"].get("cue_revision") == revision for event in [*geometry, *colors])
-    assert all(event["args"].get("outcome") == "succeeded" for event in colors)
+    assert all(
+        event["args"].get("outcome") == ("not-admitted" if refused else "succeeded")
+        for event in colors
+    )
+    assert all(event["args"]["accepted"] is not refused for event in colors)
+    assert all(("effect_id" in event["args"]) is not refused for event in colors)
 
 
 def test_reader_reports_acknowledgment_wait_and_preserves_originating_cue(monkeypatch, tmp_path):
@@ -132,3 +143,59 @@ def test_reader_reports_acknowledgment_wait_and_preserves_originating_cue(monkey
     assert written["args"]["cue_revision"] == "42"
     assert written["args"]["round_trip_ms"] == 250.0
     assert diagnosis["interaction_latency"]["surface_write"]["p50_ms"] == 250.0
+
+
+@pytest.mark.parametrize("retirement", ["remove", "close"])
+def test_retired_surface_late_ack_is_exported_as_rejected(monkeypatch, tmp_path, retirement):
+    config = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    config.write_text(
+        f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n', encoding="utf-8"
+    )
+    gate = ActiveGate()
+    gate.set(value=True)
+    provider = TracerProvider()
+    provider.add_span_processor(
+        CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
+    )
+    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+    ipc = _DeferredIPC()
+    surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
+    with otel_metrics.traced("cue_reconcile", cue_revision="old-cue"):
+        transaction = surfaces.present(
+            Image.new("RGBA", (2, 2), "white"), 0, 0, oid=OverlayId.TOAST
+        )
+    ipc.execute(0)
+    if retirement == "close":
+        surfaces.close()
+    else:
+        surfaces.remove(OverlayId.TOAST)
+        ipc.finish(1)
+
+    ipc.finish(0)
+    provider.shutdown()
+    archive = report.build_report_bundle(tmp_path / "reports", diagnostic_detail=True)
+    events = load_startup_trace(archive)
+    diagnosis = json.loads(startup_json(events))
+
+    terminal = next(
+        event["args"]
+        for event in events
+        if event.get("name") == "surface_write"
+        and event["args"]["surface_revision"] == transaction.revision
+    )
+    assert terminal["outcome"] == "succeeded"
+    assert terminal["accepted"] is False
+    assert terminal["cue_revision"] == "old-cue"
+    assert terminal["validation_scope"] == "upload-acknowledgment-not-pixels"
+    assert surfaces.snapshot(OverlayId.TOAST).status is SurfaceStatus.ABSENT
+    assert diagnosis["interaction_latency"]["surface_write"]["count"] >= 1
+    reported = [
+        row
+        for row in diagnosis["startup"]
+        if row["name"] == "surface_write"
+        and row["args"].get("surface_revision") == transaction.revision
+    ]
+    assert reported[0]["args"]["accepted"] is False
+    assert reported[0]["args"]["validation_scope"] == "upload-acknowledgment-not-pixels"

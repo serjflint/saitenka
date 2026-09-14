@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
 from typing import TYPE_CHECKING, NamedTuple, cast
-
-from saitenka_subtitles.geometry import GeometrySnapshot
 
 from saitenka import otel_metrics
 from saitenka.app.subtitle_geometry_diagnostics import GeometryCacheReason, UnpaintableFrame
@@ -23,7 +21,7 @@ from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, LocalJobLane, con
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka_subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.geometry import GeometryRequest, GeometrySnapshot
 
     from saitenka.app.subtitle_pipeline import (
         GeometryPrefetchResolution,
@@ -49,6 +47,14 @@ class GeometryWorkerStats:
     result_cache_entries: int
     prefetch_cache_entries: int
     coverage_trimmed: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryPresentation:
+    sequence: int
+    generation: int
+    ready: bool
+    reason: str
 
 
 GEOMETRY_LANE = "subtitle-geometry"
@@ -87,10 +93,9 @@ class _Prefetched(NamedTuple):
 
 
 def run_geometry_job(request: object, cancelled: threading.Event) -> object:
-    _ = cancelled  # the coordinator's generation fence already retires superseded work
     if not isinstance(request, GeometryJob):
         raise TypeError("invalid subtitle-geometry request")
-    request.worker.execute(request)
+    request.worker.execute(request, cancelled)
     return None
 
 
@@ -159,6 +164,7 @@ class SubtitleGeometryWorker:
         self._failures = 0
         self._ready_before_presented = 0
         self._presented = 0
+        self._presentations: deque[GeometryPresentation] = deque(maxlen=128)
         self._max_submit_us = 0
         self._prefetched_count = 0
         self._prefetch_dropped = 0
@@ -339,13 +345,13 @@ class SubtitleGeometryWorker:
         for settle in owed:
             settle()
 
-    def execute(self, job: GeometryJob) -> None:
+    def execute(self, job: GeometryJob, cancelled: threading.Event | None = None) -> None:
         """Run one lane job. Called on a lane worker thread by :func:`run_geometry_job`."""
         if job.current is not None:
-            self._process_current(job.current)
+            self._process_current(job.current, cancelled)
         else:
             assert job.prefetch is not None
-            self._process_prefetch(job.prefetch)
+            self._process_prefetch(job.prefetch, cancelled)
 
     def _delivered(self, completion: EffectFinished) -> None:
         """The lane terminal. Admission of the next job happens here rather than at the end of the
@@ -457,13 +463,13 @@ class SubtitleGeometryWorker:
             if result is None:
                 return None
             self._cache[key] = result
-        return GeometrySnapshot(
-            request.generation,
-            request.track_id,
-            request.frame_id,
-            request.timestamp_ms,
-            request.variant,
-            result.tokens,
+        return dataclass_replace(
+            result,
+            generation=request.generation,
+            track_id=request.track_id,
+            frame_id=request.frame_id,
+            timestamp_ms=request.timestamp_ms,
+            variant=request.variant,
         )
 
     def _store(
@@ -553,8 +559,16 @@ class SubtitleGeometryWorker:
         """
         self._condition.notify_all()
 
-    def _drop_prefetch(self, key: str, error: Exception | None = None) -> None:
+    def _drop_prefetch(
+        self,
+        key: str,
+        error: Exception | None = None,
+        *,
+        reason: GeometryCacheReason | None = None,
+    ) -> None:
         with self._condition:
+            if reason is not None:
+                self._remember_provenance(key, reason)
             waiter = self._prefetch_waiters.pop(key, None)
             self._prefetch_inflight_key = None
             self._prefetch_dropped += 1
@@ -576,12 +590,20 @@ class SubtitleGeometryWorker:
                     self._superseded += 1
             self._idle()
 
-    def _process_prefetch(self, item: tuple[str, int, GeometryRequestBuilder]) -> None:
+    def _process_prefetch(
+        self, item: tuple[str, int, GeometryRequestBuilder], cancelled: threading.Event | None
+    ) -> None:
         key, epoch, build = item
+        if self._prefetch_cancelled(epoch, cancelled):
+            self._drop_prefetch(key, reason=GeometryCacheReason.PREFETCH_SUPERSEDED)
+            return
         try:
             request = build()
         except Exception as error:  # noqa: BLE001 -- a promoted waiter turns this into a failure
             self._drop_prefetch(key, error)
+            return
+        if self._prefetch_cancelled(epoch, cancelled):
+            self._drop_prefetch(key, reason=GeometryCacheReason.PREFETCH_SUPERSEDED)
             return
         outcome = self._coordinator.render_prefetch_outcome(request)
         waiter = self._cache_prefetch_outcome(key, epoch, request, outcome.snapshot)
@@ -596,6 +618,14 @@ class SubtitleGeometryWorker:
                 else:
                     self._superseded += 1
             self._idle()
+
+    def _prefetch_cancelled(self, epoch: int, cancelled: threading.Event | None) -> bool:
+        with self._condition:
+            return (
+                self._closed
+                or epoch != self._prefetch_epoch
+                or bool(cancelled is not None and cancelled.is_set())
+            )
 
     def _cache_prefetch_outcome(
         self,
@@ -661,13 +691,23 @@ class SubtitleGeometryWorker:
             self._idle()
 
     def _process_current(
-        self, item: tuple[GeometryReservation, GeometryRequestBuilder, str | None]
+        self,
+        item: tuple[GeometryReservation, GeometryRequestBuilder, str | None],
+        cancelled: threading.Event | None,
     ) -> None:
         reservation, build, _work_key = item
+        if reservation.generation != self._coordinator.generation or (
+            cancelled is not None and cancelled.is_set()
+        ):
+            self._finish_current(published=False)
+            return
         try:
             request = build()
         except Exception as error:  # noqa: BLE001 -- source preparation is optional
             self._finish_build_error(recorded=self._coordinator.record_error(reservation, error))
+            return
+        if cancelled is not None and cancelled.is_set():
+            self._finish_current(published=False)
             return
         ticket = self._coordinator.bind(reservation, request)
         if ticket is None:
@@ -717,14 +757,24 @@ class SubtitleGeometryWorker:
             request.timestamp_ms,
             request.variant,
         )
+        self._record_presentation("prefetch-hit", request.generation, ready=ready)
+        return ready
+
+    def mark_not_ready(self, reason: str = "unspecified") -> None:
+        self._record_presentation(reason, self._coordinator.generation, ready=False)
+
+    def _record_presentation(self, reason: str, generation: int, *, ready: bool) -> None:
         with self._condition:
             self._presented += 1
             self._ready_before_presented += int(ready)
-        return ready
+            self._presentations.append(
+                GeometryPresentation(self._presented, generation, ready, reason)
+            )
 
-    def mark_not_ready(self) -> None:
+    @property
+    def presentation_history(self) -> tuple[GeometryPresentation, ...]:
         with self._condition:
-            self._presented += 1
+            return tuple(self._presentations)
 
     @property
     def stats(self) -> GeometryWorkerStats:

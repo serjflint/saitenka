@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import math
-import zipfile
 from collections import deque
 from typing import TYPE_CHECKING
 
-from saitenka.app.subtitle_report import load_trace
 from saitenka.trace_analysis import parent_tree_health, tooltip_lifecycles, tooltip_quality
 
 if TYPE_CHECKING:
@@ -38,12 +36,27 @@ _SPAN_NAMES = frozenset(
         "subtitle_geometry_cache",
         "mpv_effect",
         "surface_write",
+        "mining_media_result",
+        "jimaku_attempt",
+        "subtitle.resync",
+        "subtitle_calibration",
     }
 )
 _FIELDS = frozenset(
     {
         "operation",
+        "status",
+        "picture_error",
+        "audio_error",
+        "reference_fmt",
+        "comparison",
+        "signature",
         "outcome",
+        "accepted",
+        "effect_id",
+        "surface_revision",
+        "cue_revision",
+        "validation_scope",
         "connection_epoch",
         "reply_latency_ms",
         "priority",
@@ -295,36 +308,21 @@ def load_startup_report(source: Path) -> tuple[list[dict], list[dict]]:
     return events, startup_records(events)
 
 
-def _check_trace_file(path: Path) -> None:
-    if path.exists() and path.stat().st_size > _MAX_TRACE_BYTES:
-        raise ValueError(_LIMIT_ERROR)
+def load_startup_evidence(source: Path) -> dict:
+    from saitenka.app.report_reader import trace_evidence
 
-
-def _check_trace_archive(source: Path) -> None:
-    try:
-        with zipfile.ZipFile(source) as archive:
-            members = [
-                item
-                for item in archive.infolist()
-                if item.filename == "trace.json"
-                or item.filename.endswith(("/trace.json", "telemetry/trace.json"))
-            ]
-            if any(item.file_size > _MAX_TRACE_BYTES for item in members):
-                raise ValueError(_LIMIT_ERROR)
-    except zipfile.BadZipFile as error:
-        raise ValueError(f"not a valid report archive: {source}") from error
+    evidence = trace_evidence(source, limit=_MAX_TRACE_BYTES)
+    if evidence.get("reason") == "diagnostic member exceeds byte limit":
+        evidence["reason"] = _LIMIT_ERROR
+    return evidence
 
 
 def load_startup_trace(source: Path) -> list[dict]:
     """Load a trace only after bounding its uncompressed input size."""
-    if source.is_file() and source.suffix == ".json":
-        _check_trace_file(source)
-    elif source.is_dir():
-        for relative in ("telemetry/trace.json", "trace.json"):
-            _check_trace_file(source / relative)
-    else:
-        _check_trace_archive(source)
-    return load_trace(source)
+    evidence = load_startup_evidence(source)
+    if evidence["status"] == "invalid":
+        raise ValueError(evidence["reason"])
+    return evidence["events"]
 
 
 def startup_json(events: Sequence[object]) -> str:

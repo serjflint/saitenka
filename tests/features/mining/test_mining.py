@@ -383,7 +383,9 @@ def test_audio_capture_failures_have_distinct_visible_diagnostics():
         (subprocess.CalledProcessError(1, "ffmpeg"), "audio ffmpeg failed — image only"),
     ],
 )
-def test_capture_media_reports_audio_subprocess_failure(monkeypatch, failure, message):
+def test_capture_media_reports_audio_subprocess_failure(
+    monkeypatch, failure, message, diagnostic_trace
+):
     r = _capture_reader(animated_enabled=False)
     _stub_capture(monkeypatch, animated_result=None)
     monkeypatch.setattr(
@@ -400,6 +402,14 @@ def test_capture_media_reports_audio_subprocess_failure(monkeypatch, failure, me
 
     assert picture.endswith(".jpg") and audio == ""
     assert toasts == [(message, "warn")]
+    events, analysis = diagnostic_trace()
+    result = next(event["args"] for event in events if event["name"] == "mining_media_result")
+    assert result["outcome"] == "partial"
+    assert result["picture_error"] == ""
+    assert result["audio_error"] == type(failure).__name__
+    record = next(row for row in analysis["startup"] if row["name"] == "mining_media_result")
+    assert record["args"]["outcome"] == "partial"
+    assert record["args"]["audio_error"] == type(failure).__name__
 
 
 def test_toast_renders_each_kind():

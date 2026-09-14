@@ -201,10 +201,14 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
 
     from test_subtitle_pipeline import request
 
-    from saitenka.app import player_evidence, render_evidence
+    from saitenka.app import option_evidence, player_evidence, profile_evidence, render_evidence
+    from saitenka.app.config import ReaderOptions
+    from saitenka.app.profiles import DEFAULT_PROFILE
 
     _setup(monkeypatch, tmp_path)
     for _ in range(6):
+        option_evidence.record(ReaderOptions())
+        profile_evidence.ProfileEvidence(DEFAULT_PROFILE)
         queries = query_evidence.QueryEvidence()
         for name in sorted(query_evidence.PROPERTIES):
             queries.ingress(
@@ -219,7 +223,27 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
         geometry = render_evidence.GeometryEvidence()
         player = player_evidence.PlayerEvidence()
         for width in range(1920, 1926):
-            geometry.describe(replace(request(0), frame_size=(width, 1080)))
+            geometry.selection(
+                pixel_owner="native" if width % 2 else "legacy", legacy_forced=bool(width % 2)
+            )
+            revision = geometry.describe(replace(request(0), frame_size=(width, 1080)))
+            geometry.requested(revision, 0, width)
+            geometry.published(
+                revision,
+                0,
+                width,
+                libass_version=0x01705000,
+                mask_source="native-original",
+                validation={
+                    "tokens": 4096,
+                    "retained_mask_tokens": 4096,
+                    "evicted_mask_tokens": 0,
+                    "verdicts": {
+                        key: 4096 if key == "mask-exact" else 0
+                        for key in render_evidence.VALIDATION_VERDICTS
+                    },
+                },
+            )
             player.record({"sub-scale": width}, "authored-ass")
 
     payload = _export()

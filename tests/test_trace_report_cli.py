@@ -235,6 +235,8 @@ def test_installed_trace_report_drops_malformed_records_and_values(tmp_path: Pat
     report = json.loads(capsys.readouterr().out)
     assert report["total"] == 1
     assert report["startup"][0]["args"] == {"priority": "current"}
+    assert report["input_evidence"]["status"] == "partial"
+    assert report["input_evidence"]["invalid_events"] == 2
 
 
 def test_interaction_summary_ignores_non_numeric_latency() -> None:

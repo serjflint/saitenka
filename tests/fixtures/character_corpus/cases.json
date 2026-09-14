@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "generator": 1,
+  "license": "Original Saitenka test text; repository license. No episode-derived content.",
+  "font": {
+    "path": "src/saitenka/assets/fonts/NotoSansJP.ttf",
+    "sha256": "c2f3b4d463500a2ddcd3849cded1fceeb9fd6d1c32e6cbecd568453ba50fc68f",
+    "family": "Noto Sans JP Thin",
+    "license": "SIL Open Font License 1.1",
+    "license_file": "src/saitenka/assets/fonts/OFL.txt"
+  },
+  "cases": [
+    {"id": "interior-dakuten", "text": "あだあ", "tags": "", "spacing": 0},
+    {"id": "kanji-neighbors", "text": "猫犬木", "tags": "", "spacing": 0},
+    {"id": "repeated-kana", "text": "だだだ", "tags": "", "spacing": 0},
+    {"id": "combining-mark", "text": "が木", "tags": "", "spacing": 0},
+    {"id": "mixed-script", "text": "A猫。", "tags": "", "spacing": 0},
+    {"id": "non-ink", "text": "猫　犬", "tags": "", "spacing": 0},
+    {"id": "positive-spacing", "text": "あだあ", "tags": "", "spacing": 1.5},
+    {"id": "negative-spacing", "text": "あだあ", "tags": "", "spacing": -0.5},
+    {"id": "fractional-position", "text": "あだあ", "tags": "{\\an7\\pos(101.25,101.75)}", "spacing": 0},
+    {"id": "fractional-size", "text": "猫だ木", "tags": "{\\fs39.25}", "spacing": 0},
+    {"id": "horizontal-scale", "text": "猫だ木", "tags": "{\\fscx112.5}", "spacing": 0},
+    {"id": "multiline", "text": "猫だ\n犬木", "tags": "", "spacing": 0}
+  ]
+}

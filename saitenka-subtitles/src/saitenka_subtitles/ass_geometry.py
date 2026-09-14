@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from types import MappingProxyType
@@ -67,6 +68,7 @@ class PreparedAssFrame:
     #: which silently switched the overprint off everywhere rather than failing anywhere.
     play_res_y: int
     requires_coverage: bool
+    document_metadata: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,7 @@ class _ParsedAssSource:
     has_bom: bool
     play_res_y: int
     soft_break: str
+    metadata: tuple[tuple[str, int], ...]
 
 
 def _token_faces(
@@ -224,7 +227,66 @@ def _parsed_source(source: bytes, track_id: SubtitleTrackId) -> _ParsedAssSource
         source.startswith(b"\xef\xbb\xbf"),
         _play_res_y(decoded_source),
         ass_soft_break(decoded_source),
+        _document_metadata(lines, len(catalog.styles)),
     )
+
+
+def _document_metadata(lines: list[str], style_count: int) -> tuple[tuple[str, int], ...]:
+    values = {"style_count": style_count, "summary_version": 1}
+    names = {"playresx", "playresy", "layoutresx", "layoutresy", "wrapstyle"}
+    script_info = False
+    for line in lines:
+        line = line.strip().lower()
+        if line.startswith("["):
+            script_info = line == "[script info]"
+        name, separator, value = line.partition(":")
+        if script_info and separator and name.strip() in names:
+            try:
+                number = int(value.strip())
+            except ValueError:
+                continue
+            if 0 <= number <= 1_000_000:
+                values[name.strip()] = number
+    return tuple(sorted(values.items()))
+
+
+_SUMMARY_TAGS = frozenset(
+    {
+        "pos",
+        "move",
+        "org",
+        "clip",
+        "iclip",
+        "t",
+        "fad",
+        "fade",
+        "fsp",
+        "fscx",
+        "fscy",
+        "fn",
+        "fs",
+        "b",
+        "i",
+        "k",
+        "kf",
+        "ko",
+        "p",
+        "bord",
+        "shad",
+        "blur",
+    }
+)
+_TAG = re.compile(
+    r"\\(" + "|".join(sorted(_SUMMARY_TAGS, key=lambda tag: (-len(tag), tag))) + r")", re.IGNORECASE
+)
+
+
+def _active_metadata(events: tuple[AnnotatedSubtitleEvent, ...]) -> tuple[tuple[str, int], ...]:
+    tags: set[str] = set()
+    for event in events:
+        for block in re.findall(r"\{[^}]*\}", event.decoded.source.raw_text):
+            tags.update(tag.lower() for tag in _TAG.findall(block) if tag.lower() in _SUMMARY_TAGS)
+    return (("active_event_count", len(events)), *tuple((f"tag_{tag}", 1) for tag in sorted(tags)))
 
 
 def _play_res_y(document: str) -> int:
@@ -438,6 +500,7 @@ def prepare_ass_hit_map_frame(
         tuple(_bgr_to_rgb(color) for color in reserved_bgr),
         parsed.play_res_y,
         any(has_karaoke_override(event.decoded.source) for event in annotated),
+        (*parsed.metadata, *_active_metadata(annotated)),
     )
 
 

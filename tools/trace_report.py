@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import zipfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from saitenka.app.report_reader import read_member, trace_evidence
+from saitenka.app.subtitle_report import load_trace
 from saitenka.trace_analysis import parent_tree_health, tooltip_quality
 
 
@@ -36,31 +37,11 @@ def _pct(sorted_vals: list[float], q: float) -> float:
 
 def _read_member(src: Path, name: str) -> str | None:
     """Read `name` from a report that is either a .zip or an unzipped directory. None if absent."""
-    if src.is_dir():
-        p = src / name
-        return p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
-    with zipfile.ZipFile(src) as z:
-        cand = [n for n in z.namelist() if n.endswith(name) or n == name]
-        if not cand:
-            return None
-        return z.read(cand[0]).decode("utf-8", errors="replace")
+    return read_member(src, name)
 
 
 def _load_trace(src: Path) -> list[dict]:
-    raw = _read_member(src, "telemetry/trace.json") or _read_member(src, "trace.json")
-    if raw is None:
-        return []
-    doc = json.loads(raw)
-    if not isinstance(doc, dict):
-        return doc
-    events = doc.get("traceEvents", [])
-    # The session id moved out of every span's args into the document, where one-per-file values
-    # belong. Re-presented as a metadata event so readers that scan `args` find it either way —
-    # traces written before the move still carry it per-span.
-    other = doc.get("otherData")
-    if isinstance(other, dict) and other.get("session"):
-        events = [{"ph": "M", "name": "session", "args": dict(other)}, *events]
-    return events
+    return load_trace(src)
 
 
 def _load_log(src: Path) -> list[dict]:
@@ -383,7 +364,11 @@ def main() -> None:
     ap.add_argument("--spans", action="store_true", help="also print per-attribute span breakdowns")
     ap.add_argument("--log", action="store_true", help="also print notable overlay.log events")
     args = ap.parse_args()
-    events = _load_trace(args.report)
+    evidence = trace_evidence(args.report)
+    events = evidence.pop("events")
+    print(f"input evidence: {json.dumps(evidence)}")
+    if evidence["status"] == "invalid":
+        raise SystemExit(evidence["reason"])
     if not events:
         raise SystemExit(f"no telemetry/trace.json found in {args.report}")
     log = _load_log(args.report) if args.log else []

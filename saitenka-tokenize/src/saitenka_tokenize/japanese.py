@@ -8,7 +8,8 @@ free. The katakana reading is folded to hiragana for furigana.
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+import unicodedata
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
@@ -370,9 +371,29 @@ def merge_dict_compounds(
     return out
 
 
+def _compose_voiced_kana(line: str) -> tuple[str, list[int] | None]:
+    """Normalize tokenizer input without moving offsets in the original subtitle."""
+    if "\u3099" not in line and "\u309a" not in line:
+        return line, None
+    characters: list[str] = []
+    offsets = [0]
+    for index, character in enumerate(line):
+        if character in {"\u3099", "\u309a"} and characters:
+            composed = unicodedata.normalize("NFC", characters[-1] + character)
+            if len(composed) == 1:
+                characters[-1] = composed
+                offsets[-1] = index + 1
+                continue
+        characters.append(character)
+        offsets.append(index + 1)
+    return "".join(characters), offsets
+
+
 def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> list[Token]:
     tokens: list[Token] = []
     idx = 0
+    original = line
+    line, offsets = _compose_voiced_kana(line)
     # Hold _TAG_LOCK across the full parse AND feature attribute reads: fugashi's C extension has
     # not declared free-threading safety, and w.feature may access MeCab-internal state that is
     # only safe from one thread at a time on a free-threaded (no-GIL) build.
@@ -398,4 +419,16 @@ def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> l
         tokens.append(Token(surf, lemma, reading, pos, start, end, pos2))
     if strip_furigana:
         tokens = strip_inline_furigana(tokens)
-    return merge_inflected(tokens) if merge else tokens
+    if merge:
+        tokens = merge_inflected(tokens)
+    if offsets is None:
+        return tokens
+    return [
+        replace(
+            token,
+            surface=original[offsets[token.start] : offsets[token.end]],
+            start=offsets[token.start],
+            end=offsets[token.end],
+        )
+        for token in tokens
+    ]

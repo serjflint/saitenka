@@ -327,6 +327,13 @@ def report(
             help="directory to write the zip into (default: the data dir's reports/)"
         ),
     ] = None,
+    attachments: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(
+            name="--attach",
+            help="explicit unredacted local attachment; repeatable, at most four files of 8 MiB",
+        ),
+    ] = (),
     no_log: Annotated[
         bool,
         cyclopts.Parameter(
@@ -336,13 +343,24 @@ def report(
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; collect/redact/bundle are unit-tested
     """Bundle allowlisted diagnostic metadata. Raw detail is opt-in; nothing is uploaded."""
+    from pathlib import Path
+
     from saitenka.app.report import build_report_bundle
 
-    dest = build_report_bundle(out, include_log=not no_log, diagnostic_detail=diagnostic_detail)
+    if attachments:
+        print("Including unredacted attachments; review before sharing (exports do not expire):")
+        for path in attachments:
+            print(f"  {path}")
+    dest = build_report_bundle(
+        out,
+        include_log=not no_log,
+        diagnostic_detail=diagnostic_detail,
+        attachments=tuple(Path(path).expanduser() for path in attachments),
+    )
     print(f"wrote {dest}")
     if not diagnostic_detail:
         print(
-            "Metadata only; runtime settings and pixel fidelity may be unknown. Review before sharing."
+            "Diagnostic metadata; runtime settings and pixel fidelity may be unknown. Review before sharing."
         )
         return 0
     print(
@@ -369,13 +387,14 @@ def subtitle_report(
     """Explain native subtitle geometry and pixel-ownership decisions from a report bundle."""
     from pathlib import Path
 
-    from saitenka.app.subtitle_report import geometry_records, load_trace, render_geometry
+    from saitenka.app.report_reader import trace_evidence
+    from saitenka.app.subtitle_report import geometry_records, render_geometry
 
     source = Path(report_path).expanduser()
-    try:
-        events = load_trace(source)
-    except (OSError, ValueError) as error:
-        print(f"subtitle report unavailable: {error}", file=sys.stderr)
+    evidence = trace_evidence(source)
+    events = evidence.pop("events")
+    if evidence["status"] == "invalid":
+        print(f"subtitle report unavailable: {evidence['reason']}", file=sys.stderr)
         return 1
     if not events:
         print(
@@ -384,8 +403,17 @@ def subtitle_report(
         )
         return 1
     if json_out:
-        print(json.dumps({"geometry": geometry_records(events)}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"geometry": geometry_records(events), "input_evidence": evidence},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
+        print(
+            f"input evidence: {evidence['status']}; invalid events: {evidence.get('invalid_events', 0)}"
+        )
         print(render_geometry(source, events), end="")
     return 0
 
@@ -403,13 +431,14 @@ def trace_report(
     """Explain startup readiness and cue-annotation latency from a report bundle."""
     from pathlib import Path
 
-    from saitenka.app.trace_report import load_startup_trace, render_startup, startup_json
+    from saitenka.app.trace_report import load_startup_evidence, render_startup, startup_json
 
     source = Path(report_path).expanduser()
-    try:
-        events = load_startup_trace(source)
-    except (OSError, ValueError) as error:
-        print(f"trace report unavailable: {error}", file=sys.stderr)
+    evidence = load_startup_evidence(source)
+    events = evidence.pop("events")
+    if evidence["status"] == "invalid":
+        reason = evidence["reason"]
+        print(f"trace report unavailable: {reason}", file=sys.stderr)
         return 1
     if not events:
         print(
@@ -417,7 +446,17 @@ def trace_report(
             file=sys.stderr,
         )
         return 1
-    print(startup_json(events) if json_out else render_startup(source, events), end="")
+    if json_out:
+        import json
+
+        result = json.loads(startup_json(events))
+        result["input_evidence"] = evidence
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"input evidence: {evidence['status']}; invalid events: {evidence.get('invalid_events', 0)}"
+        )
+        print(render_startup(source, events), end="")
     return 0
 
 

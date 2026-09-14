@@ -87,7 +87,7 @@ def manifest(events: list[tuple[int, int, str]], provenance: dict) -> dict:
         "coordinates": rows,
         "census_sha256": digest([item.key for item in coordinates]),
         "sampling": "one interior midpoint per event; animation states not qualified",
-        "capture_estimate_upper_bound": len(coordinates) * 7,
+        "capture_estimate_upper_bound": len(coordinates) * 9,
     }
     return {**result, "manifest_sha256": digest(result)}
 
@@ -113,10 +113,11 @@ def reference_mask(
     while bottom < ink.shape[0] and ink[bottom].any():
         bottom += 1
     columns = ink[top:bottom].any(axis=0)
+    other_columns = (blue[top:bottom, :, 0] > 0).any(axis=0)
     left, right = int(xs.min()), int(xs.max()) + 1
-    while left > 0 and columns[left - 1]:
+    while left > 0 and columns[left - 1] and not other_columns[left - 1]:
         left -= 1
-    while right < ink.shape[1] and columns[right]:
+    while right < ink.shape[1] and columns[right] and not other_columns[right]:
         right += 1
     region = np.s_[top:bottom, left:right]
     # Red inside this cell belongs to another character: touching/overlapping ink is ambiguous.
@@ -131,34 +132,31 @@ def green_coverage(composite: np.ndarray) -> np.ndarray:
     return np.maximum(composite[:, :, 1].astype(np.int16) - composite[:, :, 0], 0).astype(np.uint8)
 
 
+def isolation_preserves_ink(original: np.ndarray, isolated: np.ndarray) -> bool:
+    coverage = np.minimum(isolated[:, :, 0].astype(np.uint16) + isolated[:, :, 2], 255)
+    return bool(np.array_equal(original[:, :, 0], coverage))
+
+
 def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -> dict:
     """Reference ownership is independent of our boxes; missing output never shrinks the mask."""
     if reference.shape != ours.shape or reference.shape != context.shape or reference.ndim != 2:
         raise ValueError("mask dimensions must match")
-    target = reference > 32
+    target = reference > 0
     expected = int(target.sum())
     if not expected:
         return {"verdict": "inconclusive", "reason": "empty-reference-mask"}
-    visible = ours > 32
+    visible = ours > 0
     missed = int((target & ~visible).sum())
     ys, xs = np.where(target)
     region = np.zeros_like(target)
     region[
         max(0, int(ys.min()) - 2) : int(ys.max()) + 3, max(0, int(xs.min()) - 2) : int(xs.max()) + 3
     ] = True
-    # The production overprint has a one-pixel border. Account for that decoration, not a shifted glyph.
-    padded = np.pad(context > 32, 1)
-    permitted = np.logical_or.reduce(
-        [
-            padded[y : y + target.shape[0], x : x + target.shape[1]]
-            for y in range(3)
-            for x in range(3)
-        ]
-    )
+    permitted = context > 0
     spill = int((region & visible & ~permitted).sum())
     frame_spill = int((visible & ~permitted).sum())
     alpha_error = float(np.abs(ours.astype(float) - reference.astype(float))[target].max())
-    cue_target = context > 32
+    cue_target = context > 0
     frame_missing = int((cue_target & ~visible).sum())
     frame_error = float(np.abs(ours.astype(float) - context.astype(float))[cue_target].max())
     character_failed = missed > 0 or spill > 0 or alpha_error > 0
@@ -199,3 +197,86 @@ def results_summary(frozen: dict, results: dict[str, dict]) -> dict:
         },
         "results": rows,
     }
+
+
+def qualification_counts(frozen: dict, result: dict) -> dict:
+    """Account executed controls separately from reported fidelity; never shrink the census."""
+    identity = frozen.get("manifest_sha256")
+    if (
+        type(frozen.get("schema")) is not int
+        or frozen["schema"] != 1
+        or identity
+        != digest({key: value for key, value in frozen.items() if key != "manifest_sha256"})
+        or result.get("manifest_sha256") != identity
+    ):
+        raise ValueError("qualification manifest mismatch")
+    coordinates, rows = frozen.get("coordinates"), result.get("results")
+    if not isinstance(coordinates, list) or not isinstance(rows, list):
+        raise TypeError("qualification census missing")
+    keys = [row.get("key") for row in coordinates if isinstance(row, dict)]
+    observed = [row.get("key") for row in rows if isinstance(row, dict)]
+    if (
+        len(keys) != len(coordinates)
+        or len(observed) != len(rows)
+        or not all(isinstance(key, str) for key in [*keys, *observed])
+        or len(set(keys)) != len(keys)
+        or len(set(observed)) != len(observed)
+        or set(keys) != set(observed)
+    ):
+        raise ValueError("qualification census differs")
+    counts = dict.fromkeys(("passed", "failed", "unsupported", "inconclusive", "unattempted"), 0)
+    controlled = 0
+    non_ink = {row["key"] for row in coordinates if row.get("reason") == "non-ink"}
+    excluded = 0
+    for row in rows:
+        verdict = row.get("verdict")
+        if verdict not in counts:
+            raise ValueError("qualification verdict missing")
+        valid_controls = row.get("controls") == {
+            "positive": "passed",
+            "displaced": "failed",
+            "wrong-color": "failed",
+        }
+        controlled += valid_controls
+        if verdict in {"passed", "failed"} and not valid_controls:
+            verdict = "inconclusive"
+        if verdict == "passed" and not _exact_result(row):
+            verdict = "inconclusive"
+        counts[verdict] += 1
+        excluded += (
+            row["key"] in non_ink and verdict == "unsupported" and row.get("reason") == "non-ink"
+        )
+    return {
+        "scope": "supplied local character artifact; structural validation, not a new render",
+        "denominator": len(keys),
+        "required_ink_coordinates": len(keys) - len(non_ink),
+        "accounted_non_ink": excluded,
+        "oracle_execution": {
+            "valid_controls": controlled,
+            "without_valid_controls": len(keys) - controlled,
+        },
+        "fidelity": counts,
+        "fault_controls": {"displacement": controlled, "wrong_color": controlled},
+        "qualified": bool(keys)
+        and counts["passed"] == len(keys) - len(non_ink)
+        and excluded == len(non_ink),
+    }
+
+
+def _exact_result(row: dict) -> bool:
+    return (
+        row.get("character_verdict") == row.get("cue_verdict") == "passed"
+        and type(row.get("reference_pixels")) is int
+        and row["reference_pixels"] > 0
+        and all(
+            type(row.get(key)) in {int, float} and row[key] == 0
+            for key in (
+                "missing_pixels",
+                "spill_pixels",
+                "frame_missing_pixels",
+                "frame_spill_pixels",
+                "intensity_error",
+                "frame_intensity_error",
+            )
+        )
+    )

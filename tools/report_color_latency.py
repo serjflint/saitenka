@@ -13,9 +13,10 @@ import collections
 import json
 import statistics
 import sys
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from saitenka.app.report_reader import trace_evidence
 
 
 def draws(trace: dict) -> list[dict]:
@@ -408,8 +409,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path, help="a saitenka report .zip")
     args = parser.parse_args(argv)
 
-    with zipfile.ZipFile(args.report) as bundle:
-        trace = json.loads(bundle.read("telemetry/trace.json"))
+    evidence = trace_evidence(args.report)
+    trace = {"traceEvents": evidence.pop("events")}
+    print(f"input evidence: {json.dumps(evidence)}")
+    if evidence["status"] == "invalid":
+        return 1
     spans = draws(trace)
     if not spans:
         print("no subtitle_draw spans — the bundle predates them, or telemetry was off")
