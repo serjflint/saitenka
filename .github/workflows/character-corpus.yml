@@ -38,11 +38,15 @@ jobs:
         run: vulkaninfo --summary
       - name: Install pinned native-geometry mpv
         run: |
-          curl -fsSL -o mpv.AppImage https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.40.0-30-g5ba7ee513/mpv-v0.40.0-30-g5ba7ee513-anylinux-x86_64.AppImage
-          echo 'e7691d61e961507a282cbce56560168b99773647ab05189931abf24e71c4820e  mpv.AppImage' | sha256sum -c -
+          curl -fsSL -o mpv.AppImage https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0%402026-09-07_1788787125/mpv-v0.41.0-anylinux-x86_64.AppImage
+          echo 'bb52fb49c54e83155891bfb97578e7ee40575a306d0dddc96fc603be20db8214  mpv.AppImage' | sha256sum -c -
           chmod +x mpv.AppImage
           ./mpv.AppImage --appimage-extract >/dev/null
           sudo ln -s "$PWD/squashfs-root/AppRun" /usr/local/bin/mpv
+      - name: Verify player GPU output
+        run: >-
+          xvfb-run -a mpv --no-config --vo=gpu-next --gpu-sw=yes --ao=null --frames=1
+          'av://lavfi:color=c=black:s=64x64:d=1'
       - name: Install runtime
         run: |
           uv sync --locked --extra full

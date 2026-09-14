@@ -60,6 +60,7 @@ from saitenka.mpvio.osd import Overlay
 from saitenka.version import overlay_version
 
 PROFILE = (
+    "--vo=gpu-next",
     "--force-render=yes",
     "--gpu-sw=yes",
     "--osc=no",
