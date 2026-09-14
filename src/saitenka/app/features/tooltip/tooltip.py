@@ -66,7 +66,7 @@ if TYPE_CHECKING:
 
 _HIT_TEST_SAMPLE_EVERY = 8  # OTel hit-test histogram samples 1-in-N poll ticks (unlike perf.timed,
 # which is an unconditional deque append and stays on every tick)
-log = logging.getLogger(__name__)  # DEBUG lands in overlay.log → bundled by `saitenka report`
+log = logging.getLogger(__name__)
 
 
 # --- hover -----------------------------------------------------------------------------------------

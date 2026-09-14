@@ -117,7 +117,8 @@ def telemetry(
         print(f"    {INSTALL_HINT}")
     elif enabled:
         print(f"  trace → {st.trace_path}")
-        print("  use the overlay (watch + hover a while), then `saitenka report` to bundle it")
+        print("  watch + hover, then `saitenka report --diagnostic-detail` to bundle the trace")
+        print("  detailed reports can contain private text and paths; review before sharing")
     elif st.extra_installed:
         print(
             "  (the 'telemetry' extra stays installed — uninstall separately if you want it gone)"
@@ -313,6 +314,13 @@ def stats(
 
 def report(
     *,
+    diagnostic_detail: Annotated[
+        bool,
+        cyclopts.Parameter(
+            negative=(),
+            help="include sensitive config, traces, crash reports and logs; review before sharing",
+        ),
+    ] = False,
     out: Annotated[
         str | None,
         cyclopts.Parameter(
@@ -323,16 +331,20 @@ def report(
         bool,
         cyclopts.Parameter(
             negative=(),
-            help="exclude the overlay log (may contain video filenames / mined sentences)",
+            help="omit logs from --diagnostic-detail (other detail may still contain private text)",
         ),
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; collect/redact/bundle are unit-tested
-    """Bundle diagnostics (doctor + versions + config + mpv.conf + plugin lua + log) into a single
-    timestamped zip for bug reports. Local-only, never uploaded; secrets are redacted."""
+    """Bundle allowlisted diagnostic metadata. Raw detail is opt-in; nothing is uploaded."""
     from saitenka.app.report import build_report_bundle
 
-    dest = build_report_bundle(out, include_log=not no_log)
+    dest = build_report_bundle(out, include_log=not no_log, diagnostic_detail=diagnostic_detail)
     print(f"wrote {dest}")
+    if not diagnostic_detail:
+        print(
+            "Metadata only; runtime settings and pixel fidelity may be unknown. Review before sharing."
+        )
+        return 0
     print(
         "Review it before sharing — API keys were removed, but it includes your config, mpv.conf, and"
         + (

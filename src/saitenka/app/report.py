@@ -1,11 +1,4 @@
-"""``saitenka report`` — a single timestamped diagnostics zip for bug reports.
-
-Replaces pasting a terminal transcript by hand. It is **user-invoked, local-only (never uploaded),
-and redacted**: API keys are scrubbed, a MANIFEST lists exactly what's inside, and the CLI tells you to
-review before sharing. What goes in is scoped by privacy tier (see MANIFEST): safe diagnostics always;
-the log (which may hold video filenames / mined sentences) is included by default but ``--no-log`` opts
-out; secrets are removed; dictionaries / Anki / video / third-party script bodies are never included.
-"""
+"""Local-only report bundles: allowlisted metadata by default, raw detail only by explicit opt-in."""
 
 from __future__ import annotations
 
@@ -401,7 +394,7 @@ def _latest_session(log_text: str) -> str | None:
     for line in reversed(log_text.splitlines()):
         try:
             sid = json.loads(line).get("session")
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RecursionError):
             continue
         if sid:
             return str(sid)
@@ -478,10 +471,12 @@ def _collect_logs(log_path: Path, *, include: bool) -> tuple[str | None, dict[st
     return session, members
 
 
-def collect(*, include_log: bool = True) -> dict[str, str]:
-    """Build ``{archive_member: text}`` for the bundle — all text, all redacted. Pure enough to test
-    with fake homes (it only reads files + runs read-only version/doctor checks)."""
+def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dict[str, str]:
+    """Build allowlisted metadata, or explicitly requested sensitive diagnostic detail."""
     from saitenka.app.paths import cache_dir
+
+    if not diagnostic_detail:
+        return _collect_metadata()
 
     log_path = cache_dir() / "overlay.log"  # resolve dynamically (respects $SAITENKA_CACHE_DIR)
 
@@ -515,6 +510,80 @@ def collect(*, include_log: bool = True) -> dict[str, str]:
     return members
 
 
+def _collect_metadata() -> dict[str, str]:
+    import tomllib
+
+    from saitenka.app.config import config_path
+    from saitenka.app.paths import cache_dir
+    from saitenka.app.report_schema import (
+        build_identity,
+        configured_metadata,
+        envelope,
+    )
+
+    configuration: dict = {"status": "unavailable"}
+    try:
+        with config_path().open("rb") as stream:
+            data = stream.read(128 * 1024 + 1)
+        if len(data) > 128 * 1024:
+            configuration = {"status": "too-large"}
+        else:
+            configuration = {
+                "status": "collected",
+                **configured_metadata(tomllib.loads(data.decode())),
+            }
+    except (ValueError, UnicodeError, RecursionError):
+        configuration = {"status": "invalid"}
+    except OSError:
+        pass
+    text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
+    session = _latest_session(text)
+    producer, health = _metadata_producer(session)
+    payload = envelope(
+        collector=build_identity(), producer=producer, configuration=configuration, health=health
+    )
+    return {
+        "diagnostics/envelope.json": json.dumps(payload, ensure_ascii=False, indent=2),
+        "MANIFEST.txt": (
+            "Local metadata-only diagnostics; NEVER uploaded by saitenka.\n"
+            "No raw configuration, logs, traces, crash text, paths, cue text or pixels.\n"
+            "Review before sharing. Exported bundles do not expire automatically.\n"
+            "Contents: diagnostics/envelope.json\n"
+        ),
+    }
+
+
+def _metadata_producer(session: str | None) -> tuple[dict, dict]:
+    from saitenka.app.paths import cache_dir
+    from saitenka.app.report_schema import SCHEMA_VERSION, count, operation_health, safe_identity
+
+    producer: dict = {"status": "unavailable"}
+    health: dict = {"status": "unavailable"}
+    if session is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
+        path = cache_dir() / "diagnostics" / f"session-{session}.json"
+        try:
+            _, raw = _diagnostic_json(path)
+            if raw.get("session") != session:
+                producer = {"status": "session-mismatch"}
+            elif type(raw.get("schema")) is not int or raw["schema"] != SCHEMA_VERSION:
+                producer = {"status": "unsupported-schema"}
+            else:
+                producer = {
+                    "status": "collected",
+                    "identity": safe_identity(raw.get("producer")),
+                    "captured_ns": count(raw.get("captured_ns")),
+                    "clock": "unix-nanoseconds",
+                    "session": "session-1",
+                    "end": "shutdown-observed"
+                    if raw.get("end") == "shutdown-observed"
+                    else "unknown",
+                }
+                health = operation_health(raw)
+        except (OSError, ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
+            producer = {"status": "unreadable-or-too-large"}
+    return producer, health
+
+
 def _manifest(members: dict[str, str], *, include_log: bool, session: str | None = None) -> str:
     lines = [
         f"saitenka {_overlay_version()} diagnostics bundle",
@@ -542,6 +611,7 @@ def build_report_bundle(
     dest_dir: str | Path | None = None,
     *,
     include_log: bool = True,
+    diagnostic_detail: bool = False,
     timestamp: str | None = None,
 ) -> Path:
     """Write the diagnostics zip and return its path. ``dest_dir`` defaults to a dedicated reports dir
@@ -550,11 +620,23 @@ def build_report_bundle(
     from saitenka.app.paths import data_dir
 
     ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", ts):
+        raise ValueError("report timestamp must be a bounded filename component")
     base = Path(dest_dir).expanduser() if dest_dir else data_dir() / "reports"
     base.mkdir(parents=True, exist_ok=True)
     dest = base / f"saitenka-report-{ts}.zip"
-    members = collect(include_log=include_log)
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, content in members.items():
-            zf.writestr(name, content)
+    members = collect(include_log=include_log, diagnostic_detail=diagnostic_detail)
+    fd, temporary_name = tempfile.mkstemp(prefix=".saitenka-report-", suffix=".tmp", dir=base)
+    temporary = Path(temporary_name)
+    try:
+        with (
+            os.fdopen(fd, "w+b") as stream,
+            zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as zf,
+        ):
+            for name, content in members.items():
+                zf.writestr(name, content)
+        # A timestamp collision must not silently destroy an earlier user-owned bundle.
+        os.link(temporary, dest)
+    finally:
+        temporary.unlink(missing_ok=True)
     return dest

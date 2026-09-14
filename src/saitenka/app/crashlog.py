@@ -7,7 +7,7 @@
    the interpreter is corrupted.
 
 Privacy (Crashpad/Sentry/GDPR practice): crash reports are written **locally only and NEVER uploaded** —
-collection is separated from transmission, so the user chooses to share via ``saitenka report``
+collection is separated from transmission; sharing a ``report --diagnostic-detail`` is opt-in
 (which bundles them). Secrets in argv / the log tail are redacted first, and old reports are pruned.
 """
 
@@ -129,7 +129,8 @@ def _prune(d: Path) -> None:
 def _notify(path: Path) -> None:  # pragma: no cover — stderr side effect
     print(
         f"\nsaitenka crashed — details saved to {path}\n"
-        "Please run `saitenka report` to bundle it for a bug report (nothing is uploaded).",
+        "Run `saitenka report --diagnostic-detail` to bundle it locally.\n"
+        "Detail can contain private text and paths; review before sharing. Nothing is uploaded.",
         file=sys.stderr,
     )
 

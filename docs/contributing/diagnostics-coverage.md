@@ -7,6 +7,21 @@ a claim that every listed platform, renderer, failure, or integration has been e
 
 ## Reading a report
 
+`saitenka report` creates a metadata-only ZIP with a versioned `diagnostics/envelope.json`.
+It separates the collector build from the producer recorded in the latest log session's summary.
+Missing, malformed, mismatched-session and unsupported-schema summaries cannot establish healthy
+operation counts. Matching identity fields do not prove identical loaded code: editable source can
+change while a process is running. The config subset is attributed to the collector's file, not the
+player's effective configuration. Runtime configuration, loaded native libraries and pixel fidelity
+remain unknown in this envelope.
+
+For the trace-based tools below, collect with `saitenka report --diagnostic-detail`.
+That opt-in includes redacted raw configuration, logs, traces and crash reports, which can still contain
+private paths and text. `--no-log` excludes logs only; it does not sanitize the other detail.
+Review the ZIP's manifest and contents before sharing. Nothing uploads automatically and exported
+ZIPs do not expire automatically. Publication fails rather than overwriting a timestamp collision;
+retry with a different timestamp or destination after preserving the earlier report.
+
 From a development checkout:
 
 ```sh

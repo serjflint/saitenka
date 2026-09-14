@@ -79,7 +79,9 @@ def test_observed_cue_carries_revision_through_geometry_and_color_export(monkeyp
         broker.close()
         mailbox.close()
         provider.shutdown()
-    archive = report.build_report_bundle(tmp_path / "reports", timestamp="cue")
+    archive = report.build_report_bundle(
+        tmp_path / "reports", timestamp="cue", diagnostic_detail=True
+    )
     events = load_startup_trace(archive)
     cue = next(event for event in events if event.get("name") == "cue_reconcile")
     revision = cue["args"]["cue_revision"]
@@ -119,7 +121,9 @@ def test_reader_reports_acknowledgment_wait_and_preserves_originating_cue(monkey
 
     ipc.finish(0)
     provider.shutdown()
-    archive = report.build_report_bundle(tmp_path / "reports", timestamp="ack")
+    archive = report.build_report_bundle(
+        tmp_path / "reports", timestamp="ack", diagnostic_detail=True
+    )
     events = load_startup_trace(archive)
     diagnosis = json.loads(startup_json(events))
     written = next(event for event in events if event.get("name") == "surface_write")

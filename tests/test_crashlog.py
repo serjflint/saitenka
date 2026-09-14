@@ -36,7 +36,7 @@ def test_isolated_native_fault_reaches_the_report_bundle(monkeypatch, tmp_path):
         timeout=3,
         check=False,
     )
-    members = report.collect()
+    members = report.collect(diagnostic_detail=True)
     assert result.returncode < 0
     assert "Fatal Python error" in members["crashes/faulthandler.log"]
 
@@ -121,7 +121,7 @@ def test_report_bundle_includes_crash_logs(monkeypatch, tmp_path):
     from saitenka.app import report
 
     monkeypatch.setattr(report, "_first_line", lambda *_c: "mpv v0.40.0")
-    members = report.collect(include_log=False)
+    members = report.collect(include_log=False, diagnostic_detail=True)
     assert any(name.startswith("crashes/crash-") for name in members)
 
 

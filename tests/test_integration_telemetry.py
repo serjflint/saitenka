@@ -49,7 +49,9 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
         anki.Anki().find_notes("private note query")
     telemetry.save_operation_summary()
     provider.shutdown()
-    archive = report.build_report_bundle(tmp_path / "reports", timestamp="integration")
+    archive = report.build_report_bundle(
+        tmp_path / "reports", timestamp="integration", diagnostic_detail=True
+    )
     import zipfile
 
     with zipfile.ZipFile(archive) as bundle:

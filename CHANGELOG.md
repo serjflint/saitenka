@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Reports default to allowlisted metadata with separate producer/collector build identities and
+  explicit unknown runtime/pixel evidence. Sensitive detail requires `report --diagnostic-detail`;
+  report publication no longer overwrites an existing timestamped bundle.
 - Local diagnostic reports retain trace-write losses, unfinished operations and native fault logs;
   bounded operation outcomes remain available without the tracing extra.
 - Tooltip quality timelines distinguish soft/crisp submission from mpv acknowledgment, independently

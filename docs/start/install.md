@@ -127,7 +127,7 @@ Each of these has full detail in the [CLI reference](../usage/cli.md) — the es
 | `saitenka update` | Pull the latest release, **keeping your current extras**. |
 | `saitenka reinstall` | Reinstall to change the extras or the source (`--yes` skips the prompt). |
 | `saitenka doctor` | Diagnose the whole environment: mpv/ffmpeg, config, AnkiConnect, imported dictionaries, recent errors. |
-| `saitenka report` | Bundle a redacted bug report (logs + environment) to attach to an issue. |
+| `saitenka report` | Bundle allowlisted diagnostic metadata locally; raw detail requires explicit opt-in. |
 
 ## Troubleshooting
 

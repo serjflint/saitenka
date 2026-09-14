@@ -259,10 +259,10 @@ blocking the player event loop.
 - A native-geometry failure can temporarily remove scanning boxes, but the mpv subtitle style should
   remain stable. A switch to the standard renderer is a catastrophic native-visibility failure; include
   a report bundle if that occurs unexpectedly. Before reproducing, run `saitenka telemetry enable`;
-  after the session, run `saitenka report`, then pass the exact printed path to
+  after the session, run `saitenka report --diagnostic-detail`, then pass the exact printed path to
   `saitenka subtitle-report /path/to/saitenka-report-20260816-181525.zip`. The installed, text-free analyzer shows
   ownership transactions and retries, capability state, matched event/token counts, skip counts, and
-  bounded error codes.
+  bounded error codes. This opt-in bundle can contain private text and paths; review it before sharing.
 - For responsive subtitles but a delayed tooltip or scroll, run `saitenka trace-report` on that same
   report path. Its hover, tooltip, and scroll summaries distinguish target lookup, preparation, visible
   paint, supersession, cancellation, and failure without recording the hovered text.
