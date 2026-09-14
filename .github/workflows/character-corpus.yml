@@ -44,9 +44,12 @@ jobs:
           ./mpv.AppImage --appimage-extract >/dev/null
           sudo ln -s "$PWD/squashfs-root/AppRun" /usr/local/bin/mpv
       - name: Verify player GPU output
-        run: >-
-          xvfb-run -a mpv --no-config --vo=gpu-next --gpu-sw=yes --ao=null --frames=1
-          'av://lavfi:color=c=black:s=64x64:d=1'
+        run: |
+          mkdir character-preflight
+          ffmpeg -v error -f lavfi -i 'color=c=black:s=64x64:d=1' \
+            -c:v libx264 -pix_fmt yuv420p character-preflight/black.mkv
+          xvfb-run -a mpv --no-config --vo=gpu-next --gpu-sw=yes --ao=null --frames=1 \
+            --log-file=character-preflight/mpv.log character-preflight/black.mkv
       - name: Install runtime
         run: |
           uv sync --locked --extra full
@@ -68,6 +71,7 @@ jobs:
         with:
           name: character-${{ matrix.format }}-${{ matrix.size }}
           path: |
+            character-preflight/
             character-input/
             character-evidence/
           if-no-files-found: error
