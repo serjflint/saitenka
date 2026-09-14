@@ -26,13 +26,16 @@ jobs:
       UV_PYTHON: '3.13'
       SAITENKA_CONFIG: /dev/null
       LIBGL_ALWAYS_SOFTWARE: '1'
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           enable-cache: true
       - name: Install display and video tools
-        run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg libvulkan1 mesa-vulkan-drivers vulkan-tools
+      - name: Verify software Vulkan driver
+        run: vulkaninfo --summary
       - name: Install pinned native-geometry mpv
         run: |
           curl -fsSL -o mpv.AppImage https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.40.0-30-g5ba7ee513/mpv-v0.40.0-30-g5ba7ee513-anylinux-x86_64.AppImage
