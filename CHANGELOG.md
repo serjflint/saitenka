@@ -17,6 +17,8 @@ logs.
 
 ### Fixed
 
+- Positive-spaced subtitle color overprints preserve fractional glyph positions, avoiding displaced
+  characters on ultrawide displays. Runs that cannot be matched exactly use their native masks.
 - Converted subtitles use mpv's integer margin and display-aspect arithmetic, avoiding shifted
   hit boxes and color overlays caused by rounding before mpv does.
 - Background jobs and delayed surface replies preserve their initiating trace context instead of

@@ -1,5 +1,8 @@
 r"""Where a token lands when it is drawn on its own, instead of inside its line.
 
+Positive-spaced native tokens use `phase_document` and exact coverage matching in `fractional`.
+The integer-box probe below remains the anchor mechanism for unspaced and negative-spaced runs.
+
 The overprint redraws one token as its own ``\an7\pos``-ed event. That is not the layout the token
 was measured in, and three things change:
 
@@ -36,6 +39,7 @@ a measurement to stand on when it is made.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import ceil
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -71,17 +75,17 @@ class Fragment:
     token_index: int
     #: Ink origin minus the anchor asked for. Subtract from the measured rectangle's origin to get
     #: the position that puts the redraw's ink where the token actually is.
-    dx: int
-    dy: int
+    dx: float
+    dy: float
     width: int
     height: int
     #: Per glyph, what to add to the token's own anchor to place that glyph as its own event. Empty
     #: when the token is drawn whole — a run without letter spacing, where both libass instances
     #: shape it identically and one event is faithful.
-    glyph_dx: tuple[int, ...] = ()
-    glyph_dy: tuple[int, ...] = ()
+    glyph_dx: tuple[float, ...] = ()
+    glyph_dy: tuple[float, ...] = ()
 
-    def anchor_for(self, x: int, y: int) -> tuple[int, int]:
+    def anchor_for(self, x: int, y: int) -> tuple[float, float]:
         return (x - self.dx, y - self.dy)
 
     def matches(self, width: int, height: int, *, slack: int = 1) -> bool:
@@ -134,7 +138,7 @@ class _Slot:
     glyph_index: int
     #: Drawn on a row of its own rather than inside the token's row.
     alone: bool
-    anchor: tuple[int, int]
+    anchor: tuple[float, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,11 +164,11 @@ def _colour(rgb: int) -> str:
     return f"{{\\1c&H{(rgb & 0xFF) << 16 | (rgb & 0x00FF00) | (rgb >> 16) & 0xFF:06X}&}}"
 
 
-def _event(anchor: tuple[int, int], request: FragmentRequest, body: str) -> str:
+def _event(anchor: tuple[float, float], request: FragmentRequest, body: str) -> str:
     tags = run_tags(request.spacing, request.scale_x, bold=request.bold, italic=request.italic)
     return (
         f"Dialogue: 0,0:00:00.00,9:00:00.00,P,,0,0,0,,"
-        f"{{\\an7\\pos({anchor[0]},{anchor[1]})\\fn{request.font_name}"
+        f"{{\\an7\\pos({anchor[0]:.12g},{anchor[1]:.12g})\\fn{request.font_name}"
         f"\\fs{request.font_size:g}{tags}\\bord0\\shad0}}{body}"
     )
 
@@ -214,6 +218,33 @@ def probe_document(
     return ProbeLayout(header + "\n".join(rows) + "\n", tuple(slots))
 
 
+def phase_document(
+    request: FragmentRequest, palette_rgb: Sequence[int]
+) -> tuple[ProbeLayout, tuple[int, int]]:
+    """One isolated character at libass's eight raster phases on each axis.
+
+    The public image API has already rounded destinations to pixels. Phase rasters retain the
+    lost information in their coverage; exact matching fails closed if a renderer uses other phases.
+    """
+    from saitenka_subtitles.geometry import MAX_FRAME_PIXELS
+
+    pitch_x = ceil(request.font_size * (max(request.scale_x, 100) / 100 + 2))
+    pitch_y = ceil(request.font_size * 3)
+    frame = (pitch_x * 8, pitch_y * 8)
+    if min(frame) <= 0 or frame[0] * frame[1] > MAX_FRAME_PIXELS:
+        raise ValueError("fractional probe exceeds frame budget")
+    header = probe_document((), (), frame).document
+    rows: list[str] = []
+    slots: list[_Slot] = []
+    inset = ceil(request.font_size)
+    for index in range(64):
+        column, row = index % 8, index // 8
+        anchor = (column * pitch_x + inset + column / 8, row * pitch_y + inset + row / 8)
+        slots.append(_Slot(0, index, alone=True, anchor=anchor))
+        rows.append(_event(anchor, request, _colour(palette_rgb[index]) + request.text))
+    return ProbeLayout(header + "\n".join(rows) + "\n", tuple(slots)), frame
+
+
 def fragments_from(
     measured: Sequence[tuple[int, int, int, int, int]],
     requests: Sequence[FragmentRequest],
@@ -226,10 +257,10 @@ def fragments_from(
     per-glyph layout would place some of its glyphs and leave the rest behind.
     """
     by_slot = {item[0]: item for item in measured}
-    inside: dict[int, dict[int, tuple[int, int]]] = {}
-    alone: dict[int, dict[int, tuple[int, int]]] = {}
+    inside: dict[int, dict[int, tuple[float, float]]] = {}
+    alone: dict[int, dict[int, tuple[float, float]]] = {}
     extent: dict[int, list[int]] = {}
-    anchors: dict[int, tuple[int, int]] = {}
+    anchors: dict[int, tuple[float, float]] = {}
     for ordinal, slot in enumerate(layout.slots):
         item = by_slot.get(ordinal)
         if item is None:
@@ -254,8 +285,8 @@ def fragments_from(
             continue
         box = measured_box
         anchor = anchors[index]
-        glyph_dx: tuple[int, ...] = ()
-        glyph_dy: tuple[int, ...] = ()
+        glyph_dx: tuple[float, ...] = ()
+        glyph_dy: tuple[float, ...] = ()
         if request.per_glyph:
             solo = alone.get(index, {})
             if len(solo) != len(request.text):

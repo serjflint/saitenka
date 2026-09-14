@@ -280,7 +280,7 @@ def _assign_rung(
         box.glyph_dy,
     )
     mask = overpaint.TokenMask(box.x, box.y, box.w, box.h, box.coverage, color)
-    if paint.drawable:
+    if box.overprint_safe and paint.drawable:
         paints.append(paint)
         return "overprint"
     if mask.usable:

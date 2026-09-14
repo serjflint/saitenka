@@ -1,0 +1,172 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
+
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+from saitenka_subtitles.fractional import PhaseMask, match_phases
+from saitenka_subtitles.fragments import probe_document
+from saitenka_subtitles.geometry import (
+    FontProvider,
+    FontSetup,
+    GeometryPaletteEntry,
+    GeometryRequest,
+)
+from saitenka_subtitles.libass_backend import LibassGeometryBackend
+from saitenka_subtitles.overprint import TokenPaint, event_lines
+
+
+@given(dx=st.integers(-32, 32), dy=st.integers(-32, 32), alpha=st.integers(1, 255))
+def test_matching_preserves_fractional_anchor_and_disconnected_mark(dx, dy, alpha):
+    coverage = bytes((alpha, 0, 0, 0, 0, alpha))
+    phase = PhaseMask(2, 3, coverage, dx / 8, dy / 8)
+
+    assert match_phases(coverage, 2, 3, [(phase,)]) == ((-dx / 8, -dy / 8),)
+
+
+@pytest.mark.parametrize("coverage", [b"\xff\0\0\0\0\0", b"\xff\0\0\0\xff\xff"])
+def test_matching_refuses_missing_or_extra_mark(coverage):
+    phase = PhaseMask(2, 3, b"\xff\0\0\0\0\xff", 0.375, 0.125)
+
+    assert match_phases(coverage, 2, 3, [(phase,)]) is None
+
+
+def test_matching_selects_native_phase_instead_of_first_same_sized_glyph():
+    wrong = PhaseMask(2, 1, b"\x7f\xff", 0, 0)
+    right = replace(wrong, coverage=b"\xff\x7f", dx=0.375)
+
+    assert match_phases(b"\xff\x7f", 2, 1, [(wrong, right)]) == ((-0.375, 0),)
+
+
+def test_matching_refuses_unclaimed_ink_after_last_glyph():
+    phase = PhaseMask(1, 1, b"\xff", 0, 0)
+
+    assert match_phases(b"\xff\0\xff", 3, 1, [(phase,)]) is None
+
+
+def test_matching_recovers_separate_fractional_positions_in_one_token():
+    first = PhaseMask(1, 2, b"\xff\x80", 0.375, 0.125)
+    second = PhaseMask(1, 2, b"\x80\xff", -0.625, -0.875)
+
+    assert match_phases(b"\xff\0\x80\x80\0\xff", 3, 2, [(first,), (second,)]) == (
+        (-0.375, -0.125),
+        (2.625, 0.875),
+    )
+
+
+def test_fractional_positions_survive_payload_serialization():
+    paint = TokenPaint(
+        "だ", 2460, 1200, "Noto Sans JP", 48, 0x00FF00, glyph_dx=(-1.625,), glyph_dy=(-0.125,)
+    )
+
+    assert r"\pos(2458.375,1199.875)" in event_lines(paint)[0]
+
+
+def native_request(origin=(64, 40)):
+    frame = (960, 540)
+    header = probe_document((), (), frame).document
+    text = "ださい"
+    body = f"{{\\an7\\pos({origin[0]},{origin[1]})\\fnNoto Sans JP Thin\\fs48\\fsp4}}{text}"
+    document = header + f"Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,{body}\n"
+    track = SubtitleTrackId("fractional")
+    event = SubtitleEventId(track, 0, 2000, 0, 0)
+    fonts = (
+        (
+            "NotoSansJP.ttf",
+            (Path(__file__).parents[1] / "src/saitenka/assets/fonts/NotoSansJP.ttf").read_bytes(),
+        ),
+    )
+    return GeometryRequest(
+        0,
+        track,
+        SubtitleFrameId(track, (event,)),
+        1000,
+        frame,
+        frame,
+        document.encode(),
+        palette=(
+            GeometryPaletteEntry(event, 0, 0xFFFFFF, "Noto Sans JP Thin", 48, text, spacing=4),
+        ),
+        font_setup=FontSetup(font_provider=FontProvider.NONE),
+        attachments=fonts,
+    )
+
+
+@pytest.mark.parametrize("origin", [(64, 40), (64.375, 40.875), (65.625, 41.125)])
+def test_fractional_redraw_matches_same_renderer_native_coverage(origin):
+    request = native_request(origin)
+    backend = LibassGeometryBackend()
+    try:
+        token = backend.render(request).tokens[0]
+        warm = backend.render(request).tokens[0]
+    finally:
+        backend.close()
+    assert token.overprint_safe
+    assert warm == token
+    paint = TokenPaint(
+        request.palette[0].text,
+        token.bounds.x - token.anchor_dx,
+        token.bounds.y - token.anchor_dy,
+        token.font_name,
+        token.font_size,
+        0xFFFFFF,
+        spacing=4,
+        glyph_dx=token.glyph_dx,
+        glyph_dy=token.glyph_dy,
+    )
+    redraw = probe_document((), (), request.frame_size).document + "\n".join(
+        f"Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,{line}" for line in event_lines(paint)
+    )
+    renderer = LibassGeometryBackend()
+    try:
+        actual = renderer.render(
+            replace(
+                request,
+                ass=redraw.encode(),
+                keep_coverage=True,
+                palette=(GeometryPaletteEntry(request.palette[0].event_id, 0, 0xFFFFFF),),
+            )
+        ).tokens[0]
+    finally:
+        renderer.close()
+    assert (actual.bounds, actual.coverage) == (token.bounds, token.coverage)
+
+
+def test_warm_glyph_atlas_does_not_reuse_another_native_phase():
+    before = native_request()
+    after = native_request((64.375, 40.875))
+    warm_backend, cold_backend = LibassGeometryBackend(), LibassGeometryBackend()
+    try:
+        warm_backend.render(before)
+        warm = warm_backend.render(after)
+        cold = cold_backend.render(after)
+    finally:
+        warm_backend.close()
+        cold_backend.close()
+
+    assert warm == cold
+    assert warm.tokens[0].overprint_safe
+
+
+def test_phase_probe_budget_failure_retains_native_mask(monkeypatch):
+    monkeypatch.setattr("saitenka_subtitles.geometry.MAX_FRAME_PIXELS", 600_000)
+    backend = LibassGeometryBackend()
+    try:
+        token = backend.render(native_request()).tokens[0]
+    finally:
+        backend.close()
+
+    assert not token.overprint_safe
+    assert len(token.coverage) == token.bounds.width * token.bounds.height
+
+
+def test_missing_native_runtime_is_not_a_successful_mask_fallback(tmp_path):
+    backend = LibassGeometryBackend(library_path=tmp_path / "missing-libass")
+    try:
+        with pytest.raises(RuntimeError, match="could not load libass"):
+            backend.render(native_request())
+    finally:
+        backend.close()

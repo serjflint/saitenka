@@ -28,8 +28,8 @@ class TokenPaint:
     """One token, ready to draw: where it is, what it is, and what color it should be."""
 
     text: str
-    x: int
-    y: int
+    x: float
+    y: float
     font_name: str
     #: In the same units as `x`/`y` — the frame the overlay declares, not the document's script res.
     font_size: float
@@ -51,8 +51,8 @@ class TokenPaint:
     #: Per-glyph offsets from `x`/`y`. Non-empty means this token is emitted one event per glyph,
     #: because mpv's OSD renderer would otherwise shape the whole run and place its glyphs a little
     #: differently from the subtitle renderer that drew the cue — see `saitenka_subtitles.fragments`.
-    glyph_dx: tuple[int, ...] = ()
-    glyph_dy: tuple[int, ...] = ()
+    glyph_dx: tuple[float, ...] = ()
+    glyph_dy: tuple[float, ...] = ()
 
     @property
     def drawable(self) -> bool:
@@ -88,9 +88,9 @@ def _ass_color(rgb: int) -> str:
     return f"&H{(rgb & 0xFF) << 16 | (rgb & 0x00FF00) | (rgb >> 16) & 0xFF:06X}&"
 
 
-def _one_event(paint: TokenPaint, text: str, x: int, y: int, *, spacing: float) -> str:
+def _one_event(paint: TokenPaint, text: str, x: float, y: float, *, spacing: float) -> str:
     return (
-        f"{{{_PREAMBLE}\\pos({x},{y})"
+        f"{{{_PREAMBLE}\\pos({x:.12g},{y:.12g})"
         f"\\fn{paint.font_name}\\fs{paint.font_size:g}"
         f"{run_tags(spacing, paint.scale_x, bold=paint.bold, italic=paint.italic)}"
         f"\\1c{_ass_color(paint.rgb)}\\bord{paint.border:g}\\shad0}}{text}"
