@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789318950257,
+  "lastUpdate": 1789381338279,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -16115,6 +16115,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.902146,
             "range": "3 replicas; min 1.18346; max 28.4337; MAD 0.718687; worst 28.4337",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cbbafcc1685702d2c1926c8110de178c5e004fce",
+          "message": "Merge pull request #525 from serjflint/fix/fractional-overprint\n\nfix(subtitles): preserve fractional overprint placement",
+          "timestamp": "2026-09-14T15:20:55+05:00",
+          "tree_id": "b6effa2c5cf10d78a737bada3d8b98aad257714b",
+          "url": "https://github.com/serjflint/saitenka/commit/cbbafcc1685702d2c1926c8110de178c5e004fce"
+        },
+        "date": 1789381336577,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.977662,
+            "range": "3 replicas; min 4.95434; max 6.45259; MAD 0.023322",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.911142,
+            "range": "3 replicas; min 6.84556; max 8.95072; MAD 0.065581; worst 8.95072",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.487477,
+            "range": "3 replicas; min 14.4768; max 20.6492; MAD 0.01067",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.623468,
+            "range": "3 replicas; min 14.6227; max 20.8683; MAD 0.000818; worst 20.8683",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.589373,
+            "range": "3 replicas; min 12.3493; max 15.6858; MAD 1.24004",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.067452,
+            "range": "3 replicas; min 0.066701; max 0.123101; MAD 0.000751; worst 0.123101",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 30.467489,
+            "range": "3 replicas; min 30.3767; max 44.5154; MAD 0.090814; worst 44.5154",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.163367,
+            "range": "3 replicas; min 2.44225; max 4.08204; MAD 0.721116; worst 4.08204",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.781553,
+            "range": "3 replicas; min 1.2548; max 1.81326; MAD 0.031702; worst 1.81326",
             "unit": "ms"
           }
         ]
