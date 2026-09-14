@@ -69,12 +69,13 @@ def _session():
 
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("stale", [False, 0, 1.25])
-def test_failed_startup_query_cannot_seed_its_data(stale, monkeypatch):
+@pytest.mark.parametrize("error", ["property unavailable", [], {}])
+def test_failed_startup_query_cannot_seed_its_data(stale, error, monkeypatch):
     ipc, gateway, reader = _session()
     monkeypatch.setattr(
         ipc,
         "register_runtime_observers",
-        lambda _names: {"options/sub-scale": {"error": "property unavailable", "data": stale}},
+        lambda _names: {"options/sub-scale": {"error": error, "data": stale}},
     )
     try:
         reader.graph.playback.start()
