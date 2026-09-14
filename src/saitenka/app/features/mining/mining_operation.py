@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from saitenka.app.features.mining import miner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 LANE = "mining-operation"
 
@@ -66,27 +70,27 @@ class MiningOperationRequest:
     journal: MiningActionJournal | None = None
 
 
-_ACTION_NAMES = (
-    "toast",
-    "reset_capture",
-    "captured_image",
-    "captured_audio",
-    "mark_mined",
-    "mined_here",
-    "remember_duplicate",
-    "preview_existing",
-    "preview_mined",
-    "record_mined",
-    "record_link",
-    "commit_mined",
-)
+_ACTION_NAMES = tuple(field.name for field in fields(miner.MiningApply))
 
 
 def _recording_apply(journal: MiningActionJournal) -> miner.MiningApply:
-    def callback(name: str):
+    def callback(name: str) -> Callable[..., None]:
         return lambda *args: journal.record(name, args)
 
-    return miner.MiningApply(*(callback(name) for name in _ACTION_NAMES))
+    return miner.MiningApply(
+        toast=callback("toast"),
+        reset_capture=callback("reset_capture"),
+        captured_image=callback("captured_image"),
+        captured_audio=callback("captured_audio"),
+        mark_mined=callback("mark_mined"),
+        mined_here=callback("mined_here"),
+        remember_duplicate=callback("remember_duplicate"),
+        preview_existing=callback("preview_existing"),
+        preview_mined=callback("preview_mined"),
+        record_mined=callback("record_mined"),
+        record_link=callback("record_link"),
+        commit_mined=callback("commit_mined"),
+    )
 
 
 def run_operation(request: object, cancelled: threading.Event) -> object:

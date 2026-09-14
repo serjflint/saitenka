@@ -61,18 +61,18 @@ class _EncounterSource:
 
 def _apply() -> miner.MiningApply:
     return miner.MiningApply(
-        lambda *_args, **_kwargs: None,
-        lambda: None,
-        lambda _path: None,
-        lambda _path: None,
-        lambda _expression: None,
-        lambda: None,
-        lambda _token: None,
-        lambda *_args: None,
-        lambda *_args: None,
-        lambda _count: None,
-        lambda *_args: None,
-        lambda *_args: None,
+        toast=lambda *_args, **_kwargs: None,
+        reset_capture=lambda: None,
+        captured_image=lambda _path: None,
+        captured_audio=lambda _path: None,
+        mark_mined=lambda _expression: None,
+        mined_here=lambda: None,
+        remember_duplicate=lambda _token: None,
+        preview_existing=lambda *_args: None,
+        preview_mined=lambda *_args: None,
+        record_mined=lambda _count: None,
+        record_link=lambda *_args: None,
+        commit_mined=lambda *_args: None,
     )
 
 
