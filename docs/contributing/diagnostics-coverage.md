@@ -81,6 +81,9 @@ The CLI lists them before collection; the ZIP inventories generic member names a
 default, and user-owned exports never expire. No new automatic sensitive-witness store is enabled.
 Report readers do not extract archives and reject unsafe paths, duplicate/ambiguous members and
 oversized compressed or expanded input.
+Trace readers distinguish missing, readable-empty, partially malformed and invalid captures. Valid
+rows in a partial capture remain usable, with the rejected-row census retained; an unsupported trace
+schema cannot establish current evidence.
 
 The producer-summary reader accepts at most 128 KiB; an oversized summary yields
 `unreadable-or-too-large`, not healthy or zero activity. Combined-history tests guard this budget.
@@ -101,6 +104,9 @@ uv run python tools/telemetry_coverage.py report.zip --require tooltip-quality
 ```
 
 The coverage command reports required evidence present/absent and optional identity joins.
+The detail tier includes the same metadata envelope as the default report, selected from the same
+log session as its trace. Allowlisted per-operation health counts identify failing boundaries even
+without tracing; pending work is not proof of a crash and a failed boundary is not its root cause.
 It also diagnoses recorded player query/admission failures from metadata-only reports. Retained
 mailbox-to-reducer joins have their own denominator; missing terminals can mean in-flight work or
 lost evidence. Neither those joins nor a successful query qualify pixels or benchmark cost.
@@ -112,6 +118,25 @@ not executed configuration cells. Preserve untested cells rather than extrapolat
 document swaps. It reports native-pixel disagreement alongside phase cost, token census and font/runtime
 provenance; faster incorrect masks are not a performance improvement. This is an offline same-renderer
 comparison, not an mpv qualification or a machine-independent timing gate.
+
+## Local replay and reduction
+
+`uv run python tools/replay_render_configuration.py REPORT --output NEW_JSON` selects a retained current geometry
+publication and emits a recipe. Use `--owner` when several owners are retained; `--historical` explicitly
+selects the last publication. Missing or stale configuration is refused. `--execute` runs the original
+synthetic ASS corpus with the captured geometry and renderer settings, using the pinned licensed font
+and an exact same-renderer alpha comparison. Empty native output is inconclusive. Original subtitle
+text, resolved fonts, mpv composition and display color processing are not reconstructed or qualified.
+
+`uv run python tools/minimize_subtitle_repro.py SOURCE --output NEW_DIRECTORY --checker COMMAND {input}` reduces a
+local ASS/SRT reproducer. The checker must return 0 for a passing candidate, 1 only for the same defect,
+and another code for inconclusive evidence. Commands run without a shell, with a 30-second per-check
+timeout and a bounded check count (`--max-checks`). Serialization must preserve the initial failure;
+every retained reduction is checked. Text reduction keeps combining marks and ZWJ sequences together
+but is not a full Unicode grapheme segmenter; it skips ASS-tagged
+events; event reduction remains available. This is greedy reduction, not a globally minimal result.
+Outputs may still contain copyrighted/private text: nothing uploads, source files stay untouched,
+and the new output directory is a user-owned export with no automatic expiry.
 
 Measure these independently:
 
@@ -211,7 +236,8 @@ Captures must be repeatable and recoloring must preserve reference intensity. Co
 compatibility is disabled for the diagnostic primary-color masks. Unsupported color/shaping or
 animated cases remain inconclusive; a midpoint sample cannot qualify animation. Converted SRT
 must first agree with mpv's original SRT rendering. The oracle checks missing ink, intensity
-disagreement and extra output, allowing the production one-pixel border only for spill support.
+disagreement and extra output; spill permission uses original context support, without a dilated
+border allowance. Production overprints add no border beyond the native outline.
 Zero numerical tolerance is a diagnostic criterion, not a calibrated cross-platform quality budget.
 
 `results.json` separates passed, failed, unsupported, inconclusive and unattempted coordinates,

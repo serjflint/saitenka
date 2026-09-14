@@ -12,6 +12,9 @@ logs.
 - Reports accept explicitly selected local attachments and retain native mask provenance and
   projection outcomes. Bounded archive readers and a redistributable synthetic character corpus
   support offline diagnosis without requiring an episode download.
+- Local tools replay retained renderer settings on synthetic text and reduce ASS/SRT reproducers
+  against an explicit failure checker. Reports retain per-operation health without tracing and
+  distinguish missing, malformed and empty trace evidence.
 
 - Rendering-property ingress evidence distinguishes wire notifications, reconnect readbacks and
   rejected mailbox admission without retaining property values.

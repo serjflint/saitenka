@@ -476,7 +476,8 @@ def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dic
     from saitenka.app.paths import cache_dir
 
     if not diagnostic_detail:
-        return _collect_metadata()
+        text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
+        return _collect_metadata(_latest_session(text))
 
     log_path = cache_dir() / "overlay.log"  # resolve dynamically (respects $SAITENKA_CACHE_DIR)
 
@@ -505,16 +506,16 @@ def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dic
     members.update(_collect_player_crashes())
     members.update(_collect_telemetry(session))
     members.update(_collect_operation_summary(session))
+    members.update(_collect_metadata(session))
 
     members["MANIFEST.txt"] = _manifest(members, include_log=include_log, session=session)
     return members
 
 
-def _collect_metadata() -> dict[str, str]:
+def _collect_metadata(session: str | None) -> dict[str, str]:
     import tomllib
 
     from saitenka.app.config import config_path
-    from saitenka.app.paths import cache_dir
     from saitenka.app.report_schema import (
         build_identity,
         configured_metadata,
@@ -536,8 +537,6 @@ def _collect_metadata() -> dict[str, str]:
         configuration = {"status": "invalid"}
     except OSError:
         pass
-    text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
-    session = _latest_session(text)
     producer, health, runtime, player, queries = _metadata_producer(session)
     payload = envelope(
         collector=build_identity(),

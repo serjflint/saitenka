@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from saitenka.app.subtitle_report import load_trace
+from saitenka.app.report_reader import trace_evidence
 
 
 def draws(trace: dict) -> list[dict]:
@@ -408,7 +409,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path, help="a saitenka report .zip")
     args = parser.parse_args(argv)
 
-    trace = {"traceEvents": load_trace(args.report)}
+    evidence = trace_evidence(args.report)
+    trace = {"traceEvents": evidence.pop("events")}
+    print(f"input evidence: {json.dumps(evidence)}")
+    if evidence["status"] == "invalid":
+        return 1
     spans = draws(trace)
     if not spans:
         print("no subtitle_draw spans — the bundle predates them, or telemetry was off")

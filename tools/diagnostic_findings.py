@@ -38,7 +38,10 @@ INGRESS_FAULTS = frozenset(
 
 
 def read_envelope(source: Path) -> dict:
-    text = read_member(source, "diagnostics/envelope.json", limit=128 * 1024)
+    try:
+        text = read_member(source, "diagnostics/envelope.json", limit=128 * 1024)
+    except (OSError, ValueError):
+        return {"status": "invalid", "next_evidence": "readable producer metadata envelope"}
     if text is None:
         return {"status": "missing", "next_evidence": "producer metadata envelope"}
     try:
@@ -53,6 +56,42 @@ def read_envelope(source: Path) -> dict:
 def diagnose(envelope: dict) -> dict:
     queries = safe_snapshot(envelope.get("player_query_health"))
     findings = []
+    health = envelope.get("operation_health")
+    if isinstance(health, dict):
+        by_operation = health.get("by_operation")
+        if isinstance(by_operation, dict):
+            for operation in (
+                "anki_request",
+                "mpv_effect",
+                "runtime_job",
+                "runtime_mpv",
+                "surface_write",
+                "tooltip_quality_submission",
+                "subtitle_calibration",
+            ):
+                counts = by_operation.get(operation)
+                if not isinstance(counts, dict):
+                    continue
+                for outcome in (
+                    "failed",
+                    "unavailable",
+                    "timeout",
+                    "disconnected",
+                    "shutdown-aborted",
+                    "pending",
+                    "other",
+                ):
+                    count = counts.get(outcome)
+                    if type(count) is int and 0 < count <= 2**63 - 1:
+                        findings.append(
+                            {
+                                "category": "operation-" + outcome,
+                                "severity": "warning",
+                                "evidence": {"operation": operation, "count": count},
+                                "cause": "recorded boundary outcome; root cause unknown",
+                                "next_evidence": "correlated terminal or dependency health; pending is not proof of a crash",
+                            }
+                        )
     for owner in queries.get("owners", []):
         identity = {"owner": owner["owner"], "connection_epoch": owner["connection_epoch"]}
         for command in owner["commands"]:
@@ -86,7 +125,7 @@ def diagnose(envelope: dict) -> dict:
                     }
                 )
     return {
-        "scope": "recorded player query and ingress faults; not a whole-product diagnosis",
+        "scope": "recorded operation, player query and ingress outcomes; not a whole-product diagnosis",
         "status": "fault-observed" if findings else "unidentified",
         "query_evidence_status": queries["status"],
         "findings": findings,

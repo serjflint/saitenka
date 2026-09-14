@@ -7,7 +7,6 @@ import math
 from collections import deque
 from typing import TYPE_CHECKING
 
-from saitenka.app.subtitle_report import load_trace
 from saitenka.trace_analysis import parent_tree_health, tooltip_lifecycles, tooltip_quality
 
 if TYPE_CHECKING:
@@ -294,32 +293,21 @@ def load_startup_report(source: Path) -> tuple[list[dict], list[dict]]:
     return events, startup_records(events)
 
 
-def _check_trace_file(path: Path) -> None:
-    if path.exists() and path.stat().st_size > _MAX_TRACE_BYTES:
-        raise ValueError(_LIMIT_ERROR)
+def load_startup_evidence(source: Path) -> dict:
+    from saitenka.app.report_reader import trace_evidence
 
-
-def _check_trace_archive(source: Path) -> None:
-    from saitenka.app.report_reader import read_member
-
-    try:
-        read_member(source, "trace.json", limit=_MAX_TRACE_BYTES)
-    except ValueError as error:
-        if str(error) == "diagnostic member exceeds byte limit":
-            raise ValueError(_LIMIT_ERROR) from error
-        raise
+    evidence = trace_evidence(source, limit=_MAX_TRACE_BYTES)
+    if evidence.get("reason") == "diagnostic member exceeds byte limit":
+        evidence["reason"] = _LIMIT_ERROR
+    return evidence
 
 
 def load_startup_trace(source: Path) -> list[dict]:
     """Load a trace only after bounding its uncompressed input size."""
-    if source.is_file() and source.suffix == ".json":
-        _check_trace_file(source)
-    elif source.is_dir():
-        for relative in ("telemetry/trace.json", "trace.json"):
-            _check_trace_file(source / relative)
-    else:
-        _check_trace_archive(source)
-    return load_trace(source)
+    evidence = load_startup_evidence(source)
+    if evidence["status"] == "invalid":
+        raise ValueError(evidence["reason"])
+    return evidence["events"]
 
 
 def startup_json(events: Sequence[object]) -> str:

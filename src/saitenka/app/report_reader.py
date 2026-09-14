@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import stat
 import zipfile
 from typing import TYPE_CHECKING
@@ -12,6 +14,73 @@ if TYPE_CHECKING:
 MAX_MEMBER_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 MAX_MEMBERS = 256
+
+
+def trace_evidence(source: Path, *, limit: int = MAX_MEMBER_BYTES) -> dict:
+    """Keep absent, invalid and empty captures distinct; never discard malformed rows silently."""
+    raw: str | None
+    try:
+        if source.is_file() and source.suffix == ".json":
+            raw = read_file(source, limit=limit)
+        else:
+            raw = read_member(source, "telemetry/trace.json", limit=limit)
+            if raw is None:
+                raw = read_member(source, "trace.json", limit=limit)
+        if raw is None:
+            return {"status": "missing", "events": [], "reason": "trace-not-collected"}
+        return _trace_document(json.loads(raw))
+    except json.JSONDecodeError:
+        return {"status": "invalid", "events": [], "reason": "invalid-trace-json"}
+    except ValueError as error:
+        return {"status": "invalid", "events": [], "reason": str(error)}
+    except (OSError, RecursionError):
+        return {"status": "invalid", "events": [], "reason": "unreadable-trace"}
+
+
+def _trace_document(document: object) -> dict:
+    metadata = document.get("otherData") if isinstance(document, dict) else None
+    if isinstance(metadata, dict) and "schema_version" in metadata:
+        version = metadata["schema_version"]
+        if type(version) is not int or version not in {1, 2}:
+            return {"status": "invalid", "events": [], "reason": "unsupported-trace-schema"}
+    rows = document.get("traceEvents") if isinstance(document, dict) else document
+    if not isinstance(rows, list):
+        return {"status": "invalid", "events": [], "reason": "invalid-trace-schema"}
+    valid = [row for row in rows if _trace_event(row)]
+    invalid = len(rows) - len(valid)
+    events = valid
+    if isinstance(metadata, dict) and isinstance(metadata.get("session"), str):
+        events = [{"ph": "M", "name": "session", "args": metadata}, *valid]
+    if invalid:
+        return {
+            "status": "partial" if valid else "invalid",
+            "events": events,
+            "reason": "invalid-trace-events",
+            "declared_events": len(rows),
+            "invalid_events": invalid,
+        }
+    return {"status": "readable", "events": events, "declared_events": len(rows)}
+
+
+def _trace_event(row: object) -> bool:
+    if not isinstance(row, dict):
+        return False
+    if not isinstance(row.get("name"), str) or not isinstance(row.get("ph"), str):
+        return False
+    if not isinstance(row.get("args", {}), dict):
+        return False
+    if row["ph"] == "X" and not {"ts", "dur"} <= row.keys():
+        return False
+    for key in ("ts", "dur"):
+        value = row.get(key, 0)
+        if (
+            type(value) not in {int, float}
+            or abs(value) > 1e18
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            return False
+    return all(type(row.get(key, 0)) in {str, int} for key in ("pid", "tid"))
 
 
 def read_file(path: Path, *, limit: int = MAX_MEMBER_BYTES) -> str:

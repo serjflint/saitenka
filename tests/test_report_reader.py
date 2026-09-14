@@ -4,7 +4,37 @@ import zipfile
 import pytest
 
 from saitenka.app import report_reader
+from saitenka.app.report_reader import trace_evidence
 from saitenka.app.subtitle_report import load_trace
+
+
+@pytest.mark.parametrize(
+    ("raw", "status"),
+    [
+        (None, "missing"),
+        ('{"traceEvents": []}', "readable"),
+        ('{"traceEvents": [null]}', "invalid"),
+        ('{"traceEvents": [{"name":"x","ph":"X","dur":NaN}]}', "invalid"),
+        ('{"traceEvents": [{"name":"x","ph":"X","args":[]}]}', "invalid"),
+        ('{"traceEvents": [{"name":"subtitle_draw","ph":"X"}]}', "invalid"),
+        ('{"traceEvents": [{"name":"subtitle_draw","ph":"X","ts":0}]}', "invalid"),
+        ('{"traceEvents": [{"name":"subtitle_draw","ph":"X","dur":1}]}', "invalid"),
+        ('{"traceEvents":', "invalid"),
+        ("{}", "invalid"),
+    ],
+)
+def test_trace_reader_distinguishes_missing_empty_and_invalid_capture(tmp_path, raw, status):
+    source = tmp_path / "report.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        if raw is not None:
+            archive.writestr("telemetry/trace.json", raw)
+
+    result = trace_evidence(source)
+
+    assert result["status"] == status
+    assert result["events"] == []
+    if status == "readable":
+        assert result["declared_events"] == 0
 
 
 @pytest.mark.parametrize(
@@ -60,3 +90,68 @@ def test_bounded_plain_file_read_has_teeth(tmp_path):
     source.write_text("x" * 11, encoding="utf-8")
     with pytest.raises(ValueError, match="byte limit"):
         report_reader.read_file(source, limit=10)
+
+
+@pytest.mark.parametrize("version", [True, 3, "2", None])
+def test_unknown_trace_schema_does_not_qualify_current_events(tmp_path, version):
+    source = tmp_path / "trace.json"
+    source.write_text(
+        json.dumps(
+            {
+                "otherData": {"schema_version": version},
+                "traceEvents": [{"name": "cue_annotation", "ph": "X"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = trace_evidence(source)
+
+    assert result == {"status": "invalid", "events": [], "reason": "unsupported-trace-schema"}
+
+
+def test_partial_trace_keeps_valid_events_and_session_metadata(tmp_path):
+    source = tmp_path / "trace.json"
+    event = {"name": "cue_annotation", "ph": "X", "ts": 0, "dur": 3}
+    metadata = {"session": "test-session", "schema_version": 2}
+    source.write_text(
+        json.dumps({"otherData": metadata, "traceEvents": [None, event]}), encoding="utf-8"
+    )
+
+    result = trace_evidence(source)
+
+    assert result["status"] == "partial"
+    assert result["declared_events"] == 2
+    assert result["invalid_events"] == 1
+    assert result["events"] == [{"ph": "M", "name": "session", "args": metadata}, event]
+
+
+def test_subtitle_report_preserves_partial_capture_status(tmp_path, capsys):
+    from saitenka.app.commands.diagnostics import subtitle_report
+
+    source = tmp_path / "trace.json"
+    source.write_text(
+        json.dumps(
+            {
+                "traceEvents": [
+                    None,
+                    {
+                        "name": "subtitle_geometry_render",
+                        "ph": "X",
+                        "ts": 0,
+                        "dur": 1,
+                        "args": {"outcome": "ready"},
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    code = subtitle_report(str(source), json_out=True)
+
+    result = json.loads(capsys.readouterr().out)
+    assert code == 0
+    assert result["input_evidence"]["status"] == "partial"
+    assert result["input_evidence"]["invalid_events"] == 1
+    assert len(result["geometry"]) == 1

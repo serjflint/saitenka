@@ -387,13 +387,14 @@ def subtitle_report(
     """Explain native subtitle geometry and pixel-ownership decisions from a report bundle."""
     from pathlib import Path
 
-    from saitenka.app.subtitle_report import geometry_records, load_trace, render_geometry
+    from saitenka.app.report_reader import trace_evidence
+    from saitenka.app.subtitle_report import geometry_records, render_geometry
 
     source = Path(report_path).expanduser()
-    try:
-        events = load_trace(source)
-    except (OSError, ValueError) as error:
-        print(f"subtitle report unavailable: {error}", file=sys.stderr)
+    evidence = trace_evidence(source)
+    events = evidence.pop("events")
+    if evidence["status"] == "invalid":
+        print(f"subtitle report unavailable: {evidence['reason']}", file=sys.stderr)
         return 1
     if not events:
         print(
@@ -402,8 +403,17 @@ def subtitle_report(
         )
         return 1
     if json_out:
-        print(json.dumps({"geometry": geometry_records(events)}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"geometry": geometry_records(events), "input_evidence": evidence},
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
+        print(
+            f"input evidence: {evidence['status']}; invalid events: {evidence.get('invalid_events', 0)}"
+        )
         print(render_geometry(source, events), end="")
     return 0
 
@@ -421,13 +431,14 @@ def trace_report(
     """Explain startup readiness and cue-annotation latency from a report bundle."""
     from pathlib import Path
 
-    from saitenka.app.trace_report import load_startup_trace, render_startup, startup_json
+    from saitenka.app.trace_report import load_startup_evidence, render_startup, startup_json
 
     source = Path(report_path).expanduser()
-    try:
-        events = load_startup_trace(source)
-    except (OSError, ValueError) as error:
-        print(f"trace report unavailable: {error}", file=sys.stderr)
+    evidence = load_startup_evidence(source)
+    events = evidence.pop("events")
+    if evidence["status"] == "invalid":
+        reason = evidence["reason"]
+        print(f"trace report unavailable: {reason}", file=sys.stderr)
         return 1
     if not events:
         print(
@@ -435,7 +446,17 @@ def trace_report(
             file=sys.stderr,
         )
         return 1
-    print(startup_json(events) if json_out else render_startup(source, events), end="")
+    if json_out:
+        import json
+
+        result = json.loads(startup_json(events))
+        result["input_evidence"] = evidence
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(
+            f"input evidence: {evidence['status']}; invalid events: {evidence.get('invalid_events', 0)}"
+        )
+        print(render_startup(source, events), end="")
     return 0
 
 

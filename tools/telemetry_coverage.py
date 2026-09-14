@@ -8,7 +8,7 @@ from pathlib import Path
 
 from diagnostic_findings import diagnose, read_envelope
 
-from saitenka.app.trace_report import load_startup_trace
+from saitenka.app.report_reader import trace_evidence
 
 INVENTORY = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "telemetry-scenarios.json"
 
@@ -75,17 +75,10 @@ def main() -> int:
     args = parser.parse_args()
     inventory = json.loads(INVENTORY.read_text(encoding="utf-8"))
     envelope = read_envelope(args.report) if args.report.suffix != ".json" else {}
-    try:
-        events = load_startup_trace(args.report)
-        trace_status = "readable"
-    except ValueError:
-        if envelope.get("schema") != 1:
-            raise
-        events = []
-        trace_status = "missing-or-invalid"
-    result = coverage(events, inventory["scenarios"])
+    trace = trace_evidence(args.report)
+    result = coverage(trace.pop("events"), inventory["scenarios"])
     result["diagnosis"] = diagnose(envelope)
-    result["trace_evidence"] = trace_status
+    result["trace_evidence"] = trace
     print(json.dumps(result, indent=2))
     qualified = {row["id"] for row in result["scenarios"] if row["status"] == "observed"}
     return 1 if set(args.require) - qualified else 0

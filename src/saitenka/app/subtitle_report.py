@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import zipfile
 from typing import TYPE_CHECKING
 
 from saitenka.app import font_resolution
-from saitenka.app.report_reader import read_file, read_member
+from saitenka.app.report_reader import read_member, trace_evidence
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -88,19 +87,10 @@ def _read_member(source: Path, name: str) -> str | None:
 
 def load_trace(source: Path) -> list[dict]:
     """Load Chrome trace events from a report zip/directory or bare trace JSON."""
-    raw: str | None
-    if source.is_file() and source.suffix == ".json":
-        raw = read_file(source)
-    else:
-        try:
-            raw = _read_member(source, "telemetry/trace.json") or _read_member(source, "trace.json")
-        except zipfile.BadZipFile as error:
-            raise ValueError(f"not a valid report archive: {source}") from error
-    if raw is None:
-        return []
-    document = json.loads(raw)
-    events = document.get("traceEvents", document) if isinstance(document, dict) else document
-    return events if isinstance(events, list) else []
+    evidence = trace_evidence(source)
+    if evidence["status"] == "invalid":
+        raise ValueError(evidence["reason"])
+    return evidence["events"]
 
 
 def geometry_spans(events: list[dict]) -> list[dict]:

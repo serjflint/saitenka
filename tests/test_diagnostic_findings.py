@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 from test_mpv_gateway import FakeIPC
-from test_render_evidence import _setup
+from test_render_evidence import _setup as _runtime_setup
 
+from saitenka import operation_summary
 from saitenka.app import report, telemetry
 from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.runtime import SessionMailbox
@@ -24,6 +25,11 @@ def _load_findings():
 
 diagnose = _load_findings().diagnose
 read_envelope = _load_findings().read_envelope
+
+
+def _setup(monkeypatch, tmp_path):
+    _runtime_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(operation_summary, "operations", operation_summary.OperationSummary())
 
 
 @pytest.mark.timeout(5)
@@ -93,3 +99,26 @@ def test_missing_or_incompatible_metadata_is_not_a_successful_diagnosis(tmp_path
     assert result["status"] == "unidentified"
     assert result["findings"] == []
     assert result["causal_completeness"]["status"] == "unknown"
+
+
+@pytest.mark.parametrize("outcome", ["unavailable", "failed", "pending"])
+def test_operation_findings_identify_boundary_without_inventing_a_root_cause(outcome):
+    result = diagnose({"operation_health": {"by_operation": {"anki_request": {outcome: 2}}}})
+
+    assert result["status"] == "fault-observed"
+    assert result["findings"][0]["evidence"] == {"operation": "anki_request", "count": 2}
+    assert result["findings"][0]["category"] == "operation-" + outcome
+    assert result["fidelity"]["status"] == "unknown"
+    assert "root cause unknown" in result["findings"][0]["cause"]
+
+
+@pytest.mark.parametrize(
+    "counts", [{"failed": True}, {"failed": -1}, {"failed": "PRIVATE"}, {"succeeded": 1}]
+)
+def test_operation_findings_do_not_promote_invalid_or_healthy_counts(counts):
+    result = diagnose(
+        {"operation_health": {"by_operation": {"anki_request": counts, "PRIVATE": {"failed": 1}}}}
+    )
+
+    assert result["findings"] == []
+    assert result["status"] == "unidentified"

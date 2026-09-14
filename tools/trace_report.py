@@ -19,7 +19,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from saitenka.app.report_reader import read_member
+from saitenka.app.report_reader import read_member, trace_evidence
+from saitenka.app.subtitle_report import load_trace
 from saitenka.trace_analysis import parent_tree_health, tooltip_quality
 
 
@@ -40,20 +41,7 @@ def _read_member(src: Path, name: str) -> str | None:
 
 
 def _load_trace(src: Path) -> list[dict]:
-    raw = _read_member(src, "telemetry/trace.json") or _read_member(src, "trace.json")
-    if raw is None:
-        return []
-    doc = json.loads(raw)
-    if not isinstance(doc, dict):
-        return doc
-    events = doc.get("traceEvents", [])
-    # The session id moved out of every span's args into the document, where one-per-file values
-    # belong. Re-presented as a metadata event so readers that scan `args` find it either way —
-    # traces written before the move still carry it per-span.
-    other = doc.get("otherData")
-    if isinstance(other, dict) and other.get("session"):
-        events = [{"ph": "M", "name": "session", "args": dict(other)}, *events]
-    return events
+    return load_trace(src)
 
 
 def _load_log(src: Path) -> list[dict]:
@@ -376,7 +364,11 @@ def main() -> None:
     ap.add_argument("--spans", action="store_true", help="also print per-attribute span breakdowns")
     ap.add_argument("--log", action="store_true", help="also print notable overlay.log events")
     args = ap.parse_args()
-    events = _load_trace(args.report)
+    evidence = trace_evidence(args.report)
+    events = evidence.pop("events")
+    print(f"input evidence: {json.dumps(evidence)}")
+    if evidence["status"] == "invalid":
+        raise SystemExit(evidence["reason"])
     if not events:
         raise SystemExit(f"no telemetry/trace.json found in {args.report}")
     log = _load_log(args.report) if args.log else []

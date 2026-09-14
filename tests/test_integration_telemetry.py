@@ -55,6 +55,10 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
     import zipfile
 
     with zipfile.ZipFile(archive) as bundle:
+        envelope = json.loads(bundle.read("diagnostics/envelope.json"))
+        assert envelope["operation_health"]["by_operation"]["anki_request"] == {
+            "unavailable" if failure == "unavailable" else "other": 1
+        }
         summary = json.loads(bundle.read("diagnostics/session.json"))
         assert summary["pending"] == {}
         assert summary["outcomes"] == [

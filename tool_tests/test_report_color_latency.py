@@ -25,6 +25,7 @@ def draw(ts_ms: float, cue: str, boxes: int, path: str = "native", *, tokens: in
         "ph": "X",
         "name": "subtitle_draw",
         "ts": ts_ms * 1000.0,
+        "dur": 0,
         "args": {"cue": cue, "measured_boxes": boxes, "path": path, "tokens": tokens},
     }
 
@@ -34,6 +35,7 @@ def decision(ts_ms: float, outcome: str, eligible: int, reason: str = "ready") -
         "ph": "X",
         "name": "subtitle_geometry_decision",
         "ts": ts_ms * 1000.0,
+        "dur": 0,
         "args": {"outcome": outcome, "eligible_tokens": eligible, "reason": reason},
     }
 
@@ -340,7 +342,11 @@ def test_a_bundle_without_the_cue_handle_is_refused_rather_than_summarised(tmp_p
         archive.writestr(
             "telemetry/trace.json",
             json.dumps(
-                {"traceEvents": [{"ph": "X", "name": "subtitle_draw", "ts": 0, "args": {}}]}
+                {
+                    "traceEvents": [
+                        {"ph": "X", "name": "subtitle_draw", "ts": 0, "dur": 0, "args": {}}
+                    ]
+                }
             ),
         )
 
@@ -355,6 +361,22 @@ def test_a_bundle_with_no_draws_at_all_is_refused(tmp_path: Path) -> None:
     assert latency.main([str(bundle)]) == 1
 
 
+@pytest.mark.parametrize("missing", ["ts", "dur"])
+def test_color_readout_rejects_malformed_timing_without_crashing(tmp_path, capsys, missing):
+    event = draw(0, "aa", 1)
+    del event[missing]
+    bundle = tmp_path / "invalid.zip"
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr("telemetry/trace.json", json.dumps({"traceEvents": [event]}))
+
+    code = latency.main([str(bundle)])
+
+    evidence = json.loads(capsys.readouterr().out.removeprefix("input evidence: "))
+    assert code == 1
+    assert evidence["status"] == "invalid"
+    assert evidence["invalid_events"] == 1
+
+
 @pytest.mark.parametrize("boxes", [1, 12])
 def test_any_positive_box_count_counts_as_colored(boxes: int) -> None:
     shown = read([draw(0, "aa", 0), draw(25, "aa", boxes)])
@@ -367,6 +389,7 @@ def lane(ts_ms: float, outcome: str, timestamp_ms: int = 1_001) -> dict:
         "ph": "X",
         "name": "subtitle_geometry_lane",
         "ts": ts_ms * 1000.0,
+        "dur": 0,
         "args": {"outcome": outcome, "timestamp_ms": timestamp_ms},
     }
 

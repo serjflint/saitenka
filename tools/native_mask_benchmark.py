@@ -79,7 +79,7 @@ def sample(backend, sink, inputs, reference):
 
 
 def benchmark(*, cycles=3, track_copies=25, sizes=((1280, 720), (3440, 1440))):
-    spec = json.loads(SPEC.read_text())
+    spec = json.loads(SPEC.read_text(encoding="utf-8"))
     font = (ROOT / spec["font"]["path"]).read_bytes()
     if hashlib.sha256(font).hexdigest() != spec["font"]["sha256"]:
         raise ValueError("synthetic font digest mismatch")

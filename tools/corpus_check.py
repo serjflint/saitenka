@@ -83,7 +83,9 @@ def _subrip_keys() -> list[str]:
 
 
 def _character_keys() -> list[str]:
-    spec = json.loads((_REPO / "tests/fixtures/character_corpus/cases.json").read_text())
+    spec = json.loads(
+        (_REPO / "tests/fixtures/character_corpus/cases.json").read_text(encoding="utf-8")
+    )
     return [
         json.dumps(
             {"format": suffix, "case": case, "font": spec["font"], "generator": spec["generator"]},

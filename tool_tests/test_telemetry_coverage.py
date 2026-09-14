@@ -2,7 +2,33 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import zipfile
 from pathlib import Path
+
+import pytest
+from telemetry_coverage import main
+
+
+@pytest.mark.parametrize(
+    ("trace", "status"),
+    [(None, "missing"), ('{"traceEvents": []}', "readable"), ('{"traceEvents": [0]}', "invalid")],
+)
+def test_coverage_cli_cannot_promote_absent_or_invalid_capture(
+    tmp_path, monkeypatch, capsys, trace, status
+):
+    source = tmp_path / "report.zip"
+    with zipfile.ZipFile(source, "w") as archive:
+        archive.writestr("diagnostics/envelope.json", '{"schema": 1}')
+        if trace is not None:
+            archive.writestr("telemetry/trace.json", trace)
+    monkeypatch.setattr("sys.argv", ["telemetry-coverage", str(source), "--require", "cue"])
+
+    code = main()
+
+    result = json.loads(capsys.readouterr().out)
+    assert code == 1
+    assert result["trace_evidence"]["status"] == status
+    assert result["observed"] == 0
 
 
 def test_missing_diagnostic_fails_the_declared_evidence_contract():
