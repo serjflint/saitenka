@@ -9,6 +9,8 @@ logs.
 
 ### Added
 
+- Reports distinguish rendering-property subscription failures, query errors and successful empty
+  replies during startup/reconnect; pending and superseded work retains bounded trace attribution.
 - Reports retain privacy-bounded player options consumed by native geometry decisions, including
   rejected configurations, with trace references and explicit unavailable/invalid values.
 - Reports retain native geometry request configurations and distinguish current from historical

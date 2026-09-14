@@ -196,7 +196,10 @@ def safe_runtime_configuration(raw: object) -> dict:
 class EvidenceRegistry:
     """A process-wide export sink; owners never overwrite another session's state."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_owners: int = _OWNERS) -> None:
+        if max_owners <= 0:
+            raise ValueError("evidence owner bound must be positive")
+        self._max_owners = max_owners
         self._lock = threading.Lock()
         self._next = 0
         self._owners: OrderedDict[int, dict] = OrderedDict()
@@ -211,7 +214,7 @@ class EvidenceRegistry:
         with self._lock:
             self._owners[owner] = deepcopy(snapshot)
             self._owners.move_to_end(owner)
-            if len(self._owners) > _OWNERS:
+            if len(self._owners) > self._max_owners:
                 self._owners.popitem(last=False)
                 self._evicted += 1
 
