@@ -237,7 +237,9 @@ def test_mixed_view_quality_survives_production_export_and_bundle(monkeypatch, t
         reader.close()
         provider.shutdown()
 
-    archive = report.build_report_bundle(tmp_path / "reports", timestamp="mixed")
+    archive = report.build_report_bundle(
+        tmp_path / "reports", timestamp="mixed", diagnostic_detail=True
+    )
     with zipfile.ZipFile(archive) as bundle:
         events = json.loads(bundle.read("telemetry/trace.json"))["traceEvents"]
     from saitenka.app.trace_report import load_startup_trace, startup_json

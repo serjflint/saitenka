@@ -46,7 +46,7 @@ def test_native_fault_is_bundled_redacted(monkeypatch, tmp_path):
         "Fatal Python error: Segmentation fault\npassword=secretvalue99"
     )
 
-    members = report.collect()
+    members = report.collect(diagnostic_detail=True)
 
     assert "Segmentation fault" in members["crashes/faulthandler.log"]
     assert "secretvalue99" not in members["crashes/faulthandler.log"]
@@ -169,7 +169,7 @@ def _hermetic(monkeypatch, tmp_path):
 
 def test_collect_includes_expected_members_and_redacts(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
-    members = report.collect(include_log=True)
+    members = report.collect(include_log=True, diagnostic_detail=True)
     assert "versions.txt" in members and "doctor.json" in members
     assert "overlay.toml" in members and "MANIFEST.txt" in members and "overlay.log" in members
     # secrets gone from both config and log
@@ -210,7 +210,7 @@ def test_collect_bundles_the_mpv_binding_table(monkeypatch, tmp_path):
     (mpv_home / "mpv.conf").write_text("hwdec=auto-safe\n")
     (mpv_home / "input.conf").write_text(f"MBTN_LEFT cycle pause\np run {tmp_path}/tool\n")
 
-    members = report.collect(include_log=False)
+    members = report.collect(include_log=False, diagnostic_detail=True)
 
     assert members["mpv/mpvhome.input.conf"].startswith("MBTN_LEFT cycle pause")
     assert "hwdec=auto-safe" in members["mpv/mpvhome.mpv.conf"]
@@ -225,7 +225,7 @@ def test_collect_scrubs_home_from_the_binding_table(monkeypatch, tmp_path):
     home = tmp_path / "home"
     (mpv_home / "input.conf").write_text(f"F5 run {home}/scripts/thing.sh\n")
 
-    bundled = report.collect(include_log=False)["mpv/mpvhome.input.conf"]
+    bundled = report.collect(include_log=False, diagnostic_detail=True)["mpv/mpvhome.input.conf"]
 
     assert str(home) not in bundled
     assert "scripts/thing.sh" in bundled  # scrubbed, not dropped
@@ -233,7 +233,7 @@ def test_collect_scrubs_home_from_the_binding_table(monkeypatch, tmp_path):
 
 def test_collect_no_log_excludes_log(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
-    members = report.collect(include_log=False)
+    members = report.collect(include_log=False, diagnostic_detail=True)
     assert "overlay.log" not in members
     assert "mpv.log" not in members  # mpv log gated by the same --no-log
     assert "no (--no-log)" in members["MANIFEST.txt"]
@@ -249,7 +249,7 @@ def test_collect_includes_dict_listing_and_mpv_log(monkeypatch, tmp_path):
     dicthelp.db().import_zip(z, imported_at=dicthelp.AT)  # into the per-test hermetic DB
     (tmp_path / "cache" / "mpv.log").write_text("[cplayer] mpv 0.40 started\n")
 
-    members = report.collect(include_log=True)
+    members = report.collect(include_log=True, diagnostic_detail=True)
     listing = members["dicts.listing.txt"]
     assert "MyDict" in listing  # imported dictionary listed
     assert f"schema {SCHEMA_VERSION}" in listing  # header carries schema + size (content-free)
@@ -274,7 +274,7 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
         cfg.read_text() + f'\n[telemetry]\nenabled = true\nexport_dir = "{tel_dir.as_posix()}"\n'
     )
 
-    members = report.collect(include_log=True)
+    members = report.collect(include_log=True, diagnostic_detail=True)
     assert "telemetry/trace.json" in members
     assert "op" in members["telemetry/trace.json"]
     assert home not in members["telemetry/trace.json"]
@@ -283,7 +283,7 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
 
 def test_collect_omits_telemetry_when_disabled(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
-    members = report.collect(include_log=True)
+    members = report.collect(include_log=True, diagnostic_detail=True)
     assert "telemetry/trace.json" not in members
     assert json.loads(members["telemetry/collection.json"])["status"] == "unavailable"
 
@@ -291,7 +291,7 @@ def test_collect_omits_telemetry_when_disabled(monkeypatch, tmp_path):
 def test_build_report_bundle_writes_timestamped_zip(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
     out = tmp_path / "reports"
-    dest = report.build_report_bundle(out, timestamp="20260721-160000")
+    dest = report.build_report_bundle(out, timestamp="20260721-160000", diagnostic_detail=True)
     assert dest.name == "saitenka-report-20260721-160000.zip"
     with zipfile.ZipFile(dest) as zf:
         names = zf.namelist()
@@ -349,7 +349,7 @@ def test_collect_bundles_the_players_native_crash_report(monkeypatch, tmp_path):
         f'"procPath":"{Path.home()}/bin/mpv"}}\n',
     )
 
-    members = report.collect(include_log=True)
+    members = report.collect(include_log=True, diagnostic_detail=True)
 
     assert "crashes/player/mpv-2026-08-22-144118.ips" in members
     body = members["crashes/player/mpv-2026-08-22-144118.ips"]
@@ -364,7 +364,9 @@ def test_collect_omits_player_crash_reports_from_another_day(monkeypatch, tmp_pa
     _hermetic(monkeypatch, tmp_path)
     _player_crash(tmp_path, "mpv-old.ips", "{}\n", age_s=report._PLAYER_CRASH_MAX_AGE_S + 60)
 
-    assert "crashes/player/mpv-old.ips" not in report.collect(include_log=True)
+    assert "crashes/player/mpv-old.ips" not in report.collect(
+        include_log=True, diagnostic_detail=True
+    )
 
 
 def test_collect_omits_player_crash_reports_off_macos(monkeypatch, tmp_path):
@@ -374,7 +376,11 @@ def test_collect_omits_player_crash_reports_off_macos(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
     _player_crash(tmp_path, "mpv-2026-08-22-144118.ips", "{}\n")
 
-    assert not [m for m in report.collect(include_log=True) if m.startswith("crashes/player/")]
+    assert not [
+        m
+        for m in report.collect(include_log=True, diagnostic_detail=True)
+        if m.startswith("crashes/player/")
+    ]
 
 
 def test_collect_bundles_a_shutdown_thread_dump(monkeypatch, tmp_path):
@@ -384,7 +390,7 @@ def test_collect_bundles_a_shutdown_thread_dump(monkeypatch, tmp_path):
     crashes.mkdir(parents=True)
     (crashes / "shutdown-hang-20260822-144132.log").write_text("Timeout (0:00:03)!\nThread 0x1 …\n")
 
-    members = report.collect(include_log=True)
+    members = report.collect(include_log=True, diagnostic_detail=True)
 
     assert "Timeout" in members["crashes/shutdown-hang-20260822-144132.log"]
 

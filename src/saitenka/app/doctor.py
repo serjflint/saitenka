@@ -1011,7 +1011,7 @@ def check_crashes() -> Check:
         "crashes",
         "warn",
         f"{len(reports)} crash report(s) captured; latest {reports[-1].name} — run "
-        "`saitenka report` to bundle them",
+        "`saitenka report --diagnostic-detail` to bundle them; review private text/paths before sharing",
     )
 
 
@@ -1339,7 +1339,8 @@ def _print_footer(report: Report) -> None:  # pragma: no cover — formatting/IO
         print("Healthy" if _WIN else "Healthy ✅")
     else:
         print("Problems found - see [x] above" if _WIN else "Problems found — see ✗ above ❌")
-        print("Tip: `saitenka report` bundles this + logs into a zip for a bug report.")
+        print("Tip: `saitenka report --diagnostic-detail` bundles this + logs locally.")
+        print("Detail can contain private text and paths; review before sharing.")
 
 
 def print_report(

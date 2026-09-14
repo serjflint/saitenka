@@ -276,24 +276,33 @@ def save_operation_summary(*, end: str = "unknown") -> None:
 def _save_operation_summary(*, end: str) -> None:
     import json
 
+    from saitenka.app.report_schema import SCHEMA_VERSION, build_identity
     from saitenka.operation_summary import operations
     from saitenka.session import session_id
-    from saitenka.version import overlay_version
 
     payload = operations.snapshot()
-    if not payload["outcomes"] and not payload["pending"]:
+    directory = cache_dir() / "diagnostics"
+    path = directory / f"session-{session_id()}.json"
+    # Empty one-shot CLI invocations must not evict playback summaries.
+    if (
+        not payload["outcomes"]
+        and not payload["pending"]
+        and end == "shutdown-observed"
+        and not path.exists()
+    ):
         return
+    identity = build_identity()
     payload.update(
+        schema=SCHEMA_VERSION,
+        producer=identity,
         session=session_id(),
-        overlay_build=overlay_version(),
+        overlay_build=identity["overlay_build"],
         tracing=is_enabled(),
         captured_ns=time.time_ns(),
         end=end,
     )
-    directory = cache_dir() / "diagnostics"
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"session-{session_id()}.json"
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(payload), encoding="utf-8")
         temporary.replace(path)
