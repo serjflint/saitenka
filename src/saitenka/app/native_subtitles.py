@@ -30,6 +30,7 @@ from saitenka_subtitles import (
 
 from saitenka import otel_metrics
 from saitenka.app import subtitle_fonts
+from saitenka.app.player_evidence import PlayerEvidence
 from saitenka.app.subtitle_geometry_diagnostics import (
     GeometryCacheReason,
     GeometryOutcome,
@@ -828,6 +829,7 @@ class NativeSubtitleGeometry:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
         self.worker = worker
+        self._player_evidence = PlayerEvidence()
         self._ports = ports
         self.lookahead = lookahead
         self.formats = formats
@@ -937,6 +939,9 @@ class NativeSubtitleGeometry:
         active_events: int,
     ) -> None:
         with otel_metrics.traced("subtitle_geometry_decision") as span:
+            if self._player_evidence.revision:
+                span.set("player_configuration_owner", self._player_evidence.owner)
+                span.set("player_configuration_revision", self._player_evidence.revision)
             span.set("cue", self._cue)
             span.set("outcome", outcome)
             span.set("reason", reason)
@@ -1541,10 +1546,14 @@ class NativeSubtitleGeometry:
         ever wanted, and a shim that takes the whole `SessionController` cannot be driven by the session
         runtime. The surface is the host's, and is the frame — see `render_inputs_of`.
         """
+        dimensions = prop("osd-dimensions") or {}
+        video = prop("video-out-params") or {}
+        settings = {name: prop(f"options/{name}") for name in GATE_OPTIONS}
+        self._player_evidence.record(settings, self.source_kind)
         return render_inputs_of(
-            prop("osd-dimensions") or {},
-            prop("video-out-params") or {},
-            {name: prop(f"options/{name}") for name in GATE_OPTIONS},
+            dimensions,
+            video,
+            settings,
             frame_size=osd,
             authored=self.source_kind is not SourceKind.CONVERTED,
         )
@@ -2214,4 +2223,5 @@ class NativeSubtitleGeometry:
             return True
 
     def close(self) -> None:
+        self._player_evidence.close()
         self.worker.close()

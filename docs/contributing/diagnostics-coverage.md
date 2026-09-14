@@ -29,6 +29,20 @@ Retained spans may reference owners or revisions no longer present in the bounde
 No publication record certifies displayed pixels. Collection adds no IPC queries, pixel probes or
 font hashing; the existing background summary writer persists the bounded snapshot.
 
+`player_configuration` separately records the option values read when native geometry evaluates a
+configuration, including configurations it refuses. Numeric, boolean and enumerated values are
+allowlisted; font names/paths, style overrides, crop expressions and color strings are redacted.
+Unavailable means the existing property reader returned `None`, not a diagnosed query error. Invalid
+values are distinct from zero/false. CLI/profile origins and applied state remain unknown.
+
+The player-option history also retains four revisions per owner and four owners. Revisions identify
+changes in the shared subset or source class; changes between redacted values are not distinguished.
+`player_configuration_read` spans identify new revisions, and geometry-decision spans reference the
+last read revision. Those references are historical: an early refusal can precede a fresh read, and
+closed owners retain history. Values may come from the observation cache or a query; they are not an
+atomic mpv snapshot, backend readback, or a join to a particular published geometry request. Retained
+traces may outlive the corresponding history. Collection introduces no additional player queries.
+
 For the trace-based tools below, collect with `saitenka report --diagnostic-detail`.
 That opt-in includes redacted raw configuration, logs, traces and crash reports, which can still contain
 private paths and text. `--no-log` excludes logs only; it does not sanitize the other detail.
