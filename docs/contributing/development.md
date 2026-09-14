@@ -73,6 +73,17 @@ uv run python examples/mpv_reader.py \
 Spelling everything out on the CLI overrides the config, e.g. `--dict … --freq … --pitch …
 --anki-decks '{"Saitenka::Known":["Expression"]}'`.
 
+## Native-render test prerequisites
+
+The default test suite includes same-renderer libass invariants. Install a system libass runtime
+(`libass9` on Ubuntu) or the optional `subtitle-geometry-bundle` extra; importing `libasslite` alone
+does not verify native availability. These tests attach the repository font and do not require an
+ambient CJK font or private episode. Missing native capability fails required qualification.
+
+CI's ordinary Python matrix selects system libass; the free-threaded matrix selects the published
+bundle. Both run `tools/preflight_libass.py` before pytest to render text and report the selected
+library/version. The preflight establishes capability, not pixel fidelity.
+
 ## Manual QA checklist
 
 What to verify after a change that could touch rendering, coloring, mining, or the reader UI:

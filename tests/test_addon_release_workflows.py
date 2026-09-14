@@ -15,6 +15,34 @@ def _named_step(workflow: dict, job: str, name: str) -> dict:
     return next(step for step in workflow["jobs"][job]["steps"] if step.get("name") == name)
 
 
+@pytest.mark.parametrize(
+    ("job", "provider", "gil"), [("tests", "system", "1"), ("tests-ft", "bundle", "0")]
+)
+def test_native_test_matrix_provisions_and_checks_selected_runtime(job, provider, gil):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    matrix = workflow["jobs"][job]
+    steps = matrix["steps"]
+    preflight = _named_step(workflow, job, "Native render preflight")
+    preflight_index = steps.index(preflight)
+    setup = "\n".join(step.get("run", "") for step in steps[:preflight_index])
+
+    assert matrix["env"]["LIBASSLITE_BUNDLE"] == ("0" if provider == "system" else "1")
+    assert (
+        "install -y libmecab-dev libass9"
+        if provider == "system"
+        else "--only-binary libasslite-bundle"
+    ) in setup
+    assert "uv sync --locked --extra full --no-default-groups --group test" in setup
+    assert (
+        preflight["run"]
+        == f"uv run --no-sync python tools/preflight_libass.py --provider {provider}"
+    )
+    assert preflight["env"]["PYTHON_GIL"] == gil
+    assert not preflight.get("continue-on-error", False)
+    assert not preflight.get("if")
+    assert any("pytest" in step.get("run", "") for step in steps[preflight_index + 1 :])
+
+
 def test_libasslite_release_versions_stay_coherent() -> None:
     wrapper = tomllib.loads((ROOT / "libasslite" / "pyproject.toml").read_text(encoding="utf-8"))
     bundle = tomllib.loads(

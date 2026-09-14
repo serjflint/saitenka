@@ -161,3 +161,12 @@ def test_phase_probe_budget_failure_retains_native_mask(monkeypatch):
 
     assert not token.overprint_safe
     assert len(token.coverage) == token.bounds.width * token.bounds.height
+
+
+def test_missing_native_runtime_is_not_a_successful_mask_fallback(tmp_path):
+    backend = LibassGeometryBackend(library_path=tmp_path / "missing-libass")
+    try:
+        with pytest.raises(RuntimeError, match="could not load libass"):
+            backend.render(native_request())
+    finally:
+        backend.close()
