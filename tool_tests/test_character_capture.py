@@ -23,7 +23,11 @@ def test_whitespace_does_not_require_ink_or_remove_neighboring_token_identity():
 
 @pytest.mark.parametrize("suffix", [".ass", ".srt"])
 @pytest.mark.parametrize("lose_mark", [False, True])
-def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(suffix, *, lose_mark):
+@pytest.mark.parametrize("ignore_controls", [False, True])
+@pytest.mark.parametrize("alter_hint", [False, True])
+def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(
+    suffix, *, lose_mark, ignore_controls, alter_hint
+):
     document = pysubs2.SSAFile()
     document.events.append(pysubs2.SSAEvent(start=1000, end=2000, text="猫"))
     source = document.to_string(suffix[1:])
@@ -36,7 +40,16 @@ def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(suf
             self.painted = []
             self.references = []
 
-        def frame(self, text, _sample, request=None, *, suffix=".ass", reference_coverage=None):
+        def frame(
+            self,
+            text,
+            _sample,
+            request=None,
+            *,
+            suffix=".ass",
+            reference_coverage=None,
+            reference_color=(0, 255, 0),
+        ):
             image = np.zeros((360, 640, 3), dtype=np.uint8)
             color = (255, 255, 0)
             if request is not None:
@@ -51,8 +64,13 @@ def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(suf
                 color = (255, 0, 0)
             image[10:20, 10:20] = color
             image[5:7, 10:12] = color
+            if alter_hint and color == (0, 0, 255):
+                image[10, 10, 2] = 127
             if lose_mark and (request is not None or reference_coverage is not None):
                 image[5:7, 10:12] = (255, 255, 0)
+            if reference_coverage is not None and not lose_mark and not ignore_controls:
+                image[:] = 0
+                image[reference_coverage > 0] = reference_color
             return image
 
     capture = Capture()
@@ -63,8 +81,21 @@ def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(suf
         suffix=suffix,
     )
 
-    assert result["verdict"] == ("inconclusive" if lose_mark else "passed")
-    assert result["reason"] == ("calibration-does-not-preserve-native-ink" if lose_mark else "")
+    assert result["verdict"] == ("inconclusive" if lose_mark or ignore_controls else "passed")
+    assert result["reason"] == (
+        "calibration-does-not-preserve-native-ink"
+        if lose_mark
+        else "capture-controls-not-discriminating"
+        if ignore_controls
+        else ""
+    )
     assert capture.painted == [(source, suffix)]
     assert capture.references[0][:2] == (source, suffix)
     assert np.array_equal(capture.references[0][2], images[0][:, :, 0])
+    if not lose_mark and not ignore_controls:
+        assert result["identity_probe_preserves_ink"] is not alter_hint
+        assert result["controls"] == {
+            "positive": "passed",
+            "displaced": "failed",
+            "wrong-color": "failed",
+        }

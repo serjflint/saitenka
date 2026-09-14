@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import math
-import zipfile
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -301,18 +300,14 @@ def _check_trace_file(path: Path) -> None:
 
 
 def _check_trace_archive(source: Path) -> None:
+    from saitenka.app.report_reader import read_member
+
     try:
-        with zipfile.ZipFile(source) as archive:
-            members = [
-                item
-                for item in archive.infolist()
-                if item.filename == "trace.json"
-                or item.filename.endswith(("/trace.json", "telemetry/trace.json"))
-            ]
-            if any(item.file_size > _MAX_TRACE_BYTES for item in members):
-                raise ValueError(_LIMIT_ERROR)
-    except zipfile.BadZipFile as error:
-        raise ValueError(f"not a valid report archive: {source}") from error
+        read_member(source, "trace.json", limit=_MAX_TRACE_BYTES)
+    except ValueError as error:
+        if str(error) == "diagnostic member exceeds byte limit":
+            raise ValueError(_LIMIT_ERROR) from error
+        raise
 
 
 def load_startup_trace(source: Path) -> list[dict]:

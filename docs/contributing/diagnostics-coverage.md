@@ -18,8 +18,12 @@ Native geometry contributes a separate producer-side configuration history: fram
 aspect, margins, renderer parameters, feature flags and text-free font-setup metadata. Foreground and
 prefetch render spans identify their owner and configuration revision; accepted publication has its
 own span, including cache-served geometry. These are the request values consumed by the geometry
-boundary, not backend readback or independently observed mpv values. Loaded native libraries, resolved
-font faces, font-content identity, CLI/profile origins and other player settings remain unknown.
+boundary, not independently observed mpv values. Accepted results additionally carry the libass
+version used by that geometry backend and the mask source (`native-original`, `request-document`,
+or unknown for older results). `subtitle_geometry_native_reference` separates reference-render and
+attribution cost, retained mask bytes and bounded attribution-failure reasons. These measure worker
+work, not display presentation. Other loaded native libraries, resolved font faces,
+font-content identity, CLI/profile origins and other player settings remain unknown.
 
 The history retains four configurations per owner and four owners, with eviction counts. A revision
 identifies changes in the recorded subset or configured font paths, not every possible renderer input.
@@ -61,13 +65,22 @@ decisions across connection epochs, with explicit eviction. `wire` notifications
 synthetic `replay-read` events. Closed, stale-epoch, not-ready, reconnect-buffered, candidate-full and
 mailbox-full outcomes cannot establish admission. A buffered event may later be queued or discarded;
 these are stage counts, not unique-event counts, and buffering has no terminal correlation yet.
-`queued` means mailbox admission only: later coalescing, epoch rejection, reduction, application and
-pixel correctness are not measured here. `player_property_ingress` spans join the history by
+`queued` means mailbox admission only. Schema-2 ingress adds reducer outcomes from
+`projection-mailbox` and `projection-direct`; `reduced` means the reducer ran, not that an effect
+was applied or pixels were displayed. Schema-1 reports retain their admission evidence with unknown
+projection counts. `player_property_ingress` spans join the history by
 `query_owner`/`ingress_sequence`; queued rows also carry the mailbox sequence and connection epoch.
 The owner's epoch describes command history; use each ingress row's epoch for ingress evidence.
 Rows are ordered by recording sequence, not necessarily wire arrival order under concurrency. No
 property values or arbitrary names enter this evidence. Missing legacy ingress remains unknown,
 whereas present zero counts mean no recorded decisions of that kind for that owner.
+
+Explicit `--attach` files are a separate unredacted tier: at most four attachments, 8 MiB each.
+The CLI lists them before collection; the ZIP inventories generic member names and sizes in
+`attachments/manifest.json`. Sources are never modified or deleted. No attachment is collected by
+default, and user-owned exports never expire. No new automatic sensitive-witness store is enabled.
+Report readers do not extract archives and reject unsafe paths, duplicate/ambiguous members and
+oversized compressed or expanded input.
 
 The producer-summary reader accepts at most 128 KiB; an oversized summary yields
 `unreadable-or-too-large`, not healthy or zero activity. Combined-history tests guard this budget.
@@ -88,9 +101,17 @@ uv run python tools/telemetry_coverage.py report.zip --require tooltip-quality
 ```
 
 The coverage command reports required evidence present/absent and optional identity joins.
+It also diagnoses recorded player query/admission failures from metadata-only reports. Retained
+mailbox-to-reducer joins have their own denominator; missing terminals can mean in-flight work or
+lost evidence. Neither those joins nor a successful query qualify pixels or benchmark cost.
 It does not certify fault detection from the presence of an event. A failed required scenario
 returns nonzero; an empty requirement list stays unobserved. Test references locate evidence,
 not executed configuration cells. Preserve untested cells rather than extrapolating from macOS.
+
+`tools/native_mask_benchmark.py` measures matched synthetic worker requests, including full-track
+document swaps. It reports native-pixel disagreement alongside phase cost, token census and font/runtime
+provenance; faster incorrect masks are not a performance improvement. This is an offline same-renderer
+comparison, not an mpv qualification or a machine-independent timing gate.
 
 Measure these independently:
 

@@ -347,7 +347,11 @@ class SubtitleModeCoordinator:
             self._current = result
             self._last_error = None
             self._evidence.published(
-                ticket.configuration_revision, request.generation, ticket.sequence
+                ticket.configuration_revision,
+                request.generation,
+                ticket.sequence,
+                libass_version=result.libass_version,
+                mask_source=result.mask_source,
             )
         with otel_metrics.traced("subtitle_geometry_publish") as span:
             span.set("configuration_owner", self._evidence.owner)
@@ -355,6 +359,7 @@ class SubtitleModeCoordinator:
             span.set("generation", request.generation)
             span.set("request_sequence", ticket.sequence)
             span.set("outcome", "published")
+            span.set("mask_source", result.mask_source)
         return True
 
     def record_error(self, reservation: GeometryReservation, error: Exception) -> bool:

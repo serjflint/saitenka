@@ -71,6 +71,15 @@ opt-in native-visible experiment instead leaves authored external ASS rendering 
 derives hit boxes on a bounded background worker; Pillow remains authoritative by default. On hover,
 the reader looks the word up and draws its tooltip in mpv's OSD surface.
 
+Native color masks come from an unmodified render of the subtitle track. A separate color-tagged
+render supplies ownership hints: inserting color boundaries can change libass's pixels. The worker
+attributes connected ink only when its owner is unambiguous, with pixel, run and aggregate mask-byte
+limits. Unattributable ink fails explicitly. Exact phase matching then chooses between a glyph redraw
+and tinting the retained native mask; neither path adds another outline over mpv's authored one.
+
+Decomposed kana voicing marks are composed for tokenization, then surfaces and offsets are restored
+to the original subtitle. A base and its mark must not become competing owners of one native glyph.
+
 The visible-vs-shadow ownership, stale-result guards, lookahead caches, and optional package boundary
 are diagrammed in [Native-visible subtitle architecture](architecture.md#native-visible-subtitle-architecture).
 

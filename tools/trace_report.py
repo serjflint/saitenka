@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import zipfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from saitenka.app.report_reader import read_member
 from saitenka.trace_analysis import parent_tree_health, tooltip_quality
 
 
@@ -36,14 +36,7 @@ def _pct(sorted_vals: list[float], q: float) -> float:
 
 def _read_member(src: Path, name: str) -> str | None:
     """Read `name` from a report that is either a .zip or an unzipped directory. None if absent."""
-    if src.is_dir():
-        p = src / name
-        return p.read_text(encoding="utf-8", errors="replace") if p.exists() else None
-    with zipfile.ZipFile(src) as z:
-        cand = [n for n in z.namelist() if n.endswith(name) or n == name]
-        if not cand:
-            return None
-        return z.read(cand[0]).decode("utf-8", errors="replace")
+    return read_member(src, name)
 
 
 def _load_trace(src: Path) -> list[dict]:

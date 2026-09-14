@@ -87,7 +87,7 @@ def manifest(events: list[tuple[int, int, str]], provenance: dict) -> dict:
         "coordinates": rows,
         "census_sha256": digest([item.key for item in coordinates]),
         "sampling": "one interior midpoint per event; animation states not qualified",
-        "capture_estimate_upper_bound": len(coordinates) * 7,
+        "capture_estimate_upper_bound": len(coordinates) * 9,
     }
     return {**result, "manifest_sha256": digest(result)}
 
@@ -131,6 +131,11 @@ def green_coverage(composite: np.ndarray) -> np.ndarray:
     return np.maximum(composite[:, :, 1].astype(np.int16) - composite[:, :, 0], 0).astype(np.uint8)
 
 
+def isolation_preserves_ink(original: np.ndarray, isolated: np.ndarray) -> bool:
+    coverage = np.minimum(isolated[:, :, 0].astype(np.uint16) + isolated[:, :, 2], 255)
+    return bool(np.array_equal(original[:, :, 0], coverage))
+
+
 def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -> dict:
     """Reference ownership is independent of our boxes; missing output never shrinks the mask."""
     if reference.shape != ours.shape or reference.shape != context.shape or reference.ndim != 2:
@@ -146,15 +151,7 @@ def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -
     region[
         max(0, int(ys.min()) - 2) : int(ys.max()) + 3, max(0, int(xs.min()) - 2) : int(xs.max()) + 3
     ] = True
-    # The production overprint has a one-pixel border. Account for that decoration, not a shifted glyph.
-    padded = np.pad(context > 32, 1)
-    permitted = np.logical_or.reduce(
-        [
-            padded[y : y + target.shape[0], x : x + target.shape[1]]
-            for y in range(3)
-            for x in range(3)
-        ]
-    )
+    permitted = context > 32
     spill = int((region & visible & ~permitted).sum())
     frame_spill = int((visible & ~permitted).sum())
     alpha_error = float(np.abs(ours.astype(float) - reference.astype(float))[target].max())

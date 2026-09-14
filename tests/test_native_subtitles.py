@@ -4,6 +4,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -1629,15 +1630,12 @@ def test_sub_delay_property_event_records_the_derived_subtitle_clock(
 
     captured: list[dict[str, object]] = []
 
-    class RecordingSpan:
-        def set(self, key: str, value: object) -> None:
-            captured[-1][key] = value
-
     @contextmanager
     def record_span(name: str, **attributes: str):
+        recorded = dict(attributes)
         if name == "subtitle_geometry_clock":
-            captured.append(dict(attributes))
-        yield RecordingSpan()
+            captured.append(recorded)
+        yield SimpleNamespace(set=lambda key, value: recorded.__setitem__(key, value))
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
@@ -1663,15 +1661,12 @@ def test_sub_delay_event_reports_unavailable_clock_without_timing_sources(
 
     captured: list[dict[str, object]] = []
 
-    class RecordingSpan:
-        def set(self, key: str, value: object) -> None:
-            captured[-1][key] = value
-
     @contextmanager
     def record_span(name: str, **attributes: str):
+        recorded = dict(attributes)
         if name == "subtitle_geometry_clock":
-            captured.append(dict(attributes))
-        yield RecordingSpan()
+            captured.append(recorded)
+        yield SimpleNamespace(set=lambda key, value: recorded.__setitem__(key, value))
 
     monkeypatch.setattr(otel_metrics, "traced", record_span)
     result, ipc, _backend = reader(tmp_path)
@@ -3044,10 +3039,7 @@ def test_an_agreeing_measurement_leaves_the_text_device_alone(tmp_path: Path) ->
     result.close()
 
 
-def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_path: Path) -> None:
-    """The consequence for the other side. A late verdict lands on device 3's rule because the cue
-    was built without masks; telling the geometry side is what makes the NEXT build keep them, so
-    those tokens rise to the raster instead of staying on the bottom rung."""
+def test_a_drifting_family_retains_native_masks_when_its_face_is_retired(tmp_path: Path) -> None:
     result, ipc, backend = reader(
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
     )
@@ -3056,7 +3048,8 @@ def test_a_drifting_family_gets_its_masks_kept_so_the_raster_can_take_it(tmp_pat
 
     result.graph.cue.set_subtitle("猫を見る")
     settle_jobs(result, ipc)
-    assert backend.requests[-1].keep_coverage is False, "the first cue had no verdict yet"
+    assert backend.requests[-1].keep_coverage is True
+    assert backend.requests[-1].native_ass == ASS
     # The same cue again, and it is re-rendered rather than served from cache — the verdict
     # invalidates, which is the half that makes the demotion reach the pixels.
     result.graph.cue.set_subtitle("猫を見る")

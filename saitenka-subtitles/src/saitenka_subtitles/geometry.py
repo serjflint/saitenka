@@ -227,6 +227,8 @@ class GeometryRequest:
     #: Keep each token's coverage mask, for the raster device. Asked for per frame rather than
     #: always, because a cue whose color the text device can draw has no use for the bytes.
     keep_coverage: bool = False
+    #: Unmodified native track; the colored document supplies ownership hints only.
+    native_ass: bytes = b""
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -267,6 +269,8 @@ class GeometryRequest:
             digest.update(value.encode())
             digest.update(b"\0")
         digest.update(self.ass)
+        digest.update(b"\0native\0")
+        digest.update(self.native_ass)
         for name, data in self.attachments:
             digest.update(name.encode())
             digest.update(b"\0")
@@ -308,6 +312,8 @@ class GeometrySnapshot:
     timestamp_ms: int
     variant: GeometryVariant
     tokens: tuple[TokenGeometry, ...]
+    libass_version: int | None = field(default=None, compare=False, kw_only=True)
+    mask_source: str = field(default="unknown", compare=False, kw_only=True)
 
     @property
     def coverage_bytes(self) -> int:

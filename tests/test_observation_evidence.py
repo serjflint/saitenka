@@ -307,4 +307,23 @@ def test_serialized_ingress_extra_fields_cannot_leak_content(monkeypatch, tmp_pa
     result = query_evidence.safe_snapshot(raw)
 
     assert result["owners"][0]["ingress"]["status"] == "collected"
+
+
+def test_legacy_ingress_preserves_admission_but_cannot_claim_projection(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    evidence = query_evidence.QueryEvidence()
+    evidence.ingress(
+        {"event": "property-change", "name": "osd-dimensions"}, 0, "queued", mailbox_sequence=1
+    )
+    raw = query_evidence.registry.snapshot()
+    ingress = raw["owners"][0]["ingress"]
+    del ingress["schema"]
+    for key in ("reduced", "projection-closed", "projection-stale-epoch", "projection-exception"):
+        del ingress["counts"][key]
+
+    result = query_evidence.safe_snapshot(raw)["owners"][0]["ingress"]
+
+    assert result["status"] == "collected"
+    assert result["counts"]["queued"] == 1
+    assert result["counts"]["reduced"] is None
     assert "PRIVATE" not in json.dumps(result)

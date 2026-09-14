@@ -22,6 +22,34 @@ from saitenka.app.session.routes import install_session_reactor
 from saitenka.app.subtitle_render import NullRenderer
 
 
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("direct", [False, True])
+def test_property_projection_is_distinct_from_mailbox_admission(monkeypatch, tmp_path, direct):
+    from test_render_evidence import _export, _setup
+
+    _setup(monkeypatch, tmp_path)
+    ipc, gateway, reader = _session()
+    try:
+        if direct:
+            reader.graph.playback.observe("options/sub-scale", 1.25)
+        else:
+            ipc.emit({"event": "property-change", "name": "options/sub-scale", "data": 1.25})
+            reader.pump()
+        payload = _export()
+        value = reader.graph.playback.value("options/sub-scale")
+    finally:
+        reader.close()
+        gateway.close()
+
+    rows = payload["player_query_health"]["owners"][0]["ingress"]["recent"]
+    assert value == 1.25
+    projection = rows[-1]
+    assert projection["outcome"] == "reduced"
+    assert projection["source"] == ("projection-direct" if direct else "projection-mailbox")
+    if not direct:
+        assert rows[-2]["mailbox_sequence"] == projection["mailbox_sequence"]
+
+
 def _session():
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
@@ -37,6 +65,25 @@ def _session():
     )
     reader.graph.playback.install_seed({})
     return ipc, gateway, reader
+
+
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("stale", [False, 0, 1.25])
+def test_failed_startup_query_cannot_seed_its_data(stale, monkeypatch):
+    ipc, gateway, reader = _session()
+    monkeypatch.setattr(
+        ipc,
+        "register_runtime_observers",
+        lambda _names: {"options/sub-scale": {"error": "property unavailable", "data": stale}},
+    )
+    try:
+        reader.graph.playback.start()
+        value = reader.graph.playback.value("options/sub-scale")
+    finally:
+        reader.close()
+        gateway.close()
+
+    assert value is None
 
 
 @pytest.mark.timeout(5)

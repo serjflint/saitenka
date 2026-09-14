@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+from saitenka_subtitles.ass_geometry import prepare_ass_hit_map_frame
+from saitenka_subtitles.document import (
+    SubtitleEventId,
+    SubtitleFrameId,
+    SubtitleTrackId,
+    TokenAnnotation,
+)
 from saitenka_subtitles.fractional import PhaseMask, match_phases
 from saitenka_subtitles.fragments import probe_document
 from saitenka_subtitles.geometry import (
@@ -65,11 +71,11 @@ def test_fractional_positions_survive_payload_serialization():
     assert r"\pos(2458.375,1199.875)" in event_lines(paint)[0]
 
 
-def native_request(origin=(64, 40)):
+def native_request(origin=(64, 40), *, spacing=4):
     frame = (960, 540)
     header = probe_document((), (), frame).document
     text = "ださい"
-    body = f"{{\\an7\\pos({origin[0]},{origin[1]})\\fnNoto Sans JP Thin\\fs48\\fsp4}}{text}"
+    body = f"{{\\an7\\pos({origin[0]},{origin[1]})\\fnNoto Sans JP Thin\\fs48\\fsp{spacing}}}{text}"
     document = header + f"Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,{body}\n"
     track = SubtitleTrackId("fractional")
     event = SubtitleEventId(track, 0, 2000, 0, 0)
@@ -88,7 +94,9 @@ def native_request(origin=(64, 40)):
         frame,
         document.encode(),
         palette=(
-            GeometryPaletteEntry(event, 0, 0xFFFFFF, "Noto Sans JP Thin", 48, text, spacing=4),
+            GeometryPaletteEntry(
+                event, 0, 0xFFFFFF, "Noto Sans JP Thin", 48, text, spacing=spacing
+            ),
         ),
         font_setup=FontSetup(font_provider=FontProvider.NONE),
         attachments=fonts,
@@ -96,8 +104,9 @@ def native_request(origin=(64, 40)):
 
 
 @pytest.mark.parametrize("origin", [(64, 40), (64.375, 40.875), (65.625, 41.125)])
-def test_fractional_redraw_matches_same_renderer_native_coverage(origin):
-    request = native_request(origin)
+@pytest.mark.parametrize("spacing", [0, -0.5, 4])
+def test_fractional_redraw_matches_same_renderer_native_coverage(origin, spacing):
+    request = replace(native_request(origin, spacing=spacing), keep_coverage=True)
     backend = LibassGeometryBackend()
     try:
         token = backend.render(request).tokens[0]
@@ -113,7 +122,7 @@ def test_fractional_redraw_matches_same_renderer_native_coverage(origin):
         token.font_name,
         token.font_size,
         0xFFFFFF,
-        spacing=4,
+        spacing=spacing,
         glyph_dx=token.glyph_dx,
         glyph_dy=token.glyph_dy,
     )
@@ -170,3 +179,61 @@ def test_missing_native_runtime_is_not_a_successful_mask_fallback(tmp_path):
             backend.render(native_request())
     finally:
         backend.close()
+
+
+@pytest.mark.parametrize("origin", [(640, 710), (640.375, 710.875)])
+def test_token_masks_reconstruct_unmodified_native_ink_across_color_run_splits(origin):
+    import numpy as np
+
+    source = native_request(origin, spacing=0)
+    document = source.ass.replace(b"\\an7", b"\\an2").replace(b"\\fs48", b"\\fs40")
+    document = document.replace("ださい".encode(), "あだあ".encode())
+    inputs = replace(source, ass=document, frame_size=(1280, 720), storage_size=(1280, 720))
+    # Script resolution and device resolution must agree for this native-reference comparison.
+    document = document.replace(b"PlayResX: 960", b"PlayResX: 1280").replace(
+        b"PlayResY: 540", b"PlayResY: 720"
+    )
+    prepared = prepare_ass_hit_map_frame(
+        document,
+        inputs.track_id,
+        active_rows=next(
+            line for line in document.decode().splitlines() if line.startswith("Dialogue:")
+        ),
+        text="あだあ",
+        tokens=(TokenAnnotation(0, 0, 1), TokenAnnotation(1, 1, 3)),
+    )
+    inputs = replace(
+        inputs,
+        ass=prepared.ass,
+        native_ass=document,
+        frame_id=prepared.frame_id,
+        palette=prepared.palette,
+        reserved_rgb=prepared.reserved_rgb,
+    )
+    backend = LibassGeometryBackend()
+    reference = LibassGeometryBackend()
+    try:
+        actual = backend.render(inputs)
+        warm = backend.render(inputs)
+        expected = reference.render(
+            replace(
+                inputs,
+                ass=document,
+                native_ass=b"",
+                keep_coverage=True,
+                palette=(GeometryPaletteEntry(prepared.palette[0].event_id, 0, 0xFFFFFF),),
+                reserved_rgb=(),
+            )
+        )
+    finally:
+        backend.close()
+        reference.close()
+    native = expected.tokens[0]
+    restored = np.zeros((native.bounds.height, native.bounds.width), dtype=np.uint8)
+    for token in actual.tokens:
+        x, y = token.bounds.x - native.bounds.x, token.bounds.y - native.bounds.y
+        restored[y : y + token.bounds.height, x : x + token.bounds.width] = np.frombuffer(
+            token.coverage, dtype=np.uint8
+        ).reshape(token.bounds.height, token.bounds.width)
+    assert restored.tobytes() == native.coverage
+    assert warm == actual

@@ -70,6 +70,20 @@ def test_stray_output_outside_every_character_fails_frame_coverage():
     assert result["frame_spill_pixels"] == 1
 
 
+def test_adjacent_extra_ink_cannot_pass_as_an_overprint_border():
+    oracle = module()
+    reference = np.zeros((5, 5), dtype=np.uint8)
+    reference[2, 2] = 255
+    ours = reference.copy()
+    ours[2, 3] = 255
+
+    result = oracle.compare_mask(reference, ours, reference)
+
+    assert result["verdict"] == "failed"
+    assert result["spill_pixels"] == 1
+    assert result["frame_spill_pixels"] == 1
+
+
 def test_checkpoint_keeps_the_full_denominator_on_interruption():
     oracle = module()
     frozen = oracle.manifest([(1000, 2000, "猫と犬"), (3000, 4000, "")], {"source": "hash"})
@@ -174,3 +188,12 @@ def test_disconnected_ink_reassigned_by_probe_still_fails_whole_cue():
     assert result["verdict"] == "failed"
     assert result["cue_verdict"] == "failed"
     assert result["frame_missing_pixels"] == 1
+
+
+def test_isolation_control_rejects_color_run_phase_change_with_unchanged_bounds():
+    original = np.full((3, 3, 3), 255, dtype=np.uint8)
+    isolated = np.zeros_like(original)
+    isolated[:, :, 2] = 255
+    assert module().isolation_preserves_ink(original, isolated)
+    isolated[1, 1, 2] = 254
+    assert not module().isolation_preserves_ink(original, isolated)

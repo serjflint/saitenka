@@ -147,6 +147,21 @@ class MpvGateway:
         ledger = self.session_ledger
         return {} if ledger is None else ledger.counts
 
+    def record_projection(self, envelope, outcome: str) -> None:
+        from saitenka.runtime.events import PropertySeeded
+
+        payload = envelope.payload
+        if not isinstance(payload, (PropertyObserved, PropertySeeded)):
+            return
+        mailbox = envelope.connection_epoch is not None
+        self._query_evidence.ingress(
+            {"event": "property-change", "name": payload.name},
+            envelope.connection_epoch if mailbox else self.connection_epoch,
+            "reduced" if outcome == "reduced" else f"projection-{outcome}",
+            source="projection-mailbox" if mailbox else "projection-direct",
+            mailbox_sequence=envelope.sequence if mailbox else None,
+        )
+
     def observe(
         self, reactor: SessionReactor, claims: Callable[[RuntimeEvent], bool] | None = None
     ) -> None:

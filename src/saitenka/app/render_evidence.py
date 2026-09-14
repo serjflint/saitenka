@@ -123,7 +123,20 @@ def _reference(raw: object, revisions: set[int], *, generation: int | None = Non
         return {"status": "invalid"}
     if generation is not None and values["generation"] != generation:
         return {**values, "status": "stale"}
-    return {**values, "status": "retained" if values["revision"] in revisions else "evicted"}
+    version = _count(raw.get("libass_version"))
+    runtime: dict = {"libass_version": version} if version is not None else {}
+    mask_source = raw.get("mask_source")
+    if isinstance(mask_source, str) and mask_source in {
+        "native-original",
+        "request-document",
+        "unknown",
+    }:
+        runtime["mask_source"] = mask_source
+    return {
+        **values,
+        **runtime,
+        "status": "retained" if values["revision"] in revisions else "evicted",
+    }
 
 
 def _owner(raw: dict) -> dict:
@@ -275,13 +288,26 @@ class GeometryEvidence:
         }
         self._registry.update(self.owner, self._state)
 
-    def published(self, revision: int, generation: int, sequence: int) -> None:
-        self._state["published"] = {
+    def published(
+        self,
+        revision: int,
+        generation: int,
+        sequence: int,
+        *,
+        libass_version: int | None = None,
+        mask_source: str = "unknown",
+    ) -> None:
+        publication: dict[str, object] = {
             "revision": revision,
             "generation": generation,
             "sequence": sequence,
         }
-        self._state["last_published"] = self._state["published"]
+        if libass_version is not None:
+            publication["libass_version"] = libass_version
+        if mask_source != "unknown":
+            publication["mask_source"] = mask_source
+        self._state["published"] = publication
+        self._state["last_published"] = publication
         self._registry.update(self.owner, self._state)
 
     def clear_published(self) -> None:

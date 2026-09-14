@@ -170,7 +170,10 @@ class PlaybackObservationController:
         replies = {
             name: replies.get(name) or {"error": "unavailable"} for name in OBSERVED_PROPERTIES
         }
-        values = {name: reply.get("data") for name, reply in replies.items()}
+        values = {
+            name: reply.get("data") if reply.get("error") in {None, "success"} else None
+            for name, reply in replies.items()
+        }
         if connection_replaced:
             for name, value in values.items():
                 self.observe(name, value)

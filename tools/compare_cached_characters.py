@@ -11,6 +11,7 @@ import hashlib
 import html
 import json
 import platform
+import shutil
 import subprocess
 import time
 from contextlib import contextmanager
@@ -25,6 +26,7 @@ from character_masks import (
     compare_mask,
     digest,
     green_coverage,
+    isolation_preserves_ink,
     manifest,
     reference_mask,
     results_summary,
@@ -77,6 +79,7 @@ PROFILE = (
     "--target-trc=srgb",
     "--icc-profile-auto=no",
     "--dither-depth=no",
+    "--zimg-dither=no",
 )
 TRACK = SubtitleTrackId("character-corpus")
 
@@ -164,9 +167,9 @@ def recolor(source: str, *, target: tuple[int, int, int] | None = None) -> str:
     return "".join(lines)
 
 
-def request_for(
+def geometry_request_for(
     source: str, sample_ms: int, size: tuple[int, int], fonts: subtitle_fonts.FontEnvironment
-) -> DrawRequest:
+):
     rows, text = authored_ass_rows_at(source.encode(), TRACK, sample_ms)
     tokens = tokenize(text, strip_furigana=False)
     prepared = prepare_ass_hit_map_frame(
@@ -191,24 +194,31 @@ def request_for(
         1.0,
         unreachable=fonts.osd_unreachable(font_names.in_document(source.encode())),
     )
+    return GeometryRequest(
+        1,
+        TRACK,
+        prepared.frame_id,
+        sample_ms,
+        size,
+        size,
+        prepared.ass,
+        native_ass=source.encode(),
+        palette=palette,
+        reserved_rgb=prepared.reserved_rgb,
+        keep_coverage=True,
+        font_setup=fonts.setup,
+        attachments=fonts.attachments,
+    ), tokens
+
+
+def request_for(
+    source: str, sample_ms: int, size: tuple[int, int], fonts: subtitle_fonts.FontEnvironment
+) -> DrawRequest:
+    inputs, tokens = geometry_request_for(source, sample_ms, size, fonts)
+    _rows, text = authored_ass_rows_at(source.encode(), TRACK, sample_ms)
     backend = LibassGeometryBackend()
     try:
-        snapshot = backend.render(
-            GeometryRequest(
-                1,
-                TRACK,
-                prepared.frame_id,
-                sample_ms,
-                size,
-                size,
-                prepared.ass,
-                palette=palette,
-                reserved_rgb=prepared.reserved_rgb,
-                keep_coverage=True,
-                font_setup=fonts.setup,
-                attachments=fonts.attachments,
-            )
-        )
+        snapshot = backend.render(inputs)
     finally:
         backend.close()
     boxes = []
@@ -258,6 +268,9 @@ class Captures:
             video=directory / "black.mkv",
             cache_dir=directory / "fonts",
         )
+        self.style = converted.style_of(
+            {name: ipc.query(f"options/{name}") for name in (*converted.STYLE_OPTIONS, "sub-font")}
+        )
 
     def command(self, *args):
         response = self.ipc.command(*args, timeout=5)
@@ -273,6 +286,7 @@ class Captures:
         *,
         suffix: str = ".ass",
         reference_coverage: np.ndarray | None = None,
+        reference_color: tuple[int, int, int] = (0, 255, 0),
     ) -> np.ndarray:
         source_path = self.directory / f"capture{suffix}"
         source_path.write_text(source, encoding="utf-8")
@@ -297,7 +311,7 @@ class Captures:
                 self.overlay.show(Image.fromarray(raster.rgba), raster.x, raster.y, oid=62)
         if reference_coverage is not None:
             rgba = np.zeros((*reference_coverage.shape, 4), dtype=np.uint8)
-            rgba[:, :, 1] = 255
+            rgba[:, :, :3] = reference_color
             rgba[:, :, 3] = reference_coverage
             self.overlay.show(Image.fromarray(rgba), 0, 0, oid=62)
         target = self.directory / "capture.png"
@@ -312,7 +326,9 @@ class Captures:
 
 
 @contextmanager
-def captures(directory: Path, size: tuple[int, int], video: Path):
+def captures(
+    directory: Path, size: tuple[int, int], video: Path | None, *, font_dir: Path | None = None
+):
     clip = directory / "black.mkv"
     subprocess.run(
         [
@@ -324,14 +340,10 @@ def captures(directory: Path, size: tuple[int, int], video: Path):
             "lavfi",
             "-i",
             f"color=c=black:s={size[0]}x{size[1]}:d=8:r=2",
-            "-i",
-            str(video),
+            *(["-i", str(video)] if video else []),
             "-map",
             "0:v:0",
-            "-map",
-            "1:t?",
-            "-c:t",
-            "copy",
+            *(["-map", "1:t?", "-c:t", "copy"] if video else []),
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -357,6 +369,17 @@ def captures(directory: Path, size: tuple[int, int], video: Path):
             f"--geometry={size[0]}x{size[1]}",
             "--hidpi-window-scale=no",
             *PROFILE,
+            *(
+                [
+                    f"--sub-fonts-dir={font_dir}",
+                    f"--osd-fonts-dir={font_dir}",
+                    "--sub-font-provider=none",
+                    "--osd-font-provider=none",
+                    "--sub-font=Noto Sans JP Thin",
+                ]
+                if font_dir
+                else []
+            ),
             f"--input-ipc-server={socket}",
             str(clip),
         ],
@@ -385,7 +408,9 @@ def captures(directory: Path, size: tuple[int, int], video: Path):
         stderr.close()
 
 
-def converted_source(source: str, size: tuple[int, int]) -> str:
+def converted_source(
+    source: str, size: tuple[int, int], style: converted.SubStyle | None = None
+) -> str:
     parsed = pysubs2.SSAFile.from_string(source, format_="srt")
     markup = subrip.markup_by_cue(source)
     rows = []
@@ -397,7 +422,7 @@ def converted_source(source: str, size: tuple[int, int]) -> str:
         if row is None:
             raise ValueError("SubRip markup conversion is unsupported")
         rows.append(row)
-    return converted.document("\n".join(rows), converted.RenderSpace(*size)).decode()
+    return converted.document("\n".join(rows), converted.RenderSpace(*size), style=style).decode()
 
 
 def coordinate_devices(source: str, coordinate: dict, request: DrawRequest) -> dict:
@@ -437,7 +462,7 @@ def coordinate_result(
         return {"verdict": "unsupported", "reason": coordinate["reason"]}, ()
     native = source
     if suffix == ".srt":
-        source = converted_source(source, capture.size)
+        source = converted_source(source, capture.size, getattr(capture, "style", None))
     active, _text = authored_ass_rows_at(source.encode(), TRACK, coordinate["sample_ms"])
     if any(tag in active for tag in (r"\t(", r"\k", r"\K", r"\move(", r"\fad")):
         return {"verdict": "inconclusive", "reason": "animated-document-needs-state-sampling"}, ()
@@ -468,8 +493,30 @@ def coordinate_result(
             "verdict": "inconclusive",
             "reason": "calibration-does-not-preserve-native-ink",
         }, (original, ours, mask)
-    verdict = compare_mask(np.where(mask > 0, context, 0), green_coverage(ours), context)
+    reference = np.where(mask > 0, context, 0)
+    controls = {"positive": compare_mask(reference, context, context)["verdict"]}
+    for name, coverage, color in (
+        ("displaced", np.roll(original[:, :, 0], 4, axis=1), (0, 255, 0)),
+        ("wrong-color", original[:, :, 0], (255, 0, 0)),
+    ):
+        corrupted = capture.frame(
+            native,
+            time_ms,
+            suffix=suffix,
+            reference_coverage=coverage,
+            reference_color=color,
+        )
+        controls[name] = compare_mask(reference, green_coverage(corrupted), context)["verdict"]
+    if controls != {"positive": "passed", "displaced": "failed", "wrong-color": "failed"}:
+        return {
+            "verdict": "inconclusive",
+            "reason": "capture-controls-not-discriminating",
+            "controls": controls,
+        }, (original, ours, mask)
+    verdict = compare_mask(reference, green_coverage(ours), context)
+    verdict["controls"] = controls
     verdict["ownership"] = "isolated-native-ink-cell-with-whole-cue-check"
+    verdict["identity_probe_preserves_ink"] = isolation_preserves_ink(original, blue)
     verdict.update(coordinate_devices(source, coordinate, request))
     return verdict, (original, ours, mask)
 
@@ -495,7 +542,13 @@ def write_index(directory: Path, summary: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cached-subtitles", type=Path, required=True)
-    parser.add_argument("--video", type=Path, required=True)
+    media = parser.add_mutually_exclusive_group(required=True)
+    media.add_argument(
+        "--video", type=Path, help="private local media, used only for attached fonts"
+    )
+    media.add_argument(
+        "--synthetic", action="store_true", help="black source and bundled OFL fonts"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--size", nargs=2, type=int, default=(1280, 720))
     parser.add_argument("--execute", action="store_true")
@@ -532,7 +585,7 @@ def main() -> int:
         events,
         {
             "subtitle_sha256": fingerprint(args.cached_subtitles),
-            "video_sha256": fingerprint(args.video),
+            "video_sha256": fingerprint(args.video) if args.video else None,
             "format": args.cached_subtitles.suffix,
             "variant": args.cached_subtitles.name,
             "track_metadata": "unknown; explicit caller selection",
@@ -542,8 +595,8 @@ def main() -> int:
             "profile": list(PROFILE),
             "runner_sha256": fingerprint(Path(__file__)),
             "implementation_sha256": implementation_digest(),
-            "fonts": font_inventory(),
-            "attachments": "copied from fingerprinted video to black reference container",
+            "fonts": synthetic_fonts() if args.synthetic else font_inventory(),
+            "attachments": "none" if args.synthetic else "copied from fingerprinted video",
             "qualification": "local midpoint profile; not whole-session fidelity certification",
         },
     )
@@ -586,7 +639,11 @@ def main() -> int:
     return int(
         bool(
             not summary["counts"]["passed"]
-            or frozen["provenance"]["fonts"]["status"] != "ambient-font-inventory"
+            or frozen["provenance"]["fonts"]["status"]
+            not in {
+                "ambient-font-inventory",
+                "pinned-bundled-fonts",
+            }
             or summary["counts"]["failed"]
             or summary["counts"]["inconclusive"]
             or summary["counts"]["unattempted"]
@@ -606,7 +663,14 @@ def execute(args, source: str, frozen: dict, results: dict) -> None:
                 "reason": "unsupported-subtitle-format",
             }
         return
-    with captures(args.output, tuple(args.size), args.video) as capture:
+    font_dir = args.output / "pinned-fonts"
+    if args.synthetic:
+        font = synthetic_fonts()
+        font_dir.mkdir(exist_ok=True)
+        shutil.copyfile(Path(__file__).resolve().parents[1] / font["path"], font_dir / "corpus.ttf")
+    with captures(
+        args.output, tuple(args.size), args.video, font_dir=font_dir if args.synthetic else None
+    ) as capture:
         for row in selected:
             try:
                 verdict, images = coordinate_result(
@@ -629,6 +693,15 @@ def execute(args, source: str, frozen: dict, results: dict) -> None:
                     Image.fromarray(pixels).save(args.output / filename)
                     verdict["artifacts"].append(filename)
             atomic_json(args.output / "results.json", results_summary(frozen, results))
+
+
+def synthetic_fonts() -> dict:
+    from synthetic_characters import ROOT, SPEC
+
+    font = json.loads(SPEC.read_text(encoding="utf-8"))["font"]
+    if fingerprint(ROOT / font["path"]) != font["sha256"]:
+        raise ValueError("bundled corpus font digest changed")
+    return {"status": "pinned-bundled-fonts", "provider": "none", **font}
 
 
 if __name__ == "__main__":

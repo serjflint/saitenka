@@ -9,6 +9,10 @@ logs.
 
 ### Added
 
+- Reports accept explicitly selected local attachments and retain native mask provenance and
+  projection outcomes. Bounded archive readers and a redistributable synthetic character corpus
+  support offline diagnosis without requiring an episode download.
+
 - Rendering-property ingress evidence distinguishes wire notifications, reconnect readbacks and
   rejected mailbox admission without retaining property values.
 
@@ -29,6 +33,12 @@ logs.
   with explicit incomplete and unsupported results.
 
 ### Fixed
+
+- Subtitle color masks preserve the unmodified native render instead of relying on pixels changed
+  by token-color tagging. Ambiguous attribution fails explicitly; overprints retain the native
+  outline without adding a second border.
+- Decomposed Japanese voicing marks retain dictionary matching and inflection merging while
+  preserving original subtitle offsets.
 
 - Positive-spaced subtitle color overprints preserve fractional glyph positions, avoiding displaced
   characters on ultrawide displays. Runs that cannot be matched exactly use their native masks.

@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import argparse
 import collections
-import json
 import statistics
 import sys
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+
+from saitenka.app.subtitle_report import load_trace
 
 
 def draws(trace: dict) -> list[dict]:
@@ -408,8 +408,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("report", type=Path, help="a saitenka report .zip")
     args = parser.parse_args(argv)
 
-    with zipfile.ZipFile(args.report) as bundle:
-        trace = json.loads(bundle.read("telemetry/trace.json"))
+    trace = {"traceEvents": load_trace(args.report)}
     spans = draws(trace)
     if not spans:
         print("no subtitle_draw spans — the bundle predates them, or telemetry was off")

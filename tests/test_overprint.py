@@ -146,6 +146,7 @@ def test_the_cue_is_drawn_once_per_token_in_its_own_color() -> None:
     assert r"\pos(100,600)" in lines[0] and r"\1c&H0000FF&" in lines[0]
     assert r"\pos(220,600)" in lines[2] and r"\1c&HFF0000&" in lines[2]
     assert lines[0].endswith("}猫")
+    assert all(r"\bord0\shad0" in line for line in lines)
 
 
 def test_a_cue_the_measurement_gave_no_face_for_is_left_uncolored() -> None:

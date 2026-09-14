@@ -7,6 +7,7 @@ import zipfile
 from typing import TYPE_CHECKING
 
 from saitenka.app import font_resolution
+from saitenka.app.report_reader import read_file, read_member
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,23 +83,14 @@ _FIELDS = frozenset(
 
 
 def _read_member(source: Path, name: str) -> str | None:
-    if source.is_dir():
-        path = source / name
-        return path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
-    with zipfile.ZipFile(source) as archive:
-        member = next(
-            (item for item in archive.namelist() if item == name or item.endswith(name)), None
-        )
-        return (
-            archive.read(member).decode("utf-8", errors="replace") if member is not None else None
-        )
+    return read_member(source, name)
 
 
 def load_trace(source: Path) -> list[dict]:
     """Load Chrome trace events from a report zip/directory or bare trace JSON."""
     raw: str | None
     if source.is_file() and source.suffix == ".json":
-        raw = source.read_text(encoding="utf-8", errors="replace")
+        raw = read_file(source)
     else:
         try:
             raw = _read_member(source, "telemetry/trace.json") or _read_member(source, "trace.json")
@@ -222,7 +214,7 @@ def font_resolution_line(source: Path) -> str:
     """
     try:
         log = _read_member(source, "mpv.log")
-    except (OSError, zipfile.BadZipFile):
+    except (OSError, ValueError, zipfile.BadZipFile):
         # This is one line of a report, not the report: an unreadable bundle is `load_trace`'s to
         # raise on, and failing here would take the whole rendering down over a diagnostic.
         return "  font resolution: report archive unreadable"

@@ -187,10 +187,8 @@ def focus_rect(boxes, hover: int, span: tuple[int, int] | None) -> tuple[int, in
     return left, top, right - left + 2 * FOCUS_PAD, bottom - top + 2 * FOCUS_PAD
 
 
-#: Our own hairline border, in frame pixels. Not the authored one — that stays where mpv drew it.
-#: This exists to swallow the antialiased fringe of the glyph underneath, which would otherwise
-#: show as a pale outline around every colored word.
-OVERPRINT_BORDER = 1.0
+#: Native outline/shadow remain visible; a duplicate border changes even the fill's composite.
+OVERPRINT_BORDER = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1417,8 +1415,12 @@ class NativeVisibleRenderer:
             self._calibration_pending.clear()
             self._calibration_osd = request.osd
         with otel_metrics.traced("subtitle_calibration_considered") as span:
-            if not (request.paused or self._calibrate_unpaused) or ipc is None:
-                span.set("reason", "playing-budget-or-unavailable")
+            span.set("validation_scope", "bounds-only")
+            if ipc is None:
+                span.set("reason", "ipc-unavailable")
+                return None
+            if not (request.paused or self._calibrate_unpaused):
+                span.set("reason", "playing-budget-exhausted")
                 return None
             signature = subtitle_calibration.payload_signature(payload, request.osd)
             measured = subtitle_calibration.measured_bounds(request.boxes, drifting=self._drifting)

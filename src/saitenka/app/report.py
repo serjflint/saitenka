@@ -628,11 +628,14 @@ def build_report_bundle(
     include_log: bool = True,
     diagnostic_detail: bool = False,
     timestamp: str | None = None,
+    attachments: tuple[Path, ...] = (),
 ) -> Path:
     """Write the diagnostics zip and return its path. ``dest_dir`` defaults to a dedicated reports dir
     under the platform data dir (``%LOCALAPPDATA%\\saitenka\\reports`` on Windows) instead of cluttering
     the home root; a ``timestamp`` (``YYYYMMDD-HHMMSS``) can be injected for deterministic tests."""
     from saitenka.app.paths import data_dir
+    from saitenka.app.report_attachments import collect_attachments
+    from saitenka.app.report_reader import MAX_ARCHIVE_BYTES
 
     ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", ts):
@@ -641,6 +644,19 @@ def build_report_bundle(
     base.mkdir(parents=True, exist_ok=True)
     dest = base / f"saitenka-report-{ts}.zip"
     members = collect(include_log=include_log, diagnostic_detail=diagnostic_detail)
+    attachment_members = collect_attachments(attachments)
+    if attachment_members:
+        members["MANIFEST.txt"] = (
+            "Local diagnostic export with UNREDACTED user attachments.\n"
+            "Attachment inventory and privacy: attachments/manifest.json\n"
+            "Never uploaded automatically. User-owned exports never expire.\n"
+            "Review all contents before sharing.\n"
+        )
+    size = sum(len(content.encode("utf-8")) for content in members.values()) + sum(
+        len(content) for content in attachment_members.values()
+    )
+    if size > MAX_ARCHIVE_BYTES:
+        raise ValueError("diagnostic archive exceeds expanded byte limit")
     fd, temporary_name = tempfile.mkstemp(prefix=".saitenka-report-", suffix=".tmp", dir=base)
     temporary = Path(temporary_name)
     try:
@@ -650,6 +666,8 @@ def build_report_bundle(
         ):
             for name, content in members.items():
                 zf.writestr(name, content)
+            for name, attachment in attachment_members.items():
+                zf.writestr(name, attachment)
         # A timestamp collision must not silently destroy an earlier user-owned bundle.
         os.link(temporary, dest)
     finally:

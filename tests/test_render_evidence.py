@@ -68,6 +68,24 @@ def test_backend_request_parameters_survive_metadata_export(monkeypatch, tmp_pat
     assert payload["pixel_fidelity"]["status"] == "unknown"
 
 
+def test_native_version_is_from_the_accepted_result_not_collector(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+
+    class VersionedBackend(FakeGeometryBackend):
+        def render(self, request):
+            return replace(
+                super().render(request), libass_version=0x01704000, mask_source="native-original"
+            )
+
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), VersionedBackend())
+    pipeline.render(request(0))
+
+    publication = _export()["effective_runtime_configuration"]["owners"][0]["published"]
+    assert publication["libass_version"] == 0x01704000
+    assert publication["mask_source"] == "native-original"
+    assert publication["status"] == "retained"
+
+
 def test_stale_publish_cannot_claim_new_configuration_has_rendered(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     backend = FakeGeometryBackend()

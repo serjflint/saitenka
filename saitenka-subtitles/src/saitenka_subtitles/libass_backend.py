@@ -31,6 +31,7 @@ from saitenka_subtitles.geometry import (
     RendererState,
     TokenGeometry,
 )
+from saitenka_subtitles.native_masks import NativeAttributionError, attribute_native_masks
 from saitenka_subtitles.telemetry import (
     EXTRACT_COLLECT_MS,
     EXTRACT_COVERAGE_MS,
@@ -702,18 +703,18 @@ class LibassGeometryBackend:
             else token
             for token in tokens
         )
-        if not any(token.spacing > 0 for token in tokens):
+        if not any(token.coverage for token in tokens):
             return anchored
         with self._telemetry.span("subtitle_geometry_fractional") as span:
             resolved = tuple(
                 self._fractional_token(
                     request, token, texts.get((token.event_id, token.token_index), "")
                 )
-                if token.spacing > 0
+                if token.coverage and token.font_name and token.font_size > 0
                 else token
                 for token in anchored
             )
-            span.set("tokens", sum(token.spacing > 0 for token in resolved))
+            span.set("tokens", sum(bool(token.coverage) for token in resolved))
             span.set("mask_fallbacks", sum(not token.overprint_safe for token in resolved))
             span.set("atlas_bytes", self._phase_bytes)
             return resolved
@@ -757,50 +758,77 @@ class LibassGeometryBackend:
         while len(self._anchors) > ANCHOR_CACHE_MAX:
             self._anchors.popitem(last=False)
 
+    @staticmethod
+    def _render_frame(renderer: NativeRenderer, request: GeometryRequest) -> RenderResult:
+        return renderer.render(
+            request.timestamp_ms,
+            request.frame_size,
+            request.storage_size,
+            pixel_aspect=request.pixel_aspect,
+            margins=request.margins,
+            use_margins=request.use_margins,
+            max_bitmap_bytes=min(
+                2 * request.frame_size[0] * request.frame_size[1], MAX_BITMAP_BYTES
+            ),
+            style=_render_style(request.renderer_state),
+        )
+
+    def _native_tokens(
+        self, request: GeometryRequest, hints: RenderResult, tokens: tuple[TokenGeometry, ...]
+    ) -> tuple[TokenGeometry, ...]:
+        with self._telemetry.span("subtitle_geometry_native_reference") as span:
+            started = time.perf_counter_ns()
+            renderer, _built_ms = self._renderer(replace(request, ass=request.native_ass))
+            native = self._render_frame(renderer, request)
+            span.set("render_ms", (time.perf_counter_ns() - started) / 1_000_000)
+            span.set("layer_count", len(native.layers))
+            started = time.perf_counter_ns()
+            try:
+                result = attribute_native_masks(native.layers, hints.layers, request, tokens)
+            except NativeAttributionError as error:
+                span.set("outcome", "unattributable")
+                span.set("reason", error.reason.value)
+                raise
+            finally:
+                span.set("attribution_ms", (time.perf_counter_ns() - started) / 1_000_000)
+            span.set("outcome", "attributed")
+            span.set("mask_bytes", sum(len(token.coverage) for token in result))
+            return result
+
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
             raise RuntimeError("libass geometry backend is closed")
         if not request.palette:
             raise ValueError("hit-map request needs a token palette")
         renderer, built_ms = self._renderer(request)
+        library_version = renderer.library_version()
         with self._telemetry.span("subtitle_geometry_libass") as span:
             span.set("provider", "libasslite")
             span.set("renderer_built_ms", built_ms)
             span.set("renderer_cache_size", len(self._renderers))
             if built_ms:
                 self._telemetry.record(RENDERER_BUILD_MS, built_ms)
-            span.set("libass_version", f"0x{renderer.library_version():x}")
+            span.set("libass_version", f"0x{library_version:x}")
             span.set("timestamp_ms", request.timestamp_ms)
             started = time.perf_counter_ns()
-            result = renderer.render(
-                request.timestamp_ms,
-                request.frame_size,
-                request.storage_size,
-                pixel_aspect=request.pixel_aspect,
-                margins=request.margins,
-                use_margins=request.use_margins,
-                max_bitmap_bytes=min(
-                    2 * request.frame_size[0] * request.frame_size[1], MAX_BITMAP_BYTES
-                ),
-                style=_render_style(request.renderer_state),
-            )
+            result = self._render_frame(renderer, request)
             render_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("render_ms", render_ms)
             span.set("layer_count", len(result.layers))
             self._telemetry.record(RENDER_MS, render_ms)
             started = time.perf_counter_ns()
-            tokens = self._anchored(
+            tokens = extract_token_geometry(
+                result,
                 request,
-                extract_token_geometry(
-                    result,
-                    request,
-                    keep_coverage=request.keep_coverage
-                    or any(entry.spacing > 0 for entry in request.palette),
-                    telemetry=self._telemetry,
-                ),
+                keep_coverage=not request.native_ass
+                and (request.keep_coverage or any(entry.spacing > 0 for entry in request.palette)),
+                telemetry=self._telemetry,
             )
+            if request.native_ass:
+                tokens = self._native_tokens(request, result, tokens)
+            tokens = self._anchored(request, tokens)
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
-            span.set("fractional_tokens", sum(token.spacing > 0 for token in tokens))
+            span.set("fractional_tokens", sum(bool(token.coverage) for token in tokens))
             span.set("fractional_mask_fallbacks", sum(not token.overprint_safe for token in tokens))
             span.set("fractional_atlas_bytes", self._phase_bytes)
             span.set("extract_ms", extract_ms)
@@ -813,6 +841,8 @@ class LibassGeometryBackend:
             request.timestamp_ms,
             request.variant,
             tokens,
+            libass_version=library_version,
+            mask_source="native-original" if request.native_ass else "request-document",
         )
 
     def close(self) -> None:

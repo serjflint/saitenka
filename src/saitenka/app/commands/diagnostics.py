@@ -327,6 +327,13 @@ def report(
             help="directory to write the zip into (default: the data dir's reports/)"
         ),
     ] = None,
+    attachments: Annotated[
+        tuple[str, ...],
+        cyclopts.Parameter(
+            name="--attach",
+            help="explicit unredacted local attachment; repeatable, at most four files of 8 MiB",
+        ),
+    ] = (),
     no_log: Annotated[
         bool,
         cyclopts.Parameter(
@@ -336,13 +343,24 @@ def report(
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; collect/redact/bundle are unit-tested
     """Bundle allowlisted diagnostic metadata. Raw detail is opt-in; nothing is uploaded."""
+    from pathlib import Path
+
     from saitenka.app.report import build_report_bundle
 
-    dest = build_report_bundle(out, include_log=not no_log, diagnostic_detail=diagnostic_detail)
+    if attachments:
+        print("Including unredacted attachments; review before sharing (exports do not expire):")
+        for path in attachments:
+            print(f"  {path}")
+    dest = build_report_bundle(
+        out,
+        include_log=not no_log,
+        diagnostic_detail=diagnostic_detail,
+        attachments=tuple(Path(path).expanduser() for path in attachments),
+    )
     print(f"wrote {dest}")
     if not diagnostic_detail:
         print(
-            "Metadata only; runtime settings and pixel fidelity may be unknown. Review before sharing."
+            "Diagnostic metadata; runtime settings and pixel fidelity may be unknown. Review before sharing."
         )
         return 0
     print(

@@ -1523,6 +1523,7 @@ class NativeSubtitleGeometry:
             cue.frame_size,
             cue.storage_size,
             prepared.ass,
+            native_ass=source,
             pixel_aspect=cue.pixel_aspect,
             margins=cue.margins,
             use_margins=cue.use_margins,
@@ -1532,11 +1533,7 @@ class NativeSubtitleGeometry:
             attachments=fonts.attachments,
             font_setup=fonts.setup,
             renderer_state=renderer_state,
-            # Exactly the frames the text device cannot color: no resolved face, a family only the
-            # subtitle renderer holds, or a document with no `PlayResY` to scale from. The raster
-            # device needs none of those — it tints what the measurement already drew.
-            keep_coverage=prepared.requires_coverage
-            or any(entry.font_size <= 0 for entry in palette),
+            keep_coverage=True,
         )
 
     def _render_inputs(self, prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:

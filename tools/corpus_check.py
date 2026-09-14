@@ -82,6 +82,19 @@ def _subrip_keys() -> list[str]:
     ]
 
 
+def _character_keys() -> list[str]:
+    spec = json.loads((_REPO / "tests/fixtures/character_corpus/cases.json").read_text())
+    return [
+        json.dumps(
+            {"format": suffix, "case": case, "font": spec["font"], "generator": spec["generator"]},
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        for suffix in ("ass", "srt")
+        for case in spec["cases"]
+    ]
+
+
 # --- registry --------------------------------------------------------------------------------------
 
 
@@ -100,6 +113,12 @@ def _census(keys: list[str]) -> tuple[int, str]:
 
 
 CORPORA: list[CorpusSpec] = [
+    CorpusSpec(
+        "synthetic-characters",
+        _character_keys,
+        count=24,
+        sha256="3b812dd77b455a89d5dbf8a5b4f93a65afa0753bfd126304b3f93cdcc989cf9d",
+    ),
     # UAX #14 line-breaking — vendored LineBreakTest.txt (census re-derived from the upstream file). Lines
     # can legitimately coincide across contexts, so keys are not required unique here.
     CorpusSpec(

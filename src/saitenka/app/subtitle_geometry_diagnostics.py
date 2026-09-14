@@ -52,6 +52,7 @@ class GeometryErrorCode(StrEnum):
     INVALID_RENDER_SPACE = "invalid-render-space"
     MISSING_PALETTE_PIXELS = "missing-token-colors"
     OVERLAPPING_PALETTE_PIXELS = "overlapping-token-colors"
+    NATIVE_ATTRIBUTION = "native-mask-attribution-failed"
     SEMANTIC_MISMATCH = "semantic-projection-mismatch"
     PALETTE_BUDGET = "token-budget-exceeded"
     ANNOTATION_MAPPING = "token-mapping-invalid"
@@ -82,6 +83,7 @@ def geometry_error_code(error: BaseException | str) -> GeometryErrorCode:
     """Classify provider details without exporting their potentially sensitive text."""
     detail = str(error).casefold()
     checks = (
+        ("native mask attribution:", GeometryErrorCode.NATIVE_ATTRIBUTION),
         ("active ass event limit", GeometryErrorCode.ACTIVE_EVENT_BUDGET),
         ("active ass row byte limit", GeometryErrorCode.ACTIVE_ROW_BUDGET),
         ("active ass event", GeometryErrorCode.ACTIVE_EVENT_MISMATCH),
