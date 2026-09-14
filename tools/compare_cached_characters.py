@@ -81,7 +81,6 @@ PROFILE = (
     "--target-trc=srgb",
     "--icc-profile-auto=no",
     "--dither-depth=no",
-    "--zimg-dither=no",
 ) + (("--macos-render-timer=system",) if platform.system() == "Darwin" else ())
 TRACK = SubtitleTrackId("character-corpus")
 
