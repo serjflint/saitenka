@@ -52,9 +52,23 @@ Each of two retained gateway owners keeps its latest attempt per property/verb i
 recorded connection epoch. A newer epoch replaces prior rows; superseded or post-close completions
 cannot overwrite them. `player_property_command` spans join by owner/sequence/epoch. Absent rows are
 not recorded, not successful. A pending row on a closed owner is historical unfinished evidence,
-not a claim that a command still runs. This is neither all IPC nor live property-observation health:
-the minimal no-gateway adapter and later direct queries remain unmeasured. Successful subscription
+not a claim that a command still runs. The minimal no-gateway adapter and later direct queries
+remain unmeasured. Successful subscription
 does not prove delivery or application; applied settings and pixels remain unknown.
+
+Each owner's `ingress` records stage-decision counts and its eight most recent rendering-property
+decisions across connection epochs, with explicit eviction. `wire` notifications are distinct from
+synthetic `replay-read` events. Closed, stale-epoch, not-ready, reconnect-buffered, candidate-full and
+mailbox-full outcomes cannot establish admission. A buffered event may later be queued or discarded;
+these are stage counts, not unique-event counts, and buffering has no terminal correlation yet.
+`queued` means mailbox admission only: later coalescing, epoch rejection, reduction, application and
+pixel correctness are not measured here. `player_property_ingress` spans join the history by
+`query_owner`/`ingress_sequence`; queued rows also carry the mailbox sequence and connection epoch.
+The owner's epoch describes command history; use each ingress row's epoch for ingress evidence.
+Rows are ordered by recording sequence, not necessarily wire arrival order under concurrency. No
+property values or arbitrary names enter this evidence. Missing legacy ingress remains unknown,
+whereas present zero counts mean no recorded decisions of that kind for that owner.
+
 The producer-summary reader accepts at most 128 KiB; an oversized summary yields
 `unreadable-or-too-large`, not healthy or zero activity. Combined-history tests guard this budget.
 

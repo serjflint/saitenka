@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Rendering-property ingress evidence distinguishes wire notifications, reconnect readbacks and
+  rejected mailbox admission without retaining property values.
+
 - Reports distinguish rendering-property subscription failures, query errors and successful empty
   replies during startup/reconnect; pending and superseded work retains bounded trace attribution.
 - Reports retain privacy-bounded player options consumed by native geometry decisions, including
