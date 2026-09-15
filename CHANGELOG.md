@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Subtitle reports distinguish selected geometry sources, usable scan regions, shadow coloring
+  eligibility and patched-mpv acquisition outcomes when telemetry is enabled.
+
 - Reports retain option origins, profile changes, renderer selection and bounded redraw-validation
   outcomes without tracing. Diagnostic coverage tools distinguish missing causal boundaries,
   known-fault expectations and independently qualified character results.

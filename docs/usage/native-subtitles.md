@@ -31,6 +31,21 @@ when leaving the source, and respects an external disable. Re-enabling collectio
 `Ctrl+Shift+L` retains the existing legacy-renderer override. An injected geometry backend takes precedence
 over `auto`; combining it with explicit `mpv` is an error.
 
+## Geometry diagnostics
+
+Run `saitenka telemetry enable` before restarting playback, then inspect the captured trace or report bundle with
+`saitenka subtitle-report PATH`. Source transitions report the configured preference, selected
+source, actual scan source, eligible paint-geometry source, token count, cue revision and generation.
+Identical redraws are coalesced; a new cue or generation produces a new record.
+
+The acquisition timeline records each mpv fetch attempt and its result, including unsupported API,
+refused geometry, stale validation and external disable. Request identity is retained separately
+from the current cue and generation, so stale completions remain attributable. `scan=none` means no usable scan regions;
+`paint=shadow` means shadow geometry passed coloring eligibility, not that a GPU upload or physical
+presentation completed. Existing subtitle-draw and pixel-ownership spans cover presentation work.
+These records contain no subtitle text or media paths. Local and cross-platform checks use the same
+report fields; display correctness still needs live qualification.
+
 ## Shadow measurement and coloring
 
 The experimental native-visible mode lets mpv keep rendering the original ASS track while Saitenka

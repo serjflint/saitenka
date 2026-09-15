@@ -211,6 +211,8 @@ class SubtitlePresentation:
         self.cue = CueRenderStore()
         self._ports = ports
         self._source = settings.source
+        self._scan_source = "none"
+        self._last_geometry_record: dict[str, str | int | bool] = {}
         self._shadow_boxes: list[WordBox] = []
         self._shadow_generation = -1
         self.native: native_subtitles.NativeSubtitleGeometry | None = None
@@ -234,6 +236,7 @@ class SubtitlePresentation:
                         reschedule=self.refresh.arm,
                         permitted=lambda: not self.pipeline.legacy_forced,
                         unavailable=self._layout_unavailable,
+                        changed=self._record_geometry,
                     ),
                     formats=settings.native_formats,
                 )
@@ -278,19 +281,69 @@ class SubtitlePresentation:
         self._shadow_generation = self.pipeline.generation
         if self.using_layout:
             self.cue.replace_geometry(paint_allowed=self._paint_ready())
+            self._record_geometry()
             return
+        self._scan_source = "shadow"
         current_origin = self.cue.current.origin
         self.cue.publish_geometry(boxes, current_origin if origin is None else origin)
+        self._record_geometry()
 
     def draw(self) -> None:
         result = self.pipeline.draw_current(self.target())
         if result is not None:
+            self._scan_source = "legacy"
             self.cue.publish_geometry(result.boxes, result.origin)
         if self.native is not None:
             self.native.sync_pixel_owner(self.pipeline.renderer)
+        self._record_geometry()
+
+    def _paint_diagnosis(self, *, allowed: bool) -> str:
+        if allowed:
+            return "eligible"
+        if not self.cue.current.boxes:
+            return "no-scan-regions"
+        if self._source == "mpv":
+            return "scan-only-policy"
+        return "shadow-paint-unqualified"
+
+    def _record_geometry(self) -> None:
+        if self.native is None and self.layout is None:
+            return
+        cue = self.cue.current
+        native = (
+            isinstance(self.renderer, NativeVisibleRenderer) and not self.pipeline.legacy_forced
+        )
+        selected = ("mpv" if self.using_layout else "shadow") if native else "legacy"
+        scan_source = self._scan_source if cue.boxes else "none"
+        paint_allowed = bool(cue.boxes) and cue.paint_allowed
+        paint_source = (
+            ("legacy" if scan_source == "legacy" else "shadow") if paint_allowed else "none"
+        )
+        reason = "configured-shadow" if native else "legacy"
+        if self.layout is not None:
+            reason = self.layout.status
+        record: dict[str, str | int | bool] = {
+            "configured_source": self._source,
+            "selected_source": selected,
+            "scan_source": scan_source,
+            "paint_source": paint_source,
+            "paint_allowed": paint_allowed,
+            "paint_reason": self._paint_diagnosis(allowed=paint_allowed),
+            "eligible_tokens": len(cue.boxes),
+            "cue_revision": self._ports.geometry().cue_revision,
+            "generation": self.pipeline.generation,
+            "reason": reason,
+        }
+        if record == self._last_geometry_record:
+            return
+        self._last_geometry_record = record
+        with otel_metrics.traced("subtitle_geometry_source") as span:
+            for key, value in record.items():
+                span.set(key, value)
 
     def _publish_layout(self, boxes: list[WordBox]) -> bool:
         if self.use_native_renderer():
+            self._scan_source = "mpv"
             self.cue.publish_geometry(boxes, (0, 0), paint_allowed=self._paint_ready())
             self.draw()
             return True
@@ -353,6 +406,7 @@ class SubtitlePresentation:
     def _layout_unavailable(self) -> None:
         if self._source == "auto":
             if self._shadow_generation == self.pipeline.generation:
+                self._scan_source = "shadow"
                 self.cue.publish_geometry(self._shadow_boxes, (0, 0))
                 self.draw()
             self.refresh.arm()
@@ -417,6 +471,7 @@ class SubtitlePresentation:
         self.cue.clear_geometry()
         target = self.target()
         self.pipeline.clear(target.surfaces, target.ipc)
+        self._record_geometry()
 
     def degrade_native_geometry(self) -> None:
         if self.using_layout:
@@ -428,6 +483,7 @@ class SubtitlePresentation:
         if owner != "legacy":
             self.cue.clear_geometry()
         self.pipeline.geometry_degraded(self.target())
+        self._record_geometry()
 
     def use_native_renderer(self) -> bool:
         return self.pipeline.renderer.use_native(self.target())

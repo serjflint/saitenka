@@ -8,9 +8,10 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+from dirty_equals import IsPartialDict
 from saitenka_subtitles.mpv_layout import decode_layout, token_regions
 from saitenka_tokenize.japanese import Token
-from util import FakeIPC
+from util import FakeIPC, record_spans
 
 from saitenka.app.mpv_layout_source import LayoutPorts, MpvLayoutSource, layout_boxes
 from saitenka.app.native_subtitles import GeometryObservation
@@ -224,6 +225,7 @@ def source():
         reschedule=lambda: ticks.append(None),
         permitted=lambda: True,
         unavailable=lambda: None,
+        changed=lambda: None,
     )
     producer = MpvLayoutSource(ipc, SubtitleModeCoordinator(NullRenderer()), ports, formats="all")
     producer.refresh()
@@ -390,7 +392,8 @@ def test_missing_api_is_cached_until_a_new_connection(unknown_command, monkeypat
 
 @pytest.mark.integration
 @pytest.mark.timeout(5)
-def test_native_source_publishes_through_the_real_session_and_retires_on_revision():
+def test_native_source_publishes_through_the_real_session_and_retires_on_revision(monkeypatch):
+    spans = record_spans(monkeypatch)
     from session_builder import build_session
     from test_native_subtitles import _ExistsDS
 
@@ -419,10 +422,88 @@ def test_native_source_publishes_through_the_real_session_and_retires_on_revisio
         assert presentation.layout.status == "scan-only"
         assert presentation.cue.current.paint_allowed is False
         assert session.graph.tooltip.hit(120, 120) == 0
+        records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
+        assert records[-1] == IsPartialDict(
+            configured_source="mpv",
+            selected_source="mpv",
+            scan_source="mpv",
+            paint_source="none",
+            paint_allowed=False,
+            paint_reason="scan-only-policy",
+        )
 
         session.graph.playback.observe("subtitle-layout-revision", 3)
 
         assert session.graph.tooltip.hit(120, 120) == -1
         assert presentation.cue.current.boxes == []
+        records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
+        assert records[-1] == IsPartialDict(
+            scan_source="none", paint_source="none", reason="invalidated"
+        )
     finally:
         session.close()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("events", [], "layout-event-count"),
+        ("capabilities", [], "unsupported-api"),
+        ("available", False, "layout-unavailable"),
+        ("available", True, "scan-only"),
+    ],
+)
+def test_acquisition_outcome_survives_the_text_free_report(monkeypatch, field, value, reason):
+    from saitenka.app.subtitle_report import geometry_records
+
+    producer, ipc, _frames, _ticks = source()
+    spans = record_spans(monkeypatch)
+    ipc.layout[field] = value
+
+    producer.input_changed()
+    producer.refresh()
+
+    records = geometry_records(
+        [{"name": span["name"], "ph": "X", "args": span["attrs"]} for span in spans]
+    )
+    assert records[-1]["args"] == IsPartialDict(
+        geometry_source="mpv",
+        reason=reason,
+        attempt=3,
+        cue_revision=1,
+        capability="false" if reason == "unsupported-api" else "true",
+    )
+    assert "猫" not in json.dumps(records, ensure_ascii=False)
+
+
+def test_cached_api_refusal_remains_explainable_after_invalidation(monkeypatch):
+    producer, ipc, _frames, _ticks = source()
+    ipc.layout["capabilities"] = []
+    producer.refresh()
+    spans = record_spans(monkeypatch)
+
+    producer.input_changed()
+    producer.refresh()
+
+    assert spans[-1]["attrs"] == IsPartialDict(reason="unsupported-api", capability="false")
+
+
+def test_stale_acquisition_retains_request_identity(monkeypatch):
+    producer, ipc, _frames, _ticks = source()
+    spans = record_spans(monkeypatch)
+    ipc.hold = True
+    producer.refresh()
+    ipc._submit_inline(**ipc.pending.pop(0))
+    validation = ipc.pending.pop(0)
+    producer.input_changed()
+
+    ipc._submit_inline(**validation)
+
+    start, finish = spans[0]["attrs"], spans[-1]["attrs"]
+    assert finish == IsPartialDict(
+        reason="stale",
+        attempt=start["attempt"],
+        request_generation=start["generation"],
+        request_cue_revision=start["cue_revision"],
+    )
+    assert finish["generation"] > finish["request_generation"]

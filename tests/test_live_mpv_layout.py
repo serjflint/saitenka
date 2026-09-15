@@ -6,7 +6,9 @@ import os
 from dataclasses import replace
 
 import pytest
+from dirty_equals import IsPartialDict
 from live_harness import LayoutLiveOptions, live_reader, poll_until
+from util import record_spans
 
 from saitenka.app.subtitle_render import color_ladder
 
@@ -29,7 +31,8 @@ pytestmark = [
         ("", r"猫を見る\N犬を見る"),
     ],
 )
-def test_auto_keeps_ordinary_shadow_paint_and_effects_scan_only(prefix, text):
+def test_auto_keeps_ordinary_shadow_paint_and_effects_scan_only(prefix, text, monkeypatch):
+    spans = record_spans(monkeypatch)
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
 
@@ -51,6 +54,14 @@ def test_auto_keeps_ordinary_shadow_paint_and_effects_scan_only(prefix, text):
                 "ordinary native geometry never admitted shadow paint",
             )
         request = session.graph.cue.draw_request()
+        records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
+        assert records[-1] == IsPartialDict(
+            configured_source="auto",
+            selected_source="mpv",
+            scan_source="mpv",
+            paint_source="none" if prefix else "shadow",
+            paint_allowed=not bool(prefix),
+        )
         assert request.boxes[0].hit_regions
         if prefix:
             assert not request.paint_allowed
@@ -169,7 +180,8 @@ def test_native_layout_follows_live_render_space_and_track_changes(change):
 @pytest.mark.skipif(
     not os.environ.get("SAITENKA_LAYOUT_STOCK_MPV"), reason="stock-build control not configured"
 )
-def test_auto_falls_back_to_shadow_on_a_real_unsupported_player():
+def test_auto_falls_back_to_shadow_on_a_real_unsupported_player(monkeypatch):
+    spans = record_spans(monkeypatch)
     with live_reader(
         native_visible=True,
         cues=((0.0, 8.0, "猫を見る"),),
@@ -178,6 +190,14 @@ def test_auto_falls_back_to_shadow_on_a_real_unsupported_player():
         ),
     ) as (_tmp, session, ipc):
         presentation = session.graph.subtitle_presentation
+        records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
+        assert records[-1] == IsPartialDict(
+            configured_source="auto",
+            selected_source="shadow",
+            scan_source="shadow",
+            paint_source="shadow",
+            reason="unsupported-api",
+        )
         assert presentation.layout.supported is False
         assert not presentation.using_layout
         assert presentation.cue.current.boxes[0].hit_regions is None

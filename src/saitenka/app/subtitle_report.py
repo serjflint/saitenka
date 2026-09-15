@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 _SPAN_NAMES = frozenset(
     {
         "subtitle_geometry_decision",
+        "subtitle_geometry_source",
+        "subtitle_geometry_acquisition",
         "subtitle_geometry_clock",
         "subtitle_geometry_cache",
         "subtitle_geometry_prepare",
@@ -26,6 +28,18 @@ _SPAN_NAMES = frozenset(
 
 _FIELDS = frozenset(
     {
+        "configured_source",
+        "selected_source",
+        "scan_source",
+        "paint_source",
+        "paint_allowed",
+        "paint_reason",
+        "geometry_source",
+        "cue_revision",
+        "attempt",
+        "request_generation",
+        "request_cue_revision",
+        "capability",
         "outcome",
         "reason",
         "error_code",
@@ -179,7 +193,30 @@ def _render_diagnosis(args: dict) -> str:
     )
 
 
+def _source_diagnosis(args: dict) -> str:
+    return (
+        f"configured={args.get('configured_source', '?')} selected={args.get('selected_source', '?')} "
+        f"scan={args.get('scan_source', '?')} paint={args.get('paint_source', '?')} "
+        f"paint_reason={args.get('paint_reason', '?')} "
+        f"eligible={args.get('eligible_tokens', 0)} reason={args.get('reason', '?')} "
+        f"cue={args.get('cue_revision', '?')} generation={args.get('generation', '?')}"
+    )
+
+
+def _acquisition_diagnosis(args: dict) -> str:
+    return (
+        f"source={args.get('geometry_source', '?')} reason={args.get('reason', '?')} "
+        f"capability={args.get('capability', '?')} attempt={args.get('attempt', '?')} "
+        f"epoch={args.get('source_epoch', '?')} "
+        f"requested_cue={args.get('request_cue_revision', '?')} "
+        f"requested_generation={args.get('request_generation', '?')} "
+        f"current_cue={args.get('cue_revision', '?')} generation={args.get('generation', '?')}"
+    )
+
+
 _DIAGNOSIS = {
+    "subtitle_geometry_source": _source_diagnosis,
+    "subtitle_geometry_acquisition": _acquisition_diagnosis,
     "subtitle_pixel_ownership": _ownership_diagnosis,
     "subtitle_geometry_clock": _clock_diagnosis,
     "subtitle_geometry_cache": _cache_diagnosis,
@@ -234,6 +271,9 @@ def render_geometry(source: Path, events: list[dict], *, nested: bool = False) -
         f"{sum(span['name'] == 'subtitle_geometry_render' for span in spans)} request, "
         f"{sum(span['name'] == 'subtitle_geometry_libass' for span in spans)} libass"
     )
+    sources = [span for span in spans if span["name"] == "subtitle_geometry_source"]
+    if sources:
+        lines.append("  source: " + _source_diagnosis(sources[-1].get("args", {})))
     start = spans[0].get("ts", 0.0)
     for span in spans:
         elapsed = (span.get("ts", start) - start) / 1_000_000

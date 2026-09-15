@@ -13,6 +13,7 @@ from saitenka_subtitles.mpv_layout import (
     token_regions,
 )
 
+from saitenka import otel_metrics
 from saitenka.app.subtitles import WordBox
 from saitenka.runtime import EffectError, EffectFinished, EffectOutcome, Owner
 
@@ -32,6 +33,7 @@ class LayoutPorts:
     reschedule: Callable[[], None]
     permitted: Callable[[], bool]
     unavailable: Callable[[], None]
+    changed: Callable[[], None]
 
 
 def _binding(seen: GeometryObservation) -> tuple[object, ...]:
@@ -116,6 +118,11 @@ def layout_boxes(layout: LayoutSnapshot, seen: GeometryObservation) -> list[Word
     return boxes
 
 
+def _refusal_reason(error: ValueError | TypeError | OverflowError) -> str:
+    # Unicode exceptions can include subtitle content in their messages.
+    return "layout-text-encoding" if isinstance(error, UnicodeError) else str(error)
+
+
 class MpvLayoutSource:
     """At most one fetch/validate chain; observations retire hits before scheduling replacement."""
 
@@ -135,14 +142,20 @@ class MpvLayoutSource:
         self._external_disabled = False
         self._saw_enabled = False
         self.status = "unprobed"
+        self.attempt = 0
+        self._request_generation = 0
+        self._request_cue_revision = 0
         self.supported: bool | None = None
         self.current: LayoutSnapshot | None = None
 
     def invalidate(self) -> None:
         self.current = None
         self._pipeline.invalidate()
+        if self.supported is not False:
+            self.status = "invalidated"
         self._ports.clear()
         self._dirty = True
+        self._record_status()
 
     def connection_replaced(self) -> None:
         self.supported = None
@@ -176,11 +189,17 @@ class MpvLayoutSource:
             return
         if self._external_disabled:
             self.status = "disabled-externally"
+            self._record_status()
             return
         self._busy = True
         self._dirty = False
+        self.attempt += 1
+        self.status = "fetching"
         generation = self._pipeline.generation
         seen = self._ports.observe()
+        self._request_generation = generation
+        self._request_cue_revision = seen.cue_revision
+        self._record_status()
         binding = _binding(seen)
 
         self._send(
@@ -203,7 +222,7 @@ class MpvLayoutSource:
             layout = decode_layout(value)
             boxes = layout_boxes(layout, seen)
         except (ValueError, TypeError, OverflowError) as error:
-            self._refuse(str(error))
+            self._refuse(_refusal_reason(error))
             return
         if not _matches(layout, seen, self._formats):
             self._refuse("unbound-event")
@@ -248,12 +267,14 @@ class MpvLayoutSource:
             if value:
                 self._saw_enabled = True
                 self._configured = True
+                self.status = "collection-ready"
                 self._dirty = True
                 self._finish()
                 return
 
             def enabled(_value: object) -> None:
                 self._configured = True
+                self.status = "collection-ready"
                 self._dirty = True
                 self._finish()
 
@@ -290,8 +311,24 @@ class MpvLayoutSource:
         ):
             self._refuse("ipc-unavailable")
 
+    def _record_status(self) -> None:
+        with otel_metrics.traced("subtitle_geometry_acquisition") as span:
+            span.set("geometry_source", "mpv")
+            span.set("reason", self.status)
+            span.set("attempt", self.attempt)
+            span.set("source_epoch", self._epoch)
+            span.set("generation", self._pipeline.generation)
+            span.set("cue_revision", self._ports.observe().cue_revision)
+            span.set("request_generation", self._request_generation)
+            span.set("request_cue_revision", self._request_cue_revision)
+            span.set(
+                "capability", "unknown" if self.supported is None else str(self.supported).lower()
+            )
+        self._ports.changed()
+
     def _finish(self) -> None:
         self._busy = False
+        self._record_status()
         if self._dirty and not self._closed:
             self._ports.reschedule()
 
