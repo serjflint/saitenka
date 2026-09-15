@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -139,6 +139,13 @@ def _compose_session(
     resolved = services or SessionServices()
     resolved_options = options or ReaderOptions()
     physical = infrastructure or SessionInfrastructure()
+    if resolved_options.subtitle_geometry.source == "mpv" and physical.geometry is not None:
+        raise ValueError("mpv geometry source conflicts with an injected shadow backend")
+    if resolved_options.subtitle_geometry.source == "auto" and physical.geometry is not None:
+        resolved_options = replace(
+            resolved_options,
+            subtitle_geometry=replace(resolved_options.subtitle_geometry, source="shadow"),
+        )
     session_identity = identity or SessionIdentity()
     resolved_assembly = build_session_assembly(
         ipc,
@@ -202,7 +209,7 @@ def _geometry_backend(settings: SubtitleGeometryOptions):
     host that picks its own provider cannot be handed a different one, which is what makes the
     fake/null/libass conformance contract testable at all.
     """
-    if not settings.native_visible:
+    if not settings.native_visible or settings.source == "mpv":
         return None
     from saitenka_subtitles.libass_backend import LibassGeometryBackend
 

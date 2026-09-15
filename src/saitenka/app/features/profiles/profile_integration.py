@@ -65,8 +65,7 @@ class ProfileIntegration:
         self.teardown_tooltip()
         self.tooltip.retire_selection()
         self.presentation.cue.reset()
-        if self.presentation.native is not None:
-            self.presentation.native.invalidate(live=True)
+        self.presentation.invalidate_geometry()
         self.apply_annotation(transition)
 
     def warm_episode(self) -> None:
@@ -76,10 +75,7 @@ class ProfileIntegration:
         self.annotation.start_episode_warm(index, self.annotation_inputs())
 
     def invalidate_tokenizer(self) -> None:
-        if self.presentation.native is not None:
-            self.presentation.native.invalidate(live=True)
-        else:
-            self.presentation.pipeline.invalidate()
+        self.presentation.invalidate_geometry()
         self.annotation.invalidate_tokenizer()
 
     def invalidate_dictionary(self) -> None:

@@ -453,7 +453,7 @@ def _launch_mpv_and_connect(
             file=sys.stderr,
         )
         return None, None, None
-    if opts.native_visible:
+    if opts.native_visible and opts.geometry_source != "mpv":
         from saitenka.mpvio.launch import (
             NATIVE_GEOMETRY_MPV_MIN,
             mpv_version_output,
@@ -1168,6 +1168,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             use_config=use_config,
             fullscreen=fullscreen,
             native_visible=subtitle_geometry_options(cfg).native_visible,
+            geometry_source=subtitle_geometry_options(cfg).source,
             extra_args=mpv_arg,
         ),
         sub_path=sub_path,

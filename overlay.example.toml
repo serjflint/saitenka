@@ -108,6 +108,7 @@
 # envelope stays visible but non-interactive.
 # [subtitle_geometry]
 # native_visible = false
+# source = "auto"                                  # mpv capabilities, otherwise shadow; "mpv" is scan-only
 # native_formats = "authored-ass"                  # or "all": also the SubRip tracks mpv converts
 # library_path = "/opt/homebrew/lib/libass.dylib"  # optional system-libass escape hatch
 # cache_max = 3                                    # retained current/lookahead geometry entries

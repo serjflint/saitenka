@@ -21,7 +21,7 @@ from saitenka.render.layout import NO_START, Block
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka_subtitles import SubtitleEventId
+    from saitenka_subtitles import Rect, SubtitleEventId
     from saitenka_tokenize.japanese import Token
 
 WHITE = (255, 255, 255, 255)
@@ -75,8 +75,12 @@ class WordBox:
     overprint_safe: bool = True
     overprint_verdict: str = "unvalidated"
     coverage_evicted: bool = False
+    #: Disjoint logical regions; the outer box remains the tooltip anchor.
+    hit_regions: tuple[Rect, ...] | None = None
 
     def contains(self, px: float, py: float) -> bool:
+        if self.hit_regions is not None:
+            return any(rect.contains(px, py) for rect in self.hit_regions)
         return self.x <= px < self.x + self.w and self.y <= py < self.y + self.h
 
 

@@ -240,6 +240,7 @@ def our_word_boxes(
             "y": token.bounds.y,
             "w": token.bounds.width,
             "h": token.bounds.height,
+            "hit_regions": None,
         }
         return {
             field.name: renamed[field.name] if field.name in renamed else getattr(token, field.name)

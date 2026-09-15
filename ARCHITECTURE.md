@@ -50,6 +50,11 @@ internal modules with explicit dependency contracts, not independently published
   it is now its own package; `app/sub_index.py` is the thin file-loading adapter. The corpus and
   differential checks therefore exercise the stable surface without constructing a `SessionController`.
   Measurement is the host's: the geometry backend takes a telemetry sink and defaults to a no-op.
+  `saitenka_subtitles.mpv_layout` decodes bounded retained layout without IPC dependencies.
+  `app/mpv_layout_source.py` acquires and validates snapshots against current cue identity;
+  `app/subtitle_presentation.py` selects the source and publishes through the same cue store.
+  Native scan regions and independently qualified shadow paint have separate coordinates and
+  eligibility. The existing renderer, pixel ownership, tooltip, and mining paths are shared.
 - **`app/`** — the application layer. `app/session/controller.py` is the owner-thread shell: it owns
   mpv mutation and cross-feature ordering, while `app/features/` packages own feature state and
   policy. Tooltip interaction and tooltip preparation have separate bounded controllers under the

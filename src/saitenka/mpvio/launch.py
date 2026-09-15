@@ -58,6 +58,7 @@ class MpvLaunchOptions:
     use_config: bool = True
     fullscreen: bool = False
     native_visible: bool = False
+    geometry_source: str = "auto"
     extra_args: list[str] | None = None
 
 
@@ -86,24 +87,20 @@ def build_mpv_argv(
         "--keep-open=yes",
         f"--slang={opts.slang}",
         "--sub-visibility=no",  # the overlay renders subs itself; this hides mpv's own sub layer
-        # Center any subtitle mpv renders ITSELF (the fallback path — a track our overlay doesn't take
-        # over, e.g. a manually-picked or native known-language track): never leave dialogue left-aligned.
-        # --sub-ass-justify makes the justification apply to ASS/SSA subs too, not just plain-text ones.
-        "--sub-align-x=center",
-        "--sub-justify=center",
-        "--sub-ass-justify=yes",
         # osd-level stays at mpv's default (1) so native OSD messages show — the z/Z/x sub-delay keys
         # (mpv builtins, repeatable) give feedback. sub-visibility=no already hides the subtitles, so
         # forcing osd-level=0 (an old over-broad hack) only silenced those messages.
         "--osd-level=1",
         f"--start={opts.start}",
     ]
+    if not opts.native_visible or opts.geometry_source != "mpv":
+        cmd.extend(("--sub-align-x=center", "--sub-justify=center", "--sub-ass-justify=yes"))
     if opts.screenshot:
         # keep-open=yes already holds the last frame at EOF for the interactive path (so a finished file
         # freezes instead of closing, and #100 auto-advance can see eof-reached). Screenshot mode wants
         # the FIRST frame held, so it pauses up front instead.
         cmd.append("--pause")
-    if opts.native_visible:
+    if opts.native_visible and opts.geometry_source != "mpv":
         cmd.extend(
             (
                 "--sub-ass-override=no",
@@ -120,6 +117,8 @@ def build_mpv_argv(
                 "--sub-visibility=yes",
             )
         )
+    if opts.native_visible and opts.geometry_source == "mpv":
+        cmd.append("--sub-visibility=yes")
     cmd.extend(opts.extra_args or [])
     cmd.extend(
         [

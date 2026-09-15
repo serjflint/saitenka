@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,14 @@ def make_clip_and_sub(
     return clip, srt
 
 
+@dataclass(frozen=True)
+class LayoutLiveOptions:
+    source: str = "shadow"
+    mpv_path: str | None = None
+    extra_args: tuple[str, ...] = ()
+    require_boxes: bool = True
+
+
 @contextmanager
 def live_reader(
     *,
@@ -135,6 +144,7 @@ def live_reader(
     native_visible: bool = False,
     config_dir: Path | None = None,
     cues: tuple[tuple[float, float, str], ...] | None = None,
+    layout: LayoutLiveOptions | None = None,
 ):
     """A live mpv window with the demo cue loaded and a :class:`SessionController` observing it. ``paused=False``
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
@@ -161,7 +171,8 @@ def live_reader(
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 
-    mpv = find_mpv(None)
+    layout = layout or LayoutLiveOptions()
+    mpv = find_mpv(layout.mpv_path)
     if not mpv:
         pytest.skip("mpv not found")
 
@@ -178,11 +189,13 @@ def live_reader(
             f"--input-ipc-server={sock}",
             "--force-window=yes",
             "--keep-open=yes",
+            "--focus-on=never",
             "--sub-visibility=no",
             "--osd-level=1",
             "--pause" if paused else "--loop-file=inf",
             f"--config-dir={config_dir}" if config_dir else "--no-config",
             f"--sub-file={srt}",
+            *layout.extra_args,
             str(clip),
         ]
     )
@@ -197,7 +210,7 @@ def live_reader(
             ipc,
             options=ReaderOptions(
                 subtitle_geometry=SubtitleGeometryOptions(
-                    native_visible=native_visible, native_formats="all"
+                    native_visible=native_visible, native_formats="all", source=layout.source
                 )
             ),
             services=SessionServices(
@@ -221,15 +234,13 @@ def live_reader(
 
         for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
             reader.pump()
-            if (
-                reader.graph.subtitle_presentation.cue.current.tokens
-                and reader.graph.subtitle_presentation.cue.current.boxes
+            if reader.graph.subtitle_presentation.cue.current.tokens and (
+                reader.graph.subtitle_presentation.cue.current.boxes or not layout.require_boxes
             ):
                 break
             time.sleep(0.1)
-        assert (
-            reader.graph.subtitle_presentation.cue.current.tokens
-            and reader.graph.subtitle_presentation.cue.current.boxes
+        assert reader.graph.subtitle_presentation.cue.current.tokens and (
+            reader.graph.subtitle_presentation.cue.current.boxes or not layout.require_boxes
         ), "subtitle never loaded into the reader"
         yield tmp, reader, ipc
     finally:

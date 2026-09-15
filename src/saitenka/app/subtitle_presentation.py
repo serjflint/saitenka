@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 from saitenka import otel_metrics
 from saitenka.app import geometry_refresh, native_subtitles
+from saitenka.app.mpv_layout_source import LayoutPorts, MpvLayoutSource
 from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import configure_runtime_job as configure_geometry_lane
 from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
@@ -200,6 +201,8 @@ class SubtitlePresentation:
         backend: GeometryBackend | None,
         ports: SubtitlePresentationPorts,
     ) -> None:
+        if settings.source == "mpv" and backend is not None:
+            raise ValueError("mpv geometry source conflicts with an injected shadow backend")
         current: CurrentSubtitleRenderer = renderer if renderer is not None else _default_renderer()
         if settings.native_visible and renderer is None:
             current = NativeVisibleRenderer()
@@ -207,7 +210,11 @@ class SubtitlePresentation:
         self.visual = visual
         self.cue = CueRenderStore()
         self._ports = ports
+        self._source = settings.source
+        self._shadow_boxes: list[WordBox] = []
+        self._shadow_generation = -1
         self.native: native_subtitles.NativeSubtitleGeometry | None = None
+        self.layout: MpvLayoutSource | None = None
         self.refresh = geometry_refresh.GeometryRefreshController(
             ipc,
             generation=lambda: self.pipeline.generation,
@@ -215,6 +222,23 @@ class SubtitlePresentation:
         )
         if not settings.native_visible:
             return
+        if settings.source in {"mpv", "auto"}:
+            if renderer is None:
+                self.layout = MpvLayoutSource(
+                    ipc,
+                    self.pipeline,
+                    LayoutPorts(
+                        observe=ports.geometry,
+                        clear=self._clear_layout,
+                        publish=self._publish_layout,
+                        reschedule=self.refresh.arm,
+                        permitted=lambda: not self.pipeline.legacy_forced,
+                        unavailable=self._layout_unavailable,
+                    ),
+                    formats=settings.native_formats,
+                )
+            if settings.source == "mpv":
+                return
         self.native = native_subtitles.NativeSubtitleGeometry(
             SubtitleGeometryWorker(
                 self.pipeline,
@@ -224,7 +248,7 @@ class SubtitlePresentation:
             native_subtitles.GeometryPorts(
                 pipeline=self.pipeline,
                 degrade=self.degrade_native_geometry,
-                clear_interaction=self.clear_native_interaction,
+                clear_interaction=self._clear_shadow,
                 use_native=self.use_native_renderer,
                 ownership_undecided=self.native_ownership_undecided,
                 redraw=self.draw,
@@ -250,6 +274,11 @@ class SubtitlePresentation:
         return self._ports.target(self.pipeline, self.native)
 
     def publish_geometry(self, boxes: list, origin: tuple[int, int] | None = None) -> None:
+        self._shadow_boxes = boxes
+        self._shadow_generation = self.pipeline.generation
+        if self.using_layout:
+            self.cue.replace_geometry(paint_allowed=self._paint_ready())
+            return
         current_origin = self.cue.current.origin
         self.cue.publish_geometry(boxes, current_origin if origin is None else origin)
 
@@ -260,7 +289,100 @@ class SubtitlePresentation:
         if self.native is not None:
             self.native.sync_pixel_owner(self.pipeline.renderer)
 
+    def _publish_layout(self, boxes: list[WordBox]) -> bool:
+        if self.use_native_renderer():
+            self.cue.publish_geometry(boxes, (0, 0), paint_allowed=self._paint_ready())
+            self.draw()
+            return True
+        return False
+
+    @property
+    def using_layout(self) -> bool:
+        return self.layout is not None and (
+            self._source == "mpv" or self.layout.supported is not False
+        )
+
+    @property
+    def paint_boxes(self) -> list[WordBox] | None:
+        return self._shadow_boxes if self.using_layout else None
+
+    def _paint_ready(self) -> bool:
+        if self._source != "auto" or self.layout is None or self.layout.current is None:
+            return False
+        if self._shadow_generation != self.pipeline.generation or not self._shadow_boxes:
+            return False
+        raw = self._ports.geometry().prop("sub-text/ass-full")
+        frame = self.layout.current
+        if not isinstance(raw, str) or len(raw) > 32768:
+            return False
+        rows = raw.splitlines()
+        if len(rows) != 1 or not rows[0].startswith("Dialogue:"):
+            return False
+        fields = rows[0].split(",", 9)
+        if len(fields) != 10:
+            return False
+        plain = fields[9].replace(r"\N", "\n")
+        if plain != frame.text or any(c in plain for c in "{\\"):
+            return False
+        try:
+            start = sum(
+                float(v) * factor
+                for v, factor in zip(fields[1].split(":"), (3600, 60, 1), strict=True)
+            )
+            end = sum(
+                float(v) * factor
+                for v, factor in zip(fields[2].split(":"), (3600, 60, 1), strict=True)
+            )
+        except ValueError:
+            return False
+        return start == frame.start and end == frame.end
+
+    def _clear_layout(self) -> None:
+        if self.using_layout:
+            self.clear_native_interaction()
+
+    def _clear_shadow(self) -> None:
+        self._shadow_boxes = []
+        self._shadow_generation = -1
+        if self.using_layout:
+            self.cue.replace_geometry(paint_allowed=False)
+            self.draw()
+        else:
+            self.clear_native_interaction()
+
+    def _layout_unavailable(self) -> None:
+        if self._source == "auto":
+            if self._shadow_generation == self.pipeline.generation:
+                self.cue.publish_geometry(self._shadow_boxes, (0, 0))
+                self.draw()
+            self.refresh.arm()
+        else:
+            self._ports.notify(
+                "This mpv does not provide the required subtitle layout capabilities.", "warn"
+            )
+
+    def geometry_changed(self) -> None:
+        if self.layout is not None:
+            self.layout.input_changed()
+        elif self.native is not None:
+            self.refresh.arm()
+
+    def invalidate_geometry(self) -> None:
+        if self.layout is not None:
+            self.layout.invalidate()
+        elif self.native is not None:
+            self.native.invalidate(live=True)
+        else:
+            self.pipeline.invalidate()
+
+    def connection_replaced(self) -> None:
+        if self.layout is not None:
+            self.layout.connection_replaced()
+        self.pipeline.connection_replaced(self.target())
+
     def toggle_renderer(self) -> bool:
+        if self.layout is not None:
+            self.layout.suspend()
         if self.native is not None:
             self.native.invalidate(live=True)
         forced = self.pipeline.force_legacy(
@@ -268,14 +390,18 @@ class SubtitlePresentation:
             forced=not self.pipeline.legacy_forced,
         )
         self._ports.redraw_cue()
+        if self.layout is not None:
+            self.refresh.arm()
         return forced
 
     def deactivate(self) -> None:
+        if self.layout is not None:
+            self.layout.close()
         self.pipeline.deactivate(self.target())
 
     def clear_pixels(self) -> None:
         """Clear native-owned pixels; legacy rendering has no retained subtitle surface."""
-        if self.native is not None:
+        if self.native is not None or self.layout is not None:
             target = self.target()
             self.pipeline.clear(target.surfaces, target.ipc)
 
@@ -293,6 +419,9 @@ class SubtitlePresentation:
         self.pipeline.clear(target.surfaces, target.ipc)
 
     def degrade_native_geometry(self) -> None:
+        if self.using_layout:
+            self._clear_shadow()
+            return
         renderer = self.pipeline.renderer
         ownership = getattr(renderer, "ownership_state", None)
         owner = getattr(getattr(ownership, "owner", None), "value", None)
@@ -310,6 +439,8 @@ class SubtitlePresentation:
     def _refresh_geometry(self) -> None:
         if self.native is not None:
             self.native.refresh(self._ports.geometry())
+        if self.layout is not None:
+            self.layout.refresh()
 
 
 def _default_renderer() -> SubtitleRenderer:

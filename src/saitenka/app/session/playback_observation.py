@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 
 # One initial read seeds each property; subsequent values arrive as ordered observations.
 OBSERVED_PROPERTIES = (
+    "subtitle-layout-revision",
+    "options/subtitle-layout",
+    "playlist",
     "sub-text",
     "sub-text/ass-full",
     "mouse-pos",

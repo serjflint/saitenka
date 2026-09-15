@@ -143,6 +143,8 @@ class DrawRequest:
     paused: bool = False
     #: Geometry eligibility does not authorize painting over authored subtitle effects.
     paint_allowed: bool = True
+    #: Independent shadow placement when native logical regions own interaction.
+    paint_boxes: list[WordBox] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +243,7 @@ def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()
     rules: list[decoration.TokenRule] = []
     devices: list[str] = []
     reasons: list[str] = []
-    for box in request.boxes:
+    for box in request.boxes if request.paint_boxes is None else request.paint_boxes:
         if box.index >= len(surfaces) or not surfaces[box.index].strip():
             continue
         color = _token_color(request, box.index)

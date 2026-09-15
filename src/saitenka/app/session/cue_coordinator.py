@@ -258,6 +258,8 @@ class CueCoordinator:
         if transition.schedule_geometry and o.presentation.native is not None:
             o.presentation.cue.replace_geometry(boxes=[])
             o.presentation.native.schedule(self.geometry_observation())
+        if o.presentation.layout is not None:
+            o.presentation.refresh.arm()
         if draw:
             o.presentation.draw()
 
@@ -289,10 +291,20 @@ class CueCoordinator:
             get=o.playback.query,
             prop=o.playback.value,
             surfaces=o.surfaces,
-            refresh=_noop if geometry is None else partial(self._refresh_geometry, geometry),
+            refresh=(
+                o.presentation.refresh.arm
+                if o.presentation.layout is not None
+                else _noop
+                if geometry is None
+                else partial(self._refresh_geometry, geometry)
+            ),
             draw_request=self.draw_request,
             source=None if geometry is None else geometry.source_path,
-            native_unsupported=geometry is not None and geometry.source_unsupported,
+            native_unsupported=(
+                not o.presentation.using_layout
+                and geometry is not None
+                and geometry.source_unsupported
+            ),
             legacy_forced=pipeline.legacy_forced,
         )
 
@@ -322,6 +334,7 @@ class CueCoordinator:
             styles=o.presentation.cue.current.styles,
             boxes=o.presentation.cue.current.boxes,
             paint_allowed=o.presentation.cue.current.paint_allowed,
+            paint_boxes=o.presentation.paint_boxes,
             owed_color=None
             if o.presentation.native is None
             else o.presentation.native.eligible_tokens,
@@ -368,6 +381,8 @@ class CueCoordinator:
 
     def retire(self, reason: str) -> None:
         o = self._o
+        if o.presentation.layout is not None:
+            o.presentation.layout.invalidate()
         if not o.annotation.retire_cue():
             self._request_playback_retirement()
             return

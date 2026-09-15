@@ -687,6 +687,13 @@ def check_subtitle_geometry() -> Check:
         options = subtitle_geometry_options(load_config())
     except (TypeError, ValueError) as error:
         return Check("subtitle-geometry", "warn", f"invalid subtitle geometry config: {error}")
+    if options.native_visible and options.source == "mpv":
+        return Check(
+            "subtitle-geometry",
+            "ok",
+            "mpv layout source configured; live capabilities are checked on connection; scan-only",
+            info=True,
+        )
     if not options.native_visible:
         return Check(
             "subtitle-geometry",
@@ -719,7 +726,8 @@ def check_subtitle_geometry() -> Check:
     return Check(
         "subtitle-geometry",
         "ok",
-        f"native-visible geometry ready — libass ABI 0x{version:08x} ({path})",
+        f"shadow geometry ready — libass ABI 0x{version:08x} ({path}); source={options.source}"
+        + ("; mpv capabilities checked on connection" if options.source == "auto" else ""),
     )
 
 

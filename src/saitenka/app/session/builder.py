@@ -174,7 +174,7 @@ def _adopt_selected_subtitle(
     """
     native = presentation.native
     if native is None:
-        presentation.pipeline.invalidate()
+        presentation.invalidate_geometry()
         subtitle_modes.on_primary_changed(ports(), sid)
         return
     native.set_source(None, live=True)
@@ -526,11 +526,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     registrations.append(
         (
             SUBTITLE_REPLAY_PARTICIPANT,
-            session_resources.Starting(
-                lambda: subtitle_presentation.pipeline.connection_replaced(
-                    subtitle_presentation.target()
-                )
-            ),
+            session_resources.Starting(subtitle_presentation.connection_replaced),
         )
     )
     surface_router = surfaces.build_surface_router(
@@ -833,12 +829,13 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         _adopt_selected_subtitle(subtitle_presentation, track_commands.ports, sid)
 
     def subtitle_timing_changed() -> None:
+        if subtitle_presentation.layout is not None:
+            subtitle_presentation.geometry_changed()
         if subtitle_presentation.native is not None:
             subtitle_presentation.native.record_clock_change(playback_observation.value)
 
     def geometry_input_changed() -> None:
-        if subtitle_presentation.native is not None:
-            subtitle_presentation.refresh.arm()
+        subtitle_presentation.geometry_changed()
 
     def pause_changed(*, paused: bool) -> None:
         log.debug("mpv pause -> %s", paused)

@@ -1,5 +1,38 @@
 # Native mpv subtitles with Saitenka interaction
 
+## Geometry source
+
+With `subtitle_geometry.native_visible = true`, `subtitle_geometry.source` selects where
+Saitenka obtains scan regions:
+
+| Source | Behavior |
+|---|---|
+| `auto` (default) | Use compatible mpv layout capabilities; fall back to shadow geometry when the API is absent. |
+| `shadow` | Use the existing libasslite measurement path. |
+| `mpv` | Require compatible mpv layout; provide scanning only, without loading libasslite. |
+
+The mpv source currently requires a [locally built patched mpv and libass pair](../contributing/mpv-layout.md).
+Selection checks capabilities on connection, rather than inferring support from a version string.
+An unsupported individual snapshot clears scan regions; it does not change renderers or hide subtitles.
+
+Native scan regions currently require one matching ASS event (or converted SubRip with
+`native_formats = "all"`). Multiple events, ambiguous shaping clusters, transformed or clipped text,
+and unsupported rendering options are refused. Invisible or unlit karaoke syllables can remain
+scannable: these are logical text regions, not a visibility mask.
+
+In `auto`, ordinary untagged dialogue may retain independently qualified shadow coloring.
+Karaoke and color/alpha overrides receive invisible scan regions only: no Saitenka text overprint,
+tint, hover outline, or level underline. Tooltip and mining behavior use the same cue and token
+identity as the existing pipeline. Geometry is withdrawn on observed cue, track, size, option,
+profile, or connection changes; mpv validation is a point-in-time check, not a display-frame lease.
+
+Saitenka enables layout collection only after discovering support. It restores an option it enabled
+when leaving the source, and respects an external disable. Re-enabling collection resumes scanning.
+`Ctrl+Shift+L` retains the existing legacy-renderer override. An injected geometry backend takes precedence
+over `auto`; combining it with explicit `mpv` is an error.
+
+## Shadow measurement and coloring
+
 The experimental native-visible mode lets mpv keep rendering the original ASS track while Saitenka
 adds word scanning, dictionary tooltips, and mining. Use it when preserving the subtitle's typesetting
 matters: the per-word colors come too, painted over mpv's own glyphs.

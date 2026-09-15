@@ -122,7 +122,14 @@ _AUTHORED_STALE_PROPERTIES = frozenset({"sub-text"}) | TRACK_PROPERTIES
 #: Every observation a geometry request is derived from — the render space plus the authored cue
 #: rows and their timing. Wider than the render space: a new cue changes the geometry inputs
 #: without changing the space they are laid out in.
-GEOMETRY_INPUT_PROPERTIES = RENDER_SPACE_PROPERTIES | {"sub-text/ass-full", "sub-start", "sub-end"}
+GEOMETRY_INPUT_PROPERTIES = RENDER_SPACE_PROPERTIES | {
+    "sub-text/ass-full",
+    "sub-start",
+    "sub-end",
+    "subtitle-layout-revision",
+    "options/subtitle-layout",
+    "playlist",
+}
 
 _RETIRE_ON_CHANGE = {
     "sub-text": RetireReason.CUE_TEXT,
