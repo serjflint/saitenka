@@ -31,6 +31,14 @@ that introduces a new authoritative fact needs its own controller/store or an ow
 
 **No — every fact it needs already has a home.**
 
+If one bounded owner already supplies the whole synchronous action, bind its method at
+`session.builder` through `merge_command_handlers`, keeping the normal command spec and executor.
+Profile cycling is the example: the owner observes its current configuration and delegates to its
+existing switch transaction. Do not add a reducer/adapter just to forward that action, and do not
+use direct binding to split a shared policy such as hovered-word admission.
+
+For a policy over snapshots from multiple owners:
+
 1. `app/features/<feature>/<feature>_intents.py` — the pure policy `reduce(command, inputs)`, a frozen
    `<Feature>Inputs`, a closed `<Feature>Command` StrEnum, one dataclass per effect. Import nothing
    that touches mpv, the display, or the host.
@@ -55,15 +63,16 @@ a named act at the composition seam, not a set of feature internals re-exposed o
 3. `app/session/routes.py` — route the owner's declared event vocabulary. Runtime and no-runtime
    construction consume the same feature bindings.
 
-**If a key triggers it**, two declarations are required in addition to the policy row:
+**If a key triggers it**, declare the binding and command policy:
 
 - `app/bindings.py` — the `*_MSG` script-message constant **and** a `BindingSpec` row in `BINDINGS`
   with a `key_attr`. The constant alone binds no key and shows nothing in the help overlay.
 - `app/runtime/commands.py` — a spec row. Not optional: `CommandExecutor` refuses at construction
   if a handler has no spec. Commands are cue-dependent by default; `_CUE_INDEPENDENT` opts out and
   `_HELP_COMMANDS` allows the command while help is open.
-- `app/session/routes.py` — the `StatelessCommandRegistration` mapping the message to the typed
-  command. Do not add a controller verb or a handler lambda.
+- For a snapshot policy, `app/session/routes.py` maps the message to its typed command with
+  `StatelessCommandRegistration`. For an owner action, the builder binds the method instead;
+  never add a feature verb to `SessionController`.
 
 The following gates enforce the boundary:
 

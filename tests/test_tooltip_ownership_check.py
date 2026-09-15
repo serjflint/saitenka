@@ -104,6 +104,8 @@ def test_tooltip_owner_cannot_republish_wrapped_or_aliased_state(body: str):
     [
         "return owner.surface_state()",
         "surface = owner.surface_state\n    return surface()",
+        "return owner.tip_ports",
+        "ports = owner.panel_ports\n    return ports",
     ],
 )
 def test_feature_cannot_take_the_mutable_surface_state(body: str):

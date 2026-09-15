@@ -50,7 +50,7 @@ class TipPorts:
     The chain spans `tooltip`, `tooltip_panel` and `nested_popup` and only ever wants the tip's own
     state, the scale it draws at, and the collaborators it hands work to. It is the one port the
     tooltip cluster has: everything outside this chain is the host under another name. Built by
-    `TooltipController.build_tip_ports`, so the stores remain private while the session binds fresh
+    `TooltipController.tip_ports`, so the stores remain private while the owner binds fresh
     physical capabilities for one owner-thread turn.
 
     `tip` is the live mutable `TooltipState`, not a copy: the chain writes scroll and crisp flags

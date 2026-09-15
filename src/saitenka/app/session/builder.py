@@ -40,6 +40,7 @@ from saitenka.app import (
     session_stats,
     subtitle_modes,
 )
+from saitenka.app.bindings import PROFILE_CYCLE_MSG
 from saitenka.app.capabilities import CapabilityProbe, configure_runtime_jobs
 from saitenka.app.features.analysis.analysis_controller import AnalysisObservation
 from saitenka.app.features.mining import mine_intents
@@ -57,7 +58,6 @@ from saitenka.app.features.mining.mining_encounter import MiningEncounterSource
 from saitenka.app.features.mining.mining_projection import MiningProjection
 from saitenka.app.features.picker import sub_picker
 from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
-from saitenka.app.features.profiles.profile_adapter import ProfileCommandEndpoint
 from saitenka.app.features.profiles.profile_controller import (
     ProfileAftermath,
     ProfileController,
@@ -91,7 +91,7 @@ from saitenka.app.media import (
 )
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.app.runtime import CueCommandState
+from saitenka.app.runtime import CueCommandState, merge_command_handlers
 from saitenka.app.session import sidebar_coordination, surfaces
 from saitenka.app.session.adapter import SessionCommandCoordinator, SessionCommandPorts
 from saitenka.app.session.command_runtime import CommandRuntime, CommandRuntimePorts
@@ -894,7 +894,10 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         CommandRuntimePorts(
             ipc=ipc,
             keys=assembly.keys,
-            contributed_handlers=assembly.command_handlers(),
+            contributed_handlers=merge_command_handlers(
+                assembly.command_handlers(),
+                {PROFILE_CYCLE_MSG: profile_controller.cycle},
+            ),
             contributed_specs=assembly.command_specs(),
             stateless=stateless_commands,
             mining=mining_controller,
@@ -1129,7 +1132,6 @@ def _assemble_stateless_commands(
             hover,
             mine,
             panel,
-            ProfileCommandEndpoint(owners.profile.profile),
             session,
             subtitle,
             interaction,

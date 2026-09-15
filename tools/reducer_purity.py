@@ -103,7 +103,6 @@ def _registered() -> dict[str, object]:
             adapter,
             adapter,
             adapter,
-            adapter,
         ):
             found[f"stateless:{binding.feature}"] = binding.policy
         return found
