@@ -7,6 +7,7 @@ published against the one that arrived.
 
 from __future__ import annotations
 
+import pytest
 from saitenka_tokenize.japanese import Token
 
 from saitenka.app.subtitle_presentation import CueRenderStore
@@ -95,3 +96,25 @@ def test_the_reset_a_cue_change_runs_clears_both_halves_together() -> None:
     store.reset()
 
     assert (store.current.lines, store.current.boxes) == ([], [])
+
+
+@pytest.mark.parametrize("update", ["annotation", "tokenization", "styles", "origin", "clear"])
+def test_derived_updates_do_not_authorize_painting_scan_only_geometry(update: str) -> None:
+    store = CueRenderStore()
+    cue = tokenized("犬")
+    store.install_tokenized(cue)
+    store.publish_geometry([box(0)], (0, 0), paint_allowed=False)
+
+    if update == "annotation":
+        store.clear_annotation()
+    elif update == "tokenization":
+        store.install_tokenized(cue)
+    elif update == "styles":
+        store.replace_tokenized(styles=[])
+    elif update == "clear":
+        store.clear_geometry()
+    else:
+        store.replace_geometry(origin=(5, 5))
+
+    assert store.current.paint_allowed is False
+    assert store.current.boxes == ([] if update == "clear" else [box(0)])

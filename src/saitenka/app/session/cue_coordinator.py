@@ -321,6 +321,7 @@ class CueCoordinator:
             hover_span=tooltip.metadata.span,
             styles=o.presentation.cue.current.styles,
             boxes=o.presentation.cue.current.boxes,
+            paint_allowed=o.presentation.cue.current.paint_allowed,
             owed_color=None
             if o.presentation.native is None
             else o.presentation.native.eligible_tokens,

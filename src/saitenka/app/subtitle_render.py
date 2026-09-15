@@ -141,6 +141,8 @@ class DrawRequest:
     #: Whether mpv is paused. Only the layout calibration reads it, and only to stay off the
     #: playing core — `compute_bounds` costs mpv a full render and a cache flush.
     paused: bool = False
+    #: Geometry eligibility does not authorize painting over authored subtitle effects.
+    paint_allowed: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +233,7 @@ def color_ladder(request: DrawRequest, *, drifting: frozenset[str] = frozenset()
     of on some later one.
     """
     styles = request.styles
-    if not styles or not request.boxes:
+    if not request.paint_allowed or not styles or not request.boxes:
         return ColorLadder()
     surfaces = [token.surface for line in request.lines for token in line]
     paints: list[overprint.TokenPaint] = []
@@ -1280,6 +1282,7 @@ class NativeVisibleRenderer:
             # holds. A field trace read `tokens=0` for all 33 legacy draws before this.
             span.set("tokens", sum(len(line) for line in request.lines))
             span.set("measured_boxes", len(request.boxes))
+            span.set("paint_allowed", request.paint_allowed)
             # The one attribute that makes the wait a viewer sees derivable from the trace alone:
             # group draws by cue, take the first, take the first with boxes, subtract. Without it the
             # draws are an undifferentiated stream and the pair cannot be found. A digest rather than
@@ -1291,16 +1294,21 @@ class NativeVisibleRenderer:
             # geometry has not landed and for a music marker that owes nothing, and telling them
             # apart meant joining to a decision span that is often absent — "no geometry decision
             # recorded" was the readout's most common verdict on the cue nobody could explain.
-            span.set("owed_color", request.owed_color)
+            span.set("owed_color", request.owed_color if request.paint_allowed else 0)
             # Color that was on screen for this cue and is not now. The wait-to-color reading takes
             # the FIRST colored draw and stops, so a cue losing its color later is invisible to it;
             # three such drops were found by hand and none of them by the readout.
             digest = cue_digest(request.text)
-            lost = bool(self._painted_cue == digest and request.owed_color and not request.boxes)
+            lost = bool(
+                request.paint_allowed
+                and self._painted_cue == digest
+                and request.owed_color
+                and not request.boxes
+            )
             span.set("lost_color", lost)
-            if request.boxes:
+            if request.paint_allowed and request.boxes:
                 self._painted_cue = digest
-            elif lost:
+            elif lost or not request.paint_allowed:
                 self._painted_cue = None
             # How many authored events the drawn boxes came from. `active_events` on the geometry
             # side says how many the snapshot was measured against; this says how many reached the
@@ -1329,6 +1337,12 @@ class NativeVisibleRenderer:
         # before this and we read only its outcome. Splitting them is what lets `draw` be host-free.
         if self._state.owner != PixelOwner.NATIVE:
             self.flush_focus(ipc)
+            return None
+        if not request.paint_allowed:
+            # A refusal also retires same-cue paint retained during a split observation burst.
+            self._defer_focus_clear = False
+            self._hide_focus(ipc)
+            self._hide_overpaint(surfaces)
             return None
         rect = (
             focus_rect(request.boxes, request.hover, request.hover_span)

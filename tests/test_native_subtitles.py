@@ -538,6 +538,46 @@ def test_native_visible_mode_never_adds_or_selects_generated_track(tmp_path: Pat
     assert backend.closed
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("cue_burst", [False, True])
+def test_paint_refusal_retires_color_without_retiring_scanning(tmp_path: Path, cue_burst) -> None:
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
+    presentation = result.graph.subtitle_presentation
+    assert presentation.native is not None
+    presentation.native.set_fonts(attachment_supplying(ipc, "arial"))
+    try:
+        result.graph.playback.observe("sub-text", "猫を見る")
+        result.graph.cue.settle()
+        settle_jobs(result, ipc)
+        result.graph.tooltip.select(0)
+        presentation.draw()
+        settle_jobs(result, ipc)
+        assert presented_overpaints(ipc)
+        assert ("osd-overlay", 1001, "ass-events") in [c[:3] for c in ipc.commands]
+        boxes = presentation.cue.current.boxes
+        if cue_burst:
+            presentation.pipeline.cue_changed(presentation.target(), nonempty=True)
+        ipc.commands.clear()
+
+        presentation.cue.replace_geometry(paint_allowed=False)
+        presentation.draw()
+        settle_jobs(result, ipc)
+
+        assert ("osd-overlay", 1001, "none", "") in ipc.commands
+        assert ("overlay-remove", OverlayId.OVERPAINT) in ipc.commands
+        assert not presented_overpaints(ipc)
+        assert not any(c[:3] == ("osd-overlay", 1001, "ass-events") for c in ipc.commands)
+        assert presentation.cue.current.boxes == boxes
+        assert result.graph.cue.draw_request().paint_allowed is False
+        assert ipc.props["sub-visibility"] is True
+        assert Driver(result).move_to_word(0).hover == 0
+    finally:
+        result.close()
+
+
 def test_visible_cue_cache_miss_keeps_native_pixels_until_geometry_is_ready(tmp_path: Path) -> None:
     result, ipc, _backend = reader(tmp_path)
 

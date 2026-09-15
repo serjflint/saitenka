@@ -58,6 +58,7 @@ class CueRenderState:
     styles: list[TokenStyle] | None = None
     boxes: list[WordBox] = field(default_factory=list)
     origin: tuple[int, int] = (0, 0)
+    paint_allowed: bool = True
 
 
 def boxes_for(tokens: list[Token], boxes: list[WordBox]) -> list[WordBox]:
@@ -95,7 +96,9 @@ class CueRenderStore:
 
     def clear_annotation(self) -> None:
         state = self._current
-        self._current = CueRenderState(boxes=state.boxes, origin=state.origin)
+        self._current = CueRenderState(
+            boxes=state.boxes, origin=state.origin, paint_allowed=state.paint_allowed
+        )
 
     def install_tokenized(self, cue: TokenizedCue) -> None:
         state = self._current
@@ -105,6 +108,7 @@ class CueRenderStore:
             styles=cue.styles,
             boxes=boxes_for(cue.tokens, state.boxes),
             origin=state.origin,
+            paint_allowed=state.paint_allowed,
         )
 
     def replace_tokenized(
@@ -125,16 +129,26 @@ class CueRenderStore:
             ),
             boxes=boxes_for(replaced, state.boxes),
             origin=state.origin,
+            paint_allowed=state.paint_allowed,
         )
 
     def clear_geometry(self) -> None:
         state = self._current
-        self._current = CueRenderState(state.lines, state.tokens, state.styles)
+        self._current = CueRenderState(
+            state.lines, state.tokens, state.styles, paint_allowed=state.paint_allowed
+        )
 
-    def publish_geometry(self, boxes: list[WordBox], origin: tuple[int, int]) -> None:
+    def publish_geometry(
+        self, boxes: list[WordBox], origin: tuple[int, int], *, paint_allowed: bool = True
+    ) -> None:
         state = self._current
         self._current = CueRenderState(
-            state.lines, state.tokens, state.styles, boxes_for(state.tokens, boxes), origin
+            state.lines,
+            state.tokens,
+            state.styles,
+            boxes_for(state.tokens, boxes),
+            origin,
+            paint_allowed,
         )
 
     def replace_geometry(
@@ -142,6 +156,7 @@ class CueRenderStore:
         *,
         boxes: list[WordBox] | object = _UNCHANGED,
         origin: tuple[int, int] | object = _UNCHANGED,
+        paint_allowed: bool | None = None,
     ) -> None:
         """Replace selected geometry facts through the cue-render owner."""
         state = self._current
@@ -154,6 +169,7 @@ class CueRenderStore:
                 state.boxes if boxes is _UNCHANGED else cast("list[WordBox]", boxes),
             ),
             state.origin if origin is _UNCHANGED else cast("tuple[int, int]", origin),
+            state.paint_allowed if paint_allowed is None else paint_allowed,
         )
 
 
