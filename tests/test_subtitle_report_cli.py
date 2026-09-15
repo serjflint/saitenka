@@ -119,3 +119,15 @@ def test_source_report_separates_native_scanning_from_shadow_paint(tmp_path: Pat
     assert "cue=7 generation=9" in output
     assert "private subtitle" not in output
     assert "text" not in geometry_records(load_trace(trace))[0]["args"]
+
+
+def test_deeply_nested_metadata_envelope_reports_unavailable(tmp_path: Path, capsys):
+    import zipfile
+
+    bundle = tmp_path / "nested.zip"
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr("diagnostics/envelope.json", "[" * 2000 + "0" + "]" * 2000)
+
+    assert subtitle_report(str(bundle)) == 1
+
+    assert "no telemetry trace found" in capsys.readouterr().err

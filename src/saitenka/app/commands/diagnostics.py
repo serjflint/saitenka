@@ -388,11 +388,19 @@ def subtitle_report(
     from pathlib import Path
 
     from saitenka.app.report_reader import trace_evidence
-    from saitenka.app.subtitle_report import geometry_records, render_geometry
+    from saitenka.app.subtitle_report import geometry_records, render_geometry, source_history
 
     source = Path(report_path).expanduser()
     evidence = trace_evidence(source)
     events = evidence.pop("events")
+    if not events and evidence["status"] != "invalid":
+        events = source_history(source)
+        if events:
+            evidence = {
+                "status": "partial",
+                "source": "metadata-history",
+                "scope": "bounded source history; no trace",
+            }
     if evidence["status"] == "invalid":
         print(f"subtitle report unavailable: {evidence['reason']}", file=sys.stderr)
         return 1
@@ -411,6 +419,8 @@ def subtitle_report(
             )
         )
     else:
+        if evidence.get("source") == "metadata-history":
+            print("Source evidence: bounded metadata history; full trace not included.")
         print(
             f"input evidence: {evidence['status']}; invalid events: {evidence.get('invalid_events', 0)}"
         )

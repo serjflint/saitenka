@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -27,6 +28,17 @@ if TYPE_CHECKING:
     from saitenka.mpvio.ipc import MpvIPC
 
 _UNCHANGED = object()
+_LAYOUT_WARNINGS = {
+    "layout-unsupported-render-mode": "the mpv render mode does not expose subtitle geometry",
+    "layout-event-count": "mpv geometry does not yet support overlapping subtitle events",
+    "layout-geometry-profile": "this subtitle's geometry is outside the supported profile",
+    "layout-margins": "mpv geometry does not yet support these display margins",
+    "unsupported-option": "mpv subtitle layout collection could not be enabled",
+    "disabled-externally": "mpv subtitle layout collection was disabled",
+    "ipc-failed": "the mpv geometry request failed",
+    "ipc-unavailable": "the mpv geometry connection is unavailable",
+}
+_COLOR_EFFECT = re.compile(r"\\(?:[1-4]?[ac](?![a-z])|alpha|k|t\(|fad|fade|r)", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +224,7 @@ class SubtitlePresentation:
         self._ports = ports
         self._source = settings.source
         self._scan_source = "none"
+        self._layout_warnings: set[str] = set()
         self._last_geometry_record: dict[str, str | int | bool] = {}
         self._shadow_boxes: list[WordBox] = []
         self._shadow_generation = -1
@@ -232,6 +245,7 @@ class SubtitlePresentation:
                     LayoutPorts(
                         observe=ports.geometry,
                         clear=self._clear_layout,
+                        invalidate=self.clear_native_interaction,
                         publish=self._publish_layout,
                         reschedule=self.refresh.arm,
                         permitted=lambda: not self.pipeline.legacy_forced,
@@ -285,7 +299,11 @@ class SubtitlePresentation:
             return
         self._scan_source = "shadow"
         current_origin = self.cue.current.origin
-        self.cue.publish_geometry(boxes, current_origin if origin is None else origin)
+        self.cue.publish_geometry(
+            boxes,
+            current_origin if origin is None else origin,
+            paint_allowed=self._shadow_paint_allowed(),
+        )
         self._record_geometry()
 
     def draw(self) -> None:
@@ -306,6 +324,23 @@ class SubtitlePresentation:
             return "scan-only-policy"
         return "shadow-paint-unqualified"
 
+    def _warn_layout_failure(self, reason: str) -> None:
+        detail = _LAYOUT_WARNINGS.get(reason)
+        if detail is None or reason in self._layout_warnings:
+            return
+        self._layout_warnings.add(reason)
+        fallback = (
+            self._source == "auto"
+            and self.layout is not None
+            and self.layout.fallback_reason is not None
+        )
+        message = (
+            f"Using shadow subtitle geometry: {detail}."
+            if fallback
+            else f"Subtitle scanning unavailable: {detail}. Try shadow geometry."
+        )
+        self._ports.notify(message, "warn")
+
     def _record_geometry(self) -> None:
         if self.native is None and self.layout is None:
             return
@@ -321,7 +356,7 @@ class SubtitlePresentation:
         )
         reason = "configured-shadow" if native else "legacy"
         if self.layout is not None:
-            reason = self.layout.status
+            reason = self.layout.selection_reason
         record: dict[str, str | int | bool] = {
             "configured_source": self._source,
             "selected_source": selected,
@@ -337,6 +372,8 @@ class SubtitlePresentation:
         if record == self._last_geometry_record:
             return
         self._last_geometry_record = record
+        self.pipeline.record_geometry_source(record)
+        self._warn_layout_failure(reason)
         with otel_metrics.traced("subtitle_geometry_source") as span:
             for key, value in record.items():
                 span.set(key, value)
@@ -352,12 +389,19 @@ class SubtitlePresentation:
     @property
     def using_layout(self) -> bool:
         return self.layout is not None and (
-            self._source == "mpv" or self.layout.supported is not False
+            self._source == "mpv"
+            or (self.layout.supported is not False and self.layout.fallback_reason is None)
         )
 
     @property
     def paint_boxes(self) -> list[WordBox] | None:
         return self._shadow_boxes if self.using_layout else None
+
+    def _shadow_paint_allowed(self) -> bool:
+        if self._source != "auto":
+            return True
+        raw = self._ports.geometry().prop("sub-text/ass-full")
+        return isinstance(raw, str) and len(raw) <= 32768 and not _COLOR_EFFECT.search(raw)
 
     def _paint_ready(self) -> bool:
         if self._source != "auto" or self.layout is None or self.layout.current is None:
@@ -407,10 +451,14 @@ class SubtitlePresentation:
         if self._source == "auto":
             if self._shadow_generation == self.pipeline.generation:
                 self._scan_source = "shadow"
-                self.cue.publish_geometry(self._shadow_boxes, (0, 0))
+                self.cue.publish_geometry(
+                    self._shadow_boxes, (0, 0), paint_allowed=self._shadow_paint_allowed()
+                )
                 self.draw()
+            else:
+                self.clear_native_interaction()
             self.refresh.arm()
-        else:
+        elif self.layout is not None and self.layout.supported is False:
             self._ports.notify(
                 "This mpv does not provide the required subtitle layout capabilities.", "warn"
             )
@@ -430,6 +478,7 @@ class SubtitlePresentation:
             self.pipeline.invalidate()
 
     def connection_replaced(self) -> None:
+        self._layout_warnings.clear()
         if self.layout is not None:
             self.layout.connection_replaced()
         self.pipeline.connection_replaced(self.target())

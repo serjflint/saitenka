@@ -9,6 +9,10 @@ logs.
 
 ### Added
 
+- Automatic subtitle geometry preserves qualified shadow scanning when native geometry cannot
+  represent the render mode or subtitle frame. Overlay warnings explain incompatibilities, and
+  metadata-only reports retain bounded geometry-source history.
+
 - Subtitle reports distinguish selected geometry sources, usable scan regions, shadow coloring
   eligibility and patched-mpv acquisition outcomes when telemetry is enabled.
 

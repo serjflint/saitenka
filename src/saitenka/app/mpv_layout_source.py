@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 class LayoutPorts:
     observe: Callable[[], GeometryObservation]
     clear: Callable[[], None]
+    invalidate: Callable[[], None]
     publish: Callable[[list[WordBox]], bool]
     reschedule: Callable[[], None]
     permitted: Callable[[], bool]
@@ -123,6 +124,16 @@ def _refusal_reason(error: ValueError | TypeError | OverflowError) -> str:
     return "layout-text-encoding" if isinstance(error, UnicodeError) else str(error)
 
 
+_SHADOW_FALLBACK_REASONS = frozenset(
+    {
+        "layout-unsupported-render-mode",
+        "layout-event-count",
+        "layout-geometry-profile",
+        "layout-margins",
+    }
+)
+
+
 class MpvLayoutSource:
     """At most one fetch/validate chain; observations retire hits before scheduling replacement."""
 
@@ -142,23 +153,29 @@ class MpvLayoutSource:
         self._external_disabled = False
         self._saw_enabled = False
         self.status = "unprobed"
+        self.fallback_reason: str | None = None
         self.attempt = 0
         self._request_generation = 0
         self._request_cue_revision = 0
         self.supported: bool | None = None
         self.current: LayoutSnapshot | None = None
 
+    @property
+    def selection_reason(self) -> str:
+        return self.fallback_reason or self.status
+
     def invalidate(self) -> None:
         self.current = None
         self._pipeline.invalidate()
         if self.supported is not False:
             self.status = "invalidated"
-        self._ports.clear()
+        self._ports.invalidate()
         self._dirty = True
         self._record_status()
 
     def connection_replaced(self) -> None:
         self.supported = None
+        self.fallback_reason = None
         self._epoch += 1
         self._busy = False
         self._configured = False
@@ -238,6 +255,7 @@ class MpvLayoutSource:
                 and self._ports.permitted()
             ):
                 self.current = layout
+                self.fallback_reason = None
                 accepted = self._ports.publish(boxes)
                 self.status = (
                     ("scan-only" if boxes else "unmapped-tokens")
@@ -254,8 +272,13 @@ class MpvLayoutSource:
 
     def _refuse(self, reason: str) -> None:
         self.current = None
-        self.status = reason
+        if reason == "unsupported-api":
+            self.fallback_reason = None
         self._ports.clear()
+        self.status = reason
+        if reason in _SHADOW_FALLBACK_REASONS and self.fallback_reason != reason:
+            self.fallback_reason = reason
+            self._ports.unavailable()
         self._finish()
 
     def _configure(self) -> None:

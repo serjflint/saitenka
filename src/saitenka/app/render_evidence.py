@@ -14,6 +14,73 @@ if TYPE_CHECKING:
 
 _OWNERS = 4
 _CONFIGURATIONS = 4
+_SOURCE_DECISIONS = 32
+_SOURCE_NAMES = frozenset({"auto", "mpv", "shadow", "legacy", "none"})
+_SOURCE_REASONS = frozenset(
+    {
+        "unprobed",
+        "invalidated",
+        "fetching",
+        "collection-ready",
+        "scan-only",
+        "stale",
+        "unsupported-api",
+        "layout-unsupported-render-mode",
+        "layout-unavailable",
+        "layout-event-count",
+        "layout-geometry-profile",
+        "layout-margins",
+        "unbound-event",
+        "configured-shadow",
+        "legacy",
+        "disabled-externally",
+        "unsupported-option",
+        "ipc-failed",
+        "ipc-unavailable",
+        "unmapped-tokens",
+        "waiting-for-native-owner",
+    }
+)
+
+
+def _source_record(raw: object) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    result: dict[str, object] = {}
+    for key in ("configured_source", "selected_source", "scan_source", "paint_source"):
+        value = raw.get(key)
+        result[key] = value if isinstance(value, str) and value in _SOURCE_NAMES else "unknown"
+    reason = raw.get("reason")
+    result["reason"] = reason if isinstance(reason, str) and reason in _SOURCE_REASONS else "other"
+    paint_reason = raw.get("paint_reason")
+    result["paint_reason"] = (
+        paint_reason
+        if isinstance(paint_reason, str)
+        and paint_reason
+        in {"eligible", "no-scan-regions", "scan-only-policy", "shadow-paint-unqualified"}
+        else "unknown"
+    )
+    result["paint_allowed"] = (
+        raw.get("paint_allowed") if type(raw.get("paint_allowed")) is bool else None
+    )
+    for key in ("cue_revision", "generation", "eligible_tokens", "captured_ns"):
+        result[key] = _count(raw.get(key))
+    return result
+
+
+def _source_history(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {"status": "unknown"}
+    history = raw.get("history")
+    if not isinstance(history, list) or len(history) > _SOURCE_DECISIONS:
+        return {"status": "invalid"}
+    return {
+        "status": "partial",
+        "scope": "geometry eligibility; not displayed pixels",
+        "history": [_source_record(row) for row in history],
+        "evicted": _count(raw.get("evicted")),
+    }
+
+
 VALIDATION_VERDICTS = (
     "mask-exact",
     "probe-error",
@@ -294,6 +361,7 @@ def _owner(raw: dict) -> dict:
         "published": _reference(raw.get("published"), revisions, generation=generation),
         "last_published": _reference(raw.get("last_published"), revisions),
         "renderer_selection": _selection(raw.get("renderer_selection")),
+        "geometry_sources": _source_history(raw.get("geometry_sources")),
     }
 
 
@@ -385,6 +453,7 @@ class GeometryEvidence:
             "published": None,
             "last_published": None,
             "renderer_selection": {"history": [], "evicted": 0},
+            "geometry_sources": {"history": [], "evicted": 0},
         }
 
     def selection(self, *, pixel_owner: str, legacy_forced: bool) -> None:
@@ -406,6 +475,14 @@ class GeometryEvidence:
         if len(history) > _CONFIGURATIONS:
             history.pop(0)
             selection["evicted"] += 1
+        self._registry.update(self.owner, self._state)
+
+    def geometry_source(self, record: dict[str, str | int | bool]) -> None:
+        evidence = self._state["geometry_sources"]
+        evidence["history"].append(_source_record({**record, "captured_ns": time.time_ns()}))
+        if len(evidence["history"]) > _SOURCE_DECISIONS:
+            evidence["history"].pop(0)
+            evidence["evicted"] += 1
         self._registry.update(self.owner, self._state)
 
     def describe(self, request: GeometryRequest) -> int:

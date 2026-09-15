@@ -89,6 +89,8 @@ def decode_layout(value: object) -> LayoutSnapshot:
     if not supports_layout(data):
         raise ValueError("layout-capabilities")
     if data.get("available") is not True or data.get("status") != "ok":
+        if data.get("status") == "unsupported-render-mode":
+            raise ValueError("layout-unsupported-render-mode")
         raise ValueError("layout-unavailable")
     events = data.get("events")
     if not isinstance(events, list) or len(events) != 1:

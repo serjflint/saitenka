@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
 from typing import TYPE_CHECKING
 
 from saitenka.app import font_resolution
+from saitenka.app.render_evidence import safe_runtime_configuration
 from saitenka.app.report_reader import read_member, trace_evidence
 
 if TYPE_CHECKING:
@@ -105,6 +107,30 @@ def load_trace(source: Path) -> list[dict]:
     if evidence["status"] == "invalid":
         raise ValueError(evidence["reason"])
     return evidence["events"]
+
+
+def source_history(source: Path) -> list[dict]:
+    """Read bounded, text-free source decisions when a metadata-only bundle has no trace."""
+    try:
+        text = read_member(source, "diagnostics/envelope.json")
+        envelope = json.loads(text) if text is not None else {}
+    except (OSError, ValueError, RecursionError, zipfile.BadZipFile):
+        return []
+    if not isinstance(envelope, dict):
+        return []
+    runtime = safe_runtime_configuration(envelope.get("effective_runtime_configuration"))
+    return [
+        {
+            "name": "subtitle_geometry_source",
+            "ph": "X",
+            "dur": 0,
+            "ts": record["captured_ns"] / 1000,
+            "args": record,
+        }
+        for owner in runtime.get("owners", [])
+        for record in owner.get("geometry_sources", {}).get("history", [])
+        if record.get("captured_ns") is not None
+    ]
 
 
 def geometry_spans(events: list[dict]) -> list[dict]:

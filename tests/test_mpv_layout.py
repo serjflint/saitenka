@@ -221,6 +221,7 @@ def source():
     ports = LayoutPorts(
         observe=lambda: seen,
         clear=frames.clear,
+        invalidate=frames.clear,
         publish=lambda boxes: frames.append(boxes) is None,
         reschedule=lambda: ticks.append(None),
         permitted=lambda: True,
@@ -507,3 +508,50 @@ def test_stale_acquisition_retains_request_identity(monkeypatch):
         request_cue_revision=start["cue_revision"],
     )
     assert finish["generation"] > finish["request_generation"]
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("source_name", ["auto", "mpv"])
+def test_incompatible_render_mode_warns_once_in_the_overlay(source_name, monkeypatch):
+    from session_builder import build_session
+    from test_native_subtitles import _ExistsDS
+
+    from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+    from saitenka.app.session.factory import SessionServices
+
+    ipc = LayoutIPC()
+    ipc.layout.update(available=False, status="unsupported-render-mode")
+    ipc.props.update({"osd-dimensions": {"w": 1280, "h": 720}, "pause": True})
+    session = build_session(
+        ipc,
+        options=ReaderOptions(
+            subtitle_geometry=SubtitleGeometryOptions(native_visible=True, source=source_name)
+        ),
+        services=SessionServices(dictionaries=_ExistsDS()),
+    )
+    messages = []
+    monkeypatch.setattr(
+        session.graph.notifications, "show", lambda text, *_args: messages.append(text)
+    )
+    try:
+        session.graph.playback.install_seed(ipc.props)
+        session.graph.playback.observe("sub-text", "猫犬")
+        session.graph.cue.settle()
+        for _ in range(12):
+            ipc.fire_runtime_timer("subtitle:geometry-refresh")
+            session.pump()
+
+        expected = (
+            "Using shadow subtitle geometry"
+            if source_name == "auto"
+            else "Subtitle scanning unavailable"
+        )
+        warnings = [message for message in messages if "render mode" in message]
+        assert warnings == [
+            f"{expected}: the mpv render mode does not expose subtitle geometry."
+            + (" Try shadow geometry." if source_name == "mpv" else "")
+        ]
+        assert session.graph.subtitle_presentation.using_layout is (source_name == "mpv")
+    finally:
+        session.close()

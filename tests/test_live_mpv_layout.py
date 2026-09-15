@@ -227,3 +227,109 @@ def test_native_layout_refuses_unrepresented_geometry_without_hiding_subtitles(p
 
         assert presentation.cue.current.boxes == []
         assert ipc.query("sub-visibility") is True
+
+
+@pytest.mark.parametrize("prefix", ["", r"{\pos(640,650)\fscx90}", r"{\kf100}"])
+def test_blended_subtitles_keep_shadow_scanning_and_eligible_color(prefix, monkeypatch):
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring, Palette
+
+    spans = record_spans(monkeypatch)
+    with live_reader(
+        native_visible=True,
+        cues=((0.0, 8.0, prefix + "猫を見る"),),
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])), Palette()),
+        layout=LayoutLiveOptions(
+            "auto",
+            os.environ["SAITENKA_LAYOUT_MPV"],
+            ("--sub-ass-override=no", "--blend-subtitles=yes"),
+        ),
+    ) as (_, session, ipc):
+        request = session.graph.cue.draw_request()
+        records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
+        assert records[-1] == IsPartialDict(
+            selected_source="shadow",
+            scan_source="shadow",
+            reason="layout-unsupported-render-mode",
+            paint_source="none" if "kf" in prefix else "shadow",
+        )
+        box = request.boxes[0]
+        assert session.graph.tooltip.hit(box.x + box.w // 2, box.y + box.h // 2) == box.index
+        assert bool(color_ladder(request).devices) is ("kf" not in prefix)
+        assert ipc.query("blend-subtitles") is True
+
+
+def test_disabling_blending_returns_auto_to_native_scanning():
+    with live_reader(
+        native_visible=True,
+        cues=((0.0, 8.0, "猫を見る"),),
+        layout=LayoutLiveOptions(
+            "auto",
+            os.environ["SAITENKA_LAYOUT_MPV"],
+            ("--sub-ass-override=no", "--blend-subtitles=yes"),
+        ),
+    ) as (_, session, ipc):
+        presentation = session.graph.subtitle_presentation
+        assert not presentation.using_layout
+
+        ipc.command("set_property", "blend-subtitles", "no")
+        poll_until(
+            session,
+            lambda: presentation.using_layout and bool(presentation.cue.current.boxes),
+            "auto did not recover native geometry",
+        )
+
+        assert presentation.cue.current.boxes[0].hit_regions
+
+
+@pytest.mark.parametrize(
+    ("cues", "reason"),
+    [
+        (((0.0, 8.0, "猫を見る"), (0.0, 8.0, "犬を見る")), "layout-event-count"),
+        (((0.0, 8.0, r"{\frz20}猫を見る"),), "layout-geometry-profile"),
+    ],
+)
+def test_auto_preserves_shadow_scanning_for_unsupported_native_geometry(cues, reason, monkeypatch):
+    spans = record_spans(monkeypatch)
+    with live_reader(
+        native_visible=True,
+        cues=cues,
+        layout=LayoutLiveOptions(
+            "auto", os.environ["SAITENKA_LAYOUT_MPV"], ("--sub-ass-override=no",)
+        ),
+    ) as (_, session, _ipc):
+        records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
+        assert records[-1] == IsPartialDict(
+            selected_source="shadow", scan_source="shadow", reason=reason
+        )
+        cue = session.graph.subtitle_presentation.cue.current
+        for surface in ("猫", "犬") if len(cues) > 1 else ("猫",):
+            index = next(i for i, token in enumerate(cue.tokens) if token.surface == surface)
+            box = next(box for box in cue.boxes if box.index == index)
+            assert session.graph.tooltip.hit(box.x + box.w // 2, box.y + box.h // 2) == index
+
+
+@pytest.mark.parametrize(
+    ("name", "value"), [("osd-dimensions", {"w": 640, "h": 360}), ("sub-delay", 1.0)]
+)
+def test_fallback_hits_retire_before_refresh_on_geometry_input_change(name, value):
+    with live_reader(
+        native_visible=True,
+        cues=((0.0, 8.0, "猫を見る"),),
+        layout=LayoutLiveOptions(
+            "auto",
+            os.environ["SAITENKA_LAYOUT_MPV"],
+            ("--sub-ass-override=no", "--blend-subtitles=yes"),
+        ),
+    ) as (_, session, _ipc):
+        presentation = session.graph.subtitle_presentation
+        box = presentation.cue.current.boxes[0]
+        point = (box.x + box.w // 2, box.y + box.h // 2)
+        assert session.graph.tooltip.hit(*point) == box.index
+
+        session.graph.playback.observe(name, value)
+
+        assert not presentation.cue.current.boxes
+        assert session.graph.tooltip.hit(*point) == -1

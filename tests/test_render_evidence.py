@@ -421,3 +421,86 @@ def test_observed_ultrawide_cue_exports_consumed_configuration(monkeypatch, tmp_
         == owner["published"]["revision"]
     )
     assert render["configuration_owner"] == publication["configuration_owner"] == owner["owner"]
+
+
+@pytest.mark.timeout(5)
+def test_metadata_only_bundle_explains_the_published_geometry_source(monkeypatch, tmp_path, capsys):
+    from test_native_subtitles import reader, settle_jobs
+
+    from saitenka.app.commands.diagnostics import subtitle_report
+
+    _setup(monkeypatch, tmp_path)
+    session, ipc, _backend = reader(tmp_path)
+    try:
+        session.graph.playback.observe("sub-text", "猫を見る")
+        session.graph.cue.settle()
+        settle_jobs(session, ipc)
+        telemetry.save_operation_summary()
+
+        bundle = report.build_report_bundle(tmp_path / "reports")
+
+        assert subtitle_report(str(bundle)) == 0
+        output = capsys.readouterr().out
+        assert "bounded metadata history" in output
+        assert "scan=shadow paint=shadow" in output
+        assert "猫を見る" not in output
+    finally:
+        session.close()
+
+
+def test_source_history_is_bounded_and_redacts_untrusted_values(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    for revision in range(40):
+        pipeline.record_geometry_source(
+            {
+                "cue_revision": revision,
+                "configured_source": "auto",
+                "selected_source": "shadow",
+                "scan_source": "shadow",
+                "paint_source": "shadow",
+                "reason": "/PRIVATE/path",
+                "paint_reason": "PRIVATE TEXT",
+                "paint_allowed": True,
+                "generation": 0,
+                "eligible_tokens": 1,
+            }
+        )
+
+    payload = _export()
+
+    history = payload["effective_runtime_configuration"]["owners"][0]["geometry_sources"]
+    assert history["evicted"] == 8
+    assert [row["cue_revision"] for row in history["history"]] == list(range(8, 40))
+    assert "PRIVATE" not in json.dumps(payload)
+
+
+def test_invalid_trace_is_not_hidden_by_metadata_source_history(monkeypatch, tmp_path, capsys):
+    import zipfile
+
+    from saitenka.app.commands.diagnostics import subtitle_report
+
+    _setup(monkeypatch, tmp_path)
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    pipeline.record_geometry_source(
+        {
+            "configured_source": "auto",
+            "selected_source": "shadow",
+            "scan_source": "shadow",
+            "paint_source": "none",
+            "cue_revision": 1,
+            "generation": 0,
+            "eligible_tokens": 1,
+            "paint_allowed": False,
+            "paint_reason": "no-scan-regions",
+            "reason": "layout-unsupported-render-mode",
+        }
+    )
+    telemetry.save_operation_summary()
+    bundle = report.build_report_bundle(tmp_path / "reports")
+    with zipfile.ZipFile(bundle, "a") as archive:
+        archive.writestr("trace.json", "{broken JSON")
+
+    assert subtitle_report(str(bundle)) == 1
+
+    assert "subtitle report unavailable" in capsys.readouterr().err

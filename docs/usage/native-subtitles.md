@@ -7,17 +7,20 @@ Saitenka obtains scan regions:
 
 | Source | Behavior |
 |---|---|
-| `auto` (default) | Use compatible mpv layout capabilities; fall back to shadow geometry when the API is absent. |
+| `auto` (default) | Use compatible mpv layout; fall back to qualified shadow geometry when the API, render mode, event count, geometry profile, or margins are unsupported. |
 | `shadow` | Use the existing libasslite measurement path. |
 | `mpv` | Require compatible mpv layout; provide scanning only, without loading libasslite. |
 
 The mpv source currently requires a [locally built patched mpv and libass pair](../contributing/mpv-layout.md).
 Selection checks capabilities on connection, rather than inferring support from a version string.
-An unsupported individual snapshot clears scan regions; it does not change renderers or hide subtitles.
+Automatic fallback keeps the existing presentation pipeline and mpv subtitles visible.
+If neither source supplies qualified geometry, scan regions remain empty. Explicit `mpv` stays scan-only
+and refuses incompatible snapshots. A repeated incompatibility warns once per reason per connection.
 
 Native scan regions currently require one matching ASS event (or converted SubRip with
 `native_formats = "all"`). Multiple events, ambiguous shaping clusters, transformed or clipped text,
-and unsupported rendering options are refused. Invisible or unlit karaoke syllables can remain
+and unsupported rendering options are refused by that source. `auto` can retain scanning through
+qualified shadow geometry for those cases. Invisible or unlit karaoke syllables can remain
 scannable: these are logical text regions, not a visibility mask.
 
 In `auto`, ordinary untagged dialogue may retain independently qualified shadow coloring.
@@ -43,8 +46,15 @@ refused geometry, stale validation and external disable. Request identity is ret
 from the current cue and generation, so stale completions remain attributable. `scan=none` means no usable scan regions;
 `paint=shadow` means shadow geometry passed coloring eligibility, not that a GPU upload or physical
 presentation completed. Existing subtitle-draw and pixel-ownership spans cover presentation work.
-These records contain no subtitle text or media paths. Local and cross-platform checks use the same
+Metadata-only reports retain the latest 32 source decisions per geometry owner, with an eviction
+count; `subtitle-report` can read that bounded history without a trace. Full acquisition timing still
+requires telemetry. These records contain no subtitle text or media paths. Local and cross-platform checks use the same
 report fields; display correctness still needs live qualification.
+
+`blend-subtitles=yes` renders subtitles into the video before the output-render stage, so the patched
+API cannot supply its geometry. `auto` preserves the setting and uses shadow geometry. To use patched
+geometry, set `blend-subtitles=no` in mpv or pass `--mpv-arg=--blend-subtitles=no` to `saitenka run`.
+Karaoke and color/alpha overrides stay scan-only when automatic selection falls back to shadow.
 
 ## Shadow measurement and coloring
 
