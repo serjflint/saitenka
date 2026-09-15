@@ -164,12 +164,16 @@ class MpvLayoutSource:
     def selection_reason(self) -> str:
         return self.fallback_reason or self.status
 
-    def invalidate(self) -> None:
+    def invalidate(self, *, shared: bool = True) -> None:
         self.current = None
-        self._pipeline.invalidate()
+        if shared:
+            self._pipeline.invalidate()
         if self.supported is not False:
             self.status = "invalidated"
-        self._ports.invalidate()
+        if shared:
+            self._ports.invalidate()
+        else:
+            self._ports.clear()
         self._dirty = True
         self._record_status()
 
@@ -185,7 +189,7 @@ class MpvLayoutSource:
         self.invalidate()
         self._ports.reschedule()
 
-    def input_changed(self) -> None:
+    def input_changed(self, *, shared: bool = True) -> None:
         if not self._ports.permitted():
             return
         option = self._ports.observe().prop("options/subtitle-layout")
@@ -195,7 +199,7 @@ class MpvLayoutSource:
         if self._configured and self._saw_enabled and option is False:
             self._restore = None
             self._external_disabled = True
-        self.invalidate()
+        self.invalidate(shared=shared)
         self._ports.reschedule()
 
     def refresh(self) -> None:

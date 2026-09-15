@@ -834,8 +834,8 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         if subtitle_presentation.native is not None:
             subtitle_presentation.native.record_clock_change(playback_observation.value)
 
-    def geometry_input_changed() -> None:
-        subtitle_presentation.geometry_changed()
+    def geometry_input_changed(property_name: str) -> None:
+        subtitle_presentation.geometry_changed(property_name)
 
     def pause_changed(*, paused: bool) -> None:
         log.debug("mpv pause -> %s", paused)

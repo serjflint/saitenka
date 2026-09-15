@@ -463,9 +463,9 @@ class SubtitlePresentation:
                 "This mpv does not provide the required subtitle layout capabilities.", "warn"
             )
 
-    def geometry_changed(self) -> None:
+    def geometry_changed(self, property_name: str = "") -> None:
         if self.layout is not None:
-            self.layout.input_changed()
+            self.layout.input_changed(shared=property_name != "subtitle-layout-revision")
         elif self.native is not None:
             self.refresh.arm()
 

@@ -250,7 +250,7 @@ class PlaybackApplication:
     observe_cue: Callable[[playback.ObservedCue], None]
     subtitle_selection_changed: Callable[[object], None]
     subtitle_timing_changed: Callable[[], None]
-    geometry_input_changed: Callable[[], None]
+    geometry_input_changed: Callable[[str], None]
     render_space_changed: Callable[[], None]
     end_of_file_changed: EndOfFileEffect
     pause_changed: PauseEffect
@@ -285,7 +285,7 @@ class PlaybackProjection:
         elif isinstance(delta, playback.SubtitleTimingChanged):
             target.subtitle_timing_changed()
         elif isinstance(delta, playback.GeometryInputChanged):
-            target.geometry_input_changed()
+            target.geometry_input_changed(delta.property_name)
         elif isinstance(delta, playback.RenderSpaceChanged):
             if delta.property_name == "osd-dimensions":
                 target.render_space_changed()

@@ -333,3 +333,70 @@ def test_fallback_hits_retire_before_refresh_on_geometry_input_change(name, valu
 
         assert not presentation.cue.current.boxes
         assert session.graph.tooltip.hit(*point) == -1
+
+
+@pytest.mark.parametrize("source_name", ["auto", "shadow"])
+def test_layout_revision_does_not_withdraw_unchanged_shadow_color(source_name):
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring, Palette
+
+    with live_reader(
+        native_visible=True,
+        cues=((0.0, 8.0, r"{\pos(640,650)\fscx90}猫を見る"),),
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])), Palette()),
+        layout=LayoutLiveOptions(
+            source_name, os.environ["SAITENKA_LAYOUT_MPV"], ("--sub-ass-override=no",)
+        ),
+    ) as (_, session, ipc):
+        before = session.graph.cue.draw_request()
+        assert color_ladder(before).devices
+
+        session.graph.playback.observe(
+            "subtitle-layout-revision", (ipc.query("subtitle-layout-revision") or 0) + 1
+        )
+
+        after = session.graph.cue.draw_request()
+        assert after.boxes == before.boxes
+        assert color_ladder(after).devices == color_ladder(before).devices
+
+
+@pytest.mark.parametrize("source_name", ["auto", "shadow"])
+def test_navigated_static_cue_keeps_color_after_layout_observations_settle(source_name):
+    import time
+
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring, Palette
+
+    with live_reader(
+        native_visible=True,
+        cues=(
+            (0.0, 2.0, r"{\pos(640,650)\fscx90}猫を見る"),
+            (2.0, 5.0, r"{\pos(640,650)\fscx90}犬を見る"),
+        ),
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫", "犬"])), Palette()),
+        layout=LayoutLiveOptions(
+            source_name, os.environ["SAITENKA_LAYOUT_MPV"], ("--sub-ass-override=no",)
+        ),
+    ) as (_, session, _ipc):
+        session.graph.subtitle_navigation.navigate(1)
+        poll_until(
+            session,
+            lambda: (
+                session.graph.playback.cue.text == "犬を見る"
+                and bool(color_ladder(session.graph.cue.draw_request()).devices)
+            ),
+            "navigation never colored the target cue",
+        )
+        for _ in range(20):
+            session.pump()
+            time.sleep(0.01)
+
+        request = session.graph.cue.draw_request()
+        assert request.text == "犬を見る"
+        assert color_ladder(request).devices
+        box = request.boxes[0]
+        assert session.graph.tooltip.hit(box.x + box.w // 2, box.y + box.h // 2) == box.index

@@ -47,6 +47,8 @@ logs.
 
 ### Fixed
 
+- Patched-mpv layout revisions no longer clear unchanged shadow geometry and coloring during
+  automatic fallback.
 - Failed subtitle raster uploads can retry identical pixels; pending overprints no longer count as
   acknowledged color. Late surface replies retain their rejected status in diagnostic reports.
 - Subtitle color masks preserve the unmodified native render instead of relying on pixels changed
