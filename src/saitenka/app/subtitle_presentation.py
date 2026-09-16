@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
+
+from saitenka_subtitles.geometry import PaintQualification
 
 from saitenka import otel_metrics
 from saitenka.app import geometry_refresh, native_subtitles
@@ -38,7 +39,6 @@ _LAYOUT_WARNINGS = {
     "ipc-failed": "the mpv geometry request failed",
     "ipc-unavailable": "the mpv geometry connection is unavailable",
 }
-_COLOR_EFFECT = re.compile(r"\\(?:[1-4]?[ac](?![a-z])|alpha|k|t\(|fad|fade|r)", re.IGNORECASE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,7 +322,12 @@ class SubtitlePresentation:
             return "no-scan-regions"
         if self._source == "mpv":
             return "scan-only-policy"
-        return "shadow-paint-unqualified"
+        snapshot = self.pipeline.current
+        return (
+            snapshot.paint_qualification.value
+            if snapshot is not None
+            else PaintQualification.MISSING.value
+        )
 
     def _warn_layout_failure(self, reason: str) -> None:
         detail = _LAYOUT_WARNINGS.get(reason)
@@ -400,43 +405,37 @@ class SubtitlePresentation:
     def _shadow_paint_allowed(self) -> bool:
         if self._source != "auto":
             return True
-        raw = self._ports.geometry().prop("sub-text/ass-full")
-        return isinstance(raw, str) and len(raw) <= 32768 and not _COLOR_EFFECT.search(raw)
+        snapshot = self.pipeline.current
+        return (
+            snapshot is not None
+            and snapshot.generation == self._shadow_generation == self.pipeline.generation
+            and snapshot.paint_qualification is PaintQualification.STATIC
+        )
 
     def _paint_ready(self) -> bool:
         if self._source != "auto" or self.layout is None or self.layout.current is None:
             return False
-        if self._shadow_generation != self.pipeline.generation or not self._shadow_boxes:
+        if not self._shadow_boxes or not self._shadow_paint_allowed():
             return False
-        raw = self._ports.geometry().prop("sub-text/ass-full")
+        snapshot = self.pipeline.current
+        if snapshot is None:
+            return False
+        events = snapshot.frame_id.active_event_ids
         frame = self.layout.current
-        if not isinstance(raw, str) or len(raw) > 32768:
-            return False
-        rows = raw.splitlines()
-        if len(rows) != 1 or not rows[0].startswith("Dialogue:"):
-            return False
-        fields = rows[0].split(",", 9)
-        if len(fields) != 10:
-            return False
-        plain = fields[9].replace(r"\N", "\n")
-        if plain != frame.text or any(c in plain for c in "{\\"):
-            return False
-        try:
-            start = sum(
-                float(v) * factor
-                for v, factor in zip(fields[1].split(":"), (3600, 60, 1), strict=True)
-            )
-            end = sum(
-                float(v) * factor
-                for v, factor in zip(fields[2].split(":"), (3600, 60, 1), strict=True)
-            )
-        except ValueError:
-            return False
-        return start == frame.start and end == frame.end
+        return len(events) == len(frame.events) and all(
+            event.start_ms == round(native.start * 1000)
+            and event.end_ms == round(native.end * 1000)
+            for event, native in zip(events, frame.events, strict=True)
+        )
 
     def _clear_layout(self) -> None:
         if self.using_layout:
-            self.clear_native_interaction()
+            if self._shadow_boxes and self._shadow_paint_allowed():
+                self._scan_source = "shadow"
+                self.cue.publish_geometry(self._shadow_boxes, (0, 0), paint_allowed=True)
+                self.draw()
+            else:
+                self.clear_native_interaction()
 
     def _clear_shadow(self) -> None:
         self._shadow_boxes = []
@@ -465,7 +464,27 @@ class SubtitlePresentation:
 
     def geometry_changed(self, property_name: str = "") -> None:
         if self.layout is not None:
-            self.layout.input_changed(shared=property_name != "subtitle-layout-revision")
+            if self.native is not None and property_name in {
+                "sub-text/ass-full",
+                "sub-start",
+                "sub-end",
+            }:
+                self.native.refresh(self._ports.geometry())
+            # Cue retirement and the shadow observation key own split cue updates.
+            shared = property_name not in {
+                "subtitle-layout-revision",
+                "options/subtitle-layout",
+                "sub-text/ass-full",
+                "sub-start",
+                "sub-end",
+            }
+            with otel_metrics.traced("subtitle_geometry_invalidate") as span:
+                span.set("property", property_name or "unspecified")
+                span.set("shared", shared)
+                span.set("generation_before", self.pipeline.generation)
+                span.set("cue_revision", self._ports.geometry().cue_revision)
+                self.layout.input_changed(shared=shared)
+                span.set("generation_after", self.pipeline.generation)
         elif self.native is not None:
             self.refresh.arm()
 

@@ -1296,16 +1296,18 @@ class NativeVisibleRenderer:
             # geometry has not landed and for a music marker that owes nothing, and telling them
             # apart meant joining to a decision span that is often absent — "no geometry decision
             # recorded" was the readout's most common verdict on the cue nobody could explain.
-            span.set("owed_color", request.owed_color if request.paint_allowed else 0)
+            span.set("owed_color", request.owed_color)
+            span.set("requested_color_tokens", request.owed_color)
+            span.set("permitted_color_tokens", request.owed_color if request.paint_allowed else 0)
+            span.set("suppressed_color_tokens", 0 if request.paint_allowed else request.owed_color)
             # Color that was on screen for this cue and is not now. The wait-to-color reading takes
             # the FIRST colored draw and stops, so a cue losing its color later is invisible to it;
             # three such drops were found by hand and none of them by the readout.
             digest = cue_digest(request.text)
             lost = bool(
-                request.paint_allowed
-                and self._painted_cue == digest
+                self._painted_cue == digest
                 and request.owed_color
-                and not request.boxes
+                and (not request.paint_allowed or not request.boxes)
             )
             span.set("lost_color", lost)
             if request.paint_allowed and request.boxes:

@@ -17,6 +17,7 @@ from saitenka_subtitles.document import (
     SubtitleEventId,
     SubtitleTrackId,
 )
+from saitenka_subtitles.geometry import PaintQualification
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -600,6 +601,39 @@ def _color_override(bgr: int | str) -> str:
 def has_karaoke_override(source: RawSubtitleEvent) -> bool:
     """Whether libass can sweep the event from secondary to primary color."""
     return any(_KARAOKE.search(block.content) for block in _blocks(source.raw_text))
+
+
+def qualify_prepared_paint(
+    source: RawSubtitleEvent, catalog: AssStyleCatalog
+) -> PaintQualification:
+    """Qualify a successfully rewritten event independently of scan geometry.
+
+    Color parsing and reset validation belong to the rewriter. These exclusions concern
+    time-varying coverage or transforms the shared paint devices have not qualified.
+    """
+    blocks = _blocks(source.raw_text)
+    styles = {source.style}
+    styles.update(
+        command.group("style").strip() or source.style
+        for block in blocks
+        for command in _COLOR_STATE.finditer(block.content)
+        if not command.group("color_command")
+    )
+    if any(int(catalog.primary_color(style), 16) >> 24 for style in styles):
+        return PaintQualification.ALPHA
+    if source.effect.strip() or any(_DYNAMIC.search(block.content) for block in blocks):
+        return PaintQualification.DYNAMIC
+    if has_karaoke_override(source):
+        return PaintQualification.KARAOKE
+    for block in blocks:
+        for command in block.content.split("\\")[1:]:
+            if command.startswith(("alpha", "1a", "2a", "3a", "4a")):
+                return PaintQualification.ALPHA
+            if command.startswith(("clip", "iclip")):
+                return PaintQualification.CLIPPING
+            if command.startswith(("fr", "fax", "fay", "p")) and not command.startswith("pos"):
+                return PaintQualification.TRANSFORM
+    return PaintQualification.STATIC
 
 
 def _apply_insertions(raw: str, insertions: Sequence[ColorInsertion]) -> str:

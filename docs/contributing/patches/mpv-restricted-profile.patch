@@ -1,20 +1,20 @@
 diff --git a/DOCS/man/input.rst b/DOCS/man/input.rst
-index ce9f58b25b..a269d79189 100644
+index ce9f58b25b..e37db579ec 100644
 --- a/DOCS/man/input.rst
 +++ b/DOCS/man/input.rst
 @@ -1111,8 +1111,7 @@ OSD Commands
      ``stale-identity``. An empty render is not a usable snapshot.
- 
+
      ``limits`` reports the effective aggregate bounds for events, parsed text
 -    bytes, layout units, outlines, outline points, bitmap pixels, emitted ink
 -    rectangles, and retained snapshot bytes. Exceeding one reports
 +    bytes, layout units, bitmap pixels, and retained snapshot bytes. Exceeding one reports
      ``limit-exceeded`` without affecting ordinary subtitle rendering.
- 
+
      A successful result additionally contains:
-@@ -1150,11 +1149,24 @@ OSD Commands
+@@ -1150,11 +1149,36 @@ OSD Commands
          grapheme, word, or code point in complex shaping mode.
- 
+
          ``logical_rects`` are pre-transform typographic boxes after line layout
 -        and collision placement. ``ink_rects`` are axis-aligned bounds of
 -        transformed fill outlines before clipping, blur, border, shadow, and
@@ -24,22 +24,34 @@ index ce9f58b25b..a269d79189 100644
 +        and collision placement. They do not represent final per-unit visible pixels.
 +
 +        The ``event-geometry-profile`` capability adds nullable ``geometry_profile``.
-+        ``static-logical-v1`` identifies a restricted source grammar checked by
-+        mpv against the exact rendered libass event: plain text, decimal karaoke
-+        timing tags (``k``, ``K``, ``kf``, ``ko``), and strict hexadecimal color
-+        and alpha tags. Unknown or malformed tags, event effects, rotation,
-+        vertical fonts and nonpositive style scales are excluded. Admission
-+        also requires mpv's requested libass pixel aspect to be 1, zero OSD margins and no ASS style
-+        override for authored ASS. Converted SubRip uses mpv's generated style.
++        ``static-logical-v2`` identifies a restricted source grammar checked by
++        mpv against the exact rendered libass event: plain text, one static
++        ``pos`` tag, positive decimal ``fscx``/``fscy`` tags, decimal karaoke
++        timing tags (``k``, ``K``, ``kf``, ``ko``), and hexadecimal color/alpha
++        tags. Color values allow up to eight digits and an optional trailing
++        ampersand; alpha values allow up to two digits. Unknown or malformed
++        tags, resets, effects, rotation, vertical fonts and nonpositive style
++        scales are excluded. Admission requires requested libass pixel aspect 1 and
++        no ASS style override for authored ASS. Converted SubRip uses mpv's
++        generated style. Rectangles already include OSD margins.
 +        Null means the event or rendering options are outside this profile,
 +        or the runtime lacks the event index needed to verify them.
++
++        The ``event-track-index`` capability adds ``track_index``, the event's
++        index in the exact rendered libass track. Sorting by this index follows
++        the traversal used by mpv's subtitle text properties. It is scoped to
++        the retained snapshot, not a persistent source-file identity. Filtered,
++        empty or unrendered events can be absent; clients must verify their
++        complete active-event binding rather than assuming positional equality.
++        ``sub-text/ass-full`` serializes times at centisecond precision while
++        event timing in the layout retains millisecond precision.
 +
 +        This profile describes logical geometry, not final pixel visibility,
 +        paint eligibility or a lease on future layout. Karaoke colors and alpha
 +        may change or hide text without changing its semantic regions. All
 +        snapshot validation and invalidation rules still apply. No outlines or
 +        additional libass output flags are required.
- 
+
      The snapshot is replaced atomically. Repeated fetches return identical data
      while the current ``snapshot_id`` and revision remain unchanged. Observe
 diff --git a/meson.build b/meson.build
@@ -72,15 +84,16 @@ index 21a1638ccf..8a663ea1d7 100644
          const ASS_RenderResult *result = ass_render_frame2(0, &request);
          return result && result->layout_status == ASS_LAYOUT_OK;
 diff --git a/player/command.c b/player/command.c
-index eb3012a1f9..1ba14992ed 100644
+index eb3012a1f9..f4abf25755 100644
 --- a/player/command.c
 +++ b/player/command.c
-@@ -5655,19 +5655,15 @@ static void cmd_subtitle_layout(void *p)
+@@ -5655,19 +5655,16 @@ static void cmd_subtitle_layout(void *p)
          node_map_add(root, "capabilities", MPV_FORMAT_NODE_ARRAY);
      node_array_add_string(capabilities, "events");
      node_array_add_string(capabilities, "unit-logical-rects");
 -    node_array_add_string(capabilities, "unit-ink-outline-rects");
 +    node_array_add_string(capabilities, "event-geometry-profile");
++    node_array_add_string(capabilities, "event-track-index");
      node_array_add_string(capabilities, "event-bitmap-bounds");
      struct mpv_node *limits =
          node_map_add(root, "limits", MPV_FORMAT_NODE_MAP);
@@ -96,18 +109,26 @@ index eb3012a1f9..1ba14992ed 100644
      node_map_add_int64(limits, "max_retained_bytes",
                         SUB_LAYOUT_MAX_RETAINED_BYTES);
  #else
-@@ -5775,6 +5771,10 @@ static void cmd_subtitle_layout(void *p)
+@@ -5767,6 +5764,7 @@ static void cmd_subtitle_layout(void *p)
+         snprintf(event_id, sizeof(event_id), "e%d", n);
+         node_map_add_string(event_node, "id", event_id);
+         node_map_add_int64(event_node, "order", n);
++        node_map_add_int64(event_node, "track_index", event->track_index);
+         node_map_add_double(event_node, "start", event->start);
+         if (event->end == MP_NOPTS_VALUE)
+             node_map_add(event_node, "end", MPV_FORMAT_NONE);
+@@ -5775,6 +5773,10 @@ static void cmd_subtitle_layout(void *p)
          node_map_add_bstr(event_node, "text",
                            (bstr){event->text, event->text_length});
          node_map_add_string(event_node, "text_index_unit", "utf8-byte");
 +        if (event->static_logical_profile)
-+            node_map_add_string(event_node, "geometry_profile", "static-logical-v1");
++            node_map_add_string(event_node, "geometry_profile", "static-logical-v2");
 +        else
 +            node_map_add(event_node, "geometry_profile", MPV_FORMAT_NONE);
- 
+
          struct mpv_node *units =
              node_map_add(event_node, "units", MPV_FORMAT_NODE_ARRAY);
-@@ -5788,10 +5788,7 @@ static void cmd_subtitle_layout(void *p)
+@@ -5788,10 +5790,7 @@ static void cmd_subtitle_layout(void *p)
              struct mpv_node *logical = node_map_add(
                  unit_node, "logical_rects", MPV_FORMAT_NODE_ARRAY);
              node_array_add_layout_rect(logical, unit->logical_bounds);
@@ -119,91 +140,42 @@ index eb3012a1f9..1ba14992ed 100644
          }
          if (event->has_bitmap_bounds) {
              node_add_layout_rect(event_node, "bitmap_bounds",
-diff --git a/sub/osd.c b/sub/osd.c
-index eb7d5b75ca..976a948855 100644
---- a/sub/osd.c
-+++ b/sub/osd.c
-@@ -110,6 +110,7 @@ static bool sub_layout_equal(const struct sub_layout *a,
-             (ae->text_length && memcmp(ae->text, be->text, ae->text_length)) ||
-             ae->start != be->start || ae->end != be->end ||
-             ae->has_bitmap_bounds != be->has_bitmap_bounds ||
-+            ae->static_logical_profile != be->static_logical_profile ||
-             !sub_layout_rect_equal(&ae->bitmap_bounds, &be->bitmap_bounds) ||
-             ae->num_units != be->num_units)
-             return false;
-@@ -120,14 +121,9 @@ static bool sub_layout_equal(const struct sub_layout *a,
-             if (au->text_start != bu->text_start ||
-                 au->text_end != bu->text_end || au->line != bu->line ||
-                 !sub_layout_rect_equal(&au->logical_bounds,
--                                       &bu->logical_bounds) ||
--                au->num_ink_bounds != bu->num_ink_bounds)
-+                                       &bu->logical_bounds))
-                 return false;
--            for (int i = 0; i < au->num_ink_bounds; i++) {
--                if (!sub_layout_rect_equal(&au->ink_bounds[i],
--                                           &bu->ink_bounds[i]))
--                    return false;
--            }
+diff --git a/sub/ass_layout_profile.h b/sub/ass_layout_profile.h
+new file mode 100644
+index 0000000000..19524cfa95
+--- /dev/null
++++ b/sub/ass_layout_profile.h
+@@ -0,0 +1,96 @@
++#ifndef MPV_ASS_LAYOUT_PROFILE_H
++#define MPV_ASS_LAYOUT_PROFILE_H
++#include <stdbool.h>
++#include <math.h>
++#include <stdlib.h>
++#include <string.h>
 +
-         }
-     }
-     return true;
-@@ -767,12 +763,7 @@ static struct sub_layout *sub_layout_copy(void *parent,
-             const struct sub_layout_unit *src_unit = &src_event->units[c];
-             struct sub_layout_unit *dst_unit = &dst_event->units[c];
-             *dst_unit = *src_unit;
--            dst_unit->ink_bounds = NULL;
--            if (src_unit->num_ink_bounds) {
--                dst_unit->ink_bounds = talloc_memdup(
--                    out, src_unit->ink_bounds,
--                    src_unit->num_ink_bounds * sizeof(src_unit->ink_bounds[0]));
--            }
++static bool layout_decimal(const unsigned char **cursor, double low, double high)
++{
++    const unsigned char *p = *cursor;
++    if (*p == '+' || *p == '-') p++;
++    unsigned digits = 0;
++    while (*p >= '0' && *p <= '9') { p++; digits++; }
++    if (*p == '.') {
++        p++;
++        while (*p >= '0' && *p <= '9') { p++; digits++; }
++    }
++    if (!digits || p - *cursor > 32) return false;
++    char *end;
++    double value = strtod((const char *)*cursor, &end);
++    if ((const unsigned char *)end != p || !isfinite(value) || value < low || value > high)
++        return false;
++    *cursor = p;
++    return true;
++}
 +
-         }
-     }
-     return out;
-diff --git a/sub/osd.h b/sub/osd.h
-index a523f03ac1..eec3b2be91 100644
---- a/sub/osd.h
-+++ b/sub/osd.h
-@@ -66,18 +66,13 @@ struct sub_layout_rect {
- #define SUB_LAYOUT_MAX_EVENTS 64
- #define SUB_LAYOUT_MAX_TEXT_BYTES (1024 * 1024)
- #define SUB_LAYOUT_MAX_UNITS 4096
--#define SUB_LAYOUT_MAX_OUTLINES 16384
--#define SUB_LAYOUT_MAX_OUTLINE_POINTS 65536
- #define SUB_LAYOUT_MAX_BITMAP_PIXELS (16 * 1024 * 1024)
--#define SUB_LAYOUT_MAX_INK_BOUNDS 8192
- #define SUB_LAYOUT_MAX_RETAINED_BYTES (1024 * 1024)
- 
- struct sub_layout_unit {
-     size_t text_start, text_end;
-     int line;
-     struct sub_layout_rect logical_bounds;
--    struct sub_layout_rect *ink_bounds;
--    int num_ink_bounds;
- };
- 
- struct sub_layout_event {
-@@ -88,6 +83,7 @@ struct sub_layout_event {
-     int num_units;
-     struct sub_layout_rect bitmap_bounds;
-     bool has_bitmap_bounds;
-+    bool static_logical_profile;
- };
- 
- enum sub_layout_unit_mode {
-diff --git a/sub/sd_ass.c b/sub/sd_ass.c
-index cff494490d..45e0287c9d 100644
---- a/sub/sd_ass.c
-+++ b/sub/sd_ass.c
-@@ -94,6 +94,80 @@ static bool layout_format_supported(struct sd *sd)
-                          !strcmp(sd->codec->codec, "subrip"));
- }
- 
 +static bool layout_static_text(const char *text)
 +{
 +    const unsigned char *p = (const unsigned char *)text;
++    bool positioned = false;
 +    while (*p) {
 +        if (*p == '}')
 +            return false;
@@ -214,7 +186,18 @@ index cff494490d..45e0287c9d 100644
 +                return false;
 +            bool timing = *p == 'k' || *p == 'K';
 +            bool alpha = false;
-+            if (timing) {
++            if (!strncmp((const char *)p, "pos(", 4)) {
++                if (positioned) return false;
++                positioned = true;
++                p += 4;
++                if (!layout_decimal(&p, -1000000, 1000000) || *p++ != ',' ||
++                    !layout_decimal(&p, -1000000, 1000000) || *p++ != ')')
++                    return false;
++            } else if (!strncmp((const char *)p, "fscx", 4) ||
++                       !strncmp((const char *)p, "fscy", 4)) {
++                p += 4;
++                if (!layout_decimal(&p, 0.000001, 10000)) return false;
++            } else if (timing) {
 +                bool lower = *p++ == 'k';
 +                if (lower && (*p == 'f' || *p == 'o'))
 +                    p++;
@@ -244,11 +227,11 @@ index cff494490d..45e0287c9d 100644
 +                while ((*p >= '0' && *p <= '9') ||
 +                       (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
 +                    p++;
-+                    if (++digits > (alpha ? 2 : 6))
++                    if (++digits > (alpha ? 2 : 8))
 +                        return false;
 +                }
-+                if (!digits || *p++ != '&')
-+                    return false;
++                if (!digits) return false;
++                if (*p == '&') p++;
 +            }
 +            if (*p != '\\' && *p != '}')
 +                return false;
@@ -258,6 +241,101 @@ index cff494490d..45e0287c9d 100644
 +    return true;
 +}
 +
++#endif
+diff --git a/sub/osd.c b/sub/osd.c
+index eb7d5b75ca..5d191138e2 100644
+--- a/sub/osd.c
++++ b/sub/osd.c
+@@ -110,6 +110,8 @@ static bool sub_layout_equal(const struct sub_layout *a,
+             (ae->text_length && memcmp(ae->text, be->text, ae->text_length)) ||
+             ae->start != be->start || ae->end != be->end ||
+             ae->has_bitmap_bounds != be->has_bitmap_bounds ||
++            ae->static_logical_profile != be->static_logical_profile ||
++            ae->track_index != be->track_index ||
+             !sub_layout_rect_equal(&ae->bitmap_bounds, &be->bitmap_bounds) ||
+             ae->num_units != be->num_units)
+             return false;
+@@ -120,14 +122,9 @@ static bool sub_layout_equal(const struct sub_layout *a,
+             if (au->text_start != bu->text_start ||
+                 au->text_end != bu->text_end || au->line != bu->line ||
+                 !sub_layout_rect_equal(&au->logical_bounds,
+-                                       &bu->logical_bounds) ||
+-                au->num_ink_bounds != bu->num_ink_bounds)
++                                       &bu->logical_bounds))
+                 return false;
+-            for (int i = 0; i < au->num_ink_bounds; i++) {
+-                if (!sub_layout_rect_equal(&au->ink_bounds[i],
+-                                           &bu->ink_bounds[i]))
+-                    return false;
+-            }
++
+         }
+     }
+     return true;
+@@ -767,12 +764,7 @@ static struct sub_layout *sub_layout_copy(void *parent,
+             const struct sub_layout_unit *src_unit = &src_event->units[c];
+             struct sub_layout_unit *dst_unit = &dst_event->units[c];
+             *dst_unit = *src_unit;
+-            dst_unit->ink_bounds = NULL;
+-            if (src_unit->num_ink_bounds) {
+-                dst_unit->ink_bounds = talloc_memdup(
+-                    out, src_unit->ink_bounds,
+-                    src_unit->num_ink_bounds * sizeof(src_unit->ink_bounds[0]));
+-            }
++
+         }
+     }
+     return out;
+diff --git a/sub/osd.h b/sub/osd.h
+index a523f03ac1..cbd61883de 100644
+--- a/sub/osd.h
++++ b/sub/osd.h
+@@ -66,18 +66,13 @@ struct sub_layout_rect {
+ #define SUB_LAYOUT_MAX_EVENTS 64
+ #define SUB_LAYOUT_MAX_TEXT_BYTES (1024 * 1024)
+ #define SUB_LAYOUT_MAX_UNITS 4096
+-#define SUB_LAYOUT_MAX_OUTLINES 16384
+-#define SUB_LAYOUT_MAX_OUTLINE_POINTS 65536
+ #define SUB_LAYOUT_MAX_BITMAP_PIXELS (16 * 1024 * 1024)
+-#define SUB_LAYOUT_MAX_INK_BOUNDS 8192
+ #define SUB_LAYOUT_MAX_RETAINED_BYTES (1024 * 1024)
+
+ struct sub_layout_unit {
+     size_t text_start, text_end;
+     int line;
+     struct sub_layout_rect logical_bounds;
+-    struct sub_layout_rect *ink_bounds;
+-    int num_ink_bounds;
+ };
+
+ struct sub_layout_event {
+@@ -88,6 +83,8 @@ struct sub_layout_event {
+     int num_units;
+     struct sub_layout_rect bitmap_bounds;
+     bool has_bitmap_bounds;
++    bool static_logical_profile;
++    int track_index;
+ };
+
+ enum sub_layout_unit_mode {
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+index cff494490d..38b6feddd3 100644
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -44,6 +44,9 @@
+ #include "dec_sub.h"
+ #include "ass_mp.h"
+ #include "packer.h"
++#if HAVE_LIBASS_LAYOUT
++#include "ass_layout_profile.h"
++#endif
+ #include "sd.h"
+
+ #define UNKNOWN_DURATION (INT_MAX / 1000)
+@@ -94,6 +97,23 @@ static bool layout_format_supported(struct sd *sd)
+                          !strcmp(sd->codec->codec, "subrip"));
+ }
+
 +static bool layout_static_event(ASS_Track *track, int index)
 +{
 +    if (index < 0 || index >= track->n_events)
@@ -278,36 +356,38 @@ index cff494490d..45e0287c9d 100644
  static bool layout_account(size_t *total, size_t count, size_t size)
  {
      if (count > (SUB_LAYOUT_MAX_RETAINED_BYTES - *total) / size)
-@@ -103,6 +177,7 @@ static bool layout_account(size_t *total, size_t count, size_t size)
+@@ -103,6 +123,7 @@ static bool layout_account(size_t *total, size_t count, size_t size)
  }
- 
+
  static struct sub_layout *build_sub_layout(const ASS_Layout *source,
 +                                           ASS_Track *track, bool profile_options,
                                             struct mp_osd_res dim,
                                             long long subtitle_ts,
                                             const char *source_format,
-@@ -148,7 +223,6 @@ static struct sub_layout *build_sub_layout(const ASS_Layout *source,
- 
+@@ -148,7 +169,6 @@ static struct sub_layout *build_sub_layout(const ASS_Layout *source,
+
      int event_index = 0;
      int total_units = 0;
 -    int total_ink_bounds = 0;
      for (ASS_LayoutEvent *src_event = source->events;
           src_event; src_event = src_event->next) {
          if (src_event->struct_size < ASS_FIELD_END(ASS_LayoutEvent, next) ||
-@@ -172,6 +246,9 @@ static struct sub_layout *build_sub_layout(const ASS_Layout *source,
+@@ -172,6 +192,11 @@ static struct sub_layout *build_sub_layout(const ASS_Layout *source,
              src_event->bitmap_bounds.w, src_event->bitmap_bounds.h,
          };
          event->has_bitmap_bounds = src_event->has_bitmap_bounds;
++        event->track_index = src_event->struct_size >= ASS_FIELD_END(ASS_LayoutEvent, event_index)
++            ? src_event->event_index : -1;
 +        event->static_logical_profile = profile_options &&
 +            src_event->struct_size >= ASS_FIELD_END(ASS_LayoutEvent, event_index) &&
 +            layout_static_event(track, src_event->event_index);
- 
+
          int num_units = 0;
          for (ASS_LayoutUnit *unit = src_event->units;
-@@ -203,42 +280,7 @@ static struct sub_layout *build_sub_layout(const ASS_Layout *source,
+@@ -203,42 +228,7 @@ static struct sub_layout *build_sub_layout(const ASS_Layout *source,
                  src_unit->logical_bounds.w, src_unit->logical_bounds.h,
              };
- 
+
 -            int num_outlines = 0;
 -            for (ASS_LayoutOutline *outline = src_unit->fill;
 -                 outline; outline = outline->next) {
@@ -348,7 +428,7 @@ index cff494490d..45e0287c9d 100644
          }
      }
      *status = SUB_LAYOUT_OK;
-@@ -970,12 +1012,9 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+@@ -970,12 +960,9 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
          } else {
              ASS_LayoutRequest limits = {
                  .struct_size = sizeof(limits),
@@ -361,17 +441,57 @@ index cff494490d..45e0287c9d 100644
                  .max_bitmap_pixels = SUB_LAYOUT_MAX_BITMAP_PIXELS,
              };
              ASS_RenderRequest request = {
-@@ -1000,8 +1039,11 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+@@ -1000,8 +987,10 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
                             ASS_FIELD_END(ASS_RenderResult, layout_status)) {
                      layout_status = SUB_LAYOUT_UNSUPPORTED;
                  } else if (result->layout_status == ASS_LAYOUT_OK) {
 -                    layout = build_sub_layout(result->layout, dim, ts,
 -                                              sd->codec->codec, &layout_status);
 +                    bool profile_options = !no_ass && scale == 1.0 &&
-+                        !dim.mt && !dim.mb && !dim.ml && !dim.mr &&
 +                        (converted || !shared_opts->ass_style_override[sd->order]);
 +                    layout = build_sub_layout(result->layout, track, profile_options,
 +                                              dim, ts, sd->codec->codec, &layout_status);
                  } else if (result->layout_status == ASS_LAYOUT_EMPTY) {
                      layout_status = SUB_LAYOUT_EMPTY;
                  } else if (result->layout_status == ASS_LAYOUT_LIMIT_EXCEEDED) {
+diff --git a/test/ass_layout_profile.c b/test/ass_layout_profile.c
+new file mode 100644
+index 0000000000..513175efb0
+--- /dev/null
++++ b/test/ass_layout_profile.c
+@@ -0,0 +1,23 @@
++#undef NDEBUG
++#include <assert.h>
++#include "sub/ass_layout_profile.h"
++
++int main(void)
++{
++    const char *valid[] = {
++        "text", "{\\pos(340,496)\\fscx50}A{\\fscx100}B",
++        "{\\pos(-5.5,+12)\\fscy150}M", "{\\c&H0000FFFF}yellow",
++        "{\\1c&HFFFF&}yellow", "{\\kf100}karaoke", "{\\alpha&H80&}alpha",
++    };
++    const char *invalid[] = {
++        "{\\pos(0,0)\\pos(1,1)}X", "{\\pos(1,)}X", "{\\pos(NaN,0)}X",
++        "{\\fscx0}X", "{\\fscy-1}X", "{\\fscxnan}X", "{\\fscx1e2}X",
++        "{\\t(\\fscx50)}X", "{\\clip(0,0,100,100)}X", "{\\move(1,2,3,4)}X",
++        "{\\frz5}X", "{\\rOther}X", "{\\c&H123456789}X", "{\\alpha&HFFF}X",
++        "{\\pos(1,2)", "}", "{\\p1}m 0 0 l 1 1", "{\\fscx}",
++    };
++    for (unsigned i = 0; i < sizeof(valid)/sizeof(valid[0]); i++)
++        assert(layout_static_text(valid[i]));
++    for (unsigned i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++)
++        assert(!layout_static_text(invalid[i]));
++}
+diff --git a/test/meson.build b/test/meson.build
+index ed20640346..a1111bf288 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -203,3 +203,7 @@ if refdir != ''
+         test('scale-zimg', scale_zimg, args: [refdir, outdir], suite: 'ffmpeg')
+     endif
+ endif
++
++layout_profile = executable('ass-layout-profile', 'ass_layout_profile.c',
++                            include_directories: incdir, dependencies: libm)
++test('ass-layout-profile', layout_profile)

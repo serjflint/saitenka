@@ -555,3 +555,122 @@ def test_incompatible_render_mode_warns_once_in_the_overlay(source_name, monkeyp
         assert session.graph.subtitle_presentation.using_layout is (source_name == "mpv")
     finally:
         session.close()
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_multiple_events_follow_track_order_with_independent_timing(reverse):
+    data = payload()
+    first = data["events"][0]
+    first["track_index"] = 7
+    second = deepcopy(first)
+    second.update(track_index=2, start=0.5, end=2.5)
+    second["units"][0]["logical_rects"][0]["x"] = 500
+    data["capabilities"].append("event-track-index")
+    data["events"] = [first, second] if reverse else [second, first]
+
+    layout = decode_layout(data)
+
+    assert layout.text == "猫犬\n猫犬"
+    assert layout.start is None and layout.end is None
+    assert [(e.track_index, e.start, e.end) for e in layout.events] == [(2, 0.5, 2.5), (7, 1, 3)]
+    regions = token_regions(layout, ((0, 1), (3, 4)))
+    assert regions[0][0].x == 500
+    assert regions[1][0].x == 100
+    assert token_regions(layout, ((2, 3),)) == ((),)
+
+
+def test_duplicate_snapshot_event_identity_refuses_binding():
+    data = payload()
+    data["capabilities"].append("event-track-index")
+    data["events"][0]["track_index"] = 2
+    data["events"].append(deepcopy(data["events"][0]))
+
+    with pytest.raises(ValueError, match="layout-event-identity"):
+        decode_layout(data)
+
+
+def test_multiple_event_unit_limit_is_aggregate():
+    data = payload()
+    data["capabilities"].append("event-track-index")
+    data["events"][0]["track_index"] = 2
+    data["events"][0]["units"] *= 1025
+    second = deepcopy(data["events"][0])
+    second["track_index"] = 3
+    data["events"].append(second)
+
+    with pytest.raises(ValueError, match="layout-unit-count"):
+        decode_layout(data)
+
+
+def test_v2_letterbox_regions_already_include_the_margin():
+    data = payload()
+    data["space"].update(width=3024, height=1898, margin_top=98, margin_bottom=99)
+    data["events"][0]["geometry_profile"] = "static-logical-v2"
+    data["events"][0]["units"][0]["logical_rects"] = [{"x": 315, "y": 413, "w": 76, "h": 152}]
+
+    layout = decode_layout(data)
+
+    assert token_regions(layout, ((0, 1),))[0][0].y == 413
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_multiple_event_acquisition_matches_mpv_centisecond_rows(mismatch):
+    ipc = LayoutIPC()
+    data = payload()
+    data["capabilities"].append("event-track-index")
+    first = data["events"][0]
+    first.update(track_index=7, start=1.005, end=3.009)
+    second = deepcopy(first)
+    second.update(track_index=2, start=0.505, end=2.507)
+    second["units"][0]["logical_rects"][0]["x"] = 500
+    data["events"] = [first, second]
+    ipc.layout = data
+    ipc.props["sub-text/ass-full"] = (
+        (
+            "Dialogue: 1,0:00:00.50,0:00:02.50,Default,,0,0,0,,猫犬\n"
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫犬"
+        ).replace("0:00:02.50", "0:00:02.51")
+        if mismatch
+        else (
+            "Dialogue: 1,0:00:00.50,0:00:02.50,Default,,0,0,0,,猫犬\n"
+            "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫犬"
+        )
+    )
+    token = Token("猫犬", "猫犬", "", "名詞", 0, 2)
+    seen = GeometryObservation(
+        prop=ipc.props.get,
+        osd=(1280, 720),
+        text="猫犬\n猫犬",
+        tokens=[token, token],
+        lines=[[token], [token]],
+        index=None,
+        normalise=str,
+        nav_index=-1,
+        cue_hint=None,
+        cue_revision=1,
+        is_skippable=lambda _: False,
+    )
+    frames = []
+    pipeline = SubtitleModeCoordinator(NullRenderer())
+    producer = MpvLayoutSource(
+        ipc,
+        pipeline,
+        LayoutPorts(
+            observe=lambda: seen,
+            clear=frames.clear,
+            invalidate=frames.clear,
+            publish=lambda boxes: frames.append(boxes) is None,
+            reschedule=lambda: None,
+            permitted=lambda: True,
+            unavailable=lambda: None,
+            changed=lambda: None,
+        ),
+        formats="all",
+    )
+    producer.refresh()
+    producer.refresh()
+
+    assert bool(frames) is not mismatch
+    if frames:
+        assert token_at(frames[-1], (510, 110), (0, 0), is_skippable=lambda _: False) == 0
+        assert token_at(frames[-1], (110, 110), (0, 0), is_skippable=lambda _: False) == 1

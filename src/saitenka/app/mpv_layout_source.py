@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
+from saitenka_subtitles.ass import decode_ass_event, parse_ass_event_line
+from saitenka_subtitles.document import SubtitleTrackId
 from saitenka_subtitles.mpv_layout import (
     LayoutSnapshot,
     decode_layout,
@@ -46,6 +48,7 @@ def _binding(seen: GeometryObservation) -> tuple[object, ...]:
         seen.prop("sub-start"),
         seen.prop("sub-end"),
         seen.prop("subtitle-layout-revision"),
+        seen.prop("sub-text/ass-full"),
         tuple((token.surface, token.start, token.end) for token in seen.tokens),
     )
 
@@ -61,11 +64,35 @@ def _matches(layout: LayoutSnapshot, seen: GeometryObservation, formats: str) ->
         playing == [layout.playlist_entry_id]
         and seen.prop("sid") == layout.track_id
         and layout.text == seen.text
-        and layout.start == seen.prop("sub-start")
-        and layout.end == seen.prop("sub-end")
+        and _event_binding_matches(layout, seen)
         and layout.size == seen.osd
         and layout.revision == seen.prop("subtitle-layout-revision")
         and (layout.format == "ass" or formats == "all")
+    )
+
+
+def _event_binding_matches(layout: LayoutSnapshot, seen: GeometryObservation) -> bool:
+    if len(layout.events) == 1:
+        return layout.start == seen.prop("sub-start") and layout.end == seen.prop("sub-end")
+    raw = seen.prop("sub-text/ass-full")
+    if not isinstance(raw, str) or len(raw.encode("utf-8")) > 131072:
+        return False
+    rows = raw.splitlines()
+    if len(rows) != len(layout.events):
+        return False
+    try:
+        decoded = [
+            decode_ass_event(parse_ass_event_line(row, SubtitleTrackId("mpv-frame"), i))
+            for i, row in enumerate(rows)
+        ]
+    except (TypeError, ValueError):
+        return False
+    return all(
+        event.text == item.text
+        # mpv serializes ass-full times at centisecond precision.
+        and round(event.start * 1000) // 10 * 10 == item.source.identity.start_ms
+        and round(event.end * 1000) // 10 * 10 == item.source.identity.end_ms
+        for event, item in zip(layout.events, decoded, strict=True)
     )
 
 

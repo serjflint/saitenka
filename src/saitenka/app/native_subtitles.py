@@ -1528,6 +1528,7 @@ class NativeSubtitleGeometry:
             prepared.ass,
             native_ass=source,
             document_metadata=prepared.document_metadata,
+            paint_qualification=prepared.paint_qualification,
             pixel_aspect=cue.pixel_aspect,
             margins=cue.margins,
             use_margins=cue.use_margins,

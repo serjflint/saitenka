@@ -931,6 +931,7 @@ class LibassGeometryBackend:
             tokens,
             libass_version=library_version,
             mask_source="native-original" if request.native_ass else "request-document",
+            paint_qualification=request.paint_qualification,
         )
 
     def close(self) -> None:

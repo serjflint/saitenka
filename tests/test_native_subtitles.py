@@ -317,6 +317,7 @@ class FakeBackend:
             request.timestamp_ms,
             request.variant,
             tokens,
+            paint_qualification=request.paint_qualification,
         )
 
     def close(self) -> None:
@@ -397,13 +398,16 @@ def reader(
     scorer=None,
     annotation_jobs: bool = False,
     annotations_ready: bool = True,
+    geometry_source: str = "shadow",
 ) -> tuple[TestSession, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
     ipc = FakeIPC(annotation_jobs=annotation_jobs)
     backend = FakeBackend()
     options = ReaderOptions(
-        subtitle_geometry=SubtitleGeometryOptions(native_visible=native_visible),
+        subtitle_geometry=SubtitleGeometryOptions(
+            native_visible=native_visible, source=geometry_source
+        ),
         prefetch=False,
     )
     # Overlay egress is a composition decision, so the surface path is only correlated when a test
@@ -416,7 +420,7 @@ def reader(
             dictionaries=_ExistsDS() if annotations_ready else None,
         ),
         infrastructure=SessionInfrastructure(
-            geometry=backend,
+            geometry=backend if geometry_source == "shadow" else None,
         ),
         options=options,
     )
@@ -4823,3 +4827,69 @@ def test_an_unread_font_environment_waits_instead_of_warning(
     assert "subtitle-font-environment-unread" in caplog.text
     assert "changed mid-track" not in caplog.text
     result.close()
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize(
+    ("prefix", "style_alpha", "allowed"),
+    [
+        (r"{\pos(340,496)\fscx50\c&H0000FFFF}", False, True),
+        (r"{\rTranslucent}", True, False),
+        (r"{\kf100}", False, False),
+        (r"{\alpha&H80&}", False, False),
+    ],
+)
+@pytest.mark.parametrize("withdraw_rows", [False, True])
+def test_auto_fallback_uses_the_prepared_event_paint_policy(
+    tmp_path, monkeypatch, prefix, style_alpha, allowed, withdraw_rows
+):
+    monkeypatch.setattr(
+        "saitenka.app.session.factory._geometry_backend", lambda _settings: FakeBackend()
+    )
+    result, ipc, _backend = reader(
+        tmp_path,
+        geometry_source="auto",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    presentation = result.graph.subtitle_presentation
+    source = ASS.decode().replace(",,猫を見る", ",," + prefix + "猫を見る")
+    if style_alpha:
+        style = next(line for line in source.splitlines() if line.startswith("Style:"))
+        source = source.replace(
+            style,
+            style
+            + "\n"
+            + style.replace("Default,", "Translucent,").replace("&H00FFFFFF", "&H80FFFFFF"),
+        )
+    path = tmp_path / "qualified.ass"
+    path.write_text(source)
+    assert presentation.native is not None
+    presentation.native.set_source(path)
+    row = next(line for line in source.splitlines() if line.startswith("Dialogue:"))
+    try:
+        ipc.set_prop("sub-text/ass-full", row)
+        ipc.set_prop("sub-text", "猫を見る")
+        result.pump()
+        result.graph.cue.settle()
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+
+        if withdraw_rows:
+            ipc.set_prop("sub-text/ass-full", "")
+            result.pump()
+            settle_geometry(result, ipc)
+
+        request = result.graph.cue.draw_request()
+        assert request.boxes
+        assert request.paint_allowed is allowed
+        assert presentation.pipeline.current is not None
+        assert presentation.pipeline.current.paint_qualification == (
+            "static-supported"
+            if allowed
+            else "alpha"
+            if style_alpha or "alpha" in prefix
+            else "karaoke"
+        )
+    finally:
+        result.close()

@@ -17,14 +17,15 @@ Automatic fallback keeps the existing presentation pipeline and mpv subtitles vi
 If neither source supplies qualified geometry, scan regions remain empty. Explicit `mpv` stays scan-only
 and refuses incompatible snapshots. A repeated incompatibility warns once per reason per connection.
 
-Native scan regions currently require one matching ASS event (or converted SubRip with
-`native_formats = "all"`). Multiple events, ambiguous shaping clusters, transformed or clipped text,
+Native scan regions require matching ASS events (or converted SubRip with
+`native_formats = "all"`). The experimental v2 profile supports static positions, scales, display
+margins, and overlaps with proven event ordering. Ambiguous shaping clusters, transformed or clipped text,
 and unsupported rendering options are refused by that source. `auto` can retain scanning through
 qualified shadow geometry for those cases. Invisible or unlit karaoke syllables can remain
 scannable: these are logical text regions, not a visibility mask.
 
-In `auto`, ordinary untagged dialogue may retain independently qualified shadow coloring.
-Karaoke and color/alpha overrides receive invisible scan regions only: no Saitenka text overprint,
+In `auto`, static dialogue, including authored speaker colors, may retain independently qualified
+shadow coloring. Karaoke and unqualified alpha effects receive invisible scan regions only: no Saitenka text overprint,
 tint, hover outline, or level underline. Tooltip and mining behavior use the same cue and token
 identity as the existing pipeline. Geometry is withdrawn on observed cue, track, size, option,
 profile, or connection changes; mpv validation is a point-in-time check, not a display-frame lease.
@@ -54,7 +55,7 @@ report fields; display correctness still needs live qualification.
 `blend-subtitles=yes` renders subtitles into the video before the output-render stage, so the patched
 API cannot supply its geometry. `auto` preserves the setting and uses shadow geometry. To use patched
 geometry, set `blend-subtitles=no` in mpv or pass `--mpv-arg=--blend-subtitles=no` to `saitenka run`.
-Karaoke and color/alpha overrides stay scan-only when automatic selection falls back to shadow.
+Karaoke and unqualified alpha effects stay scan-only when automatic selection falls back to shadow.
 
 ## Shadow measurement and coloring
 

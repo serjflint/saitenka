@@ -838,3 +838,20 @@ def test_a_timeline_times_the_color_of_every_cue_that_colors(tmp_path, monkeypat
             result.close()
     assert colored, "no appearance owed color — the timeline proves nothing about the timer"
     assert snap["saitenka.subtitle.color_latency_ms"]["count"] == len(colored)
+
+
+def test_policy_withdrawal_preserves_demand_and_reports_lost_color(tmp_path, monkeypatch):
+    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+    try:
+        _show(result, ipc, TIMELINE[0])
+        presentation = result.graph.subtitle_presentation
+        presentation.cue.replace_geometry(paint_allowed=False)
+        presentation.pipeline.draw_current(presentation.target())
+
+        draw = _draws(spans)[-1]
+        assert draw["requested_color_tokens"] > 0
+        assert draw["owed_color"] == draw["suppressed_color_tokens"]
+        assert draw["permitted_color_tokens"] == 0
+        assert draw["lost_color"] is True
+    finally:
+        result.close()

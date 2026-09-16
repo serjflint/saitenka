@@ -16,6 +16,16 @@ MAX_GEOMETRY_TOKENS = 4_096
 MAX_BITMAP_BYTES = 16 * 1_024 * 1_024
 
 
+class PaintQualification(StrEnum):
+    MISSING = "missing-coherent-evidence"
+    STATIC = "static-supported"
+    KARAOKE = "karaoke"
+    ALPHA = "alpha"
+    DYNAMIC = "dynamic-geometry"
+    CLIPPING = "clipping"
+    TRANSFORM = "unsupported-drawing-transform"
+
+
 @dataclass(frozen=True, slots=True)
 class Rect:
     x: int
@@ -233,6 +243,7 @@ class GeometryRequest:
     native_ass: bytes = b""
     document_metadata: tuple[tuple[str, int], ...] = field(default=(), compare=False)
     source_kind: str = field(default="unknown", compare=False)
+    paint_qualification: PaintQualification = PaintQualification.MISSING
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -269,6 +280,7 @@ class GeometryRequest:
             # color device, silently. Free while the only producer derives it from the palette
             # hashed above — and this is what keeps that from being the thing holding it true.
             repr(self.keep_coverage),
+            self.paint_qualification.value,
         ):
             digest.update(value.encode())
             digest.update(b"\0")
@@ -318,6 +330,9 @@ class GeometrySnapshot:
     tokens: tuple[TokenGeometry, ...]
     libass_version: int | None = field(default=None, compare=False, kw_only=True)
     mask_source: str = field(default="unknown", compare=False, kw_only=True)
+    paint_qualification: PaintQualification = field(
+        default=PaintQualification.MISSING, kw_only=True
+    )
 
     @property
     def coverage_bytes(self) -> int:

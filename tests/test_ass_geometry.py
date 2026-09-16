@@ -300,3 +300,27 @@ def test_a_style_that_typesets_nothing_reports_libass_own_defaults() -> None:
             False,
             False,
         )
+
+
+@pytest.mark.parametrize(
+    ("prefix", "reason"),
+    [
+        (r"{\pos(340,496)\fscx50\c&H0000FFFF}", "static-supported"),
+        (r"{\c&HFFFF&}猫{\r}", "static-supported"),
+        (r"{\kf100}", "karaoke"),
+        (r"{\alpha&H80&}", "alpha"),
+        (r"{\iclip(0,0,100,100)}", "clipping"),
+        (r"{\frz10}", "unsupported-drawing-transform"),
+    ],
+)
+def test_prepared_frame_carries_paint_qualification(prefix, reason):
+    source = ASS.decode().replace(",,猫を見る\n", ",," + prefix + "猫を見る\n").encode()
+    track = SubtitleTrackId("track")
+    rows, text = authored_ass_rows_at(source, track, 1500)
+
+    prepared = prepare_ass_hit_map_frame(
+        source, track, active_rows=rows, text=text, tokens=(TokenAnnotation(0, 0, 1),)
+    )
+
+    assert prepared.paint_qualification == reason
+    assert prepared.palette

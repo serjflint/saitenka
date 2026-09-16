@@ -47,6 +47,9 @@ logs.
 
 ### Fixed
 
+- Automatic subtitle coloring uses the prepared event policy, preserving static speaker colors
+  across cached geometry. Suppressed color demand and policy-driven withdrawal remain visible in traces.
+
 - Patched-mpv layout revisions no longer clear unchanged shadow geometry and coloring during
   automatic fallback.
 - Failed subtitle raster uploads can retry identical pixels; pending overprints no longer count as

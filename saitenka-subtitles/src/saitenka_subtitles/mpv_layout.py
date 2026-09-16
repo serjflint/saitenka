@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import math
 from bisect import bisect_left
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from typing import Any
 
 from saitenka_subtitles.geometry import Rect
 
 CAPABILITIES = frozenset({"events", "unit-logical-rects", "event-geometry-profile"})
+MAX_EVENTS = 64
 MAX_UNITS = 4096
 MAX_TEXT_BYTES = 32768
 
@@ -23,6 +24,15 @@ class LayoutUnit:
 
 
 @dataclass(frozen=True, slots=True)
+class LayoutEvent:
+    track_index: int
+    text: str
+    start: float
+    end: float
+    units: tuple[LayoutUnit, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class LayoutSnapshot:
     snapshot_id: str
     revision: int
@@ -32,9 +42,10 @@ class LayoutSnapshot:
     format: str
     size: tuple[int, int]
     text: str
-    start: float
-    end: float
+    start: float | None
+    end: float | None
     units: tuple[LayoutUnit, ...]
+    events: tuple[LayoutEvent, ...]
 
 
 def _object(value: Any) -> dict[str, Any]:
@@ -53,6 +64,14 @@ def _number(value: Any) -> float:
     if type(value) not in {int, float} or abs(value) > 10**9 or not math.isfinite(value):
         raise ValueError("layout-number")
     return float(value)
+
+
+def _text(value: Any) -> str:
+    if not isinstance(value, str) or not value or len(value) > MAX_TEXT_BYTES:
+        raise ValueError("layout-text")
+    if len(value.encode("utf-8")) > MAX_TEXT_BYTES:
+        raise ValueError("layout-text")
+    return value
 
 
 def supports_layout(value: object) -> bool:
@@ -84,7 +103,7 @@ def _regions(value: Any, size: tuple[int, int]) -> tuple[Rect, ...]:
 
 
 def decode_layout(value: object) -> LayoutSnapshot:
-    """Accept one static logical event; ambiguous simultaneous events have no action binding."""
+    """Decode bounded final-output regions, preserving every event's timing and identity."""
     data = _object(value)
     if not supports_layout(data):
         raise ValueError("layout-capabilities")
@@ -93,19 +112,17 @@ def decode_layout(value: object) -> LayoutSnapshot:
             raise ValueError("layout-unsupported-render-mode")
         raise ValueError("layout-unavailable")
     events = data.get("events")
-    if not isinstance(events, list) or len(events) != 1:
+    if not isinstance(events, list) or not 0 < len(events) <= MAX_EVENTS:
         raise ValueError("layout-event-count")
+    if len(events) > 1:
+        return _decode_multiple(data, events)
     event = _object(events[0])
-    if event.get("geometry_profile") != "static-logical-v1":
+    if event.get("geometry_profile") not in {"static-logical-v1", "static-logical-v2"}:
         raise ValueError("layout-geometry-profile")
     if event.get("text_index_unit") != "utf8-byte":
         raise ValueError("layout-text-index")
-    text = event.get("text")
-    if not isinstance(text, str) or not text or len(text) > MAX_TEXT_BYTES:
-        raise ValueError("layout-text")
+    text = _text(event.get("text"))
     encoded = text.encode("utf-8")
-    if len(encoded) > MAX_TEXT_BYTES:
-        raise ValueError("layout-text")
     space = _object(data.get("space"))
     if (space.get("name"), space.get("render_origin"), space.get("rect_semantics")) != (
         "osd",
@@ -116,9 +133,15 @@ def decode_layout(value: object) -> LayoutSnapshot:
     size = (_integer(space.get("width"), 1, 16384), _integer(space.get("height"), 1, 16384))
     if _number(space.get("display_par")) <= 0:
         raise ValueError("layout-par")
-    if any(
-        _number(space.get(key)) != 0
+    margins = tuple(
+        _number(space.get(key))
         for key in ("margin_top", "margin_bottom", "margin_left", "margin_right")
+    )
+    if (
+        any(value < 0 for value in margins)
+        or margins[0] + margins[1] >= size[1]
+        or margins[2] + margins[3] >= size[0]
+        or (any(margins) and event.get("geometry_profile") != "static-logical-v2")
     ):
         raise ValueError("layout-margins")
     track = _object(data.get("track"))
@@ -165,6 +188,42 @@ def decode_layout(value: object) -> LayoutSnapshot:
         start,
         end,
         tuple(decoded),
+        (LayoutEvent(_integer(event.get("track_index", 0)), text, start, end, tuple(decoded)),),
+    )
+
+
+def _decode_multiple(data: dict[str, Any], raw_events: list[Any]) -> LayoutSnapshot:
+    if "event-track-index" not in data["capabilities"]:
+        raise ValueError("layout-event-count")
+    events = [_object(event) for event in raw_events]
+    indices = [_integer(event.get("track_index")) for event in events]
+    if len(set(indices)) != len(indices):
+        raise ValueError("layout-event-identity")
+    texts = [_text(event.get("text")) for event in events]
+    if sum(len(text.encode("utf-8")) for text in texts) + len(texts) - 1 > MAX_TEXT_BYTES:
+        raise ValueError("layout-text")
+    if any(not isinstance(event.get("units"), list) for event in events):
+        raise ValueError("layout-unit-count")
+    if sum(len(event["units"]) for event in events) > MAX_UNITS:
+        raise ValueError("layout-unit-count")
+    parts = [
+        decode_layout({**data, "events": [event]})
+        for _, event in sorted(zip(indices, events, strict=True))
+    ]
+    units: list[LayoutUnit] = []
+    offset = 0
+    for part in parts:
+        units.extend(
+            replace(unit, start=unit.start + offset, end=unit.end + offset) for unit in part.units
+        )
+        offset += len(part.text.encode("utf-8")) + 1
+    return replace(
+        parts[0],
+        text="\n".join(part.text for part in parts),
+        start=None,
+        end=None,
+        units=tuple(units),
+        events=tuple(part.events[0] for part in parts),
     )
 
 

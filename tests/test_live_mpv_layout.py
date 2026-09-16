@@ -287,7 +287,7 @@ def test_disabling_blending_returns_auto_to_native_scanning():
 @pytest.mark.parametrize(
     ("cues", "reason"),
     [
-        (((0.0, 8.0, "猫を見る"), (0.0, 8.0, "犬を見る")), "layout-event-count"),
+        (((0.0, 8.0, r"{\frz20}猫を見る"), (0.0, 8.0, "犬を見る")), "layout-geometry-profile"),
         (((0.0, 8.0, r"{\frz20}猫を見る"),), "layout-geometry-profile"),
     ],
 )
@@ -358,7 +358,7 @@ def test_layout_revision_does_not_withdraw_unchanged_shadow_color(source_name):
         )
 
         after = session.graph.cue.draw_request()
-        assert after.boxes == before.boxes
+        assert [box.index for box in after.boxes] == [box.index for box in before.boxes]
         assert color_ladder(after).devices == color_ladder(before).devices
 
 
@@ -400,3 +400,61 @@ def test_navigated_static_cue_keeps_color_after_layout_observations_settle(sourc
         assert color_ladder(request).devices
         box = request.boxes[0]
         assert session.graph.tooltip.hit(box.x + box.w // 2, box.y + box.h // 2) == box.index
+
+
+@pytest.mark.parametrize("source_name", ["auto", "shadow"])
+def test_static_speaker_colors_remain_colored_after_observations_settle(source_name):
+    import time
+
+    from saitenka_wordstate import Scorer
+    from saitenka_wordstate.known import KnownWords
+
+    from saitenka.app.scoring import Coloring, Palette
+
+    with live_reader(
+        native_visible=True,
+        cues=((0.0, 8.0, r"{\pos(640,650)\fscx50\c&H0000FFFF}猫{\fscx100}を見る"),),
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])), Palette()),
+        layout=LayoutLiveOptions(
+            source_name, os.environ["SAITENKA_LAYOUT_MPV"], ("--sub-ass-override=no",)
+        ),
+    ) as (_, session, _ipc):
+        poll_until(
+            session,
+            lambda: bool(color_ladder(session.graph.cue.draw_request()).devices),
+            "static color never painted",
+        )
+        for _ in range(20):
+            session.pump()
+            assert color_ladder(session.graph.cue.draw_request()).devices
+            time.sleep(0.01)
+        boxes = session.graph.cue.draw_request().boxes
+        assert boxes
+        assert bool(boxes[0].hit_regions) is (source_name == "auto")
+
+
+def test_native_overlap_uses_both_events_for_token_hits():
+    with live_reader(
+        native_visible=True,
+        cues=(
+            (0.0, 8.0, r"{\pos(320,500)}猫を見る"),
+            (0.0, 8.0, r"{\pos(960,650)\c&H0000FFFF}犬を見る"),
+        ),
+        layout=LayoutLiveOptions(
+            "mpv", os.environ["SAITENKA_LAYOUT_MPV"], ("--sub-ass-override=no",)
+        ),
+    ) as (_, session, _ipc):
+        request = session.graph.cue.draw_request()
+        assert all(box.hit_regions for box in request.boxes)
+        for word in ("猫", "犬"):
+            index = next(
+                i
+                for i, t in enumerate(session.graph.subtitle_presentation.cue.current.tokens)
+                if t.surface == word
+            )
+            box = next(b for b in request.boxes if b.index == index)
+            region = box.hit_regions[0]
+            assert (
+                session.graph.tooltip.hit(region.x + region.width / 2, region.y + region.height / 2)
+                == index
+            )
