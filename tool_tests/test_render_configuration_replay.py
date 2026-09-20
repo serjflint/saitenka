@@ -11,6 +11,28 @@ from saitenka.app.render_evidence import GeometryEvidence, registry
 from saitenka.app.subtitle_fonts import FontEnvironment
 
 
+@pytest.fixture(autouse=True)
+def enabled_evidence(monkeypatch, tmp_path):
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+
+    from saitenka import otel_metrics
+    from saitenka.app import telemetry
+    from saitenka.app.otel_export import CTFSpanProcessor
+
+    gate = otel_metrics.ActiveGate()
+    gate.set(value=True)
+    processor = CTFSpanProcessor(tmp_path / "trace.json", gate, start_thread=False)
+    provider = TracerProvider()
+    provider.add_span_processor(processor)
+    monkeypatch.setattr(otel_metrics, "span_gate", gate)
+    monkeypatch.setattr(telemetry, "span_gate", gate)
+    monkeypatch.setattr(telemetry, "_span_processor", processor)
+    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+    yield
+    provider.shutdown()
+
+
 def _envelope():
     return {"effective_runtime_configuration": registry.snapshot()}
 

@@ -270,7 +270,8 @@ def test_connection_replacement_fences_late_stage_reply(old_reply_first):
     assert acknowledgments[0]["connection_epoch"] == 1
 
 
-def test_runtime_clock_and_entry_retirement_survive_without_tracing(monkeypatch):
+@pytest.mark.usefixtures("enabled_telemetry")
+def test_runtime_clock_and_entry_retirement_survive_trace_export(monkeypatch):
     from saitenka.app import render_evidence
     from saitenka.mpvio.diagnostics import payload_hash
 
@@ -291,6 +292,7 @@ def test_runtime_clock_and_entry_retirement_survive_without_tracing(monkeypatch)
     assert "private subtitle" not in str(snapshot)
 
 
+@pytest.mark.usefixtures("enabled_telemetry")
 def test_history_eviction_remains_visible_in_report(monkeypatch):
     from saitenka.app import render_evidence
     from saitenka.app.timed_osd_evidence import LIMIT

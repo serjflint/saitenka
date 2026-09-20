@@ -569,25 +569,38 @@ def _collect_metadata(session: str | None) -> dict[str, str]:
     }
 
 
-def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict, dict]:
+def _summary_health(raw: dict) -> dict:
     from saitenka.app.color_evidence import safe_color_metrics
+    from saitenka.app.report_schema import count, operation_health
+
+    health = operation_health(raw)
+    if raw.get("sampled"):
+        health.update(status="partial", sampled=True)
+    if raw.get("diagnostic_loss"):
+        health.update(status="partial", diagnostic_loss=count(raw["diagnostic_loss"]))
+    health["subtitle_color"] = safe_color_metrics(raw.get("subtitle_color_metrics"))
+    return health
+
+
+def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict, dict]:
     from saitenka.app.option_evidence import safe_snapshot as safe_options
     from saitenka.app.paths import cache_dir
     from saitenka.app.player_evidence import safe_snapshot
     from saitenka.app.query_evidence import safe_snapshot as safe_queries
     from saitenka.app.render_evidence import safe_runtime_configuration
-    from saitenka.app.report_schema import SCHEMA_VERSION, count, operation_health, safe_identity
+    from saitenka.app.report_schema import SCHEMA_VERSION, count, safe_identity
 
-    producer: dict = {"status": "unavailable"}
-    health: dict = {"status": "unavailable"}
-    runtime: dict = {"status": "unknown"}
-    player: dict = {"status": "unknown"}
-    queries: dict = {"status": "unknown"}
-    options: dict = {"status": "unknown"}
+    producer: dict = {"status": "not-collected"}
+    health: dict = {"status": "not-collected"}
+    runtime: dict = {"status": "not-collected"}
+    player: dict = {"status": "not-collected"}
+    queries: dict = {"status": "not-collected"}
+    options: dict = {"status": "not-collected"}
     if session is not None and re.fullmatch(r"[A-Za-z0-9_-]{1,80}", session):
         path = cache_dir() / "diagnostics" / f"session-{session}.json"
         try:
             _, raw = _diagnostic_json(path)
+            health = {"status": "unavailable"}
             if raw.get("session") != session:
                 producer = {"status": "session-mismatch"}
             elif type(raw.get("schema")) is not int or raw["schema"] != SCHEMA_VERSION:
@@ -603,14 +616,16 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dic
                     if raw.get("end") == "shutdown-observed"
                     else "unknown",
                 }
-                health = operation_health(raw)
-                health["subtitle_color"] = safe_color_metrics(raw.get("subtitle_color_metrics"))
+                health = _summary_health(raw)
                 runtime = safe_runtime_configuration(raw.get("runtime_configuration"))
                 player = safe_snapshot(raw.get("player_configuration"))
                 queries = safe_queries(raw.get("player_queries"))
                 options = safe_options(raw.get("session_configuration"))
+        except FileNotFoundError:
+            pass
         except (OSError, ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
             producer = {"status": "unreadable-or-too-large"}
+            health = {"status": "unavailable"}
     return producer, health, runtime, player, queries, options
 
 

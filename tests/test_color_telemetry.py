@@ -115,6 +115,7 @@ def test_repeated_target_has_readable_timestamp_and_distinct_occurrences(monkeyp
     assert all(target["text_hash"] == "text-digest" for target in targets)
 
 
+@pytest.mark.usefixtures("enabled_telemetry")
 def test_color_outcome_survives_real_trace_export(monkeypatch, caplog):
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
@@ -126,6 +127,9 @@ def test_color_outcome_survives_real_trace_export(monkeypatch, caplog):
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     try:
         with _telemetry():
@@ -146,36 +150,38 @@ def test_color_outcome_survives_real_trace_export(monkeypatch, caplog):
     assert "Invalid type NoneType" not in caplog.text
 
 
+@pytest.mark.usefixtures("enabled_telemetry")
 def test_stale_ack_is_reported_without_attributing_it_to_replacement():
-    rows = []
-    telemetry = ColorTelemetry(FakeIPC(), clock=lambda: 0.0, evidence=rows.append)
+    from saitenka.app.telemetry import diagnostic_snapshot
+
+    telemetry = ColorTelemetry(FakeIPC(), clock=lambda: 0.0, configuration_owner=1)
     telemetry.bind((1000, "a" * 32))
     old = telemetry.submit(1, "overprint", frozenset({0}))
     telemetry.bind((2000, "b" * 32))
     telemetry.settle(old, accepted=True)
-    assert rows[-1] == {
-        "event": "subtitle_color_stale_ack",
-        "color_session": telemetry.session,
-        "occurrence": 1,
-        "device": "overprint",
-        "write": 1,
-        "accepted": False,
-    }
+    history = diagnostic_snapshot("runtime_configuration")["owners"][0]["whole_cue"]["history"]
+    stale = next(row for row in history if row["event"] == "subtitle_color_stale_ack")
+    assert stale["occurrence"] == 1
+    assert stale["device"] == "overprint"
+    assert stale["accepted"] is False
     assert telemetry.current.snapshot(0).acknowledged == 0
     telemetry.retire("shutdown")
 
 
-def test_report_separates_cue_to_submit_from_ack_wait():
+@pytest.mark.usefixtures("enabled_telemetry")
+def test_report_separates_cue_to_submit_from_ack_wait(monkeypatch):
     now = [0.0]
-    rows = []
-    telemetry = ColorTelemetry(FakeIPC(), clock=lambda: now[0], evidence=rows.append)
+    rows = record_spans(monkeypatch)
+    telemetry = ColorTelemetry(FakeIPC(), clock=lambda: now[0])
     telemetry.bind((1000, "a" * 32))
     telemetry.qualify(1, frozenset({0}), frozenset({0}))
     now[0] = 0.003
     write = telemetry.submit(1, "overprint", frozenset({0}))
     now[0] = 0.007
     telemetry.settle(write, accepted=True)
-    times = {row["event"]: row["elapsed_ms"] for row in rows if "elapsed_ms" in row}
+    times = {
+        row["name"]: row["attrs"]["elapsed_ms"] for row in rows if "elapsed_ms" in row["attrs"]
+    }
     assert times["subtitle_color_submit"] == pytest.approx(3)
     assert times["subtitle_color_ack"] == pytest.approx(7)
     telemetry.retire("shutdown")

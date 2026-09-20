@@ -178,7 +178,7 @@ def record_cue_arrival(cue: str) -> None:
     not restart the clock — it would report a wait shorter than the one actually sat through.
     """
     global _color_wait
-    if not cue:
+    if not cue or subtitle_color_latency_ms is None:
         return
     with _color_wait_lock:
         if _color_wait is not None and _color_wait[0] == cue:
@@ -302,10 +302,24 @@ def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
         histogram.record((time.perf_counter() - start) * 1000.0, attributes or None)
 
 
-#: Memoized resolution of `opentelemetry.trace`: `None` = not yet checked, ``False`` = confirmed
-#: unavailable (the telemetry extra isn't installed — this can't change at runtime, so caching
-#: it forever is correct). Avoids re-attempting (and re-catching ImportError from) a failing import
-#: on every single call from a hot call site like `traced()`.
+class ActiveGate:
+    """Cheap recording gate; concurrent flips may admit or omit one boundary span."""
+
+    __slots__ = ("_on",)
+
+    def __init__(self) -> None:
+        self._on = False
+
+    def __bool__(self) -> bool:
+        return self._on
+
+    def set(self, *, value: bool) -> None:
+        self._on = value
+
+
+span_gate = ActiveGate()
+
+# None means unresolved; False memoizes an unavailable optional SDK.
 _trace_available: bool | None = None
 _trace_module: ModuleType | None = None
 
@@ -321,6 +335,9 @@ def _resolve_trace_module() -> ModuleType | None:
     depend on some earlier test in the same process having resolved the module first.
     """
     global _trace_available, _trace_module
+
+    if not span_gate:
+        return None
     if _trace_available is False:
         return None
     if _trace_module is None:
@@ -485,34 +502,29 @@ class DeferredSpan:
     submitting thread does next, and it outlives that scope anyway.
     """
 
-    __slots__ = ("_finished", "_lock", "_operation", "_span")
+    __slots__ = ("_finished", "_lock", "_span")
 
     def __init__(self, name: str, **attributes: str) -> None:
-        from saitenka.operation_summary import operations
-
-        self._operation = operations.start(name)
         self._finished = False
         self._lock = threading.Lock()
         trace = _resolve_trace_module()
         if trace is None:
             self._span: Any | None = None
             return
-        span = trace.get_tracer("saitenka.overlay").start_span(name)
+        span = trace.get_tracer("saitenka.overlay").start_span(
+            name, attributes={"timing": "operation-lifetime"}
+        )
         span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
-        span.set_attribute("timing", "operation-lifetime")
         for k, v in {**_causal_attributes(trace), **attributes}.items():
             span.set_attribute(k, v)
         self._span = span
 
     def finish(self, **attributes: object) -> None:
-        from saitenka.operation_summary import operations
-
         with self._lock:
             if self._finished:
                 return
             self._finished = True
             span, self._span = self._span, None
-        operations.finish(self._operation, str(attributes.get("outcome", "unknown")))
         if span is None:
             return
         for k, v in attributes.items():

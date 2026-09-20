@@ -7,10 +7,11 @@ import pytest
 from test_mpv_gateway import FakeIPC
 from test_render_evidence import _setup as _runtime_setup
 
-from saitenka import operation_summary
 from saitenka.app import report, telemetry
 from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.runtime import SessionMailbox
+
+pytestmark = pytest.mark.usefixtures("enabled_telemetry")
 
 
 def _load_findings():
@@ -55,7 +56,6 @@ def test_missing_evidence_cannot_satisfy_a_fault_contract(case):
 
 def _setup(monkeypatch, tmp_path):
     _runtime_setup(monkeypatch, tmp_path)
-    monkeypatch.setattr(operation_summary, "operations", operation_summary.OperationSummary())
 
 
 @pytest.mark.timeout(5)

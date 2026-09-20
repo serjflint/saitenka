@@ -221,7 +221,9 @@ class SubtitlePresentation:
         if settings.native_visible and renderer is None:
             current = NativeVisibleRenderer(coloring=settings.coloring)
         self.pipeline = SubtitleModeCoordinator(current, backend)
-        self.color_telemetry = ColorTelemetry(ipc, evidence=self.pipeline.record_whole_cue)
+        self.color_telemetry = ColorTelemetry(
+            ipc, configuration_owner=self.pipeline.configuration_owner
+        )
         self.visual = visual
         self.cue = CueRenderStore()
         self._ports = ports
@@ -246,7 +248,10 @@ class SubtitlePresentation:
             "whole-cue-auto",
         }:
             self.timed = TimedOsd(
-                ipc, ports.geometry, self._timed_changed, evidence=self.pipeline.record_timed_osd
+                ipc,
+                ports.geometry,
+                self._timed_changed,
+                configuration_owner=self.pipeline.configuration_owner,
             )
             current.timed = self.timed
         if not settings.native_visible:

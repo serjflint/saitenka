@@ -2882,11 +2882,7 @@ def presented_overpaints(ipc) -> list[tuple[int, int, int, int]]:
 
 
 @pytest.mark.timeout(5)
-def test_failed_overpaint_upload_does_not_suppress_identical_retry(monkeypatch, tmp_path):
-    from saitenka import operation_summary
-
-    summary = operation_summary.OperationSummary()
-    monkeypatch.setattr(operation_summary, "operations", summary)
+def test_failed_overpaint_upload_does_not_suppress_identical_retry(tmp_path, diagnostic_trace):
     result, ipc, _backend = reader(
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
     )
@@ -2904,10 +2900,9 @@ def test_failed_overpaint_upload_does_not_suppress_identical_retry(monkeypatch, 
         settle_jobs(result, ipc)
 
         assert presented_overpaints(ipc)
+        events, _ = diagnostic_trace()
         outcomes = {
-            row["outcome"]
-            for row in summary.snapshot()["outcomes"]
-            if row["operation"] == "subtitle_device_upload"
+            row["args"]["outcome"] for row in events if row["name"] == "subtitle_device_upload"
         }
         assert "failed" in outcomes
         assert "acknowledged" in outcomes
@@ -4979,9 +4974,14 @@ def test_track_load_in_blank_gap_prepares_first_cue_before_arrival(tmp_path, del
 
 
 @pytest.mark.parametrize("scenario", ["initial", "resume", "arrival"])
+@pytest.mark.parametrize("tracing", [False, True])
 def test_track_load_stages_timed_color_before_first_cue_notification(
-    tmp_path, monkeypatch, scenario
+    tmp_path, monkeypatch, scenario, tracing
 ):
+    if tracing:
+        from telemetry_helpers import enable_telemetry
+
+        enable_telemetry(monkeypatch, tmp_path)
     result, ipc, _backend = reader(
         tmp_path,
         coloring="whole-cue-osd",
@@ -5046,6 +5046,10 @@ def test_track_load_stages_timed_color_before_first_cue_notification(
             assert result.graph.subtitle_presentation.pipeline.current is None
     finally:
         result.close()
+        if tracing:
+            from saitenka.app import telemetry
+
+            telemetry.shutdown()
 
 
 def test_late_stock_capability_reply_repaints_ready_cue(tmp_path, monkeypatch):

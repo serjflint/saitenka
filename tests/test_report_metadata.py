@@ -8,7 +8,6 @@ import zipfile
 import pytest
 
 from saitenka.app import report, report_schema
-from saitenka.operation_summary import OperationSummary
 
 
 def _environment(monkeypatch, tmp_path):
@@ -21,13 +20,19 @@ def _environment(monkeypatch, tmp_path):
     )
 
     monkeypatch.setattr(render_evidence, "registry", render_evidence.EvidenceRegistry())
-    monkeypatch.setattr(option_evidence, "registry", render_evidence.EvidenceRegistry())
-    monkeypatch.setattr(profile_evidence, "registry", render_evidence.EvidenceRegistry())
-    monkeypatch.setattr(player_evidence, "registry", render_evidence.EvidenceRegistry())
+    monkeypatch.setattr(
+        option_evidence, "registry", render_evidence.EvidenceRegistry(kind="session_configuration")
+    )
+    monkeypatch.setattr(
+        profile_evidence, "registry", render_evidence.EvidenceRegistry(kind="profiles")
+    )
+    monkeypatch.setattr(
+        player_evidence, "registry", render_evidence.EvidenceRegistry(kind="player_configuration")
+    )
     monkeypatch.setattr(
         query_evidence,
         "registry",
-        render_evidence.EvidenceRegistry(max_owners=query_evidence.MAX_OWNERS),
+        render_evidence.EvidenceRegistry(kind="player_queries"),
     )
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
     config = tmp_path / "overlay.toml"
@@ -137,8 +142,8 @@ def test_missing_producer_is_unknown_not_collector_identity(monkeypatch, tmp_pat
 
     payload = _envelope()
 
-    assert payload["producer"] == {"status": "unavailable"}
-    assert payload["operation_health"] == {"status": "unavailable"}
+    assert payload["producer"] == {"status": "not-collected"}
+    assert payload["operation_health"] == {"status": "not-collected"}
     assert payload["identity_comparison"]["status"] == "unknown"
 
 
@@ -226,7 +231,7 @@ def test_invalid_config_reports_no_effective_values(monkeypatch, tmp_path, body,
     payload = _envelope()
 
     assert payload["configuration"] == {"status": status}
-    assert payload["effective_runtime_configuration"]["status"] == "unknown"
+    assert payload["effective_runtime_configuration"]["status"] == "not-collected"
 
 
 def test_config_allowlist_rejects_wrong_types_and_nonfinite_values():
@@ -282,12 +287,11 @@ def test_invalid_operation_counts_cannot_claim_clean_health(pending):
     assert "pending_total" not in result
 
 
-def test_empty_producer_summary_is_written_without_tracing(monkeypatch, tmp_path):
-    from saitenka import operation_summary, session
+def test_disabled_telemetry_reports_not_collected_without_writing_summary(monkeypatch, tmp_path):
+    from saitenka import session
     from saitenka.app import telemetry
 
     _environment(monkeypatch, tmp_path)
-    monkeypatch.setattr(operation_summary, "operations", OperationSummary())
     monkeypatch.setattr(session, "session_id", lambda: "private-session")
     monkeypatch.setattr(telemetry, "is_enabled", lambda: False)
     (tmp_path / "overlay.log").write_text('{"session":"private-session"}\n')
@@ -295,10 +299,9 @@ def test_empty_producer_summary_is_written_without_tracing(monkeypatch, tmp_path
     telemetry.save_operation_summary()
 
     payload = _envelope()
-    assert payload["producer"]["status"] == "collected"
-    assert payload["producer"]["identity"] == payload["collector"]
-    assert payload["operation_health"]["pending_total"] == 0
-    assert set(payload["operation_health"]["terminal_totals"].values()) == {0}
+    assert payload["producer"]["status"] == "not-collected"
+    assert payload["operation_health"]["status"] == "not-collected"
+    assert not (tmp_path / "diagnostics").exists()
 
 
 def test_timestamp_collision_preserves_original_bundle(monkeypatch, tmp_path):
@@ -316,11 +319,10 @@ def test_timestamp_collision_preserves_original_bundle(monkeypatch, tmp_path):
 
 
 def test_empty_cli_shutdown_does_not_publish_a_session_summary(monkeypatch, tmp_path):
-    from saitenka import operation_summary, session
+    from saitenka import session
     from saitenka.app import telemetry
 
     _environment(monkeypatch, tmp_path)
-    monkeypatch.setattr(operation_summary, "operations", OperationSummary())
     monkeypatch.setattr(session, "session_id", lambda: "cli")
 
     telemetry.save_operation_summary(end="shutdown-observed")

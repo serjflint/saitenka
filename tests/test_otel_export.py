@@ -16,7 +16,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from util import await_ready, validate_ctf_document
 
-from saitenka.app.otel_export import CTFSpanProcessor, _span_to_ctf_event
+from saitenka.app.otel_export import CTFSpanProcessor, SummaryOptions, _span_to_ctf_event
 from saitenka.app.telemetry import ActiveGate
 
 GOLDEN_TRACE = Path(__file__).resolve().parent / "golden" / "sample_trace.json"
@@ -56,6 +56,121 @@ def test_ctf_event_shape():
     # entirely: `parent_id` names the edge, and 34 bytes of "same root" was 10.6% of a real file.
     assert "parent_id" not in event["args"]
     assert "trace_id" not in event["args"]
+
+
+def test_summary_pending_counts_only_deferred_operations(tmp_path):
+    summary = tmp_path / "session.json"
+    processor, _ = _on_gate(path=tmp_path / "trace.json", summary=SummaryOptions(summary, {}))
+    provider = TracerProvider(resource=Resource.create({}))
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer("test")
+    with (
+        tracer.start_as_current_span("ordinary"),
+        tracer.start_as_current_span("upload", attributes={"timing": "operation-lifetime"}),
+    ):
+        processor.force_flush()
+        snapshot = json.loads(summary.read_text())
+    provider.shutdown()
+
+    assert snapshot["pending"] == {"upload": 1}
+    assert snapshot["outcomes"] == []
+    assert snapshot["diagnostic_loss"] == 0
+
+
+def test_summary_queue_loss_cannot_claim_complete_operation_counts(tmp_path, monkeypatch):
+    from saitenka.app import report
+    from saitenka.session import session_id
+
+    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path))
+    summary = tmp_path / "diagnostics" / f"session-{session_id()}.json"
+    processor, _ = _on_gate(
+        path=tmp_path / "trace.json", summary=SummaryOptions(summary, {}), maxsize=1
+    )
+    span = _make_span(timing="operation-lifetime", outcome="succeeded")
+    processor.on_end(span)
+    processor.on_end(span)
+
+    processor.shutdown()
+    _, health, *_ = report._metadata_producer(session_id())
+
+    assert health["status"] == "partial"
+    assert health["diagnostic_loss"] == 1
+    assert sum(health["terminal_totals"].values()) == 1
+
+
+def test_pending_census_overflow_is_explicit_in_summary(tmp_path):
+    summary = tmp_path / "session.json"
+    processor, _ = _on_gate(path=tmp_path / "trace.json", summary=SummaryOptions(summary, {}))
+    provider = TracerProvider(resource=Resource.create({}))
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer("test")
+    spans = [
+        tracer.start_span("upload", attributes={"timing": "operation-lifetime"}) for _ in range(257)
+    ]
+    try:
+        processor.force_flush()
+        snapshot = json.loads(summary.read_text())
+    finally:
+        for span in spans:
+            span.end()
+        provider.shutdown()
+
+    assert snapshot["pending"] == {"upload": 256}
+    assert snapshot["diagnostic_loss"] == 1
+
+
+def test_summary_retains_only_ten_sessions(tmp_path):
+    import os
+
+    for index in range(12):
+        path = tmp_path / f"session-old-{index}.json"
+        path.write_text("{}")
+        os.utime(path, ns=(index, index))
+    current = tmp_path / "session-current.json"
+    processor, _ = _on_gate(path=tmp_path / "trace.json", summary=SummaryOptions(current, {}))
+
+    processor.shutdown()
+
+    assert len(list(tmp_path.glob("session-*.json"))) == 10
+    assert current.exists()
+    assert not (tmp_path / "session-old-2.json").exists()
+
+
+def test_truncated_diagnostic_record_does_not_stop_trace_or_summary_export(tmp_path):
+    from opentelemetry.sdk.trace import SpanLimits
+
+    summary = tmp_path / "session.json"
+    path = tmp_path / "trace.json"
+    processor, _ = _on_gate(path=path, summary=SummaryOptions(summary, {}))
+    provider = TracerProvider(
+        resource=Resource.create({}), span_limits=SpanLimits(max_attribute_length=32)
+    )
+    provider.add_span_processor(processor)
+    tracer = provider.get_tracer("test")
+    with tracer.start_as_current_span(
+        "diagnostic_record",
+        attributes={
+            "kind": "profiles",
+            "owner": 1,
+            "action": "snapshot",
+            "record": json.dumps({"owner": 1, "requested": {"language": "jp"}}),
+        },
+    ):
+        pass
+    with tracer.start_as_current_span(
+        "after", attributes={"timing": "operation-lifetime", "outcome": "succeeded"}
+    ):
+        pass
+
+    provider.shutdown()
+    payload = json.loads(summary.read_text())
+
+    assert payload["diagnostic_loss"] == 1
+    assert payload["outcomes"] == [{"operation": "after", "outcome": "succeeded", "count": 1}]
+    assert [row["name"] for row in json.loads(path.read_text())["traceEvents"]] == [
+        "diagnostic_record",
+        "after",
+    ]
 
 
 def test_exception_class_survives_export_without_private_message(tmp_path):

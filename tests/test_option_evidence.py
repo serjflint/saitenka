@@ -23,6 +23,8 @@ from saitenka.app.features.profiles.profile_controller import (
 from saitenka.app.launch.run import RunFlags, _build_run_options
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 
+pytestmark = pytest.mark.usefixtures("enabled_telemetry")
+
 
 @pytest.mark.parametrize(
     "mode", ["legacy", "whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"]

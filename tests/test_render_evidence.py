@@ -7,11 +7,14 @@ from dataclasses import replace
 
 import pytest
 from saitenka_subtitles.geometry import FontProvider, FontSetup, RendererState
+from telemetry_helpers import enable_telemetry
 from test_report_metadata import _environment
 from test_subtitle_pipeline import FakeCurrentRenderer, FakeGeometryBackend, request
 
 from saitenka.app import render_evidence, report, telemetry
 from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
+
+pytestmark = pytest.mark.usefixtures("enabled_telemetry")
 
 
 @pytest.mark.timeout(5)
@@ -113,6 +116,7 @@ def _setup(monkeypatch, tmp_path):
     config = _environment(monkeypatch, tmp_path)
     monkeypatch.setattr(session, "session_id", lambda: "runtime-test")
     (tmp_path / "overlay.log").write_text('{"session":"runtime-test"}\n')
+    enable_telemetry(monkeypatch, tmp_path)
     return config
 
 

@@ -9,6 +9,8 @@ from util import record_spans
 
 from saitenka.app import native_subtitles, player_evidence
 
+pytestmark = pytest.mark.usefixtures("enabled_telemetry")
+
 
 def test_every_native_gate_option_has_an_explicit_sharing_policy():
     assert set(native_subtitles.GATE_OPTIONS) == player_evidence.OPTIONS

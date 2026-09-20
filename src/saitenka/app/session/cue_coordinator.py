@@ -86,6 +86,7 @@ class CueCoordinator:
         self._identity_ever_installed = False
         self._settled_hooks: list[Callable[[], None]] = []
         self._settling = False
+        self._cue_start_ms: int | None = None
 
     def on_settled(self, hook: Callable[[], None]) -> None:
         """Run `hook` after a cue observation has been reconciled — the cue-driven boundary for
@@ -113,7 +114,7 @@ class CueCoordinator:
         o = self._o
         cue, self._pending = self._pending, None
         if cue is None:
-            self._refine_color_occurrence()
+            self._refine_cue_identity()
             otel_metrics.record_cue_settle("no-observation")
             return
         if self._restore_navigation_transient(cue.text):
@@ -133,19 +134,17 @@ class CueCoordinator:
                 otel_metrics.record_cue_settle(settled, span)
         finally:
             self._settling = False
-        self._refine_color_occurrence()
+        self._refine_cue_identity()
         self._run_settled_hooks()
 
-    def _refine_color_occurrence(self) -> None:
+    def _refine_cue_identity(self) -> None:
         o = self._o
-        tracker = o.presentation.color_telemetry
         if (
-            tracker.current is not None
-            and tracker.cue_start_ms is None
+            self._cue_start_ms is None
             and o.playback.cue.text.strip()
             and not o.track_commands.navigation.current.sub_settle.open
         ):
-            self._track_color_occurrence(o.playback.cue.text, provisional=False)
+            self._update_cue_identity(o.playback.cue.text, provisional=False)
 
     def _run_settled_hooks(self) -> None:
         for hook in self._settled_hooks:
@@ -165,7 +164,7 @@ class CueCoordinator:
             "sub-text change: %d chars, paused=%s", len(text.strip()), o.playback.value("pause")
         )
         _track_color_wait(text)
-        self._track_color_occurrence(text, provisional=provisional_navigation)
+        self._update_cue_identity(text, provisional=provisional_navigation)
         with otel_metrics.instrumented(
             otel_metrics.cue_redraw_duration_ms, "cue_redraw", cue=cue_digest(text)
         ):
@@ -238,10 +237,11 @@ class CueCoordinator:
         self.apply_annotation_transition(transition, draw=True)
         o.presentation.pipeline.flush_focus(o.presentation.target())
 
-    def _track_color_occurrence(self, text: str, *, provisional: bool) -> None:
+    def _update_cue_identity(self, text: str, *, provisional: bool) -> None:
         o = self._o
         tracker = o.presentation.color_telemetry
         if not text.strip():
+            self._cue_start_ms = None
             tracker.retire("blank")
             return
         navigation = o.track_commands.navigation.current
@@ -260,13 +260,14 @@ class CueCoordinator:
             }
             start = candidates.pop() if len(candidates) == 1 else None
         state = o.playback.state
+        self._cue_start_ms = None if start is None else round(float(start) * 1000)
         tracker.bind(
             (
                 state.connection.epoch,
                 state.media.source,
                 state.track.track,
                 state.track.role,
-                None if start is None else round(float(start) * 1000),
+                self._cue_start_ms,
                 hashlib.blake2s(text.encode(), digest_size=16).hexdigest(),
             ),
             reconcile=(not provisional and navigation.sub_settle.open),
@@ -405,7 +406,7 @@ class CueCoordinator:
             record_whole_cue=o.presentation.pipeline.record_whole_cue,
             whole_cue_identity=(
                 hashlib.blake2s(o.playback.cue.text.encode(), digest_size=16).hexdigest(),
-                o.presentation.color_telemetry.cue_start_ms,
+                self._cue_start_ms,
                 o.presentation.pipeline.generation,
             ),
             whole_cue=(
@@ -524,6 +525,7 @@ class CueCoordinator:
 
     def replace_source(self, path: object = None, *, reason: str) -> None:
         o = self._o
+        self._cue_start_ms = None
         o.presentation.invalidate_timed("source-replaced")
         o.presentation.color_telemetry.retire("source-changed")
         o.navigation.retire_settle()

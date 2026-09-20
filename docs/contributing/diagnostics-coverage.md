@@ -14,6 +14,13 @@ operation counts. Matching identity fields do not prove identical loaded code: e
 change while a process is running. The config subset is attributed to the collector's file, not the
 player's effective configuration.
 
+Runtime diagnostics require `telemetry.enabled = true`. When disabled, reports mark runtime
+evidence as `not-collected`; they cannot establish successful zero counts. When enabled, producers
+enqueue individual records through OpenTelemetry. Its existing writer owns the bounded histories
+and report summary; cue processing never copies retained history. Queue loss, malformed diagnostic
+records and sampling mark operation health as partial. The OTel SDK kill switch disables collection.
+Playback identity and cached subtitle publication do not depend on recording.
+
 Native geometry contributes a separate producer-side configuration history: frame/storage dimensions,
 aspect, margins, renderer parameters, feature flags and text-free font-setup metadata. Foreground and
 prefetch render spans identify their owner and configuration revision; accepted publication has its
@@ -35,7 +42,7 @@ not shared. Both histories are bounded to four owners; process-local constructio
 a reconstruction of every later override.
 
 Accepted geometry also retains aggregate same-renderer verdicts and mask-eviction counts. These
-survive tracing-off collection and warm-cache publication; stale generations cannot become current
+survive warm-cache publication while recording is enabled; stale generations cannot become current
 findings. They describe redraw eligibility and retained coverage, not upload or physical pixels.
 The bounded `renderer_selection` history distinguishes an explicit legacy-mode request from the
 post-draw ownership state. Repeated unchanged draws do not consume history; missing older records
@@ -47,7 +54,7 @@ identifies changes in the recorded subset or configured font paths, not every po
 survive invalidation/close. Evicted references are marked rather than silently joined to newer values.
 Retained spans may reference owners or revisions no longer present in the bounded report.
 No publication record certifies displayed pixels. Collection adds no IPC queries, pixel probes or
-font hashing; the existing background summary writer persists the bounded snapshot.
+font hashing; the OpenTelemetry writer persists the bounded snapshot.
 
 `player_configuration` separately records the option values read when native geometry evaluates a
 configuration, including configurations it refuses. Numeric, boolean and enumerated values are
@@ -153,8 +160,9 @@ that contract does not itself prove the fault was injected. Missing evidence can
 stale-result control. The reported fault denominator is separate from the larger scenario inventory;
 families without a declared executed fault contract remain unqualified.
 The detail tier includes the same metadata envelope as the default report, selected from the same
-log session as its trace. Allowlisted per-operation health counts identify failing boundaries even
-without tracing; pending work is not proof of a crash and a failed boundary is not its root cause.
+log session as its trace. Allowlisted per-operation health counts identify failing boundaries without
+sharing detailed traces; recording must be enabled. Pending work is not proof of a crash and a failed
+boundary is not its root cause.
 It also diagnoses recorded player query/admission failures from metadata-only reports. Retained
 mailbox-to-reducer joins have their own denominator; missing terminals can mean in-flight work or
 lost evidence. Neither those joins nor a successful query qualify pixels or benchmark cost.

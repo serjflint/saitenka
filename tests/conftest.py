@@ -16,6 +16,18 @@ import saitenka.app.backlog as _backlog  # noqa: E402  # must come after the sys
 import saitenka.app.dictdb as _dictdb  # noqa: E402  # must come after the sys.path setup above
 import saitenka.app.features.mining.mined_store as _mined_store  # noqa: E402
 
+
+@pytest.fixture
+def enabled_telemetry(monkeypatch, tmp_path):
+    from telemetry_helpers import enable_telemetry
+
+    from saitenka.app import telemetry
+
+    enable_telemetry(monkeypatch, tmp_path)
+    yield
+    telemetry.shutdown()
+
+
 # Opt-in CrossHair (symbolic-execution) backend for the Hypothesis property tests — `poe crosshair`.
 # Registered ONLY when hypothesis-crosshair is installed (the pinned-3.13 `poe crosshair` env), so default test
 # runs are untouched. Select with `pytest --hypothesis-profile=crosshair`; a per-test @settings that
@@ -233,6 +245,9 @@ def diagnostic_trace(monkeypatch, tmp_path):
     provider.add_span_processor(
         CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
     )
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     finished = False
 

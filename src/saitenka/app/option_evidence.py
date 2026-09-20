@@ -54,7 +54,7 @@ ORIGINS = frozenset(
         "unknown",
     }
 )
-registry = EvidenceRegistry()
+registry = EvidenceRegistry(kind="session_configuration")
 
 
 def origins(
@@ -99,6 +99,8 @@ def _value(value: object) -> object:
 
 
 def record(options: ReaderOptions) -> int:
+    if not registry.enabled:
+        return 0
     owner = registry.allocate()
     sources = dict(options.diagnostic_origins)
     fields = {}

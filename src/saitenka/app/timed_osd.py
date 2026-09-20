@@ -94,9 +94,11 @@ class TimedOsd:
         observe: Callable[[], GeometryObservation],
         changed: Callable[[], None],
         *,
-        evidence: Callable[[dict], None] = lambda _: None,
+        evidence: Callable[[dict], None] | None = None,
+        configuration_owner: int = 0,
     ) -> None:
         self._evidence = evidence
+        self._configuration_owner = configuration_owner
         self._ipc = ipc
         self._observe = observe
         self._changed = changed
@@ -110,6 +112,10 @@ class TimedOsd:
         self._closed = False
 
     def _record(self, event: str, entry: StagedCue | None = None, **attrs: object) -> None:
+        from saitenka.app.telemetry import span_gate
+
+        if not span_gate and self._evidence is None:
+            return
         record = dict(
             event=event,
             epoch=self._epoch,
@@ -129,8 +135,10 @@ class TimedOsd:
                 entry_epoch=entry.epoch,
                 payload_hash=entry.payload_hash,
             )
-        self._evidence(record)
+        if self._evidence is not None:
+            self._evidence(record)
         with otel_metrics.traced("subtitle_timed_osd", event=event) as span:
+            span.set("configuration_owner", self._configuration_owner)
             for key, value in record.items():
                 span.set(key, value)
 

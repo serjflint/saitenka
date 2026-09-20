@@ -32,10 +32,10 @@ class ColorTelemetry:
         ipc: MpvIPC,
         *,
         clock: Callable[[], float] = time.monotonic,
-        evidence: Callable[[dict], None] | None = None,
+        configuration_owner: int = 0,
     ) -> None:
         self._ipc = ipc
-        self._evidence = evidence
+        self._configuration_owner = configuration_owner
         self._clock = clock
         self.session = uuid.uuid4().hex
         self.current: ColorAccounting | None = None
@@ -53,7 +53,7 @@ class ColorTelemetry:
 
     def begin(self, kind: str) -> None:
         self.retire("replaced")
-        if otel_metrics.subtitle_color_outcomes is None and self._evidence is None:
+        if otel_metrics.subtitle_color_outcomes is None:
             return
         self._serial += 1
         self.current = ColorAccounting(
@@ -69,6 +69,8 @@ class ColorTelemetry:
         self._arm()
 
     def bind(self, key: tuple[object, ...], *, reconcile: bool = False) -> None:
+        if otel_metrics.subtitle_color_outcomes is None:
+            return
         previous = self._key
         refinement = (
             previous is not None
@@ -143,17 +145,13 @@ class ColorTelemetry:
         if write is None:
             return
         if current is None or write.occurrence != current.occurrence:
-            if self._evidence is not None:
-                self._evidence(
-                    {
-                        "event": "subtitle_color_stale_ack",
-                        "color_session": self.session,
-                        "occurrence": write.occurrence,
-                        "device": write.device,
-                        "write": write.serial,
-                        "accepted": False,
-                    }
-                )
+            with otel_metrics.traced("subtitle_color_stale_ack") as span:
+                span.set("configuration_owner", self._configuration_owner)
+                span.set("color_session", self.session)
+                span.set("occurrence", write.occurrence)
+                span.set("device", write.device)
+                span.set("write", write.serial)
+                span.set("accepted", value=False)
             return
         settled = current.settle(write, self._clock(), accepted=accepted)
         self._trace(
@@ -215,24 +213,9 @@ class ColorTelemetry:
         self._key = None
         self._ipc.cancel_runtime_timer(_TIMER)
 
-    def _record_evidence(self, name: str, attrs: dict) -> None:
-        if self._evidence is not None:
-            self._evidence(
-                {
-                    **attrs,
-                    "event": name,
-                    "color_session": self.session,
-                    "occurrence": self.current.occurrence if self.current else None,
-                    "text_hash": self._key[-1] if self._key else None,
-                    "cue_start_ms": self._key[-2] if self._key else None,
-                    "requested_tokens": attrs.get("requested"),
-                    "color_status": attrs.get("status"),
-                }
-            )
-
     def _trace(self, name: str, **attrs: object) -> None:
-        self._record_evidence(name, attrs)
         with otel_metrics.traced(name) as span:
+            span.set("configuration_owner", self._configuration_owner)
             span.set("color_session", self.session)
             if self.current is not None:
                 span.set("occurrence", self.current.occurrence)

@@ -20,14 +20,18 @@ could re-enter it.
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import msgspec
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
+
+from saitenka.app.diagnostic_summary import DiagnosticSummary
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -36,6 +40,13 @@ if TYPE_CHECKING:
     from saitenka.app.telemetry import ActiveGate
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SummaryOptions:
+    path: Path
+    producer: dict
+    sampled: bool = False
 
 
 def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
@@ -119,6 +130,7 @@ class CTFSpanProcessor(SpanProcessor):
         interval: float = 1.0,
         maxsize: int = 2048,
         start_thread: bool = True,
+        summary: SummaryOptions | None = None,
     ) -> None:
         """*sample_fn* is polled by the writer thread every *interval* seconds (``None`` = no
         counters). *start_thread=False* skips the writer thread — tests drive flushes deterministically
@@ -126,6 +138,11 @@ class CTFSpanProcessor(SpanProcessor):
         defaults."""
         super().__init__()
         self._path = path
+        self._summary = DiagnosticSummary()
+        self._summary_path = summary.path if summary else None
+        self._summary_identity = summary.producer if summary else {}
+        self._sampled = summary.sampled if summary else False
+        self._summary_written = 0.0
         self._gate = gate
         self._sample_fn = sample_fn
         self._interval = interval
@@ -133,7 +150,7 @@ class CTFSpanProcessor(SpanProcessor):
         self._io_lock = threading.Lock()
         self._dropped_lock = threading.Lock()
         self._dropped = 0
-        self._pending: dict[str, str] = {}
+        self._pending: dict[str, tuple[str, bool]] = {}
         self._pending_overflow = 0
         self._initialized = False
         self._health = {
@@ -141,6 +158,7 @@ class CTFSpanProcessor(SpanProcessor):
             "history_losses": 0,
             "sample_failures": 0,
             "lost_events": 0,
+            "projection_failures": 0,
         }
         self._ended = False
         self._last_sample = time.monotonic()
@@ -148,6 +166,7 @@ class CTFSpanProcessor(SpanProcessor):
             str, float
         ] = {}  # last WRITTEN value per series; see _sample_counter_events
         self._stop = threading.Event()
+        self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         if start_thread:
             self._thread = threading.Thread(target=self._run, name="ctf-writer", daemon=True)
@@ -167,6 +186,7 @@ class CTFSpanProcessor(SpanProcessor):
             return
         try:
             self._queue.put_nowait(span)
+            self._wake.set()
         except queue.Full:
             with self._dropped_lock:
                 self._dropped += 1
@@ -176,19 +196,20 @@ class CTFSpanProcessor(SpanProcessor):
             return
         with self._dropped_lock:
             if len(self._pending) < 256:
-                self._pending[format(span.get_span_context().span_id, "016x")] = span.name[:128]
+                self._pending[format(span.get_span_context().span_id, "016x")] = (
+                    span.name[:128],
+                    (span.attributes or {}).get("timing") == "operation-lifetime",
+                )
             else:
                 self._pending_overflow += 1
 
     def _run(self) -> None:  # pragma: no cover — timing-dependent background loop
         while not self._stop.is_set():
-            try:
-                seed = [self._queue.get(timeout=self._interval)]
-            except queue.Empty:
-                seed = []
-            self._flush(seed)
+            self._wake.wait(self._interval)
+            self._wake.clear()
+            self._flush([])
 
-    def _flush(self, seed: list[ReadableSpan]) -> None:
+    def _flush(self, seed: list[ReadableSpan], *, force: bool = False) -> None:
         """Drain the queue into *seed*, encode, sample counters if the interval elapsed, and write —
         all under ``_io_lock`` so this whole unit is atomic against a concurrent flusher."""
         with self._io_lock:
@@ -199,6 +220,11 @@ class CTFSpanProcessor(SpanProcessor):
                 except queue.Empty:
                     break
             events = [_span_to_ctf_event(s) for s in spans]
+            for event in events:
+                try:
+                    self._summary.consume(event)
+                except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
+                    self._health["projection_failures"] += 1
             if self._sample_fn is not None:
                 now = time.monotonic()
                 if now - self._last_sample >= self._interval:
@@ -207,6 +233,57 @@ class CTFSpanProcessor(SpanProcessor):
             if events:
                 self._write_events(events)
             self._write_health()
+            self._write_summary(force=force)
+
+    def diagnostic_snapshot(self, kind: str) -> dict:
+        self.force_flush()
+        with self._io_lock:
+            return self._summary.snapshot(kind)
+
+    def _write_summary(self, *, force: bool) -> None:
+        if self._summary_path is None:
+            return
+        now = time.monotonic()
+        if not force and not self._ended and now - self._summary_written < self._interval:
+            return
+        self._summary_written = now
+        from saitenka import otel_metrics
+        from saitenka.app.color_evidence import safe_color_metrics
+        from saitenka.session import session_id
+
+        with self._dropped_lock:
+            pending = {key: name for key, (name, operation) in self._pending.items() if operation}
+            omitted = self._pending_overflow
+        payload = dict(
+            self._summary.report(pending),
+            schema=1,
+            producer=self._summary_identity,
+            session=session_id(),
+            tracing=True,
+            sampled=self._sampled,
+            captured_ns=time.time_ns(),
+            end="shutdown-observed" if self._ended else "unknown",
+            diagnostic_loss=(
+                self.dropped_count
+                + self._health["lost_events"]
+                + self._health["projection_failures"]
+                + omitted
+            ),
+            subtitle_color_metrics=safe_color_metrics(otel_metrics.snapshot()).get("metrics", {}),
+        )
+        try:
+            self._summary_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self._summary_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(payload), encoding="utf-8")
+            temporary.replace(self._summary_path)
+            summaries = sorted(
+                self._summary_path.parent.glob("session-*.json"),
+                key=lambda path: path.stat().st_mtime_ns,
+            )
+            for old in summaries[:-10]:
+                old.unlink(missing_ok=True)
+        except OSError:
+            log.warning("telemetry summary unavailable", exc_info=True)
 
     def _write_health(self) -> None:
         from saitenka.session import session_id
@@ -219,7 +296,7 @@ class CTFSpanProcessor(SpanProcessor):
             "captured_ns": time.time_ns(),
         }
         with self._dropped_lock:
-            payload["pending"] = dict(self._pending)
+            payload["pending"] = {key: name for key, (name, _) in self._pending.items()}
             payload["pending_admissions_omitted"] = self._pending_overflow
         path = self._path.with_suffix(".health.json")
         try:
@@ -291,16 +368,13 @@ class CTFSpanProcessor(SpanProcessor):
                 f.write(b"," + chunk + self._CLOSING)
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:  # noqa: ARG002  # base-class signature; unused
-        """Drain + write synchronously on the calling thread. Airtight only against a stopped writer
-        (:meth:`shutdown` joins first); while the writer runs it may hold a just-``get``'d span outside
-        the lock, so a racing force_flush can write later spans first — a harmless ts reorder Perfetto
-        sorts out, never a loss. Unreachable in production (force_flush only runs post-join at shutdown)
-        and in tests (``start_thread=False``)."""
-        self._flush([])
+        """Drain in admission order under the writer lock, including the report projection."""
+        self._flush([], force=True)
         return True
 
     def shutdown(self) -> None:
         self._stop.set()
+        self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
         self._ended = self._thread is None or not self._thread.is_alive()

@@ -218,14 +218,11 @@ class AsyncSessionWriter:
         self._queue.put(snapshot)
 
     def _run(self) -> None:
-        from saitenka.app.telemetry import save_operation_summary
-
         store = None
         try:
             store = SessionStore(self._path)
             while (item := self._queue.get()) is not None:
                 store.save(item)
-                save_operation_summary()
         except (OSError, sqlite3.Error):
             log.warning("session history unavailable", exc_info=True)
         finally:

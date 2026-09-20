@@ -1,4 +1,4 @@
-"""Conservative diagnoses from sanitized producer evidence, including tracing-off reports."""
+"""Conservative diagnoses from sanitized producer evidence, including older report formats."""
 
 from __future__ import annotations
 

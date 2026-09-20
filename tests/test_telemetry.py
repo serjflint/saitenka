@@ -128,6 +128,9 @@ def test_configured_telemetry_exports_cue_checkpoints_without_extra_opt_in(tmp_p
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
     provider = telemetry._tracer_provider
     assert provider is not None
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     # OTel's global provider cannot be replaced between tests; use this configured provider.
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
 
@@ -338,7 +341,7 @@ def test_a_deferred_span_ends_from_the_completion_not_the_submission(monkeypatch
             ended.append((self.name, dict(self.attributes)))
 
     class _Tracer:
-        def start_span(self, name):
+        def start_span(self, name, **_kwargs):
             return _Span(name)
 
         def start_as_current_span(self, _name):  # pragma: no cover — asserted unreachable

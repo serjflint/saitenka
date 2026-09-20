@@ -945,19 +945,23 @@ def record_spans(monkeypatch) -> list[dict]:
     """Capture every ``traced(...)`` span (name + static attrs + in-block ``.set`` attrs) without
     standing up an OTel provider — ``instrumented`` composes ``traced``, so this sees the real path."""
     spans: list[dict] = []
+    original = otel_metrics.traced
 
     @contextlib.contextmanager
     def _fake_traced(name, **attrs):
         rec = {"name": name, "attrs": dict(attrs)}
         spans.append(rec)
 
-        class _Setter:
-            recording = True
+        with original(name, **attrs) as actual:
 
-            def set(self, key, value):
-                rec["attrs"][key] = value
+            class _Setter:
+                recording = True
 
-        yield _Setter()
+                def set(self, key, value):
+                    rec["attrs"][key] = value
+                    actual.set(key, value)
+
+            yield _Setter()
 
     monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
     return spans

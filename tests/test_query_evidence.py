@@ -12,6 +12,8 @@ from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.app.session.playback_observation import OBSERVED_PROPERTIES
 from saitenka.runtime import ConnectionReady, SessionMailbox
 
+pytestmark = pytest.mark.usefixtures("enabled_telemetry")
+
 
 def test_query_evidence_properties_are_in_the_production_observer_set():
     assert set(OBSERVED_PROPERTIES) >= query_evidence.PROPERTIES
@@ -328,6 +330,9 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
                 },
             )
             player.record({"sub-scale": width}, "authored-ass")
+        from saitenka.app import telemetry
+
+        telemetry.save_operation_summary()
 
     payload = _export()
 

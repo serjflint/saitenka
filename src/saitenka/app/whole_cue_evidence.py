@@ -1,4 +1,4 @@
-"""Bounded, text-free whole-cue decisions retained without tracing."""
+"""Allowlisted whole-cue evidence shared by trace projection and report readers."""
 
 from __future__ import annotations
 

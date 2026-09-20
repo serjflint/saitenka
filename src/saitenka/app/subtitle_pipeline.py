@@ -134,6 +134,10 @@ class SubtitleModeCoordinator:
         self._evidence = GeometryEvidence()
 
     @property
+    def configuration_owner(self) -> int:
+        return self._evidence.owner
+
+    @property
     def renderer(self) -> CurrentSubtitleRenderer:
         return self._renderer
 
@@ -368,7 +372,7 @@ class SubtitleModeCoordinator:
                 ticket.sequence,
                 libass_version=result.libass_version,
                 mask_source=result.mask_source,
-                validation=validation_summary(result),
+                validation=validation_summary(result) if self._evidence.enabled else None,
             )
         with otel_metrics.traced("subtitle_geometry_publish") as span:
             span.set("configuration_owner", self._evidence.owner)

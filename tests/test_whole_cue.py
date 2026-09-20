@@ -228,6 +228,7 @@ def test_observed_cue_uses_optional_coloring_without_changing_scan_boxes(tmp_pat
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("mode", ["whole-cue-auto", "whole-cue-overpaint", "whole-cue-osd"])
+@pytest.mark.usefixtures("enabled_telemetry")
 def test_explicit_shadow_keeps_boxes_when_backend_refuses_paint(tmp_path, monkeypatch, mode):
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords

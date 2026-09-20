@@ -228,6 +228,9 @@ def test_traced_stamps_cpu_ms_so_wall_vs_cpu_reveals_a_stall(monkeypatch):
     not working — the one signal that told genuinely-CPU-bound freq load apart from GIL-stalled
     startup. A fake trace module keeps this off OTel's set-once global provider."""
     fake = _FakeTraceModule()
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(otel_metrics, "_trace_available", True)
     monkeypatch.setattr(otel_metrics, "_trace_module", fake)
     with otel_metrics.traced("x"):
@@ -246,6 +249,9 @@ def test_traced_stamps_the_real_native_thread_id(monkeypatch):
     import threading
 
     fake = _FakeTraceModule()
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(otel_metrics, "_trace_available", True)
     monkeypatch.setattr(otel_metrics, "_trace_module", fake)
     with otel_metrics.traced("x"):
