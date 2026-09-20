@@ -127,9 +127,6 @@ def test_color_outcome_survives_real_trace_export(monkeypatch, caplog):
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-    from telemetry_helpers import enable_span_gate
-
-    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     try:
         with _telemetry():

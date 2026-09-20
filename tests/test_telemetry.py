@@ -128,9 +128,6 @@ def test_configured_telemetry_exports_cue_checkpoints_without_extra_opt_in(tmp_p
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
     provider = telemetry._tracer_provider
     assert provider is not None
-    from telemetry_helpers import enable_span_gate
-
-    enable_span_gate(monkeypatch)
     # OTel's global provider cannot be replaced between tests; use this configured provider.
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
 
