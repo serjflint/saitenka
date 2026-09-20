@@ -39,6 +39,7 @@ OBSERVED_PROPERTIES = (
     "sub-delay",
     "options/sub-speed",
     "options/sub-fps",
+    "options/sub-fix-timing",
     "options/play-direction",
     "time-pos",
     "video-out-params",

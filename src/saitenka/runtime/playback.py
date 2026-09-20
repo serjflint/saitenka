@@ -129,6 +129,7 @@ _AUTHORED_STALE_PROPERTIES = frozenset({"sub-text"}) | TRACK_PROPERTIES
 #: rows and their timing. Wider than the render space: a new cue changes the geometry inputs
 #: without changing the space they are laid out in.
 GEOMETRY_INPUT_PROPERTIES = RENDER_SPACE_PROPERTIES | {
+    "options/sub-fix-timing",
     "options/sub-speed",
     "options/sub-fps",
     "options/play-direction",

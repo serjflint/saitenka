@@ -5052,6 +5052,55 @@ def test_track_load_stages_timed_color_before_first_cue_notification(
             telemetry.shutdown()
 
 
+def test_observed_timing_repair_retires_prepared_color(tmp_path):
+    result, ipc, _backend = reader(
+        tmp_path,
+        coloring="whole-cue-osd",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    try:
+        ipc.props.update(
+            {
+                "command-list": [{"name": "osd-overlay-timed"}],
+                "sub-text": "",
+                "sub-text/ass-full": "",
+                "time-pos": 0.0,
+                "sub-start": None,
+                "sub-end": None,
+                "options/sub-speed": 1.0,
+                "options/sub-fps": 0.0,
+                "options/play-direction": "forward",
+                "options/osd-shaper": "complex",
+                "options/sub-ass-override": "scale",
+                "options/sub-ass-justify": False,
+                "options/sub-line-spacing": 0.0,
+                "options/sub-hinting": "none",
+                "options/sub-scale-signs": True,
+                "options/sub-fix-timing": False,
+            }
+        )
+        result.graph.playback.start()
+        assert any(
+            c[0] == "observe_property" and c[2] == "options/sub-fix-timing" for c in ipc.commands
+        )
+        result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+        staged = [c for c in ipc.commands if c[0] == "osd-overlay-timed"]
+        assert staged
+        ipc.commands.clear()
+
+        ipc.props["options/sub-fix-timing"] = True
+        result.graph.playback.observe_event({"name": "options/sub-fix-timing", "data": True})
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+
+        assert all(("osd-overlay", c[1], "none", "") in ipc.commands for c in staged)
+        assert not any(c[0] == "osd-overlay-timed" for c in ipc.commands)
+    finally:
+        result.close()
+
+
 def test_late_stock_capability_reply_repaints_ready_cue(tmp_path, monkeypatch):
     from saitenka.runtime import Owner
 

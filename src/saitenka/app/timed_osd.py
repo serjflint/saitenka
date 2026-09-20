@@ -51,6 +51,10 @@ def subtitle_delay_ms(seen: GeometryObservation) -> int | None:
         or seen.prop("options/sub-fps") != 0
         or seen.prop("options/play-direction") != "forward"
         or seen.prop("options/blend-subtitles") is not False
+        or (
+            seen.prop("options/sub-fix-timing") is not False
+            and seen.prop("options/sub-ass-override") not in {False, "no"}
+        )
         or filters_can_drop_a_cue({name: seen.prop(f"options/{name}") for name in FILTER_OPTIONS})
     ):
         return None

@@ -171,12 +171,10 @@ def _appearance(demand: dict, observed: list[Frame], stages: list[dict]) -> dict
         f for f in window if demand["video_start_ms"] <= f.video_ms < demand["video_end_ms"]
     ]
     native = [f for f in interval if f.native]
-    if demand["requested"] == 0:
-        return {**row, "status": "no-color"}
-    if demand.get("unsupported"):
-        return {**row, "status": "unsupported"}
     if not native:
         return {**row, "reason": "no-native-composition"}
+    if demand["requested"] == 0 or demand.get("unsupported"):
+        return {**row, **_no_color_alignment(demand, interval, window)}
     matches = _matching_stages(demand, stages)
     if not matches:
         return {**row, "status": "missed", "reason": "unstaged"}
@@ -187,6 +185,15 @@ def _appearance(demand: dict, observed: list[Frame], stages: list[dict]) -> dict
     if not stage.get("payload_hash") or not demand.get("owner"):
         return {**row, "reason": "unmatched-payload-or-owner"}
     return {**row, **_alignment(demand, native, window, stage)}
+
+
+def _no_color_alignment(demand: dict, interval: list[Frame], window: list[Frame]) -> dict:
+    unexpected = sum(bool(f.color) for f in interval)
+    if unexpected:
+        return {"status": "unexpected-color", "unexpected_color_compositions": unexpected}
+    if not _complete_interval(demand, window):
+        return {"status": "unknown", "reason": "incomplete-no-color-interval"}
+    return {"status": "no-color" if demand["requested"] == 0 else "unsupported"}
 
 
 def _matching_stages(demand: dict, stages: list[dict]) -> list[dict]:
@@ -378,6 +385,9 @@ def _retired_before(stage: dict, wall: int, records: list[dict]) -> bool:
 
 def _appearance_counters(rows: list[dict]) -> dict:
     return {
+        "unexpected_color_compositions": sum(
+            row.get("unexpected_color_compositions", 0) for row in rows
+        ),
         "readiness_misses": sum(
             row.get("ready") is False or row["status"] == "missed" for row in rows
         ),

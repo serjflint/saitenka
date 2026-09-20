@@ -76,6 +76,71 @@ def test_complete_independent_warm_population_qualifies():
     assert result["outcomes"] == {"complete": 1}
 
 
+def _no_color_capture(*, unsupported, colored=False, coverage="complete"):
+    manifest = demand()
+    manifest["appearances"].append(
+        dict(
+            manifest["appearances"][0],
+            occurrence=2,
+            requested=int(unsupported),
+            unsupported=unsupported,
+            required_warm=False,
+            start_ms=3000,
+            end_ms=4000,
+            video_start_ms=3000,
+            video_end_ms=4000,
+            wall_start_ns=5000,
+            wall_end_ns=10000,
+        )
+    )
+    lines = capture().splitlines()[:-1]
+    for comp, pts in enumerate((2.0, 3.0, 3.5, 4.0), 5):
+        if coverage == "missing" or (coverage == "mid-cue" and pts <= 3):
+            continue
+        if coverage == "no-offset" and pts == 4:
+            continue
+        native = 3 <= pts < 4 and coverage != "no-native"
+        color = native and colored
+        prefix = f"{comp} {(comp + 1) * 1000} {comp} "
+        lines.extend(
+            prefix + event
+            for event in (
+                f"draw_begin pts={pts}",
+                "gpu_render ok=1",
+                "gpu_submit ok=1",
+                f"overlay_attached index=0 parts={int(native)}",
+                f"external_candidate owner=0x1 id=1001 hash=unexpected images={int(color)} render_index=4",
+                f"overlay_attached index=4 parts={int(color)}",
+            )
+        )
+    raw = "\n".join([*lines, f"# health recorded={len(lines)} attempted={len(lines)} overflow=0"])
+    return raw, manifest
+
+
+@pytest.mark.parametrize("unsupported", [False, True])
+@pytest.mark.parametrize("colored", [False, True])
+def test_no_color_demand_requires_absence_of_attached_color(unsupported, colored):
+    raw, manifest = _no_color_capture(unsupported=unsupported, colored=colored)
+
+    result = qualify(raw, manifest, stages())
+
+    assert result["qualified"] is not colored
+    assert result["appearances"][1]["status"] == (
+        "unexpected-color" if colored else "unsupported" if unsupported else "no-color"
+    )
+
+
+@pytest.mark.parametrize("unsupported", [False, True])
+@pytest.mark.parametrize("coverage", ["missing", "mid-cue", "no-offset", "no-native"])
+def test_no_color_demand_cannot_certify_incomplete_capture(unsupported, coverage):
+    raw, manifest = _no_color_capture(unsupported=unsupported, coverage=coverage)
+
+    result = qualify(raw, manifest, stages())
+
+    assert not result["qualified"]
+    assert result["appearances"][1]["status"] == "unknown"
+
+
 @pytest.mark.parametrize("mutation", ["first", "expired", "owner", "payload", "duplicate"])
 def test_frame_regressions_cannot_pass_on_a_successful_ack(mutation):
     changes = {"first": False} if mutation == "first" else {mutation: True}

@@ -109,6 +109,39 @@ def test_stock_mpv_keeps_reactive_surface_owner():
     assert not any(command[0] == "osd-overlay-timed" for command in ipc.commands)
 
 
+@pytest.mark.parametrize(
+    ("repair", "override", "eligible"),
+    [
+        (True, "scale", False),
+        (None, "scale", False),
+        (False, "scale", True),
+        (True, "no", True),
+        (True, False, True),
+    ],
+)
+def test_timing_repair_only_blocks_when_native_intervals_can_change(repair, override, eligible):
+    owner, ipc = consumer(cues=[Cue(10, 11, "猫"), Cue(11.1, 12.1, "犬")])
+    ipc.props.update({"options/sub-fix-timing": repair, "options/sub-ass-override": override})
+
+    owner.stage(10001, "cat", (1280, 720))
+
+    assert [c for c in ipc.commands if c[0] == "osd-overlay-timed"] == (
+        [("osd-overlay-timed", 2001, 4000, 5000, "cat", 1280, 720, 1)] if eligible else []
+    )
+
+
+def test_enabling_effective_timing_repair_removes_prepared_color():
+    owner, ipc = consumer()
+    ipc.props.update({"options/sub-fix-timing": False, "options/sub-ass-override": "scale"})
+    owner.stage(16121, "cat", (1280, 720))
+    ipc.commands.clear()
+    ipc.props["options/sub-fix-timing"] = True
+
+    owner.stage(16121, "cat", (1280, 720))
+
+    assert ipc.commands == [("osd-overlay", 2001, "none", "")]
+
+
 def test_invalidation_clears_pending_stage_before_slot_can_be_reused():
     owner, ipc = consumer()
     owner.discover()

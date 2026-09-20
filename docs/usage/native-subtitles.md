@@ -33,7 +33,9 @@ With a patched mpv exposing `osd-overlay-timed`, the OSD modes also upload prepa
 of playback. mpv activates and expires them on its video clock, so the first native subtitle frame
 can already contain its colors. Cue notifications continue to update scanning and interaction.
 This path requires indexed static cues, normal subtitle speed/FPS, forward playback, unblended
-subtitles and no cue-dropping filters. Co-timed events share one interval; changing overlaps or
+subtitles, no cue-dropping filters, and no effective `sub-fix-timing` repair. Timing repair is ignored
+by mpv under the default `sub-ass-override=no`; enabling it with `scale` declines timed coloring.
+Co-timed events share one interval; changing overlaps or
 unsupported timing keep scanning without timed color. Subtitle delay is
 applied to the display interval while authored timestamps remain part of cue identity. Stock mpv
 keeps reactive OSD publication. Traces record capability, staging, acknowledgment, removal and refusal
@@ -56,8 +58,9 @@ that option automatically. Missing access reports `font-access`. Raster uses the
 font environment. Karaoke, alpha, dynamic effects, clipping and unproven occlusion remain independently
 restricted for coloring. Underlines use the existing vector decoration path.
 
-Normal reports retain a bounded history of whole-cue decisions, submissions, acknowledgments and
-terminal outcomes even with tracing disabled. They include the requested mode, paint device, refusal
+With telemetry enabled, reports retain a bounded history of whole-cue decisions, submissions,
+acknowledgments and terminal outcomes. Enable telemetry before reproducing a problem; disabled
+sessions do not collect this history. Records include the requested mode, paint device, refusal
 reasons, cue text hash plus numeric timestamp, occurrence/generation, and shadow-predicted bounds.
 Reason counts and eviction counts remain after individual rows age out. `saitenka subtitle-report PATH`
 formats these decisions; diagnostic traces additionally include bounded per-unit shadow geometry.
