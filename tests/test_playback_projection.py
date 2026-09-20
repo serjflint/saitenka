@@ -405,6 +405,18 @@ def test_each_changed_cue_fact_publishes_the_identity_it_implies() -> None:
     assert [c.cue for c in seen] == [Revision(), Revision(1), Revision(1)]
 
 
+def test_observed_echo_confirms_a_locally_replaced_cue_once_without_new_identity() -> None:
+    projection = PlaybackProjection()
+    state = projection.cue_replaced(PlaybackState(), "猫を見る")
+    identity = state.identity()
+
+    confirmed = projection.observe(state, "sub-text", "猫を見る")
+
+    assert observed(confirmed.deltas) == [identity]
+    assert confirmed.state.identity() == identity
+    assert projection.observe(confirmed.state, "sub-text", "猫を見る").deltas == ()
+
+
 def test_repeated_identical_cue_text_publishes_no_further_identity() -> None:
     projection = PlaybackProjection()
     state = projection.observe(PlaybackState(), "sub-text", "猫を見る").state
@@ -473,3 +485,26 @@ def test_every_fact_domain_is_reachable_from_the_delta_vocabulary() -> None:
     from saitenka.runtime.playback import _DELTA_DOMAIN
 
     assert set(_DELTA_DOMAIN.values()) == set(FactDomain)
+
+
+@given(start=st.integers(min_value=0, max_value=10000), end_first=st.booleans())
+def test_unknown_timing_completes_once_but_conflicting_known_timing_retires(start, end_first):
+    projection = PlaybackProjection()
+    state = installed(projection, start=None, end=None)
+    fields = [("sub-start", start), ("sub-end", start + 2)]
+    if end_first:
+        fields.reverse()
+    for name, value in fields:
+        observed = projection.observe(state, name, value)
+        assert CueIdentityRetired not in kinds(observed.deltas)
+        state = observed.state
+        observed = projection.observe(state, name, None)
+        assert CueIdentityRetired not in kinds(observed.deltas)
+        state = observed.state
+    assert state.cue.installed is not None
+    assert (state.cue.installed.start, state.cue.installed.end) == (start, start + 2)
+
+    conflict = projection.observe(state, fields[0][0], fields[0][1] + 10)
+
+    assert CueIdentityRetired in kinds(conflict.deltas)
+    assert conflict.state.cue.installed is None

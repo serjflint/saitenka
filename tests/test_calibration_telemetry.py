@@ -47,6 +47,9 @@ def test_missing_bounds_cannot_create_an_unbounded_probe_loop(monkeypatch, tmp_p
     path = tmp_path / "trace.json"
     provider = TracerProvider()
     provider.add_span_processor(CTFSpanProcessor(path, gate, start_thread=False))
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     session, ipc, _backend = reader(
         tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 
+from saitenka_subtitles import whole_cue
 from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
 from saitenka_subtitles.fractional import PhaseMask, match_phases
 from saitenka_subtitles.fragments import (
@@ -27,6 +28,7 @@ from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometryPaletteEntry,
     GeometrySnapshot,
+    PaintQualification,
     Rect,
     RendererState,
     TokenGeometry,
@@ -186,7 +188,7 @@ def _collect_layer(
     layer: ImageLayer,
     palette: dict[int, tuple[int, _TokenKey]],
     reserved: set[int],
-    owners: np.ndarray,
+    owners: np.ndarray | None,
     frame_size: tuple[int, int],
     bounds: dict[_TokenKey, list[int]],
     segments: dict[_TokenKey, list[Rect]],
@@ -224,11 +226,12 @@ def _collect_layer(
     top, bottom = int(ys.min()), int(ys.max())
     if left < 0 or right >= frame_width or top < 0 or bottom >= frame_height:
         raise ValueError("libass character bitmap extends outside the frame")
-    positions = ys * frame_width + xs
-    previous = owners[positions]
-    if bool(np.any((previous != 0) & (previous != owner))):
-        raise ValueError("ambiguous libass token overlap")
-    owners[positions] = owner
+    if owners is not None:
+        positions = ys * frame_width + xs
+        previous = owners[positions]
+        if bool(np.any((previous != 0) & (previous != owner))):
+            raise ValueError("ambiguous libass token overlap")
+        owners[positions] = owner
     extent = bounds.setdefault(key, [left, top, right + 1, bottom + 1])
     extent[0] = min(extent[0], left)
     extent[1] = min(extent[1], top)
@@ -364,7 +367,11 @@ def extract_token_geometry(
     # because an allocation that scales with the FRAME rather than with the cue is a different
     # problem from a loop that scales with the ink, and one number could not tell them apart.
     started = time.perf_counter_ns()
-    owners = np.zeros(request.frame_size[0] * request.frame_size[1], dtype=np.uint16)
+    owners = (
+        np.zeros(request.frame_size[0] * request.frame_size[1], dtype=np.uint16)
+        if request.coloring == "legacy"
+        else None
+    )
     sink.record(EXTRACT_OWNERS_MS, (time.perf_counter_ns() - started) / 1_000_000)
 
     bounds: dict[_TokenKey, list[int]] = {}
@@ -514,7 +521,10 @@ class LibassGeometryBackend:
         built_ms = 0.0
         if renderer is None:
             started = time.perf_counter_ns()
-            renderer = self._new_renderer(request)
+            with self._telemetry.span("subtitle_geometry_renderer_build") as span:
+                span.set("attachments", len(request.attachments))
+                span.set("document_bytes", len(request.ass))
+                renderer = self._new_renderer(request)
             built_ms = (time.perf_counter_ns() - started) / 1_000_000
             self._documents[key] = request.ass
         elif self._documents.get(key) is not request.ass:
@@ -883,6 +893,84 @@ class LibassGeometryBackend:
             span.set("mask_bytes", sum(len(token.coverage) for token in result))
             return result
 
+    def _whole_cue(
+        self, request: GeometryRequest, layers: Sequence[ImageLayer]
+    ) -> whole_cue.WholeCue | None:
+        cue = request.whole_cue
+        if cue is None:
+            return None
+        palette = {entry.rgb: entry.token_index for entry in request.palette}
+        cue = replace(cue, layers=whole_cue.retain_layers(layers, palette))
+        cue = replace(
+            cue,
+            evidence=(
+                ("shadow_bounds", whole_cue.layer_bounds(cue.layers)),
+                ("margins", request.margins),
+                ("mapping", cue.mapping),
+                ("comparison", "not-run"),
+            ),
+        )
+        if not cue.qualify or cue.osd_reason != "eligible":
+            return cue
+        try:
+            return self._qualify_osd(request, cue, palette)
+        except (ValueError, RuntimeError, OSError):
+            log.debug("whole-cue OSD qualification failed", exc_info=True)
+            return replace(cue, osd_reason="osd-input", blockers=(*cue.blockers, "osd-input"))
+
+    def _qualify_osd(
+        self, request: GeometryRequest, cue: whole_cue.WholeCue, palette: dict[int, int]
+    ) -> whole_cue.WholeCue:
+        with self._telemetry.span("subtitle_osd_qualification") as span:
+            started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
+            osd_request = replace(
+                request,
+                ass=whole_cue.osd_document(
+                    cue, tuple((token, rgb) for rgb, token in palette.items())
+                ),
+                timestamp_ms=0,
+                margins=(0, 0, 0, 0),
+                use_margins=False,
+                storage_size=request.frame_size,
+                renderer_state=RendererState(features=((3, True),)),
+                attachments=(),
+                font_setup=request.osd_font_setup
+                or replace(request.font_setup, extract_fonts=False),
+            )
+            renderer, _built = self._renderer(osd_request)
+            predicted = self._render_frame(renderer, osd_request)
+            candidate = whole_cue.retain_layers(predicted.layers, palette)
+            evidence = (
+                ("shadow_bounds", whole_cue.layer_bounds(cue.layers)),
+                ("osd_bounds", whole_cue.layer_bounds(candidate)),
+                ("margins", request.margins),
+                ("mapping", cue.mapping),
+                ("qualification_cpu_ms", (time.thread_time_ns() - cpu_started) / 1_000_000),
+                ("qualification_ms", (time.perf_counter_ns() - started) / 1_000_000),
+                ("comparison", "exact" if candidate == cue.layers else "shape-mismatch"),
+            )
+            span.set("generation", request.generation)
+            span.set("timestamp_ms", request.timestamp_ms)
+            for name, values in (("shadow", cue.layers), ("osd", candidate)):
+                span.set(
+                    f"{name}_units",
+                    tuple(
+                        number
+                        for layer in values[:128]
+                        for number in (layer.token, layer.x, layer.y, layer.width, layer.height)
+                    ),
+                )
+                span.set(f"{name}_units_omitted", max(0, len(values) - 128))
+            for key, value in evidence:
+                span.set(key, value)
+            return replace(
+                cue,
+                evidence=evidence,
+                osd_reason="eligible" if candidate == cue.layers else "shape-mismatch",
+                blockers=() if candidate == cue.layers else ("shape-mismatch",),
+            )
+
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
             raise RuntimeError("libass geometry backend is closed")
@@ -899,12 +987,15 @@ class LibassGeometryBackend:
             span.set("libass_version", f"0x{library_version:x}")
             span.set("timestamp_ms", request.timestamp_ms)
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             result = self._render_frame(renderer, request)
+            span.set("render_cpu_ms", (time.thread_time_ns() - cpu_started) / 1_000_000)
             render_ms = (time.perf_counter_ns() - started) / 1_000_000
             span.set("render_ms", render_ms)
             span.set("layer_count", len(result.layers))
             self._telemetry.record(RENDER_MS, render_ms)
             started = time.perf_counter_ns()
+            cpu_started = time.thread_time_ns()
             tokens = extract_token_geometry(
                 result,
                 request,
@@ -912,10 +1003,12 @@ class LibassGeometryBackend:
                 and (request.keep_coverage or any(entry.spacing > 0 for entry in request.palette)),
                 telemetry=self._telemetry,
             )
-            if request.native_ass:
+            if request.native_ass and request.coloring == "legacy":
                 tokens = self._native_tokens(request, result, tokens)
-            tokens = self._anchored(request, tokens)
+            if request.coloring == "legacy":
+                tokens = self._anchored(request, tokens)
             extract_ms = (time.perf_counter_ns() - started) / 1_000_000
+            span.set("extract_cpu_ms", (time.thread_time_ns() - cpu_started) / 1_000_000)
             span.set("fractional_tokens", sum(bool(token.coverage) for token in tokens))
             span.set("fractional_mask_fallbacks", sum(not token.overprint_safe for token in tokens))
             span.set("fractional_atlas_bytes", self._phase_bytes)
@@ -930,7 +1023,20 @@ class LibassGeometryBackend:
             request.variant,
             tokens,
             libass_version=library_version,
-            mask_source="native-original" if request.native_ass else "request-document",
+            mask_source=(
+                "whole-cue-layers"
+                if request.coloring != "legacy"
+                else "native-original"
+                if request.native_ass
+                else "request-document"
+            ),
+            paint_qualification=(
+                PaintQualification.OCCLUDED
+                if request.whole_cue is not None
+                and whole_cue.has_occlusion(result.layers, {entry.rgb for entry in request.palette})
+                else request.paint_qualification
+            ),
+            whole_cue=self._whole_cue(request, result.layers),
         )
 
     def close(self) -> None:

@@ -14,6 +14,13 @@ operation counts. Matching identity fields do not prove identical loaded code: e
 change while a process is running. The config subset is attributed to the collector's file, not the
 player's effective configuration.
 
+Runtime diagnostics require `telemetry.enabled = true`. When disabled, reports mark runtime
+evidence as `not-collected`; they cannot establish successful zero counts. When enabled, producers
+enqueue individual records through OpenTelemetry. Its existing writer owns the bounded histories
+and report summary; cue processing never copies retained history. Queue loss, malformed diagnostic
+records and sampling mark operation health as partial. The OTel SDK kill switch disables collection.
+Playback identity and cached subtitle publication do not depend on recording.
+
 Native geometry contributes a separate producer-side configuration history: frame/storage dimensions,
 aspect, margins, renderer parameters, feature flags and text-free font-setup metadata. Foreground and
 prefetch render spans identify their owner and configuration revision; accepted publication has its
@@ -35,7 +42,7 @@ not shared. Both histories are bounded to four owners; process-local constructio
 a reconstruction of every later override.
 
 Accepted geometry also retains aggregate same-renderer verdicts and mask-eviction counts. These
-survive tracing-off collection and warm-cache publication; stale generations cannot become current
+survive warm-cache publication while recording is enabled; stale generations cannot become current
 findings. They describe redraw eligibility and retained coverage, not upload or physical pixels.
 The bounded `renderer_selection` history distinguishes an explicit legacy-mode request from the
 post-draw ownership state. Repeated unchanged draws do not consume history; missing older records
@@ -47,7 +54,7 @@ identifies changes in the recorded subset or configured font paths, not every po
 survive invalidation/close. Evicted references are marked rather than silently joined to newer values.
 Retained spans may reference owners or revisions no longer present in the bounded report.
 No publication record certifies displayed pixels. Collection adds no IPC queries, pixel probes or
-font hashing; the existing background summary writer persists the bounded snapshot.
+font hashing; the OpenTelemetry writer persists the bounded snapshot.
 
 `player_configuration` separately records the option values read when native geometry evaluates a
 configuration, including configurations it refuses. Numeric, boolean and enumerated values are
@@ -108,10 +115,26 @@ The producer-summary reader accepts at most 128 KiB; an oversized summary yields
 
 For the trace-based tools below, collect with `saitenka report --diagnostic-detail`.
 That opt-in includes redacted raw configuration, logs, traces and crash reports, which can still contain
-private paths and text. `--no-log` excludes logs only; it does not sanitize the other detail.
+private paths and text. `--no-log` excludes logs and frame diagnostics; it does not sanitize the remaining detail.
 Review the ZIP's manifest and contents before sharing. Nothing uploads automatically and exported
 ZIPs do not expire automatically. Publication fails rather than overwriting a timestamp collision;
 retry with a different timestamp or destination after preserving the earlier report.
+
+### Subtitle frame timing
+
+With telemetry enabled, `saitenka run` records IPC enqueue, transport-write and reply-receive
+boundaries keyed by connection, epoch and request ID. OSD payload hashes link those requests to
+the temporary diagnostic mpv build's command and composition events; subtitle text is not included
+in those identities. Subtitle-clock observations include `sub-delay`, including negative offsets.
+
+The diagnostic build reads `SAITENKA_MPV_TRACE`, supplied automatically by the launcher, and flushes
+its bounded frame trace on normal exit. Quit mpv before collecting the report. Detailed reports
+include `diagnostics/mpv-frame.json` (binary hash, capabilities, initial clock and trace health)
+and, when available, `diagnostics/mpv-frame.tsv`. Stock builds produce no frame trace; absent,
+partial and overflowing traces do not qualify as complete evidence. `--no-log` omits both members.
+GPU submission establishes which composition contains color, not physical display presentation.
+The mpv peer binding applies to the initial connection epoch; a reconnect is explicitly marked
+unmapped, so the old binding cannot qualify later frame correlations.
 
 From a development checkout:
 
@@ -137,8 +160,9 @@ that contract does not itself prove the fault was injected. Missing evidence can
 stale-result control. The reported fault denominator is separate from the larger scenario inventory;
 families without a declared executed fault contract remain unqualified.
 The detail tier includes the same metadata envelope as the default report, selected from the same
-log session as its trace. Allowlisted per-operation health counts identify failing boundaries even
-without tracing; pending work is not proof of a crash and a failed boundary is not its root cause.
+log session as its trace. Allowlisted per-operation health counts identify failing boundaries without
+sharing detailed traces; recording must be enabled. Pending work is not proof of a crash and a failed
+boundary is not its root cause.
 It also diagnoses recorded player query/admission failures from metadata-only reports. Retained
 mailbox-to-reducer joins have their own denominator; missing terminals can mean in-flight work or
 lost evidence. Neither those joins nor a successful query qualify pixels or benchmark cost.

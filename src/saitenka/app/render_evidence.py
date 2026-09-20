@@ -5,15 +5,81 @@ from __future__ import annotations
 import math
 import threading
 import time
-from collections import OrderedDict
-from copy import deepcopy
 from typing import TYPE_CHECKING
+
+from saitenka.app import timed_osd_evidence, whole_cue_evidence
 
 if TYPE_CHECKING:
     from saitenka_subtitles.geometry import GeometryRequest, GeometrySnapshot
 
 _OWNERS = 4
 _CONFIGURATIONS = 4
+_SOURCE_DECISIONS = 32
+_SOURCE_NAMES = frozenset({"auto", "mpv", "shadow", "legacy", "none"})
+_SOURCE_REASONS = frozenset(
+    {
+        "unprobed",
+        "invalidated",
+        "fetching",
+        "collection-ready",
+        "scan-only",
+        "stale",
+        "unsupported-api",
+        "layout-unsupported-render-mode",
+        "layout-unavailable",
+        "layout-event-count",
+        "layout-geometry-profile",
+        "layout-margins",
+        "unbound-event",
+        "configured-shadow",
+        "legacy",
+        "disabled-externally",
+        "unsupported-option",
+        "ipc-failed",
+        "ipc-unavailable",
+        "unmapped-tokens",
+        "waiting-for-native-owner",
+    }
+)
+
+
+def _source_record(raw: object) -> dict:
+    raw = raw if isinstance(raw, dict) else {}
+    result: dict[str, object] = {}
+    for key in ("configured_source", "selected_source", "scan_source", "paint_source"):
+        value = raw.get(key)
+        result[key] = value if isinstance(value, str) and value in _SOURCE_NAMES else "unknown"
+    reason = raw.get("reason")
+    result["reason"] = reason if isinstance(reason, str) and reason in _SOURCE_REASONS else "other"
+    paint_reason = raw.get("paint_reason")
+    result["paint_reason"] = (
+        paint_reason
+        if isinstance(paint_reason, str)
+        and paint_reason in whole_cue_evidence.REASONS | {"shadow-paint-unqualified"}
+        else "unknown"
+    )
+    result["paint_allowed"] = (
+        raw.get("paint_allowed") if type(raw.get("paint_allowed")) is bool else None
+    )
+    for key in ("cue_revision", "generation", "eligible_tokens", "captured_ns"):
+        result[key] = _count(raw.get(key))
+    return result
+
+
+def _source_history(raw: object) -> dict:
+    if not isinstance(raw, dict):
+        return {"status": "unknown"}
+    history = raw.get("history")
+    if not isinstance(history, list) or len(history) > _SOURCE_DECISIONS:
+        return {"status": "invalid"}
+    return {
+        "status": "partial",
+        "scope": "geometry eligibility; not displayed pixels",
+        "history": [_source_record(row) for row in history],
+        "evicted": _count(raw.get("evicted")),
+    }
+
+
 VALIDATION_VERDICTS = (
     "mask-exact",
     "probe-error",
@@ -219,6 +285,7 @@ def _reference(raw: object, revisions: set[int], *, generation: int | None = Non
     if isinstance(mask_source, str) and mask_source in {
         "native-original",
         "request-document",
+        "whole-cue-layers",
         "unknown",
     }:
         runtime["mask_source"] = mask_source
@@ -294,6 +361,9 @@ def _owner(raw: dict) -> dict:
         "published": _reference(raw.get("published"), revisions, generation=generation),
         "last_published": _reference(raw.get("last_published"), revisions),
         "renderer_selection": _selection(raw.get("renderer_selection")),
+        "geometry_sources": _source_history(raw.get("geometry_sources")),
+        "whole_cue": whole_cue_evidence.safe_history(raw.get("whole_cue")),
+        "timed_osd": timed_osd_evidence.safe_history(raw.get("timed_osd")),
     }
 
 
@@ -331,108 +401,118 @@ def safe_runtime_configuration(raw: object) -> dict:
 
 
 class EvidenceRegistry:
-    """A process-wide export sink; owners never overwrite another session's state."""
+    """An opt-in trace emitter; retained evidence belongs to the trace writer."""
 
-    def __init__(self, *, max_owners: int = _OWNERS) -> None:
-        if max_owners <= 0:
-            raise ValueError("evidence owner bound must be positive")
-        self._max_owners = max_owners
-        self._lock = threading.Lock()
+    def __init__(self, *, kind: str = "runtime_configuration") -> None:
+        self.kind = kind
         self._next = 0
-        self._owners: OrderedDict[int, dict] = OrderedDict()
-        self._evicted = 0
+        self._lock = threading.Lock()
+
+    @property
+    def enabled(self) -> bool:
+        from saitenka.app.telemetry import span_gate
+
+        return bool(span_gate)
 
     def allocate(self) -> int:
+        if not self.enabled:
+            return 0
         with self._lock:
             self._next += 1
             return self._next
 
-    def update(self, owner: int, snapshot: dict) -> None:
-        with self._lock:
-            self._owners[owner] = deepcopy(snapshot)
-            self._owners.move_to_end(owner)
-            if len(self._owners) > self._max_owners:
-                self._owners.popitem(last=False)
-                self._evicted += 1
+    def update(self, owner: int, snapshot: dict, *, action: str = "snapshot") -> None:
+        if not self.enabled:
+            return
+        import json
+
+        from saitenka import otel_metrics
+
+        with otel_metrics.traced("diagnostic_record") as span:
+            span.set("kind", self.kind)
+            span.set("owner", owner)
+            span.set("action", action)
+            span.set("record", json.dumps(snapshot, separators=(",", ":")))
 
     def snapshot(self) -> dict:
-        with self._lock:
-            return {
-                "schema": 1,
-                "owners": deepcopy(list(self._owners.values())),
-                "owners_evicted": self._evicted,
-            }
+        from saitenka.app.telemetry import diagnostic_snapshot
+
+        return diagnostic_snapshot(self.kind)
 
 
 registry = EvidenceRegistry()
 
 
 class GeometryEvidence:
-    """Serialized by the owning coordinator's state lock; no I/O or font hashing."""
+    """Emit changes; no retained histories or report snapshots on the cue thread."""
 
     def __init__(self) -> None:
         self._registry = registry
         self.owner = self._registry.allocate()
         self._key: object = None
         self._revision = 0
-        self._state: dict = {
-            "owner": self.owner,
-            "closed": False,
-            "generation": 0,
-            "configurations": [],
-            "configurations_evicted": 0,
-            "requested": None,
-            "published": None,
-            "last_published": None,
-            "renderer_selection": {"history": [], "evicted": 0},
-        }
+        self._selection: tuple[str, bool] | None = None
+        self._last_whole_decision: dict | None = None
+
+    def _record(self, action: str, row: dict) -> None:
+        self._registry.update(self.owner, row, action=action)
+
+    @property
+    def enabled(self) -> bool:
+        return self._registry.enabled
 
     def selection(self, *, pixel_owner: str, legacy_forced: bool) -> None:
-        selection = self._state["renderer_selection"]
-        history = selection["history"]
-        if history and (history[-1]["pixel_owner"], history[-1]["legacy_forced"]) == (
-            pixel_owner,
-            legacy_forced,
-        ):
+        if not self._registry.enabled or self._selection == (pixel_owner, legacy_forced):
             return
-        history.append(
+        self._selection = (pixel_owner, legacy_forced)
+        self._record(
+            "selection",
             {
-                "revision": selection["evicted"] + len(history) + 1,
-                "captured_ns": time.time_ns(),
                 "pixel_owner": pixel_owner,
                 "legacy_forced": legacy_forced,
-            }
+                "captured_ns": time.time_ns(),
+            },
         )
-        if len(history) > _CONFIGURATIONS:
-            history.pop(0)
-            selection["evicted"] += 1
-        self._registry.update(self.owner, self._state)
+
+    def geometry_source(self, record: dict[str, str | int | bool]) -> None:
+        if self._registry.enabled:
+            self._record("source", _source_record({**record, "captured_ns": time.time_ns()}))
+
+    def timed_osd(self, raw: dict) -> None:
+        if self._registry.enabled:
+            self._record(
+                "timed", {**timed_osd_evidence.safe_record(raw), "captured_ns": time.time_ns()}
+            )
+
+    def whole_cue(self, raw: dict) -> None:
+        if not self._registry.enabled:
+            return
+        record = whole_cue_evidence.safe_record(raw)
+        if record.get("event") == "decision":
+            if record == self._last_whole_decision:
+                return
+            self._last_whole_decision = record
+        self._record("whole", {**record, "captured_ns": time.time_ns()})
 
     def describe(self, request: GeometryRequest) -> int:
+        if not self._registry.enabled:
+            return 0
         fields = _fields(configuration_fields(request))
-        # Paths stay local, so equal public flags still distinguish a changed font configuration.
         key = (fields, request.font_setup)
         if key != self._key:
             self._key = key
             self._revision += 1
-            rows = self._state["configurations"]
-            rows.append(
-                {"revision": self._revision, "captured_ns": time.time_ns(), "fields": fields}
+            self._record(
+                "describe",
+                {"revision": self._revision, "captured_ns": time.time_ns(), "fields": fields},
             )
-            if len(rows) > _CONFIGURATIONS:
-                rows.pop(0)
-                self._state["configurations_evicted"] += 1
-        self._registry.update(self.owner, self._state)
         return self._revision
 
     def requested(self, revision: int, generation: int, sequence: int) -> None:
-        self._state["generation"] = generation
-        self._state["requested"] = {
-            "revision": revision,
-            "generation": generation,
-            "sequence": sequence,
-        }
-        self._registry.update(self.owner, self._state)
+        if self._registry.enabled:
+            self._record(
+                "requested", {"revision": revision, "generation": generation, "sequence": sequence}
+            )
 
     def published(
         self,
@@ -444,26 +524,25 @@ class GeometryEvidence:
         mask_source: str = "unknown",
         validation: dict | None = None,
     ) -> None:
-        publication: dict[str, object] = {
+        if not self._registry.enabled:
+            return
+        row: dict[str, object] = {
             "revision": revision,
             "generation": generation,
             "sequence": sequence,
         }
         if libass_version is not None:
-            publication["libass_version"] = libass_version
+            row["libass_version"] = libass_version
         if mask_source != "unknown":
-            publication["mask_source"] = mask_source
+            row["mask_source"] = mask_source
         if validation is not None:
-            publication["validation"] = _validation(validation)
-        self._state["published"] = publication
-        self._state["last_published"] = publication
-        self._registry.update(self.owner, self._state)
+            row["validation"] = _validation(validation)
+        self._record("published", row)
 
     def clear_published(self) -> None:
-        self._state["published"] = None
-        self._registry.update(self.owner, self._state)
+        if self._registry.enabled:
+            self._record("clear", {})
 
     def invalidate(self, generation: int, *, closed: bool = False) -> None:
-        self._state.update(generation=generation, closed=closed, requested=None, published=None)
-        if self._revision:
-            self._registry.update(self.owner, self._state)
+        if self._registry.enabled:
+            self._record("invalidate", {"generation": generation, "closed": closed})

@@ -100,6 +100,8 @@ def test_every_subtitle_geometry_setting_survives_the_loader():
     shipped that way — `overlay.toml` asked for the SubRip tracks and got authored-ass.
     """
     written = {
+        "source": "mpv",
+        "coloring": "whole-cue-auto",
         "native_visible": True,
         "native_formats": "all",
         "library_path": "/opt/lib/libass.dylib",

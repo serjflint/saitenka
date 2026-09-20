@@ -316,6 +316,7 @@ class FakeIPC:
     can run on the event-driven path. All commands are recorded in ``commands``."""
 
     def __init__(self):
+        self.diagnostic_id = f"fake-{id(self)}"
         self.events: list[dict] = []
         #: The real transport lets a consumer WAIT for an event rather than ask repeatedly. A fake
         #: that always returns instantly cannot tell a blocking loop from a spinning one, so it
@@ -944,17 +945,23 @@ def record_spans(monkeypatch) -> list[dict]:
     """Capture every ``traced(...)`` span (name + static attrs + in-block ``.set`` attrs) without
     standing up an OTel provider — ``instrumented`` composes ``traced``, so this sees the real path."""
     spans: list[dict] = []
+    original = otel_metrics.traced
 
     @contextlib.contextmanager
     def _fake_traced(name, **attrs):
         rec = {"name": name, "attrs": dict(attrs)}
         spans.append(rec)
 
-        class _Setter:
-            def set(self, key, value):
-                rec["attrs"][key] = value
+        with original(name, **attrs) as actual:
 
-        yield _Setter()
+            class _Setter:
+                recording = True
+
+                def set(self, key, value):
+                    rec["attrs"][key] = value
+                    actual.set(key, value)
+
+            yield _Setter()
 
     monkeypatch.setattr(otel_metrics, "traced", _fake_traced)
     return spans

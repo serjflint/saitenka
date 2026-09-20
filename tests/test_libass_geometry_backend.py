@@ -181,6 +181,30 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
 
 
 @pytest.mark.parametrize(
+    "changed",
+    [
+        (("renamed.ttf", b"font"),),
+        (("font.ttf", b"FONT"),),
+        (("font.ttf", b"font"), ("extra.ttf", b"extra")),
+    ],
+)
+def test_font_content_and_names_invalidate_both_snapshot_and_renderer(changed):
+    baseline = request()
+    altered = replace(baseline, attachments=changed)
+
+    assert baseline.cache_key() != altered.cache_key()
+    assert baseline.renderer_key() != altered.renderer_key()
+
+
+def test_identical_font_bytes_share_identity_across_requests():
+    first = request()
+    second = replace(first, generation=2, attachments=(("font.ttf", bytes(bytearray(b"font"))),))
+
+    assert first.cache_key() == second.cache_key()
+    assert first.renderer_key() == second.renderer_key()
+
+
+@pytest.mark.parametrize(
     "margins",
     [(-1, 0, 0, 0), (360, 360, 0, 0), (0, 0, 640, 640)],
 )
@@ -766,3 +790,59 @@ def test_the_extraction_still_works_for_a_caller_that_passes_no_telemetry() -> N
     geometry = extract_token_geometry(rendered, request(palette_size=1))
 
     assert len(geometry) == 1
+
+
+def test_whole_cue_telemetry_encloses_build_and_osd_render(monkeypatch):
+    from saitenka_subtitles import libass_backend
+    from saitenka_subtitles.whole_cue import OsdEvent, WholeCue
+
+    cpu = [0]
+    monkeypatch.setattr(libass_backend.time, "thread_time_ns", lambda: cpu[0])
+    completed = []
+
+    class Telemetry:
+        @contextmanager
+        def span(self, name):
+            values = {}
+            start = cpu[0]
+            try:
+                yield SimpleNamespace(set=lambda key, value: values.__setitem__(key, value))
+            finally:
+                completed.append((name, (cpu[0] - start) / 1_000_000, values))
+
+        def record(self, metric, milliseconds):
+            pass
+
+    class Renderer(FakeRenderer):
+        def render(self, *args, **kwargs):
+            cpu[0] += 20_000_000
+            return super().render(*args, **kwargs)
+
+    def factory(ass, **_kwargs):
+        cpu[0] += 10_000_000
+        return Renderer(Result((Layer(1, 1, b"\xff", 0x01020300, 10, 20),)), ass)
+
+    backend = LibassGeometryBackend(renderer_factory=factory, telemetry=Telemetry())
+    cue = WholeCue(
+        events=(OsdEvent("猫", "", ((0, 0, 1),)),),
+        resolution=(1280, 720),
+        osd_reason="eligible",
+        qualify=True,
+    )
+    try:
+        snapshot = backend.render(
+            replace(request(palette_size=1), coloring="whole-cue-osd", whole_cue=cue)
+        )
+    finally:
+        backend.close()
+
+    assert [(name, cpu) for name, cpu, _ in completed] == [
+        ("subtitle_geometry_renderer_build", 10.0),
+        ("subtitle_geometry_libass", 20.0),
+        ("subtitle_geometry_renderer_build", 10.0),
+        ("subtitle_osd_qualification", 30.0),
+    ]
+    phases = {name: values for name, _, values in completed}
+    assert phases["subtitle_geometry_libass"]["render_cpu_ms"] == 20.0
+    assert phases["subtitle_geometry_libass"]["extract_cpu_ms"] == 0.0
+    assert dict(snapshot.whole_cue.evidence)["qualification_cpu_ms"] == 30.0

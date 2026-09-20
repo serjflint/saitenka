@@ -1,0 +1,210 @@
+--- /dev/null
++++ b/sub/osd_timing.h
+@@ -0,0 +1,19 @@
++#pragma once
++#include <math.h>
++#include <stdbool.h>
++#include <stdint.h>
++
++static inline bool osd_interval_valid(int64_t start, int64_t end)
++{
++    return start < end && start >= -(INT64_C(1) << 52) &&
++           end <= (INT64_C(1) << 52);
++}
++
++static inline bool osd_interval_active(int64_t start, int64_t end, double pts)
++{
++    if (!isfinite(pts) || !osd_interval_valid(start, end))
++        return false;
++    // Match native ASS's millisecond quantization.
++    double ms = floor(pts * 1000 + 1e-6);
++    return ms >= start && ms < end;
++}
+--- a/sub/osd.h
++++ b/sub/osd.h
+@@ -345,6 +345,8 @@
+     int res_x, res_y;
+     int z;
+     bool hidden;
++    bool timed;
++    int64_t start_ms, end_ms;
+ 
+     double *out_rc; // hack to pass boundary rect, [x0, y0, x1, y1]
+ };
+--- a/sub/osd_state.h
++++ b/sub/osd_state.h
+@@ -63,6 +63,7 @@
+ struct osd_external {
+     struct osd_external_ass ov;
+     struct ass_state ass;
++    bool active;
+ };
+ 
+ struct osd_state {
+@@ -96,7 +97,7 @@
+ 
+ // defined in osd_libass.c
+ struct sub_bitmaps *osd_object_get_bitmaps(struct osd_state *osd,
+-                                           struct osd_object *obj, int format);
++                                           struct osd_object *obj, int format, double video_pts);
+ void osd_destroy_backend(struct osd_state *osd);
+ 
+ #endif
+--- a/sub/osd_libass.c
++++ b/sub/osd_libass.c
+@@ -26,6 +26,7 @@
+ #include "common/common.h"
+ #include "common/msg.h"
+ #include "osd.h"
++#include "osd_timing.h"
+ #include "common/frame_diag.h"
+ #include "osd_state.h"
+ 
+@@ -615,6 +616,9 @@
+     zorder_changed |= entry->ov.z != ov->z;
+     entry->ov.z = ov->z;
+     entry->ov.hidden = ov->hidden;
++    entry->ov.timed = ov->timed;
++    entry->ov.start_ms = ov->start_ms;
++    entry->ov.end_ms = ov->end_ms;
+ 
+     update_external(osd, obj, entry);
+ 
+@@ -690,7 +694,7 @@
+ }
+ 
+ struct sub_bitmaps *osd_object_get_bitmaps(struct osd_state *osd,
+-                                           struct osd_object *obj, int format)
++                                           struct osd_object *obj, int format, double video_pts)
+ {
+     if (obj->type == OSDTYPE_OSD) {
+         if (obj->osd_changed) {
+@@ -708,7 +712,17 @@
+ 
+     append_ass(&obj->ass, &obj->vo_res, &obj->ass_imgs[0], &obj->changed);
+     for (int n = 0; n < obj->num_externals; n++) {
+-        if (obj->externals[n]->ov.hidden) {
++        struct osd_external *ext = obj->externals[n];
++        bool active = !ext->ov.hidden && (!ext->ov.timed ||
++            osd_interval_active(ext->ov.start_ms, ext->ov.end_ms, video_pts));
++        obj->changed |= active != ext->active;
++        ext->active = active;
++        if (ext->ov.timed)
++            sk_diag("timed_candidate", "id=%lld hash=%016llx active=%d start=%lld end=%lld pts=%.9f",
++                    (long long)ext->ov.id,
++                    (unsigned long long)sk_diag_hash(ext->ov.data), active,
++                    (long long)ext->ov.start_ms, (long long)ext->ov.end_ms, video_pts);
++        if (!active) {
+             update_playres(&obj->externals[n]->ass, &obj->vo_res);
+             obj->ass_imgs[n + 1] = NULL;
+         } else {
+--- a/sub/osd.c
++++ b/sub/osd.c
+@@ -494,7 +494,7 @@
+             obj->external2->change_id = 0;
+         }
+     } else {
+-        res = osd_object_get_bitmaps(osd, obj, format);
++        res = osd_object_get_bitmaps(osd, obj, format, video_pts);
+     }
+ 
+     if (obj->vo_had_output != !!res) {
+--- a/player/command.c
++++ b/player/command.c
+@@ -59,6 +59,7 @@
+ #include "common/playlist.h"
+ #include "sub/dec_sub.h"
+ #include "sub/osd.h"
++#include "sub/osd_timing.h"
+ #include "sub/sd.h"
+ #include "options/m_option.h"
+ #include "options/m_property.h"
+@@ -5520,6 +5521,33 @@
+     osd_set_external2(mpctx->osd, NULL);
+     for (int n = 0; n < 2; n++)
+         mp_image_unrefp(&cmd->overlay_osd[n].packed);
++}
++
++static void cmd_osd_overlay_timed(void *p)
++{
++    struct mp_cmd_ctx *cmd = p;
++    struct MPContext *mpctx = cmd->mpctx;
++    int64_t start = cmd->args[1].v.i64, end = cmd->args[2].v.i64;
++    if (!osd_interval_valid(start, end)) {
++        cmd->success = false;
++        return;
++    }
++    double rc[4] = {0};
++    struct osd_external_ass ov = {
++        .owner = cmd->cmd->sender,
++        .id = cmd->args[0].v.i64,
++        .format = 1,
++        .data = cmd->args[3].v.s,
++        .res_x = cmd->args[4].v.i,
++        .res_y = cmd->args[5].v.i,
++        .z = cmd->args[6].v.i,
++        .timed = true,
++        .start_ms = start,
++        .end_ms = end,
++        .out_rc = rc,
++    };
++    osd_set_external(mpctx->osd, &ov);
++    mp_wakeup_core(mpctx);
+ }
+ 
+ static void cmd_osd_overlay(void *p)
+@@ -8154,6 +8182,19 @@
+                                         {"dh", OPT_INT(v.i), OPTDEF_INT(0)}, }},
+     { "overlay-remove", cmd_overlay_remove, { {"id", OPT_INT(v.i)} } },
+ 
++    { "osd-overlay-timed", cmd_osd_overlay_timed,
++        {
++            {"id", OPT_INT64(v.i64)},
++            {"start_ms", OPT_INT64(v.i64)},
++            {"end_ms", OPT_INT64(v.i64)},
++            {"data", OPT_STRING(v.s)},
++            {"res_x", OPT_INT(v.i), OPTDEF_INT(0)},
++            {"res_y", OPT_INT(v.i), OPTDEF_INT(720)},
++            {"z", OPT_INT(v.i), OPTDEF_INT(0)},
++        },
++        .is_noisy = true,
++    },
++
+     { "osd-overlay", cmd_osd_overlay,
+         {
+             {"id", OPT_INT64(v.i64)},
+--- /dev/null
++++ b/test/osd_timing.c
+@@ -0,0 +1,22 @@
++#include "test_utils.h"
++#include "sub/osd_timing.h"
++
++int main(void)
++{
++    assert_false(osd_interval_active(16120, 17000, 16.119));
++    assert_true(osd_interval_active(16120, 17000, 16.120));
++    assert_true(osd_interval_active(16120, 17000, 16.9999));
++    assert_false(osd_interval_active(16120, 17000, 17.000));
++    assert_false(osd_interval_active(16120, 17000, NAN));
++    assert_false(osd_interval_active(16120, 17000, INFINITY));
++    assert_false(osd_interval_active(16120, 17000, MP_NOPTS_VALUE));
++    assert_false(osd_interval_valid(1, 1));
++    assert_false(osd_interval_valid(2, 1));
++    assert_false(osd_interval_valid(INT64_MIN, INT64_MAX));
++    // Selection is stateless across backwards seeks and touching intervals.
++    assert_true(osd_interval_active(16120, 17000, 16.5));
++    assert_false(osd_interval_active(17000, 18000, 16.5));
++    assert_true(osd_interval_active(17000, 18000, 17.0));
++    assert_false(osd_interval_active(16120, 17000, 17.0));
++    return 0;
++}
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -207,3 +207,7 @@
+ layout_profile = executable('ass-layout-profile', 'ass_layout_profile.c',
+                             include_directories: incdir, dependencies: libm)
+ test('ass-layout-profile', layout_profile)
++
++osd_timing = executable('osd-timing', files('osd_timing.c'),
++                        include_directories: incdir, link_with: test_utils)
++test('osd-timing', osd_timing)

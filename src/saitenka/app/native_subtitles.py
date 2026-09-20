@@ -26,7 +26,9 @@ from saitenka_subtitles import (
     parse_ass_event_line,
     prepare_ass_hit_map_frame,
     subrip,
+    whole_cue,
 )
+from saitenka_subtitles.ass_geometry import active_ass_text
 
 from saitenka import otel_metrics
 from saitenka.app import subtitle_fonts
@@ -206,6 +208,8 @@ GATE_OPTIONS = (
     # mpv's runs with different advances than ours. The rest are read only on the
     # `sub-ass-override` branches that set them (`sd_ass.c:552-558,577`).
     "sub-shaper",
+    "osd-shaper",
+    "osd-justify",
     "sub-ass-justify",
     "sub-line-spacing",
     "sub-hinting",
@@ -825,6 +829,7 @@ class NativeSubtitleGeometry:
         *,
         lookahead: int = 2,
         formats: NativeFormats = NativeFormats.AUTHORED_ASS,
+        coloring: str = "legacy",
     ) -> None:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
@@ -833,6 +838,7 @@ class NativeSubtitleGeometry:
         self._ports = ports
         self.lookahead = lookahead
         self.formats = formats
+        self.coloring = coloring
         self.source_kind = SourceKind.NONE
         self.source_path: Path | None = None
         self._source_bytes: bytes | None = None
@@ -841,12 +847,14 @@ class NativeSubtitleGeometry:
         self.ass_full_capability = AssFullCapability.UNKNOWN
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        self._eligible_indices: frozenset[int] | None = None
         #: Which cue the traced decisions are about — the join key across this chain.
         self._cue = cue_digest("")
         self._last_decision: tuple[GeometryOutcome, str] | None = None
         self._owner = "unknown"
         self._submitted_at: tuple[int, float] | None = None
         self._pending_key: tuple[int, str] | None = None
+        self._lookahead_pending: _ScheduleInputs | None = None
         self._published_key: str | None = None
         self._source_epoch = 0
         self._last_transition: str | None = None
@@ -883,6 +891,10 @@ class NativeSubtitleGeometry:
         # family stays uncolored for as long as it is shown.
         self._ports.reschedule()
         self._ports.redraw()
+
+    @property
+    def paint_origin(self) -> tuple[int, int]:
+        return (0, 0) if self._last_render_inputs is None else self._last_render_inputs.box_origin
 
     def set_track_codec(self, codec: str) -> None:
         """Which decoder mpv is running for the selected track, from `track-list`.
@@ -1095,10 +1107,10 @@ class NativeSubtitleGeometry:
         self._announced_reason = reason
         self._ports.notify(_fallback_notice(reason, diagnostic), "warn")
 
-    def _set_ready(self, *, active_events: int = 0) -> None:
+    def _set_ready(self, *, active_events: int = 0) -> bool:
         self._failure_diagnostic = None
         self.fallback_reason = None
-        self._set_decision(
+        return self._set_decision(
             GeometryOutcome.READY,
             "ready",
             active_events=active_events,
@@ -1191,6 +1203,10 @@ class NativeSubtitleGeometry:
         return self._fonts.options == render.font_options
 
     @property
+    def eligible_token_indices(self) -> frozenset[int] | None:
+        return self._eligible_indices
+
+    @property
     def eligible_tokens(self) -> int:
         """How many tokens the last decision owed a box — the cue's debt, not its styling.
 
@@ -1222,6 +1238,7 @@ class NativeSubtitleGeometry:
         self._published_key = None
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        self._eligible_indices = None
         self._last_render_inputs = None
         self._failure_diagnostic = None
         if live:
@@ -1297,6 +1314,7 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
         self._pending_key = None
         self._published_key = None
+        self._lookahead_pending = None
         if keep_lookahead:
             self.worker.retire_live()
         else:
@@ -1304,7 +1322,39 @@ class NativeSubtitleGeometry:
         if live:
             self._ports.clear_interaction()
 
+    def replenish(self, seen: GeometryObservation) -> None:
+        inputs, self._lookahead_pending = self._lookahead_pending, None
+        if inputs is not None and inputs.generation == self.worker.generation:
+            self._prefetch(
+                seen,
+                inputs.path,
+                inputs.track_id,
+                inputs.generation,
+                inputs.render,
+                inputs.cue.timestamp_ms,
+            )
+
+    def prefetched_cue(
+        self, snapshot: GeometrySnapshot, seen: GeometryObservation
+    ) -> tuple[TokenizedCue, list[WordBox]] | None:
+        if seen.index is None:
+            return None
+        render = self._render_inputs(seen.prop, seen.osd)
+        inputs = self._lookahead_cue(snapshot.track_id, snapshot.timestamp_ms, render, seen.index)
+        if inputs is None:
+            return None
+        return self._ports.tokenize_lookahead(inputs.text), self.snapshot_boxes(
+            snapshot, render.box_origin
+        )
+
     def refresh(self, seen: GeometryObservation) -> None:
+        self._refresh(seen)
+        self.replenish(seen)
+
+    def _refresh(self, seen: GeometryObservation) -> None:
+        if not seen.text.strip():
+            self._prefetch_gap(seen)
+            return
         active_rows = seen.prop("sub-text/ass-full")
         if not isinstance(active_rows, str) or not active_rows.strip():
             # mpv has withdrawn the rows this cue renders from — the blank it publishes while a
@@ -1326,13 +1376,59 @@ class NativeSubtitleGeometry:
             active_events = len(snapshot.frame_id.active_event_ids)
             if seen.prop("sub-start") is None or seen.prop("sub-end") is None:
                 self._set_pending_with_current_geometry(active_events=active_events)
-            else:
-                self._set_ready(active_events=active_events)
+            elif self._set_ready(active_events=active_events):
+                self._ports.redraw()
+            return
+        if self._restore_cached(seen):
             return
         # The cue moved, not the document it renders from, so the lookahead for later cues survives.
         self.invalidate(live=True, keep_lookahead=True)
         if seen.text.strip():
             self.schedule(seen)
+
+    def _restore_cached(self, seen: GeometryObservation) -> bool:
+        if self._last_snapshot is None:
+            return False
+        inputs = self._resolve_schedule_inputs(seen)
+        if inputs is None or not self._publish_cached(inputs):
+            return False
+        self.apply(seen)
+        return True
+
+    def _prefetch_gap(self, seen: GeometryObservation) -> None:
+        path, index = self.source_path, seen.index
+        if path is None or index is None or self.lookahead == 0:
+            return
+        if (
+            self.source_kind is SourceKind.NONE
+            or self.ass_full_capability == AssFullCapability.UNSUPPORTED
+        ):
+            return
+        try:
+            render = self._render_inputs(seen.prop, seen.osd)
+            if not self._fonts_are_current(render):
+                return
+            playhead = _as_float(seen.prop("time-pos"), math.nan)
+            delay = _as_float(seen.prop("sub-delay"), 0.0)
+            if not math.isfinite(playhead) or not math.isfinite(delay):
+                return
+            subtitle_time = max(0.0, playhead - delay)
+            timestamp_ms = round(subtitle_time * 1_000)
+            # A track can finish loading inside an event, before its text observation arrives.
+            active = index.active_at(subtitle_time)
+            if active.located:
+                timestamp_ms = round(index.cues[active.position].start * 1_000)
+            self._prefetch(
+                seen,
+                path,
+                SubtitleTrackId(f"sid:{seen.prop('sid')}:{path.resolve()}"),
+                self._ports.pipeline.generation,
+                render,
+                timestamp_ms - 1,
+            )
+        except (TypeError, ValueError):
+            # Startup observations arrive independently; the next refresh retries.
+            return
 
     @staticmethod
     def record_clock_change(prop) -> None:
@@ -1366,6 +1462,7 @@ class NativeSubtitleGeometry:
         self._submitted_at = None
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        self._eligible_indices = None
         self.fallback_reason = None
         self._set_decision(GeometryOutcome.EMPTY, "empty", owner=self._owner)
 
@@ -1481,8 +1578,8 @@ class NativeSubtitleGeometry:
         except (TypeError, ValueError):
             return None
 
-    @staticmethod
     def _build(
+        self,
         source: bytes,
         track_id: SubtitleTrackId,
         generation: int,
@@ -1518,6 +1615,30 @@ class NativeSubtitleGeometry:
         palette = _palette_in_frame_units(
             prepared, cue.frame_size[1], renderer_state.font_scale, unreachable=unreachable
         )
+        whole = None
+        if self.coloring.startswith("whole-cue"):
+            whole = whole_cue.WholeCue(osd_reason="configured-overpaint")
+            if self.coloring != "whole-cue-overpaint":
+                try:
+                    whole = whole_cue.osd_template(
+                        source,
+                        prepared,
+                        fonts_blocked=unreachable.all_unsafe,
+                        blocked_families=unreachable.families,
+                        frame=cue.frame_size,
+                        margins=cue.margins,
+                    )
+                except (ValueError, KeyError):
+                    whole = whole_cue.WholeCue(osd_reason="osd-input")
+            whole = whole_cue.render_constraints(
+                whole,
+                pixel_aspect=cue.pixel_aspect,
+                osd_justify=dict(cue.render_profile).get("osd-justify")
+                not in {"None", "'auto'", None},
+                default_state=renderer_state == RendererState(),
+                blended=dict(cue.render_profile).get("blend-subtitles")
+                not in {"False", "'no'", "None"},
+            )
         return GeometryRequest(
             generation,
             track_id,
@@ -1528,6 +1649,7 @@ class NativeSubtitleGeometry:
             prepared.ass,
             native_ass=source,
             document_metadata=prepared.document_metadata,
+            paint_qualification=prepared.paint_qualification,
             pixel_aspect=cue.pixel_aspect,
             margins=cue.margins,
             use_margins=cue.use_margins,
@@ -1537,7 +1659,10 @@ class NativeSubtitleGeometry:
             attachments=fonts.attachments,
             font_setup=fonts.setup,
             renderer_state=renderer_state,
-            keep_coverage=True,
+            keep_coverage=self.coloring == "legacy",
+            coloring=self.coloring,
+            whole_cue=whole,
+            osd_font_setup=fonts.osd_setup,
         )
 
     def _render_inputs(self, prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:
@@ -1697,9 +1822,9 @@ class NativeSubtitleGeometry:
             if len(queued_keys) >= self.lookahead:
                 break
 
-    def schedule(self, seen: GeometryObservation) -> bool:
+    def schedule(self, seen: GeometryObservation, *, redraw: bool = True) -> bool:
         try:
-            return self._schedule(seen)
+            return self._schedule(seen, redraw=redraw)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             self.worker.mark_not_ready("schedule-error")
             reason, code = geometry_failure_reason(error)
@@ -1745,6 +1870,15 @@ class NativeSubtitleGeometry:
         if not isinstance(active_rows, str) or not active_rows.strip():
             self._degrade_geometry("subtitle-ass-full-unavailable")
             return None
+        if source is not None:
+            try:
+                observed_text = active_ass_text(source, track_id, active_rows)
+            except (TypeError, ValueError):
+                pass  # The worker classifies malformed or unsupported authored events.
+            else:
+                if observed_text != seen.text.replace("\r", "").replace("\\N", "\n"):
+                    self._degrade_geometry("subtitle-observation-pending")
+                    return None
         if start is None or end is None:
             return self._indexed_span(seen, active_rows)
         return self._clocked_span(seen, start, end, active_rows)
@@ -1953,13 +2087,14 @@ class NativeSubtitleGeometry:
             self._observation_key(seen),
         )
 
-    def _publish_cached(self, seen: GeometryObservation, inputs: _ScheduleInputs) -> bool:
+    def _publish_cached(self, inputs: _ScheduleInputs) -> bool:
         cached = self.worker.publish_prefetched(inputs.key, inputs.generation)
         if cached is None:
             return False
         if inputs.observation_key is not None:
             self._pending_key = (inputs.generation, inputs.observation_key)
         self._eligible_tokens = len(cached.palette)
+        self._eligible_indices = frozenset(entry.token_index for entry in cached.palette)
         self.worker.mark_presented(cached)
         if not self._ports.use_native():
             if self._ports.ownership_undecided():
@@ -1967,26 +2102,25 @@ class NativeSubtitleGeometry:
             self._degrade_geometry("mpv-sub-visibility-rejected")
             return True
         self._set_ready(active_events=len(cached.frame_id.active_event_ids))
-        self._prefetch(
-            seen,
-            inputs.path,
-            inputs.track_id,
-            inputs.generation,
-            inputs.render,
-            inputs.cue.timestamp_ms,
-        )
+        self._lookahead_pending = inputs
         return True
 
-    def _schedule(self, seen: GeometryObservation) -> bool:
+    def _select_annotations(self, selection: AnnotationSelection) -> None:
+        self._last_selection = selection
+        self._eligible_tokens = len(selection.annotations)
+        self._eligible_indices = frozenset(entry.token_index for entry in selection.annotations)
+
+    def _schedule(self, seen: GeometryObservation, *, redraw: bool = True) -> bool:
         self._last_selection = AnnotationSelection((), 0, 0, 0)
         self._eligible_tokens = 0
+        self._eligible_indices = None
         self._cue = cue_digest(seen.text)
         inputs = self._resolve_schedule_inputs(seen)
         if inputs is None:
             return False
         with otel_metrics.traced("subtitle_geometry_cache") as span:
             span.set("cue", cue_digest(seen.text))
-            cache_hit = self._publish_cached(seen, inputs)
+            cache_hit = self._publish_cached(inputs)
             stats = self.worker.stats
             span.set("outcome", "hit" if cache_hit else "miss")
             if not cache_hit:
@@ -2007,7 +2141,8 @@ class NativeSubtitleGeometry:
         if cache_hit:
             # A hit resolves inside this call, so there is no terminal to wait for: publish here, or
             # a cached cue would sit unapplied until some later miss happened to land.
-            self.apply(seen)
+            self.apply(seen, redraw=redraw)
+            self._ports.reschedule()
             return True
         try:
             selection = self._annotations(
@@ -2020,8 +2155,7 @@ class NativeSubtitleGeometry:
             self.worker.mark_not_ready("invalid-token-annotation")
             self._degrade_geometry("subtitle-token-annotation-invalid")
             return False
-        self._last_selection = selection
-        self._eligible_tokens = len(selection.annotations)
+        self._select_annotations(selection)
         if not selection.annotations:
             self._ports.publish([], None)
             self.worker.mark_not_ready("no-eligible-tokens")
@@ -2100,9 +2234,9 @@ class NativeSubtitleGeometry:
             self._pending_key = None
         return accepted
 
-    def apply(self, seen: GeometryObservation) -> bool:
+    def apply(self, seen: GeometryObservation, *, redraw: bool = True) -> bool:
         try:
-            return self._apply(seen)
+            return self._apply(seen, redraw=redraw)
         except Exception as error:  # noqa: BLE001  # optional provider must fail interaction closed
             reason, code = geometry_failure_reason(error)
             self._degrade_geometry(
@@ -2159,6 +2293,10 @@ class NativeSubtitleGeometry:
         # point all read the box directly. One translated set is one answer; a translated origin
         # beside untranslated boxes is two.
         origin = (0, 0) if self._last_render_inputs is None else self._last_render_inputs.box_origin
+        return self.snapshot_boxes(snapshot, origin)
+
+    @staticmethod
+    def snapshot_boxes(snapshot: GeometrySnapshot, origin: tuple[int, int]) -> list[WordBox]:
         return [
             WordBox(
                 item.token_index,
@@ -2196,7 +2334,7 @@ class NativeSubtitleGeometry:
             )
         self._submitted_at = None
 
-    def _apply(self, seen: GeometryObservation) -> bool:
+    def _apply(self, seen: GeometryObservation, *, redraw: bool = True) -> bool:
         """Turn the published snapshot into boxes on screen, or trace why not.
 
         Five ways to answer no. Untraced, a published render leaving through one is
@@ -2231,7 +2369,8 @@ class NativeSubtitleGeometry:
                 self._set_fallback("mpv-sub-visibility-rejected")
                 return False
             self._set_ready(active_events=len(snapshot.frame_id.active_event_ids))
-            self._ports.redraw()
+            if redraw:
+                self._ports.redraw()
             span.set("outcome", "applied")
             return True
 

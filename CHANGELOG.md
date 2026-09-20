@@ -9,6 +9,13 @@ logs.
 
 ### Added
 
+- Automatic subtitle geometry preserves qualified shadow scanning when native geometry cannot
+  represent the render mode or subtitle frame. Overlay warnings explain incompatibilities, and
+  metadata-only reports retain bounded geometry-source history.
+
+- Subtitle reports distinguish selected geometry sources, usable scan regions, shadow coloring
+  eligibility and patched-mpv acquisition outcomes when telemetry is enabled.
+
 - Reports retain option origins, profile changes, renderer selection and bounded redraw-validation
   outcomes without tracing. Diagnostic coverage tools distinguish missing causal boundaries,
   known-fault expectations and independently qualified character results.
@@ -40,6 +47,15 @@ logs.
 
 ### Fixed
 
+- Indexed subtitle navigation seeks to the cue it prepares, including rapid repeated steps and
+  subtitle delay. Whole-cue OSD lookahead caches final color/underline payloads and publishes the
+  current cue before replenishing lookahead.
+
+- Automatic subtitle coloring uses the prepared event policy, preserving static speaker colors
+  across cached geometry. Suppressed color demand and policy-driven withdrawal remain visible in traces.
+
+- Patched-mpv layout revisions no longer clear unchanged shadow geometry and coloring during
+  automatic fallback.
 - Failed subtitle raster uploads can retry identical pixels; pending overprints no longer count as
   acknowledged color. Late surface replies retain their rejected status in diagnostic reports.
 - Subtitle color masks preserve the unmodified native render instead of relying on pixels changed

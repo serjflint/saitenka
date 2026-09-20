@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
 from typing import TYPE_CHECKING
 
 from saitenka.app import font_resolution
+from saitenka.app.render_evidence import safe_runtime_configuration
 from saitenka.app.report_reader import read_member, trace_evidence
 
 if TYPE_CHECKING:
@@ -14,6 +16,11 @@ if TYPE_CHECKING:
 _SPAN_NAMES = frozenset(
     {
         "subtitle_geometry_decision",
+        "subtitle_geometry_source",
+        "subtitle_whole_cue",
+        "subtitle_osd_qualification",
+        "subtitle_whole_cue_summary",
+        "subtitle_geometry_acquisition",
         "subtitle_geometry_clock",
         "subtitle_geometry_cache",
         "subtitle_geometry_prepare",
@@ -26,6 +33,21 @@ _SPAN_NAMES = frozenset(
 
 _FIELDS = frozenset(
     {
+        "configured_source",
+        "requested",
+        "device",
+        "cache_hit",
+        "selected_source",
+        "scan_source",
+        "paint_source",
+        "paint_allowed",
+        "paint_reason",
+        "geometry_source",
+        "cue_revision",
+        "attempt",
+        "request_generation",
+        "request_cue_revision",
+        "capability",
         "outcome",
         "reason",
         "error_code",
@@ -77,6 +99,28 @@ _FIELDS = frozenset(
         "retry_exhausted",
         "accepted",
         "effect_id",
+        "color_session",
+        "occurrence",
+        "text_hash",
+        "cue_start_ms",
+        "blockers",
+        "shadow_bounds",
+        "osd_bounds",
+        "osd_resolution",
+        "frame_size",
+        "comparison",
+        "delta",
+        "scan_available",
+        "qualification_ms",
+        "counts",
+        "outcomes",
+        "evicted",
+        "scope",
+        "mapping",
+        "shadow_units",
+        "osd_units",
+        "shadow_units_omitted",
+        "osd_units_omitted",
     }
 )
 
@@ -91,6 +135,60 @@ def load_trace(source: Path) -> list[dict]:
     if evidence["status"] == "invalid":
         raise ValueError(evidence["reason"])
     return evidence["events"]
+
+
+def source_history(source: Path) -> list[dict]:
+    """Read bounded, text-free source decisions when a metadata-only bundle has no trace."""
+    try:
+        text = read_member(source, "diagnostics/envelope.json")
+        envelope = json.loads(text) if text is not None else {}
+    except (OSError, ValueError, RecursionError, zipfile.BadZipFile):
+        return []
+    if not isinstance(envelope, dict):
+        return []
+    runtime = safe_runtime_configuration(envelope.get("effective_runtime_configuration"))
+    sources = [
+        {
+            "name": "subtitle_geometry_source",
+            "ph": "X",
+            "dur": 0,
+            "ts": record["captured_ns"] / 1000,
+            "args": record,
+        }
+        for owner in runtime.get("owners", [])
+        for record in owner.get("geometry_sources", {}).get("history", [])
+        if record.get("captured_ns") is not None
+    ]
+    whole = [
+        {
+            "name": "subtitle_whole_cue",
+            "ph": "X",
+            "dur": 0,
+            "ts": row["captured_ns"] / 1000,
+            "args": row,
+        }
+        for owner in runtime.get("owners", [])
+        for row in owner.get("whole_cue", {}).get("history", [])
+        if row.get("event") == "decision" and row.get("captured_ns") is not None
+    ]
+    summaries = [
+        {
+            "name": "subtitle_whole_cue_summary",
+            "ph": "X",
+            "dur": 0,
+            "ts": max((row.get("captured_ns", 0) for row in evidence.get("history", [])), default=0)
+            / 1000,
+            "args": {
+                "counts": evidence.get("counts", {}),
+                "outcomes": evidence.get("outcomes", {}),
+                "evicted": evidence.get("evicted"),
+                "scope": evidence.get("scope", "missing"),
+            },
+        }
+        for owner in runtime.get("owners", [])
+        if (evidence := owner.get("whole_cue", {})).get("history")
+    ]
+    return sources + whole + summaries
 
 
 def geometry_spans(events: list[dict]) -> list[dict]:
@@ -179,7 +277,54 @@ def _render_diagnosis(args: dict) -> str:
     )
 
 
+def _source_diagnosis(args: dict) -> str:
+    return (
+        f"configured={args.get('configured_source', '?')} selected={args.get('selected_source', '?')} "
+        f"scan={args.get('scan_source', '?')} paint={args.get('paint_source', '?')} "
+        f"paint_reason={args.get('paint_reason', '?')} "
+        f"eligible={args.get('eligible_tokens', 0)} reason={args.get('reason', '?')} "
+        f"cue={args.get('cue_revision', '?')} generation={args.get('generation', '?')}"
+    )
+
+
+def _acquisition_diagnosis(args: dict) -> str:
+    return (
+        f"source={args.get('geometry_source', '?')} reason={args.get('reason', '?')} "
+        f"capability={args.get('capability', '?')} attempt={args.get('attempt', '?')} "
+        f"epoch={args.get('source_epoch', '?')} "
+        f"requested_cue={args.get('request_cue_revision', '?')} "
+        f"requested_generation={args.get('request_generation', '?')} "
+        f"current_cue={args.get('cue_revision', '?')} generation={args.get('generation', '?')}"
+    )
+
+
+def _whole_cue_diagnosis(args: dict) -> str:
+    return (
+        f"requested={args.get('requested', '?')} device={args.get('device', '?')} "
+        f"reason={args.get('reason', '?')} blockers={args.get('blockers', [])} "
+        f"cue={args.get('text_hash', '?')} at={args.get('cue_start_ms', '?')}ms "
+        f"occurrence={args.get('occurrence', '?')} comparison={args.get('comparison', 'unknown')}"
+    )
+
+
+def _osd_qualification_diagnosis(args: dict) -> str:
+    return (
+        f"shadow comparison={args.get('comparison', 'unknown')} "
+        f"subtitle={args.get('shadow_bounds', '?')} osd={args.get('osd_bounds', '?')} "
+        f"mapping={args.get('mapping', '?')} cost={args.get('qualification_ms', '?')}ms "
+        "actual mpv pixels=unmeasured"
+    )
+
+
 _DIAGNOSIS = {
+    "subtitle_whole_cue": _whole_cue_diagnosis,
+    "subtitle_osd_qualification": _osd_qualification_diagnosis,
+    "subtitle_whole_cue_summary": lambda a: (
+        f"occurrence-reasons={a.get('counts', {})} terminal-outcomes={a.get('outcomes', {})} "
+        f"evicted={a.get('evicted', '?')}; {a.get('scope', 'unknown')}"
+    ),
+    "subtitle_geometry_source": _source_diagnosis,
+    "subtitle_geometry_acquisition": _acquisition_diagnosis,
     "subtitle_pixel_ownership": _ownership_diagnosis,
     "subtitle_geometry_clock": _clock_diagnosis,
     "subtitle_geometry_cache": _cache_diagnosis,
@@ -234,6 +379,9 @@ def render_geometry(source: Path, events: list[dict], *, nested: bool = False) -
         f"{sum(span['name'] == 'subtitle_geometry_render' for span in spans)} request, "
         f"{sum(span['name'] == 'subtitle_geometry_libass' for span in spans)} libass"
     )
+    sources = [span for span in spans if span["name"] == "subtitle_geometry_source"]
+    if sources:
+        lines.append("  source: " + _source_diagnosis(sources[-1].get("args", {})))
     start = spans[0].get("ts", 0.0)
     for span in spans:
         elapsed = (span.get("ts", start) - start) / 1_000_000

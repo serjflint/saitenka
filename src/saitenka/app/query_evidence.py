@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import threading
 import time
-from collections import deque
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
+from saitenka.app.diagnostic_summary import INGRESS_HISTORY, INGRESS_OUTCOMES
 from saitenka.app.player_evidence import OPTIONS
 from saitenka.app.render_evidence import EvidenceRegistry
 from saitenka.app.report_schema import count
@@ -22,23 +22,6 @@ PROPERTIES = frozenset(f"options/{name}" for name in OPTIONS) | {
 }
 _VERBS = frozenset({"observe_property", "get_property"})
 MAX_OWNERS = 2
-INGRESS_HISTORY = 8
-INGRESS_OUTCOMES = frozenset(
-    {
-        "queued",
-        "buffered",
-        "stale-epoch",
-        "closed",
-        "not-ready",
-        "candidate-full",
-        "mailbox-full",
-        "exception",
-        "reduced",
-        "projection-closed",
-        "projection-stale-epoch",
-        "projection-exception",
-    }
-)
 _PROJECTION_OUTCOMES = frozenset(
     {"reduced", "projection-closed", "projection-stale-epoch", "projection-exception"}
 )
@@ -237,7 +220,7 @@ def safe_snapshot(raw: object) -> dict:
     }
 
 
-registry = EvidenceRegistry(max_owners=MAX_OWNERS)
+registry = EvidenceRegistry(kind="player_queries")
 
 
 class QueryEvidence:
@@ -250,26 +233,18 @@ class QueryEvidence:
         self._epoch = 0
         self._closed = False
         self._stale = 0
-        self._ingress: deque[dict] = deque(maxlen=INGRESS_HISTORY)
-        self._ingress_counts = dict.fromkeys(sorted(INGRESS_OUTCOMES), 0)
         self._ingress_sequence = 0
 
-    def _save(self) -> None:
+    def _record(self, action: str, row: dict) -> None:
         self._registry.update(
             self.owner,
             {
-                "owner": self.owner,
-                "commands": list(self._rows.values()),
+                **row,
                 "connection_epoch": self._epoch,
                 "closed": self._closed,
                 "stale_completions": self._stale,
-                "ingress": {
-                    "schema": 2,
-                    "recent": list(self._ingress),
-                    "counts": self._ingress_counts,
-                    "evicted": max(0, self._ingress_sequence - INGRESS_HISTORY),
-                },
             },
+            action=action,
         )
 
     def ingress(
@@ -281,6 +256,8 @@ class QueryEvidence:
         source: str = "wire",
         mailbox_sequence: int | None = None,
     ) -> None:
+        if not self._registry.enabled:
+            return
         name = message.get("name")
         if (
             message.get("event") != "property-change"
@@ -291,19 +268,18 @@ class QueryEvidence:
         with self._lock:
             self._ingress_sequence += 1
             sequence = self._ingress_sequence
-            self._ingress_counts[outcome] += 1
-            self._ingress.append(
+            self._record(
+                "ingress",
                 {
                     "sequence": sequence,
                     "property": name,
-                    "connection_epoch": epoch,
+                    "event_epoch": epoch,
                     "source": source,
                     "outcome": outcome,
                     "recorded_ns": time.time_ns(),
                     "mailbox_sequence": mailbox_sequence,
-                }
+                },
             )
-            self._save()
         with otel_metrics.traced("player_property_ingress") as span:
             span.set("query_owner", self.owner)
             span.set("ingress_sequence", sequence)
@@ -315,6 +291,8 @@ class QueryEvidence:
                 span.set("mailbox_sequence", mailbox_sequence)
 
     def command(self, send: Callable[..., dict], verb: str, *args: object, epoch: int) -> dict:
+        if not self._registry.enabled:
+            return send(verb, *args)
         name = args[-1] if args else None
         if not isinstance(name, str) or name not in PROPERTIES or verb not in _VERBS:
             return send(verb, *args)
@@ -334,7 +312,7 @@ class QueryEvidence:
             }
             if not self._closed and epoch == self._epoch:
                 self._rows[name, verb] = row
-                self._save()
+                self._record("command", row)
         outcome = "exception"
         with otel_metrics.traced("player_property_command") as span:
             span.set("query_owner", self.owner)
@@ -355,12 +333,15 @@ class QueryEvidence:
                         or self._rows.get((name, verb)) is not row
                     ):
                         self._stale += 1
+                        self._record("state", {})
                     else:
                         row.update(outcome=outcome, completed_ns=time.time_ns())
-                    self._save()
+                        self._record("command", row)
 
     def close(self) -> None:
+        if not self._registry.enabled:
+            return
         with self._lock:
             self._closed = True
-            if self._rows or self._ingress:
-                self._save()
+            if self._rows or self._ingress_sequence:
+                self._record("state", {})

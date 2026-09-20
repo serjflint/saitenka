@@ -1,17 +1,14 @@
-"""Integration failure evidence survives export and tracing-disabled collection."""
+"""Integration evidence is exported only when tracing is enabled."""
 
 import json
 
 import pytest
 from ankiconnect_client import AnkiConnectClient
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
 from test_diagnostic_findings import _load_findings
 from test_report import _hermetic
 
-from saitenka import operation_summary, otel_metrics
+from saitenka import otel_metrics
 from saitenka.app import anki, report, telemetry
-from saitenka.app.otel_export import CTFSpanProcessor
 from saitenka.app.trace_report import load_startup_trace
 from saitenka.session import session_id
 
@@ -26,16 +23,13 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
         f'[telemetry]\nenabled = {str(tracing).lower()}\nexport_dir = "{directory}"\n'
     )
     (tmp_path / "cache/overlay.log").write_text(json.dumps({"session": session_id()}) + "\n")
-    monkeypatch.setattr(operation_summary, "operations", operation_summary.OperationSummary())
-    monkeypatch.setattr(otel_metrics, "_trace_available", tracing)
+    from telemetry_helpers import enable_telemetry
+
+    telemetry.shutdown()
+    if tracing:
+        enable_telemetry(monkeypatch, tmp_path)
+        config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{tmp_path / "trace"}"\n')
     monkeypatch.setattr("ankiconnect_client.client.time.sleep", lambda _seconds: None)
-    gate = telemetry.ActiveGate()
-    gate.set(value=tracing)
-    provider = TracerProvider()
-    provider.add_span_processor(
-        CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
-    )
-    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
 
     class Transport:
         def send(self, _payload, *, timeout):
@@ -49,11 +43,19 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
     with pytest.raises((anki.AnkiError, OSError)):
         anki.Anki().find_notes("private note query")
     telemetry.save_operation_summary()
-    provider.shutdown()
+    telemetry.shutdown()
     archive = report.build_report_bundle(
         tmp_path / "reports", timestamp="integration", diagnostic_detail=True
     )
     diagnosis = _load_findings().diagnose_report(archive)
+    if not tracing:
+        import zipfile
+
+        with zipfile.ZipFile(archive) as bundle:
+            envelope = json.loads(bundle.read("diagnostics/envelope.json"))
+            assert envelope["operation_health"] == {"status": "not-collected"}
+            assert "diagnostics/session.json" not in bundle.namelist()
+        return
     assert any(
         finding["category"]
         == ("operation-unavailable" if failure == "unavailable" else "operation-other")
@@ -100,6 +102,9 @@ def test_enabling_tracing_externally_still_resolves_the_module(monkeypatch):
     assertions pass only when some earlier test in the same process had resolved the module first:
     run the file alone and the two `tracing=True` cases failed.
     """
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(otel_metrics, "_trace_available", True)
     monkeypatch.setattr(otel_metrics, "_trace_module", None)
 

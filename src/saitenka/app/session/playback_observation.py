@@ -22,6 +22,11 @@ log = logging.getLogger(__name__)
 
 # One initial read seeds each property; subsequent values arrive as ordered observations.
 OBSERVED_PROPERTIES = (
+    "path",
+    "track-list",
+    "subtitle-layout-revision",
+    "options/subtitle-layout",
+    "playlist",
     "sub-text",
     "sub-text/ass-full",
     "mouse-pos",
@@ -32,6 +37,10 @@ OBSERVED_PROPERTIES = (
     "sub-start",
     "sub-end",
     "sub-delay",
+    "options/sub-speed",
+    "options/sub-fps",
+    "options/sub-fix-timing",
+    "options/play-direction",
     "time-pos",
     "video-out-params",
     "options/sub-ass-override",
@@ -47,12 +56,17 @@ OBSERVED_PROPERTIES = (
     "options/sub-scale-by-window",
     "options/blend-subtitles",
     "options/sub-filter-sdh",
+    "options/sub-filter-regex-enable",
+    "options/sub-filter-regex",
+    "options/sub-filter-jsre",
     "options/sub-font-provider",
     "options/embeddedfonts",
     "options/sub-fonts-dir",
     "options/sub-font",
     "options/osd-fonts-dir",
     "options/osd-font-provider",
+    "options/osd-font",
+    "options/osd-justify",
     "options/sub-font-size",
     "options/sub-color",
     "options/sub-outline-color",
@@ -72,6 +86,7 @@ OBSERVED_PROPERTIES = (
     "options/video-crop",
     "options/video-rotate",
     "options/sub-shaper",
+    "options/osd-shaper",
     "options/sub-ass-justify",
     "options/sub-line-spacing",
     "options/sub-hinting",
@@ -247,7 +262,7 @@ class PlaybackApplication:
     observe_cue: Callable[[playback.ObservedCue], None]
     subtitle_selection_changed: Callable[[object], None]
     subtitle_timing_changed: Callable[[], None]
-    geometry_input_changed: Callable[[], None]
+    geometry_input_changed: Callable[[str], None]
     render_space_changed: Callable[[], None]
     end_of_file_changed: EndOfFileEffect
     pause_changed: PauseEffect
@@ -282,7 +297,7 @@ class PlaybackProjection:
         elif isinstance(delta, playback.SubtitleTimingChanged):
             target.subtitle_timing_changed()
         elif isinstance(delta, playback.GeometryInputChanged):
-            target.geometry_input_changed()
+            target.geometry_input_changed(delta.property_name)
         elif isinstance(delta, playback.RenderSpaceChanged):
             if delta.property_name == "osd-dimensions":
                 target.render_space_changed()

@@ -6,14 +6,27 @@ import hashlib
 import math
 from dataclasses import dataclass, field, replace
 from enum import IntEnum, StrEnum
+from functools import lru_cache
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+    from saitenka_subtitles.whole_cue import WholeCue
 
 MAX_FRAME_PIXELS = 16_777_216
 MAX_GEOMETRY_TOKENS = 4_096
 MAX_BITMAP_BYTES = 16 * 1_024 * 1_024
+
+
+class PaintQualification(StrEnum):
+    MISSING = "missing-coherent-evidence"
+    STATIC = "static-supported"
+    KARAOKE = "karaoke"
+    ALPHA = "alpha"
+    DYNAMIC = "dynamic-geometry"
+    CLIPPING = "clipping"
+    TRANSFORM = "unsupported-drawing-transform"
+    OCCLUDED = "overlapping-paint"
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +220,19 @@ def _validate_attachments(request: GeometryRequest) -> None:
         raise ValueError("geometry render profile names must be non-empty and unique")
 
 
+@lru_cache(maxsize=2)
+def _attachment_fingerprint(attachments: tuple[tuple[str, bytes], ...]) -> bytes:
+    # Immutable font bytes share their cached Python hash across cue requests.
+    digest = hashlib.sha256()
+    for name, data in attachments:
+        encoded = name.encode()
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return digest.digest()
+
+
 @dataclass(frozen=True, slots=True)
 class GeometryRequest:
     generation: int
@@ -233,6 +259,10 @@ class GeometryRequest:
     native_ass: bytes = b""
     document_metadata: tuple[tuple[str, int], ...] = field(default=(), compare=False)
     source_kind: str = field(default="unknown", compare=False)
+    paint_qualification: PaintQualification = PaintQualification.MISSING
+    coloring: str = "legacy"
+    whole_cue: WholeCue | None = None
+    osd_font_setup: FontSetup | None = None
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -269,16 +299,17 @@ class GeometryRequest:
             # color device, silently. Free while the only producer derives it from the palette
             # hashed above — and this is what keeps that from being the thing holding it true.
             repr(self.keep_coverage),
+            self.paint_qualification.value,
+            self.coloring,
+            repr(self.whole_cue),
+            repr(self.osd_font_setup),
         ):
             digest.update(value.encode())
             digest.update(b"\0")
         digest.update(self.ass)
         digest.update(b"\0native\0")
         digest.update(self.native_ass)
-        for name, data in self.attachments:
-            digest.update(name.encode())
-            digest.update(b"\0")
-            digest.update(data)
+        digest.update(_attachment_fingerprint(self.attachments))
         return digest.hexdigest()
 
     def renderer_key(self) -> str:
@@ -299,12 +330,7 @@ class GeometryRequest:
         digest = hashlib.sha256()
         digest.update(repr(self.font_setup).encode())
         digest.update(b"\0")
-        # Names and sizes, not the bytes: a font's content is what makes a renderer expensive to
-        # build, and re-hashing megabytes of it per cue would pay that cost back a second time.
-        # Attachments only change when the track does, which also changes a name or a length.
-        for name, data in self.attachments:
-            digest.update(f"{name}:{len(data)}".encode())
-            digest.update(b"\0")
+        digest.update(_attachment_fingerprint(self.attachments))
         return digest.hexdigest()
 
 
@@ -318,12 +344,18 @@ class GeometrySnapshot:
     tokens: tuple[TokenGeometry, ...]
     libass_version: int | None = field(default=None, compare=False, kw_only=True)
     mask_source: str = field(default="unknown", compare=False, kw_only=True)
+    paint_qualification: PaintQualification = field(
+        default=PaintQualification.MISSING, kw_only=True
+    )
+    whole_cue: WholeCue | None = field(default=None, kw_only=True)
 
     @property
     def coverage_bytes(self) -> int:
         """Retained alpha, in bytes — the only part of a snapshot whose size is not bounded by the
         token count. A full-screen sign's masks are megabytes."""
-        return sum(len(token.coverage) for token in self.tokens)
+        return sum(len(token.coverage) for token in self.tokens) + (
+            self.whole_cue.byte_size if self.whole_cue is not None else 0
+        )
 
     def without_coverage(self) -> GeometrySnapshot:
         """The same hit boxes with the masks dropped.
@@ -334,6 +366,7 @@ class GeometrySnapshot:
         """
         return replace(
             self,
+            whole_cue=(replace(self.whole_cue, layers=()) if self.whole_cue is not None else None),
             tokens=tuple(
                 replace(
                     token,

@@ -239,6 +239,28 @@ def test_each_token_lands_on_at_most_one_color_device() -> None:
     assert (len(ladder.paints), len(ladder.masks), len(ladder.rules)) == (1, 1, 0)
 
 
+@pytest.mark.parametrize("paint_allowed", [False, True])
+def test_scan_only_geometry_suppresses_both_color_devices_and_level_rules(paint_allowed):
+    from saitenka.app.subtitle_render import color_ladder
+    from saitenka.app.subtitles import WordBox, token_at
+
+    boxes = [
+        WordBox(0, 0, 0, 50, 40, "Arial", 48.0),
+        WordBox(1, 60, 0, 50, 40, "", 48.0, coverage=b"\xff" * 2000),
+    ]
+    request = dataclasses.replace(
+        draw_request(styles=[Style((255, 0, 0, 255), (0, 128, 255, 255))] * 2, boxes=boxes),
+        paint_allowed=paint_allowed,
+    )
+
+    ladder = color_ladder(request)
+
+    assert (len(ladder.paints), len(ladder.masks), len(ladder.rules)) == (
+        (1, 1, 2) if paint_allowed else (0, 0, 0)
+    )
+    assert token_at(request.boxes, (75, 20), (0, 0), is_skippable=lambda _: False) == 1
+
+
 def test_a_face_the_overprint_cannot_use_still_reaches_the_raster() -> None:
     """The token that used to fall out: device 1 refuses the *text*, so having a face must not keep
     it off device 2, which does not care what the text says."""
@@ -318,8 +340,10 @@ class FakeSurfaces:
         if on_settled is not None:
             on_settled(True)  # noqa: FBT003 -- surface settlement callback contract
 
-    def remove(self, oid, *, owner) -> None:
+    def remove(self, oid, *, owner, on_settled=None) -> None:
         self.calls.append(("remove", oid, owner))
+        if on_settled is not None:
+            on_settled(True)  # noqa: FBT003 -- surface settlement callback contract
 
     def overpaint_traffic(self) -> list[str]:
         """Just the raster slot: the focus slot and the fallback share this recorder."""

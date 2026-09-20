@@ -1,5 +1,36 @@
 # Responsiveness benchmark — in-mpv tooltip
 
+## Live cue-color profiling
+
+`poe cue-replay` runs the actual player and session with the live harness's small synthetic
+dictionary and scorer. It measures navigation to mpv acknowledgment, not physical display latency.
+Playback stays paused while navigation changes cues. Use the production interpreter for unprofiled measurements:
+
+Build the [paired patched mpv/libass](docs/contributing/mpv-layout.md) first, and choose a `--start`
+position inside a colorable cue in the supplied subtitle file.
+
+```sh
+uv run poe cue-replay --media /path/episode.mkv --subtitles /path/japanese.ass \
+  --mpv /path/patched/mpv --start 16.22 --source auto
+```
+
+Replace `cue-replay` with `cue-pyspy` to prepare the separate Python 3.13 profiling environment.
+After first-cue readiness and one successful prefetch (when enabled), it prints a 100 Hz `sudo py-spy`
+attachment command. Run that command in
+another terminal, then press Enter in the runner. After replay, stop the profiler before allowing
+cleanup. Only py-spy runs elevated; mpv stays unfocused. Python 3.13 profiles diagnose hotspots and
+do not qualify production-interpreter latency.
+
+Run `--source shadow` separately for comparison. `--scenario back-forth` alternates forward and
+backward navigation; `--prefetch off` is a diagnostic control, not the default. Each invocation uses
+a fresh process. The output directory contains `result.json`, production traces under `telemetry/`,
+and the optional profile. Without `--output`, a new temporary directory is created and its path is
+printed at each checkpoint. Checkpoints retain interrupted attempts, phase timings and runtime work
+at readiness; successful prefetch does not imply background prefetch is idle. Prefetch failures fail
+the run and remain visible in its success/failure counts. Completed-only p95
+is explicitly labeled and reported alongside the full attempt denominator. This runner does not
+declare latency-budget qualification. `--help` owns the remaining options.
+
 The hosted benchmark portfolio, replica statistics, and CI publishing contract are documented in
 [`docs/contributing/continuous-benchmarks.md`](docs/contributing/continuous-benchmarks.md). This file
 keeps dated measurements and profiler evidence.

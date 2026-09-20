@@ -24,6 +24,7 @@ from saitenka.app.subtitle_render import NullRenderer
 
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.usefixtures("enabled_telemetry")
 def test_property_projection_is_distinct_from_mailbox_admission(monkeypatch, tmp_path, direct):
     from test_render_evidence import _export, _setup
 

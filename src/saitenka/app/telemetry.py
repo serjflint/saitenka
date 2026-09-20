@@ -9,12 +9,16 @@ all: no providers, no threads, no export directory created.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING
 
 from saitenka.app.paths import cache_dir
+from saitenka.otel_metrics import ActiveGate, span_gate
+
+__all__ = ["ActiveGate", "span_gate"]
 
 #: Per-session trace rotation: each run writes its own ``trace-<timestamp>.json`` (a CTF doc is one
 #: recording — appending sessions into one file overlays their clocks/thread-ids), and the newest N are
@@ -34,37 +38,10 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-@final
-class ActiveGate:
-    """A cheap flag an inspector (``doctor``, a future runtime keybind) flips on to make a gated
-    component start actually recording. Reading it when off is a single attribute load — no lock,
-    matching mpv's "free when nobody is inspecting" model. Not a linearizable primitive: under
-    free-threading a flip can be observed a beat late by another thread, which is fine for a
-    sampling/recording toggle (worst case: one extra or one skipped span right at the flip)."""
-
-    __slots__ = ("_on",)
-
-    def __init__(self) -> None:
-        self._on = False
-
-    def __bool__(self) -> bool:
-        return self._on
-
-    def set(self, *, value: bool) -> None:
-        self._on = value
-
-
 _lock = threading.Lock()
-_summary_lock = threading.Lock()
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _span_processor: CTFSpanProcessor | None = None
-
-#: Gates the span pipeline. Starts off (so it costs nothing before/without telemetry); `configure()`
-#: turns it on as part of enabling telemetry — see the comment there. Exists as a separate switch
-#: from `TelemetryOptions.enabled` for a future dynamic on/off (a doctor/keybind hook toggling
-#: capture without a restart), not as a second "is telemetry on" gate a user has to know about.
-span_gate = ActiveGate()
 
 
 def export_dir(options: TelemetryOptions) -> Path:
@@ -185,7 +162,7 @@ def _sample_counters() -> dict[str, float]:
 def configure(options: TelemetryOptions) -> None:
     """Idempotent: a no-op if disabled, if the extra isn't installed, or if already configured."""
     global _tracer_provider, _meter_provider, _span_processor
-    if not options.enabled:
+    if not options.enabled or os.environ.get("OTEL_SDK_DISABLED", "").lower() == "true":
         return
     with _lock:
         if _tracer_provider is not None:
@@ -195,6 +172,7 @@ def configure(options: TelemetryOptions) -> None:
             from opentelemetry.sdk.metrics import MeterProvider
             from opentelemetry.sdk.metrics.export import InMemoryMetricReader
             from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.sampling import ALWAYS_ON, DEFAULT_ON
         except ImportError:
             log.warning(
                 "telemetry.enabled=true but the 'telemetry' extra isn't installed "
@@ -202,8 +180,10 @@ def configure(options: TelemetryOptions) -> None:
             )
             return
 
-        from saitenka.app.otel_export import CTFSpanProcessor
+        from saitenka.app.otel_export import CTFSpanProcessor, SummaryOptions
+        from saitenka.app.report_schema import build_identity
         from saitenka.otel_metrics import register as register_metrics
+        from saitenka.session import session_id
 
         out_dir = export_dir(options)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -218,7 +198,16 @@ def configure(options: TelemetryOptions) -> None:
         # One processor owns the queue, the writer thread, and the file. sample_fn wires the curated
         # counters (below) as CTF "counter" tracks in the SAME trace file the spans go into — Perfetto
         # graphs them next to the spans, time-correlated, no separate metrics-visualization stack.
-        processor = CTFSpanProcessor(trace_path, span_gate, sample_fn=_sample_counters)
+        processor = CTFSpanProcessor(
+            trace_path,
+            span_gate,
+            sample_fn=_sample_counters,
+            summary=SummaryOptions(
+                cache_dir() / "diagnostics" / f"session-{session_id()}.json",
+                build_identity(),
+                sampled=tp.sampler not in {ALWAYS_ON, DEFAULT_ON},
+            ),
+        )
         tp.add_span_processor(processor)
         # TelemetryOptions.enabled is the actual opt-in switch; the gate defaulting off would mean
         # enabling telemetry produces logs + metrics but NO trace ever, since nothing else flips it —
@@ -240,7 +229,6 @@ def configure(options: TelemetryOptions) -> None:
 def shutdown() -> None:
     """Flush + tear down the providers. Safe to call even when telemetry was never configured."""
     global _tracer_provider, _meter_provider, _span_processor
-    save_operation_summary(end="shutdown-observed")
     with _lock:
         if _tracer_provider is not None:
             try:
@@ -268,66 +256,14 @@ def shutdown() -> None:
 
 
 def save_operation_summary(*, end: str = "unknown") -> None:
-    # The periodic writer and shutdown may overlap on a free-threaded interpreter.
-    with _summary_lock:
-        _save_operation_summary(end=end)
+    """Flush already-enabled telemetry; never creates a diagnostic recorder."""
+    del end
+    if _span_processor is not None:
+        _span_processor.force_flush()
 
 
-def _save_operation_summary(*, end: str) -> None:
-    import json
-
-    from saitenka.app.option_evidence import registry as option_registry
-    from saitenka.app.player_evidence import registry as player_registry
-    from saitenka.app.profile_evidence import registry as profile_registry
-    from saitenka.app.query_evidence import registry as query_registry
-    from saitenka.app.render_evidence import registry
-    from saitenka.app.report_schema import SCHEMA_VERSION, build_identity
-    from saitenka.operation_summary import operations
-    from saitenka.session import session_id
-
-    payload = operations.snapshot()
-    runtime_configuration = registry.snapshot()
-    player_configuration = player_registry.snapshot()
-    player_queries = query_registry.snapshot()
-    session_configuration = option_registry.snapshot()
-    session_configuration["profiles"] = profile_registry.snapshot()
-    directory = cache_dir() / "diagnostics"
-    path = directory / f"session-{session_id()}.json"
-    # Empty one-shot CLI invocations must not evict playback summaries.
-    if (
-        not payload["outcomes"]
-        and not payload["pending"]
-        and not runtime_configuration["owners"]
-        and not player_configuration["owners"]
-        and not player_queries["owners"]
-        and not session_configuration["owners"]
-        and not session_configuration["profiles"]["owners"]
-        and end == "shutdown-observed"
-        and not path.exists()
-    ):
-        return
-    identity = build_identity()
-    payload.update(
-        schema=SCHEMA_VERSION,
-        producer=identity,
-        session=session_id(),
-        overlay_build=identity["overlay_build"],
-        tracing=is_enabled(),
-        captured_ns=time.time_ns(),
-        end=end,
-        runtime_configuration=runtime_configuration,
-        player_configuration=player_configuration,
-        player_queries=player_queries,
-        session_configuration=session_configuration,
-    )
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload), encoding="utf-8")
-        temporary.replace(path)
-        for old in sorted(directory.glob("session-*.json"), key=lambda item: item.stat().st_mtime)[
-            :-10
-        ]:
-            old.unlink()
-    except OSError:
-        log.warning("operation summary unavailable", exc_info=True)
+def diagnostic_snapshot(kind: str) -> dict:
+    """Inspect the writer's projection; disabled telemetry has no recorded owners."""
+    if _span_processor is None:
+        return {"schema": 1, "owners": [], "owners_evicted": 0}
+    return _span_processor.diagnostic_snapshot(kind)

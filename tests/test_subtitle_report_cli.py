@@ -80,3 +80,54 @@ def test_geometry_records_are_text_free(tmp_path: Path) -> None:
             },
         }
     ]
+
+
+def test_source_report_separates_native_scanning_from_shadow_paint(tmp_path: Path, capsys):
+    trace = tmp_path / "trace.json"
+    trace.write_text(
+        json.dumps(
+            {
+                "traceEvents": [
+                    {
+                        "name": "subtitle_geometry_source",
+                        "dur": 0,
+                        "ph": "X",
+                        "ts": 1,
+                        "args": {
+                            "configured_source": "auto",
+                            "selected_source": "mpv",
+                            "scan_source": "mpv",
+                            "paint_source": "shadow",
+                            "paint_allowed": True,
+                            "paint_reason": "eligible",
+                            "reason": "scan-only",
+                            "eligible_tokens": 3,
+                            "cue_revision": 7,
+                            "generation": 9,
+                            "text": "private subtitle",
+                        },
+                    }
+                ]
+            }
+        )
+    )
+
+    assert subtitle_report(str(trace)) == 0
+
+    output = capsys.readouterr().out
+    assert "configured=auto selected=mpv scan=mpv paint=shadow" in output
+    assert "cue=7 generation=9" in output
+    assert "private subtitle" not in output
+    assert "text" not in geometry_records(load_trace(trace))[0]["args"]
+
+
+def test_deeply_nested_metadata_envelope_reports_unavailable(tmp_path: Path, capsys):
+    import zipfile
+
+    bundle = tmp_path / "nested.zip"
+    with zipfile.ZipFile(bundle, "w") as archive:
+        archive.writestr("diagnostics/envelope.json", "[" * 2000 + "0" + "]" * 2000)
+
+    assert subtitle_report(str(bundle)) == 1
+
+    assert "no telemetry trace found" in capsys.readouterr().err

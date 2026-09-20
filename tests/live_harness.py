@@ -11,12 +11,17 @@ import subprocess
 import tempfile
 import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from session_builder import build_session
 
 from saitenka.app.session.factory import SessionServices
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DEMO_LINE = "門前の小僧習わぬ経を読む"
 
@@ -29,6 +34,11 @@ class MiniDS:
     dicts = ()
     freqs = ()
     pitches = ()
+    freq_titles = ()
+    pitch_titles = ()
+
+    def decoded_entry_count(self):
+        return 0
 
     def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # match DictionarySet
         from saitenka.panel import Definition, Entry
@@ -126,6 +136,21 @@ def make_clip_and_sub(
     return clip, srt
 
 
+@dataclass(frozen=True)
+class LayoutLiveOptions:
+    source: str = "shadow"
+    mpv_path: str | None = None
+    extra_args: tuple[str, ...] = ()
+    require_boxes: bool = True
+    wait_for_cue: bool = True
+    media: Path | None = None
+    subtitles: Path | None = None
+    start_seconds: float | None = None
+    prefetch: bool = True
+    phase: Callable[[str], None] | None = None
+    coloring: str = "legacy"
+
+
 @contextmanager
 def live_reader(
     *,
@@ -135,6 +160,7 @@ def live_reader(
     native_visible: bool = False,
     config_dir: Path | None = None,
     cues: tuple[tuple[float, float, str], ...] | None = None,
+    layout: LayoutLiveOptions | None = None,
 ):
     """A live mpv window with the demo cue loaded and a :class:`SessionController` observing it. ``paused=False``
     lets playback run so mpv's VO advances frames — required for the jank harness to see real
@@ -161,28 +187,40 @@ def live_reader(
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 
-    mpv = find_mpv(None)
+    layout = layout or LayoutLiveOptions()
+    phase = layout.phase
+    mpv = find_mpv(layout.mpv_path)
     if not mpv:
         pytest.skip("mpv not found")
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-live-"))
-    clip, srt = make_clip_and_sub(tmp, cues)
-    if native_visible:
+    if (layout.media is None) != (layout.subtitles is None):
+        raise ValueError("media and subtitles must be supplied together")
+    clip, srt = (
+        (layout.media, layout.subtitles)
+        if layout.media is not None
+        else make_clip_and_sub(tmp, cues)
+    )
+    if native_visible and layout.media is None:
         # An authored track, because the native path measures the document mpv draws: a converted
         # SubRip leaves it with no document at all (`subtitle-source-conversion-unreproduced`).
         srt = write_ass(tmp / "line.ass", cues or ((0.0, 8.0, DEMO_LINE),))
     sock = default_ipc_path(tmp.name)
+    if phase is not None:
+        phase("mpv-launch")
     proc = subprocess.Popen(
         [
             mpv,
             f"--input-ipc-server={sock}",
             "--force-window=yes",
             "--keep-open=yes",
+            "--focus-on=never",
             "--sub-visibility=no",
             "--osd-level=1",
             "--pause" if paused else "--loop-file=inf",
             f"--config-dir={config_dir}" if config_dir else "--no-config",
             f"--sub-file={srt}",
+            *layout.extra_args,
             str(clip),
         ]
     )
@@ -196,9 +234,13 @@ def live_reader(
         reader = build_session(
             ipc,
             options=ReaderOptions(
+                prefetch=layout.prefetch,
                 subtitle_geometry=SubtitleGeometryOptions(
-                    native_visible=native_visible, native_formats="all"
-                )
+                    native_visible=native_visible,
+                    native_formats="all",
+                    source=layout.source,
+                    coloring=layout.coloring,
+                ),
             ),
             services=SessionServices(
                 dictionaries=dict_set if dict_set is not None else MiniDS(),
@@ -206,48 +248,62 @@ def live_reader(
             ),
         )
         reader.start()
-        reader.graph.subtitle_navigation.load_index(srt)
+        if phase is not None:
+            phase("session-started")
         if native_visible and reader.graph.subtitle_presentation.native is not None:
             from saitenka.app.embedded_subs import resolve_track_fonts
 
             # Through the production resolver, as `test_native_subtitles` does: a track load is
             # where the font set is read, and skipping it measures an environment no session has.
             resolve_track_fonts(ipc, ipc.query, reader.graph.subtitle_presentation.native)
-            reader.graph.subtitle_presentation.native.set_source(srt)
-        if cues is not None:
+        reader.graph.subtitle_navigation.load_index(srt)
+        if phase is not None:
+            phase("source-ready")
+        if layout.start_seconds is not None:
+            ipc.command("seek", str(layout.start_seconds), "absolute+exact")
+        elif cues is not None:
             # A multi-cue file starts before its first cue, so the wait below would time out on an
             # empty overlay rather than on a real failure.
             ipc.command("seek", str(cues[0][0] + 0.1), "absolute")
 
-        for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
-            reader.pump()
-            if (
-                reader.graph.subtitle_presentation.cue.current.tokens
-                and reader.graph.subtitle_presentation.cue.current.boxes
-            ):
-                break
-            time.sleep(0.1)
-        assert (
-            reader.graph.subtitle_presentation.cue.current.tokens
-            and reader.graph.subtitle_presentation.cue.current.boxes
-        ), "subtitle never loaded into the reader"
+        if layout.wait_for_cue:
+            for _ in range(100):  # wait for the subtitle cue → tokens + per-word boxes
+                reader.pump()
+                if reader.graph.subtitle_presentation.cue.current.tokens and (
+                    reader.graph.subtitle_presentation.cue.current.boxes or not layout.require_boxes
+                ):
+                    break
+                time.sleep(0.1)
+            assert reader.graph.subtitle_presentation.cue.current.tokens and (
+                reader.graph.subtitle_presentation.cue.current.boxes or not layout.require_boxes
+            ), "subtitle never loaded into the reader"
+            if phase is not None:
+                phase("first-cue-geometry")
         yield tmp, reader, ipc
     finally:
         try:
-            if reader is not None:
-                reader.close()
-            if gateway is not None:
-                gateway.close()
-            if ipc is not None:
-                ipc.command("quit")
-                ipc.close()
-        except Exception:  # noqa: BLE001  # best-effort teardown - preserve the caller's assertion
-            pass
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            if phase is not None:
+                phase("cleanup")
+            try:
+                if reader is not None:
+                    reader.close()
+                if gateway is not None:
+                    gateway.close()
+                if ipc is not None:
+                    ipc.command("quit")
+                    ipc.close()
+            except Exception:  # noqa: BLE001  # best-effort teardown preserves the caller's failure
+                pass
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
 
 
 def poll_until(reader, predicate, message: str) -> None:

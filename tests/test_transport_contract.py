@@ -28,6 +28,47 @@ from saitenka.mpvio.ipc import MpvIPC
 from saitenka.mpvio.transport import UnixSocketTransport
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_osd_wire_phases_share_request_identity_without_subtitle_text(make_link, monkeypatch):
+    from util import record_spans
+
+    spans = record_spans(monkeypatch)
+    link = make_link()
+    request = link.ipc.command_async("osd-overlay", 1001, "ass-events", "private cue", 1280, 720)
+    wire = link.next_command()
+    link.push(json.dumps({"request_id": wire["request_id"], "error": "success"}).encode() + b"\n")
+    assert request.future.result(timeout=2)["error"] == "success"
+    assert link.ipc._flush_outbound(2)
+    phases = {s["name"]: s["attrs"] for s in spans if s["name"].startswith("mpv_ipc_")}
+    assert phases.keys() == {"mpv_ipc_enqueue", "mpv_ipc_write", "mpv_ipc_reply"}
+    assert {s["request_id"] for s in phases.values()} == {str(wire["request_id"])}
+    assert len({s["ipc_connection"] for s in phases.values()}) == 1
+    assert phases["mpv_ipc_enqueue"]["overlay_id"] == "1001"
+    assert len(phases["mpv_ipc_enqueue"]["payload_hash"]) == 16
+    assert "private cue" not in str(phases)
+    assert int(phases["mpv_ipc_reply"]["received_wall_ns"]) > 0
+    assert int(phases["mpv_ipc_write"]["write_end_wall_ns"]) > 0
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_disabled_tracing_does_not_hash_the_osd_payload(make_link, monkeypatch):
+    from saitenka import otel_metrics
+    from saitenka.mpvio import diagnostics
+
+    def forbidden(_args):
+        raise AssertionError("disabled tracing must not hash payloads")
+
+    monkeypatch.setattr(otel_metrics, "_trace_available", False)
+    monkeypatch.setattr(diagnostics, "command_identity", forbidden)
+    link = make_link()
+    request = link.ipc.command_async("osd-overlay", 1001, "ass-events", "private cue", 1280, 720)
+    wire = link.next_command()
+    link.push(json.dumps({"request_id": wire["request_id"], "error": "success"}).encode() + b"\n")
+    assert request.future.result(timeout=2)["error"] == "success"
+
+
 def _drain_until(ipc: MpvIPC, deadline: float = 1.0) -> list[dict]:
     """Poll ``drain_events`` until non-empty or timeout — no fixed sleep, so it won't flake under load
     yet returns the instant the reader thread has delivered."""

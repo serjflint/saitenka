@@ -52,6 +52,8 @@ _ENUM = {
     "sub-ass-override": {"no", "yes", "force", "scale", "strip"},
     "blend-subtitles": {"no", "yes", "video"},
     "sub-shaper": {"simple", "complex"},
+    "osd-shaper": {"simple", "complex"},
+    "osd-justify": {"auto", "left", "center", "right"},
     "sub-hinting": {"none", "light", "normal", "native"},
     "sub-font-provider": {"auto", "none", "fontconfig"},
     "osd-font-provider": {"auto", "none", "fontconfig"},
@@ -62,6 +64,7 @@ _ENUM = {
 _PRIVATE = frozenset(
     {
         "sub-font",
+        "osd-font",
         "sub-fonts-dir",
         "osd-fonts-dir",
         "sub-ass-style-overrides",
@@ -174,7 +177,7 @@ def safe_snapshot(raw: object) -> dict:
     }
 
 
-registry = EvidenceRegistry()
+registry = EvidenceRegistry(kind="player_configuration")
 
 
 class PlayerEvidence:
@@ -185,38 +188,32 @@ class PlayerEvidence:
         self.owner = self._registry.allocate()
         self.revision = 0
         self._key: object = None
-        self._state: dict = {
-            "owner": self.owner,
-            "closed": False,
-            "configurations": [],
-            "configurations_evicted": 0,
-        }
 
     def record(self, settings: Mapping[str, object], source: str) -> None:
+        if not self._registry.enabled:
+            return
         values = fields(settings)
         key = (values, source)
         if key == self._key:
             return
         self._key = key
         self.revision += 1
-        rows = self._state["configurations"]
-        rows.append(
+        self._registry.update(
+            self.owner,
             {
                 "revision": self.revision,
                 "captured_ns": time.time_ns(),
                 "source_class": source,
                 "fields": values,
-            }
+            },
+            action="configuration",
         )
-        if len(rows) > 4:
-            rows.pop(0)
-            self._state["configurations_evicted"] += 1
-        self._registry.update(self.owner, self._state)
         with otel_metrics.traced("player_configuration_read") as span:
             span.set("player_configuration_owner", self.owner)
             span.set("player_configuration_revision", self.revision)
 
     def close(self) -> None:
-        self._state["closed"] = True
+        if not self._registry.enabled:
+            return
         if self.revision:
-            self._registry.update(self.owner, self._state)
+            self._registry.update(self.owner, {}, action="close")

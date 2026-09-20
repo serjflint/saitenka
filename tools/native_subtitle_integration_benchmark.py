@@ -526,6 +526,7 @@ class _IPC:
             "options/blend-subtitles": False,
             "options/sub-filter-sdh": False,
             "options/sub-shaper": "complex",
+            "options/osd-shaper": "complex",
             "options/sub-ass-justify": False,
             "options/sub-line-spacing": 0.0,
             "options/sub-hinting": "none",
@@ -557,6 +558,8 @@ class _IPC:
             "options/sub-font": "sans-serif",
             "options/osd-fonts-dir": "",
             "options/osd-font-provider": "auto",
+            "options/osd-font": "sans-serif",
+            "options/osd-justify": "auto",
         }
 
     def command(self, *args):

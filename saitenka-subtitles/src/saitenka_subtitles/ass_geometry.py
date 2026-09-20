@@ -18,6 +18,7 @@ from saitenka_subtitles.ass import (
     has_karaoke_override,
     parse_ass_event_line,
     parse_ass_styles,
+    qualify_prepared_paint,
     rewrite_ass_event,
     serialize_ass_event_line,
     source_primary_bgr_colors,
@@ -31,7 +32,11 @@ from saitenka_subtitles.document import (
     SubtitleTrackId,
     TokenAnnotation,
 )
-from saitenka_subtitles.geometry import MAX_GEOMETRY_TOKENS, GeometryPaletteEntry
+from saitenka_subtitles.geometry import (
+    MAX_GEOMETRY_TOKENS,
+    GeometryPaletteEntry,
+    PaintQualification,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -69,6 +74,7 @@ class PreparedAssFrame:
     play_res_y: int
     requires_coverage: bool
     document_metadata: tuple[tuple[str, int], ...] = ()
+    paint_qualification: PaintQualification = PaintQualification.MISSING
 
 
 @dataclass(frozen=True, slots=True)
@@ -434,6 +440,17 @@ def authored_ass_rows_at(
     )
 
 
+def active_ass_text(source: bytes, track_id: SubtitleTrackId, active_rows: str) -> str:
+    """Decode observed rows using the authored document's event and wrapping rules."""
+    parsed = _parsed_source(source, track_id)
+    return "\n".join(
+        event.text
+        for event in _match_active_events(
+            active_rows, track_id, parsed.signature_index, parsed.soft_break
+        )
+    )
+
+
 def prepare_ass_hit_map_frame(
     source: bytes,
     track_id: SubtitleTrackId,
@@ -501,6 +518,15 @@ def prepare_ass_hit_map_frame(
         parsed.play_res_y,
         any(has_karaoke_override(event.decoded.source) for event in annotated),
         (*parsed.metadata, *_active_metadata(annotated)),
+        next(
+            (
+                reason
+                for event in annotated
+                if (reason := qualify_prepared_paint(event.decoded.source, parsed.catalog))
+                is not PaintQualification.STATIC
+            ),
+            PaintQualification.STATIC,
+        ),
     )
 
 

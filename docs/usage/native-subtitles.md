@@ -1,5 +1,131 @@
 # Native mpv subtitles with Saitenka interaction
 
+## Optional whole-cue coloring
+
+Set `coloring` under `[subtitle_geometry]` alongside `native_visible = true`:
+
+| Coloring | Behavior |
+|---|---|
+| `legacy` (default) | Existing per-token overprint/overpaint selection. |
+| `whole-cue-auto` | Whole-event ASS OSD when qualified; otherwise whole-cue raster; otherwise scan boxes only. |
+| `whole-cue-osd` | Qualified whole-event ASS OSD, otherwise scan boxes only. |
+| `whole-cue-overpaint` | Whole-cue raster, otherwise scan boxes only. |
+| `boxes-only` | Scanning without coloring or level underlines. |
+
+Use geometry source `auto` or `shadow` for coloring; explicit `mpv` remains scan-only.
+The new modes retain the original subtitle track and the secondary translation slot. Raster coloring
+renders complete authored events through libass and keeps its positioned fill layers, without glyph
+matching or fractional probes. Changes to reading-state colors reuse those layers. Level underlines
+use the existing vector decoration path.
+
+The OSD path keeps complete static events, including explicit line breaks, style resets and multiple
+independently positioned events. It maps script coordinates into the displayed video rectangle,
+including letterbox offsets. Default alignment and margins are lowered to explicit positions.
+On the preparation worker, one authored render and one OSD-context render must agree in positioned
+fill masks. Recoloring reuses the prepared template; it adds no qualification IPC round trip.
+
+Lookahead also prepares the final ASS color and underline payload. A bounded presentation cache
+reuses those bytes while their layout, selected colors and underline inputs match. Hover remains
+dynamic; a changed input rebuilds the affected artifact. Current-cue publication precedes lookahead
+replenishment. Diagnostic traces label artifact hits with `subtitle_osd_artifact`.
+
+With a patched mpv exposing `osd-overlay-timed`, the OSD modes also upload prepared colors ahead
+of playback. mpv activates and expires them on its video clock, so the first native subtitle frame
+can already contain its colors. Cue notifications continue to update scanning and interaction.
+This path requires indexed static cues, normal subtitle speed/FPS, forward playback, unblended
+subtitles, no cue-dropping filters, and no effective `sub-fix-timing` repair. Timing repair is ignored
+by mpv under the default `sub-ass-override=no`; enabling it with `scale` declines timed coloring.
+Co-timed events share one interval; changing overlaps or
+unsupported timing keep scanning without timed color. Subtitle delay is
+applied to the display interval while authored timestamps remain part of cue identity. Stock mpv
+keeps reactive OSD publication. Traces record capability, staging, acknowledgment, removal and refusal
+under `subtitle_timed_osd`; acknowledgments alone do not prove first-frame display.
+
+Indexed subtitle navigation presents and seeks to the same destination, using an absolute exact
+seek with subtitle delay applied. Cue-dropping filters, non-default subtitle speed/FPS and reverse
+playback retain mpv's relative navigation without a speculative cue. mpv still owns video seeking
+and display scheduling; an OSD acknowledgment is not a displayed-frame timestamp.
+
+OSD retains complex shaping. Kerning differences, unsupported automatic wrapping, fractional aspect
+scaling, custom OSD justification or inaccessible fonts can still produce a refusal. These cues keep
+scan boxes in explicit OSD mode; auto mode can use the retained whole-cue raster. The comparison is
+between two shadow renders, not a measurement of mpv's displayed pixels. Libass/font differences
+between installations still require live qualification.
+
+Attachment fonts reach OSD only when separately available there. Supplying the identical font files
+through mpv's `osd-fonts-dir` lets the qualifier use them; Saitenka does not install fonts or change
+that option automatically. Missing access reports `font-access`. Raster uses the existing subtitle
+font environment. Karaoke, alpha, dynamic effects, clipping and unproven occlusion remain independently
+restricted for coloring. Underlines use the existing vector decoration path.
+
+With telemetry enabled, reports retain a bounded history of whole-cue decisions, submissions,
+acknowledgments and terminal outcomes. Enable telemetry before reproducing a problem; disabled
+sessions do not collect this history. Records include the requested mode, paint device, refusal
+reasons, cue text hash plus numeric timestamp, occurrence/generation, and shadow-predicted bounds.
+Reason counts and eviction counts remain after individual rows age out. `saitenka subtitle-report PATH`
+formats these decisions; diagnostic traces additionally include bounded per-unit shadow geometry.
+Actual displayed geometry remains unknown unless separately measured. Upload acknowledgment does not
+measure physical display latency. These options are experimental; the default remains `legacy`.
+
+## Geometry source
+
+With `subtitle_geometry.native_visible = true`, `subtitle_geometry.source` selects where
+Saitenka obtains scan regions:
+
+| Source | Behavior |
+|---|---|
+| `auto` (default) | Use compatible mpv layout; fall back to qualified shadow geometry when the API, render mode, event count, geometry profile, or margins are unsupported. |
+| `shadow` | Use the existing libasslite measurement path. |
+| `mpv` | Require compatible mpv layout; provide scanning only, without loading libasslite. |
+
+The mpv source currently requires a [locally built patched mpv and libass pair](../contributing/mpv-layout.md).
+Selection checks capabilities on connection, rather than inferring support from a version string.
+Automatic fallback keeps the existing presentation pipeline and mpv subtitles visible.
+If neither source supplies qualified geometry, scan regions remain empty. Explicit `mpv` stays scan-only
+and refuses incompatible snapshots. A repeated incompatibility warns once per reason per connection.
+
+Native scan regions require matching ASS events (or converted SubRip with
+`native_formats = "all"`). The experimental v2 profile supports static positions, scales, display
+margins, and overlaps with proven event ordering. Ambiguous shaping clusters, transformed or clipped text,
+and unsupported rendering options are refused by that source. `auto` can retain scanning through
+qualified shadow geometry for those cases. Invisible or unlit karaoke syllables can remain
+scannable: these are logical text regions, not a visibility mask.
+
+In `auto`, static dialogue, including authored speaker colors, may retain independently qualified
+shadow coloring. Karaoke and unqualified alpha effects receive invisible scan regions only: no Saitenka text overprint,
+tint, hover outline, or level underline. Tooltip and mining behavior use the same cue and token
+identity as the existing pipeline. Geometry is withdrawn on observed cue, track, size, option,
+profile, or connection changes; mpv validation is a point-in-time check, not a display-frame lease.
+
+Saitenka enables layout collection only after discovering support. It restores an option it enabled
+when leaving the source, and respects an external disable. Re-enabling collection resumes scanning.
+`Ctrl+Shift+L` retains the existing legacy-renderer override. An injected geometry backend takes precedence
+over `auto`; combining it with explicit `mpv` is an error.
+
+## Geometry diagnostics
+
+Run `saitenka telemetry enable` before restarting playback, then inspect the captured trace or report bundle with
+`saitenka subtitle-report PATH`. Source transitions report the configured preference, selected
+source, actual scan source, eligible paint-geometry source, token count, cue revision and generation.
+Identical redraws are coalesced; a new cue or generation produces a new record.
+
+The acquisition timeline records each mpv fetch attempt and its result, including unsupported API,
+refused geometry, stale validation and external disable. Request identity is retained separately
+from the current cue and generation, so stale completions remain attributable. `scan=none` means no usable scan regions;
+`paint=shadow` means shadow geometry passed coloring eligibility, not that a GPU upload or physical
+presentation completed. Existing subtitle-draw and pixel-ownership spans cover presentation work.
+Metadata-only reports retain the latest 32 source decisions per geometry owner, with an eviction
+count; `subtitle-report` can read that bounded history without a trace. Full acquisition timing still
+requires telemetry. These records contain no subtitle text or media paths. Local and cross-platform checks use the same
+report fields; display correctness still needs live qualification.
+
+`blend-subtitles=yes` renders subtitles into the video before the output-render stage, so the patched
+API cannot supply its geometry. `auto` preserves the setting and uses shadow geometry. To use patched
+geometry, set `blend-subtitles=no` in mpv or pass `--mpv-arg=--blend-subtitles=no` to `saitenka run`.
+Karaoke and unqualified alpha effects stay scan-only when automatic selection falls back to shadow.
+
+## Shadow measurement and coloring
+
 The experimental native-visible mode lets mpv keep rendering the original ASS track while Saitenka
 adds word scanning, dictionary tooltips, and mining. Use it when preserving the subtitle's typesetting
 matters: the per-word colors come too, painted over mpv's own glyphs.

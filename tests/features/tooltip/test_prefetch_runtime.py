@@ -14,7 +14,7 @@ from saitenka.app.features.tooltip.preparation import (
     TooltipPreparationConfig,
     TooltipPreparationInputs,
 )
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 
 
 def _item(generation: int, surface: str, *, full: bool = False) -> prefetch.PrefetchItem:
@@ -40,6 +40,7 @@ def _complete(state: prefetch.PrefetchState, call: dict, outcome=EffectOutcome.S
             call["identity"],
             outcome,
             result=True,
+            error=EffectError.INTERNAL if outcome is EffectOutcome.FAILED else None,
         ),
         call["on_finished"],
     )
@@ -57,6 +58,29 @@ def test_speculative_scheduler_is_bounded_by_its_snapshot_contract() -> None:
     snapshot = state.snapshot
     assert snapshot.inflight == 1
     assert snapshot.pending == snapshot.pending_limit - 1
+
+
+@pytest.mark.parametrize(
+    ("outcome", "succeeded", "failed"),
+    [
+        (EffectOutcome.SUCCEEDED, 1, 0),
+        (EffectOutcome.FAILED, 0, 1),
+        (EffectOutcome.CANCELLED, 0, 0),
+    ],
+)
+def test_prefetch_snapshot_distinguishes_success_failure_and_cancellation(
+    outcome, succeeded, failed
+):
+    state = prefetch.PrefetchState(head_queue_max=1)
+    state.workers = 1
+    submitter = _Submitter()
+    state.submitter = submitter
+    prefetch.schedule(state, [(0, _item(state.gen, "猫", full=True))], lambda _: None)
+
+    _complete(state, submitter.calls[0], outcome)
+
+    assert (state.snapshot.succeeded, state.snapshot.failed) == (succeeded, failed)
+    assert state.snapshot.inflight == 0
 
 
 @pytest.mark.parametrize("limit", [-1, 0, 65])

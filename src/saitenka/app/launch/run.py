@@ -453,7 +453,7 @@ def _launch_mpv_and_connect(
             file=sys.stderr,
         )
         return None, None, None
-    if opts.native_visible:
+    if opts.native_visible and opts.geometry_source != "mpv":
         from saitenka.mpvio.launch import (
             NATIVE_GEOMETRY_MPV_MIN,
             mpv_version_output,
@@ -478,15 +478,24 @@ def _launch_mpv_and_connect(
     cmd = build_mpv_argv(
         mpv_bin, sock, mpv_log, video_path, opts, sub_path=sub_path, en_sub_path=en_sub_path
     )
+    from saitenka.app.config import resolve_telemetry
+    from saitenka.app.mpv_frame_diagnostics import launch_environment, record_player
     from saitenka.session import session_id
+
+    frame_diagnostics = resolve_telemetry(cfg).enabled
+    environment = (
+        launch_environment(mpv_bin, cache_dir(), session_id()) if frame_diagnostics else None
+    )
 
     print(f"[saitenka] session {session_id()} — quote this when reporting a bug")
     print("launching:", " ".join(cmd))
     log.info("launching mpv: %s", " ".join(cmd))  # capture the exact flags in the bundle-able log
     with otel_metrics.traced("startup.mpv_connect"):
-        proc = subprocess.Popen(cmd)
+        proc = subprocess.Popen(cmd, env=environment)
         try:
             ipc = MpvIPC(sock).connect(timeout=15)
+            if frame_diagnostics and environment is not None:
+                record_player(ipc, cache_dir(), session_id())
         except TimeoutError as e:
             print("mpv IPC unreachable:", e, file=sys.stderr)
             from saitenka.app.procutil import kill_process_tree
@@ -1168,6 +1177,7 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             use_config=use_config,
             fullscreen=fullscreen,
             native_visible=subtitle_geometry_options(cfg).native_visible,
+            geometry_source=subtitle_geometry_options(cfg).source,
             extra_args=mpv_arg,
         ),
         sub_path=sub_path,

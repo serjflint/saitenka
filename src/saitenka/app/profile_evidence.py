@@ -10,7 +10,7 @@ from saitenka.app.report_schema import count
 if TYPE_CHECKING:
     from saitenka.app.profiles import Profile
 
-registry = EvidenceRegistry()
+registry = EvidenceRegistry(kind="profiles")
 _LANGUAGES = frozenset(
     {"jp", "ja", "en", "fr", "de", "es", "it", "pt", "ru", "uk", "el", "pl", "nl", "sv", "zh", "ko"}
 )
@@ -44,6 +44,8 @@ class ProfileEvidence:
         self.finish("constructed")
 
     def request(self, profile: Profile) -> None:
+        if not self._registry.enabled:
+            return
         self._state["revision"] += 1
         self._state["requested"] = _fields(
             {
@@ -56,12 +58,16 @@ class ProfileEvidence:
         self._registry.update(self.owner, self._state)
 
     def finish(self, outcome: str) -> None:
+        if not self._registry.enabled:
+            return
         self._state["outcome"] = outcome
         if outcome == "constructed":
             self._state["applied"] = self._state["requested"]
         self._registry.update(self.owner, self._state)
 
     def applied(self, profile: Profile, tokenizer: str) -> None:
+        if not self._registry.enabled:
+            return
         self._state["applied"] = _fields(
             {
                 "main_language": profile.langs.main,

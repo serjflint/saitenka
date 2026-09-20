@@ -30,6 +30,9 @@ def test_reused_lane_exports_each_requests_parent_and_restores_context(
     processor = CTFSpanProcessor(path, gate, start_thread=False)
     provider = TracerProvider()
     provider.add_span_processor(processor)
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     user_context = ContextVar("locale", default="missing")
     observed = []
@@ -151,6 +154,9 @@ def test_failed_crisp_submission_does_not_claim_an_acknowledged_upgrade(monkeypa
     path = directory / "trace-1.json"
     provider = TracerProvider()
     provider.add_span_processor(CTFSpanProcessor(path, gate, start_thread=False))
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     quality = ViewQuality()
     panel = object()
@@ -186,6 +192,9 @@ def test_old_viewport_ack_cannot_settle_a_new_scroll_destination(monkeypatch, tm
     path = tmp_path / "trace.json"
     provider = TracerProvider()
     provider.add_span_processor(CTFSpanProcessor(path, gate, start_thread=False))
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     quality = ViewQuality()
     panel = object()
@@ -223,6 +232,9 @@ def test_mixed_view_quality_survives_production_export_and_bundle(monkeypatch, t
     provider = TracerProvider()
     processor = CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
     provider.add_span_processor(processor)
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     reader = _nested_reader(two_words=True)
     try:

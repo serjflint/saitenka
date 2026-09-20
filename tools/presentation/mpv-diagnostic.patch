@@ -1,0 +1,329 @@
+--- /dev/null
++++ b/common/frame_diag.c
+@@ -0,0 +1,85 @@
++#include "common/frame_diag.h"
++#include "osdep/timer.h"
++#include <pthread.h>
++#include <stdatomic.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#define SK_ROWS 65536
++struct row { atomic_bool ready; char text[768]; };
++static struct row *rows;
++static char *path;
++static pthread_once_t once = PTHREAD_ONCE_INIT;
++static atomic_uint cursor;
++static atomic_ullong composition_serial;
++static _Thread_local unsigned long long composition;
++
++static void flush(void)
++{
++    if (!rows) return;
++    FILE *out = fopen(path, "w");
++    if (!out) { perror("frame diagnostic"); return; }
++    unsigned n = atomic_load(&cursor), complete = 0;
++    for (unsigned i = 0; i < n && i < SK_ROWS; i++) {
++        if (atomic_load(&rows[i].ready)) {
++            fputs(rows[i].text, out);
++            fputc('\n', out);
++            complete++;
++        }
++    }
++    fprintf(out, "# health recorded=%u attempted=%u overflow=%u\n", complete, n,
++            n > SK_ROWS ? n - SK_ROWS : 0);
++    fclose(out);
++}
++static void init(void)
++{
++    const char *p = getenv("SAITENKA_MPV_TRACE");
++    if (!p || !*p) return;
++    path = strdup(p);
++    rows = calloc(SK_ROWS, sizeof(*rows));
++    if (rows) atexit(flush);
++}
++bool sk_diag_enabled(void)
++{
++    pthread_once(&once, init);
++    return rows != NULL;
++}
++uint64_t sk_diag_hash(const char *text)
++{
++    uint64_t hash = UINT64_C(14695981039346656037);
++    if (text) for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
++        hash ^= *p;
++        hash *= UINT64_C(1099511628211);
++    }
++    return hash;
++}
++void sk_diag(const char *tag, const char *fmt, ...)
++{
++    if (!sk_diag_enabled()) return;
++    unsigned i = atomic_fetch_add(&cursor, 1);
++    if (i >= SK_ROWS) return;
++    struct timespec wall;
++    int64_t mono = mp_time_ns();
++    clock_gettime(CLOCK_REALTIME, &wall);
++    char detail[512];
++    va_list args;
++    va_start(args, fmt);
++    vsnprintf(detail, sizeof(detail), fmt, args);
++    va_end(args);
++    snprintf(rows[i].text, sizeof(rows[i].text),
++             "%lld %lld %llu %s %s", (long long)mono,
++             (long long)wall.tv_sec * 1000000000LL + wall.tv_nsec,
++             composition, tag, detail);
++    atomic_store(&rows[i].ready, true);
++}
++void sk_diag_begin(uint64_t frame, double pts, int64_t target, bool redraw)
++{
++    if (!sk_diag_enabled()) return;
++    composition = atomic_fetch_add(&composition_serial, 1) + 1;
++    sk_diag("draw_begin", "frame=%llu pts=%.9f target=%lld redraw=%d",
++            (unsigned long long)frame, pts, (long long)target, redraw);
++}
++void sk_diag_end(void) { composition = 0; }
+--- /dev/null
++++ b/common/frame_diag.h
+@@ -0,0 +1,8 @@
++#pragma once
++#include <stdint.h>
++#include <stdbool.h>
++bool sk_diag_enabled(void);
++uint64_t sk_diag_hash(const char *text);
++void sk_diag(const char *tag, const char *fmt, ...);
++void sk_diag_begin(uint64_t frame, double pts, int64_t target, bool redraw);
++void sk_diag_end(void);
+--- a/input/ipc.c
++++ b/input/ipc.c
+@@ -18,6 +18,7 @@
+ #include <mpv/client.h>
+ 
+ #include "common/msg.h"
++#include "common/frame_diag.h"
+ #include "input/input.h"
+ #include "misc/json.h"
+ #include "misc/node.h"
+@@ -127,6 +128,7 @@
+     mpv_node *async_node = NULL;
+     bool async = false;
+     bool send_reply = true;
++    bool diag_osd = false;
+ 
+     rc = json_parse(ta_parent, &msg_node, &src, MAX_JSON_DEPTH);
+     if (rc < 0) {
+@@ -177,6 +179,18 @@
+         }
+ 
+         cmd = cmd_str_node->u.string;
++    }
++
++    diag_osd = sk_diag_enabled() && cmd &&
++        (!strcmp(cmd, "osd-overlay") || !strcmp(cmd, "osd-overlay-timed"));
++    if (diag_osd) {
++        int index = !strcmp(cmd, "osd-overlay-timed") ? 4 : 3;
++        mpv_node *payload = mpv_node_array_get(cmd_node, index);
++        const char *text = payload && payload->format == MPV_FORMAT_STRING
++            ? payload->u.string : "";
++        sk_diag("ipc_received", "client=%s request=%lld command=%s hash=%016llx async=%d",
++                mpv_client_name(client), (long long)reqid, cmd,
++                (unsigned long long)sk_diag_hash(text), async);
+     }
+ 
+     if (cmd && !strcmp("client_name", cmd)) {
+@@ -360,6 +374,9 @@
+     }
+ 
+ error:
++    if (diag_osd)
++        sk_diag("ipc_complete", "client=%s request=%lld result=%d async=%d",
++                mpv_client_name(client), (long long)reqid, rc, async);
+     /* If the request contains a "request_id", copy it back into the response.
+      * This makes it easier on the requester to match up the IPC results with
+      * the original requests.
+--- a/meson.build
++++ b/meson.build
+@@ -84,6 +84,7 @@
+     'common/common.c',
+     'common/encode_lavc.c',
+     'common/msg.c',
++    'common/frame_diag.c',
+     'common/playlist.c',
+     'common/recorder.c',
+     'common/stats.c',
+--- a/player/client.c
++++ b/player/client.c
+@@ -46,6 +46,7 @@
+ #include "command.h"
+ #include "core.h"
+ #include "client.h"
++#include "common/frame_diag.h"
+ 
+ /*
+  * Locking hierarchy:
+@@ -1720,6 +1721,19 @@
+             if (prop->value_ts == 0)
+                 changed = true; // initial event
+ 
++            if (sk_diag_enabled() && changed && val_valid &&
++                (!strcmp(prop->name, "sub-text") || !strcmp(prop->name, "sub-text/ass"))) {
++                mpv_node diag_node = {0};
++                if (prop->format == MPV_FORMAT_NODE)
++                    memcpy(&diag_node, &val, sizeof(diag_node));
++                const char *text = prop->format == MPV_FORMAT_STRING ? val.string :
++                    prop->format == MPV_FORMAT_NODE && diag_node.format == MPV_FORMAT_STRING
++                    ? diag_node.u.string : NULL;
++                if (text)
++                    sk_diag("cue_observed", "client=%s property=%s hash=%016llx bytes=%zu",
++                            ctx->name, prop->name,
++                            (unsigned long long)sk_diag_hash(text), strlen(text));
++            }
+             prop->value_valid = val_valid;
+             if (changed && val_valid) {
+                 // move val to prop->value
+--- a/sub/osd.c
++++ b/sub/osd.c
+@@ -36,6 +36,7 @@
+ #include "player/client.h"
+ #include "player/command.h"
+ #include "osd.h"
++#include "common/frame_diag.h"
+ #include "osd_state.h"
+ #include "dec_sub.h"
+ #include "img_convert.h"
+@@ -557,6 +558,10 @@
+         bool authoritative = origin == OSD_RENDER_PRESENTATION &&
+                              !osd->render_subs_in_filter;
+         stats_time_end(osd->stats, stat_type_render);
++        if (obj->is_sub)
++            sk_diag("native_candidate", "type=%d pts=%.9f parts=%d flags=%d change=%d",
++                    obj->type, video_pts, imgs ? imgs->num_parts : 0, draw_flags,
++                    imgs ? imgs->change_id : 0);
+ 
+         bool accepted = imgs && (!imgs->num_parts || formats[imgs->format]);
+         if (n == OSDTYPE_SUB) {
+--- a/sub/osd_libass.c
++++ b/sub/osd_libass.c
+@@ -26,6 +26,7 @@
+ #include "common/common.h"
+ #include "common/msg.h"
+ #include "osd.h"
++#include "common/frame_diag.h"
+ #include "osd_state.h"
+ 
+ static const char osd_font_pfb[] =
+@@ -529,6 +530,10 @@
+                             struct osd_external *ext)
+ {
+     bstr t = bstr0(ext->ov.data);
++    if (sk_diag_enabled())
++        sk_diag("external_update", "owner=%p peer=%s id=%lld hash=%016llx hidden=%d bytes=%zu",
++                ext->ov.owner, (const char *)ext->ov.owner, (long long)ext->ov.id,
++                (unsigned long long)sk_diag_hash(ext->ov.data), ext->ov.hidden, t.len);
+     ext->ass.res_x = ext->ov.res_x;
+     ext->ass.res_y = ext->ov.res_y;
+     create_ass_track(osd, obj, &ext->ass);
+@@ -710,6 +715,12 @@
+             append_ass(&obj->externals[n]->ass, &obj->vo_res,
+                        &obj->ass_imgs[n + 1], &obj->changed);
+         }
++        if (sk_diag_enabled())
++            sk_diag("external_candidate", "owner=%p peer=%s id=%lld hash=%016llx hidden=%d images=%d render_index=%d",
++                    obj->externals[n]->ov.owner, (const char *)obj->externals[n]->ov.owner,
++                    (long long)obj->externals[n]->ov.id,
++                    (unsigned long long)sk_diag_hash(obj->externals[n]->ov.data),
++                    obj->externals[n]->ov.hidden, obj->ass_imgs[n + 1] != NULL, obj->type);
+     }
+ 
+ done:;
+--- a/video/out/vo.c
++++ b/video/out/vo.c
+@@ -33,6 +33,7 @@
+ #include "options/options.h"
+ #include "misc/bstr.h"
+ #include "vo.h"
++#include "common/frame_diag.h"
+ #include "aspect.h"
+ #include "dr_helper.h"
+ #include "input/input.h"
+@@ -1008,7 +1009,11 @@
+ 
+         stats_time_start(in->stats, "video-draw");
+ 
++        sk_diag_begin(frame->frame_id,
++                      frame->num_frames ? frame->frames[0]->pts : -1.0,
++                      target, frame->redraw);
+         in->visible = vo->driver->draw_frame(vo, frame);
++        sk_diag("draw_end", "visible=%d", in->visible);
+ 
+         stats_time_end(in->stats, "video-draw");
+ 
+@@ -1025,6 +1030,12 @@
+         if (vo->driver->get_vsync)
+             vo->driver->get_vsync(vo, &vsync);
+ 
++        if (sk_diag_enabled())
++            sk_diag("flip", "feedback=%lld supported=%d visible=%d dropped=%d",
++                (long long)vsync.last_queue_display_time,
++                vsync.last_queue_display_time > 0, in->visible,
++                prev_drop_count != vo_get_drop_count(vo));
++        sk_diag_end();
+         // Make up some crap if presentation feedback is missing.
+         if (vsync.last_queue_display_time <= 0)
+             vsync.last_queue_display_time = mp_time_ns();
+@@ -1102,8 +1113,13 @@
+     frame->duration = -1;
+     mp_mutex_unlock(&in->lock);
+ 
+-    vo->driver->draw_frame(vo, frame);
++    sk_diag_begin(frame->frame_id,
++                  frame->num_frames ? frame->frames[0]->pts : -1.0, 0, true);
++    bool diag_visible = vo->driver->draw_frame(vo, frame);
++    sk_diag("draw_end", "visible=%d", diag_visible);
+     vo->driver->flip_page(vo);
++    sk_diag("flip", "feedback=-1 feedback_status=not_queried visible=%d dropped=0", diag_visible);
++    sk_diag_end();
+ 
+     if (frame != &dummy && !(vo->driver->caps & VO_CAP_FRAMEOWNER))
+         talloc_free(frame);
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -31,6 +31,7 @@
+ #include "config.h"
+ #include "common/common.h"
+ #include "common/stats.h"
++#include "common/frame_diag.h"
+ #include "misc/io_utils.h"
+ #include "options/m_config.h"
+ #include "options/options.h"
+@@ -445,6 +446,8 @@
+             break;
+         }
+ 
++        sk_diag("overlay_attached", "index=%d change=%d parts=%d pts=%.9f",
++                item->render_index, item->change_id, entry->num_parts, pts);
+         // Duplicate overlay parts for each eye in stereo 3D modes
+         if (div[0] > 1 || div[1] > 1) {
+             int orig_num = entry->num_parts;
+@@ -1625,6 +1628,7 @@
+     // Render frame
+     stats_time_start(p->stats, "render");
+     bool render_ok = pl_render_image_mix(p->rr, &mix, &target, &params);
++    sk_diag("gpu_render", "ok=%d overlays=%d", render_ok, target.num_overlays);
+     stats_time_end(p->stats, "render");
+     if (!render_ok) {
+         MP_ERR(vo, "Failed rendering frame!\n");
+@@ -1671,7 +1675,9 @@
+     struct ra_swapchain *sw = p->ra_ctx->swapchain;
+ 
+     if (p->frame_pending) {
+-        if (!pl_swapchain_submit_frame(p->sw))
++        bool diag_submitted = pl_swapchain_submit_frame(p->sw);
++        sk_diag("gpu_submit", "ok=%d", diag_submitted);
++        if (!diag_submitted)
+             MP_ERR(vo, "Failed presenting frame!\n");
+         p->frame_pending = false;
+     }

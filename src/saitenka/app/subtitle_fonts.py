@@ -63,6 +63,7 @@ FONT_OPTIONS = (
     # the text device has to stand down for it.
     "osd-fonts-dir",
     "osd-font-provider",
+    "osd-font",
 )
 
 #: Wall-clock bound on the two attachment subprocesses. They run on the reader thread at every track
@@ -130,6 +131,8 @@ class FontEnvironment:
     #: Whether the two libraries use the same font provider. When they do not, even a system family
     #: is looked up two ways and no family can be argued equal.
     osd_shares_provider: bool = True
+    osd_setup: FontSetup | None = None
+    osd_attachment_families: frozenset[str] = frozenset()
 
     def osd_unreachable(
         self,
@@ -159,7 +162,7 @@ class FontEnvironment:
         signs are attachment-only should lose the color on its signs, not on the whole episode.
         """
         return OsdReach(
-            self.attachment_families
+            (self.attachment_families - self.osd_attachment_families)
             | (in_document if self.setup.extract_fonts else frozenset())
             | (frozenset() if self.osd_shares_fonts_dir else self.fonts_dir_families)
             | measured,
@@ -236,6 +239,27 @@ def _directory_families(fonts_dir: str | None) -> frozenset[str]:
         except OSError:
             continue
     return frozenset(found)
+
+
+def _osd_attachment_families(
+    attachments: tuple[tuple[str, bytes], ...], fonts_dir: str | None
+) -> frozenset[str]:
+    """Only identical attachment bytes prove directory access to the same face."""
+    if not attachments or not fonts_dir:
+        return frozenset()
+    try:
+        entries = sorted(Path(fonts_dir).iterdir())[:MAX_FONTS_DIR_FILES]
+    except OSError:
+        return frozenset()
+    wanted = {data for _, data in attachments}
+    available: set[str] = set()
+    for entry in entries:
+        try:
+            if entry.is_file() and (data := entry.read_bytes()) in wanted:
+                available.update(font_names.families(data))
+        except OSError:
+            continue
+    return frozenset(available)
 
 
 def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:
@@ -381,4 +405,12 @@ def resolve(
         osd_shares_fonts_dir=shares_dir,
         osd_shares_provider=_font_provider(settings.get("osd-font-provider"))
         == setup.font_provider,
+        osd_attachment_families=_osd_attachment_families(attachments, osd_fonts_dir),
+        osd_setup=FontSetup(
+            fonts_dir=osd_fonts_dir,
+            default_font=setup.default_font,
+            default_family=str(settings.get("osd-font") or "sans-serif"),
+            fontconfig_config=setup.fontconfig_config,
+            font_provider=_font_provider(settings.get("osd-font-provider")),
+        ),
     )

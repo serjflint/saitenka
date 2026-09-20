@@ -233,6 +233,7 @@ def request_for(
             "y": token.bounds.y,
             "w": token.bounds.width,
             "h": token.bounds.height,
+            "hit_regions": None,
         }
         boxes.append(
             WordBox(

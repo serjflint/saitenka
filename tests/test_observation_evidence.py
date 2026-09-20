@@ -11,6 +11,8 @@ from saitenka.app import query_evidence
 from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.runtime import CloseRequested, ConnectionReady, PropertyObserved, SessionMailbox
 
+pytestmark = pytest.mark.usefixtures("enabled_telemetry")
+
 
 def test_wire_observation_reaches_report_with_mailbox_identity(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)

@@ -1,0 +1,24 @@
+{
+  "mpv": {
+    "base": "e7191f2a65d64af266c5c80793e79d2f4b92b789",
+    "implementation": "e9a710c712846ff8dcae2f7cb3f2743f050a41eb",
+    "patches": [
+      "mpv-layout.patch",
+      "mpv-diagnostic.patch",
+      "mpv-timed.patch"
+    ]
+  },
+  "libass": {
+    "base": "b2fe9d8770678a7b5271387d38c20657ebf3429a",
+    "implementation": "a4e65d3ebe182742cb96b49148610606f3149c2b",
+    "patches": [
+      "libass-layout.patch"
+    ]
+  },
+  "sha256": {
+    "libass-layout.patch": "19bf0016d8499891e710dd5497e86753bc4ee1758e2f3a3508f9e9770505958a",
+    "mpv-diagnostic.patch": "28a3a794d227e4be409f177df9e2c53a24b9efc624a2d166c394f76cb0090db7",
+    "mpv-timed.patch": "7f5a2fe6457c689d3d8d315848a0ea40a8d4aa9357c3de7534fc91401c6d72de",
+    "mpv-layout.patch": "50f75b9edfa569b3120336a1c0e8abacc691eb8c48026f8548aa78bb0fd117e2"
+  }
+}

@@ -84,6 +84,8 @@ class PrefetchState:
             raise ValueError(f"head prefetch queue limit must be between 1 and {_MAX_HEAD_PENDING}")
         self.head_queue_max = head_queue_max
         self.head_built = 0
+        self.succeeded = 0
+        self.failed = 0
         self.gen = 0
         self.key: tuple[str, bool] | None = None
         self.sequence = 0
@@ -116,6 +118,8 @@ class PrefetchState:
             self.pending_limit,
             self.head_built,
             self.closed,
+            self.succeeded,
+            self.failed,
         )
 
 
@@ -127,6 +131,8 @@ class PrefetchSnapshot:
     pending_limit: int
     head_built: int
     closed: bool
+    succeeded: int
+    failed: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +309,10 @@ def finish(
     current = state.inflight.pop(identity.sequence, None)
     if current is None or current[0] != identity:
         return
+    if completion.outcome is EffectOutcome.SUCCEEDED and completion.result is True:
+        state.succeeded += 1
+    elif completion.outcome is EffectOutcome.FAILED:
+        state.failed += 1
     if (
         completion.outcome is EffectOutcome.SUCCEEDED
         and completion.result is True

@@ -28,6 +28,7 @@ FIELDS = {
     "panels.scale": "ui_scale",
     "prefetch": "prefetch",
     "subtitle_geometry.native_visible": "subtitle_geometry.native_visible",
+    "subtitle_geometry.coloring": "subtitle_geometry.coloring",
     "subtitle_geometry.cache_max": "subtitle_geometry.cache_max",
     "subtitle_geometry.lookahead": "subtitle_geometry.lookahead",
 }
@@ -53,7 +54,7 @@ ORIGINS = frozenset(
         "unknown",
     }
 )
-registry = EvidenceRegistry()
+registry = EvidenceRegistry(kind="session_configuration")
 
 
 def origins(
@@ -84,12 +85,22 @@ def _value(value: object) -> object:
         return value
     if isinstance(value, (int, float)) and abs(value) <= 1e9 and math.isfinite(value):
         return value
-    if isinstance(value, str) and value in {"default", "taffy"}:
+    if isinstance(value, str) and value in {
+        "default",
+        "taffy",
+        "legacy",
+        "whole-cue-auto",
+        "whole-cue-osd",
+        "whole-cue-overpaint",
+        "boxes-only",
+    }:
         return value
     return None
 
 
 def record(options: ReaderOptions) -> int:
+    if not registry.enabled:
+        return 0
     owner = registry.allocate()
     sources = dict(options.diagnostic_origins)
     fields = {}

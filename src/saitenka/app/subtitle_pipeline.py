@@ -134,6 +134,10 @@ class SubtitleModeCoordinator:
         self._evidence = GeometryEvidence()
 
     @property
+    def configuration_owner(self) -> int:
+        return self._evidence.owner
+
+    @property
     def renderer(self) -> CurrentSubtitleRenderer:
         return self._renderer
 
@@ -162,6 +166,18 @@ class SubtitleModeCoordinator:
     def record_pixel_owner(self, owner: str) -> None:
         with self._state_lock:
             self._evidence.selection(pixel_owner=owner, legacy_forced=self.legacy_forced)
+
+    def record_geometry_source(self, record: dict[str, str | int | bool]) -> None:
+        with self._state_lock:
+            self._evidence.geometry_source(record)
+
+    def record_timed_osd(self, record: dict) -> None:
+        with self._state_lock:
+            self._evidence.timed_osd(record)
+
+    def record_whole_cue(self, record: dict) -> None:
+        with self._state_lock:
+            self._evidence.whole_cue(record)
 
     def draw_current(self, target: SubtitleTarget) -> DrawResult | None:
         """Draw the current cue and hand the geometry back. The one place a draw is staged.
@@ -356,7 +372,7 @@ class SubtitleModeCoordinator:
                 ticket.sequence,
                 libass_version=result.libass_version,
                 mask_source=result.mask_source,
-                validation=validation_summary(result),
+                validation=validation_summary(result) if self._evidence.enabled else None,
             )
         with otel_metrics.traced("subtitle_geometry_publish") as span:
             span.set("configuration_owner", self._evidence.owner)

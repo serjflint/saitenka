@@ -68,6 +68,9 @@ def test_observed_cue_carries_revision_through_geometry_and_color_export(
     provider.add_span_processor(
         CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
     )
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     session, ipc, _backend = reader(
         tmp_path,
@@ -120,6 +123,9 @@ def test_reader_reports_acknowledgment_wait_and_preserves_originating_cue(monkey
     provider.add_span_processor(
         CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
     )
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     clock = iter((100.0, 100.25))
     monkeypatch.setattr(
@@ -159,6 +165,9 @@ def test_retired_surface_late_ack_is_exported_as_rejected(monkeypatch, tmp_path,
     provider.add_span_processor(
         CTFSpanProcessor(directory / "trace-1.json", gate, start_thread=False)
     )
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
     ipc = _DeferredIPC()
     surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))

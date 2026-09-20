@@ -1,0 +1,126 @@
+{
+  "provenance": {
+    "libass": "a4e65d3ebe182742cb96b49148610606f3149c2b",
+    "mpv_base": "0983100ebde02f5f0ea66d3a96d26002a1776f44",
+    "mpv_patch_sha256": "ff55453f228bd320403f12f1ca9ffbb3789b80a50da61ed4ddc32fe0f486ac0a",
+    "platform": "macOS",
+    "cue": "0..8 seconds: 猫を見る"
+  },
+  "snapshot": {
+    "capabilities": [
+      "events",
+      "unit-logical-rects",
+      "event-geometry-profile",
+      "event-bitmap-bounds"
+    ],
+    "limits": {
+      "max_events": 64,
+      "max_text_bytes": 1048576,
+      "max_units": 4096,
+      "max_bitmap_pixels": 16777216,
+      "max_retained_bytes": 1048576
+    },
+    "available": true,
+    "status": "ok",
+    "revision": 7,
+    "snapshot_id": "g1-r7",
+    "media": {
+      "playlist_entry_id": 1
+    },
+    "track": {
+      "id": 1,
+      "decoder_generation": 1,
+      "format": "ass",
+      "layout_engine": "libass",
+      "layout_unit_mode": "harfbuzz-cluster"
+    },
+    "time": {
+      "render_video_pts": 0.12,
+      "render_subtitle_pts": 0.12,
+      "event_domain": "subtitle"
+    },
+    "space": {
+      "name": "osd",
+      "width": 1280,
+      "height": 720,
+      "margin_top": 0,
+      "margin_bottom": 0,
+      "margin_left": 0,
+      "margin_right": 0,
+      "display_par": 1.0,
+      "rect_semantics": "half-open",
+      "render_origin": "output-render"
+    },
+    "events": [
+      {
+        "id": "e0",
+        "order": 0,
+        "start": 0.0,
+        "end": 8.0,
+        "text": "猫を見る",
+        "text_index_unit": "utf8-byte",
+        "geometry_profile": "static-logical-v1",
+        "units": [
+          {
+            "start": 0,
+            "end": 3,
+            "line": 0,
+            "logical_rects": [
+              {
+                "x": 563.5,
+                "y": 642.0,
+                "w": 38.25,
+                "h": 48.0
+              }
+            ]
+          },
+          {
+            "start": 3,
+            "end": 6,
+            "line": 0,
+            "logical_rects": [
+              {
+                "x": 601.75,
+                "y": 642.0,
+                "w": 38.25,
+                "h": 48.0
+              }
+            ]
+          },
+          {
+            "start": 6,
+            "end": 9,
+            "line": 0,
+            "logical_rects": [
+              {
+                "x": 640.0,
+                "y": 642.0,
+                "w": 38.25,
+                "h": 48.0
+              }
+            ]
+          },
+          {
+            "start": 9,
+            "end": 12,
+            "line": 0,
+            "logical_rects": [
+              {
+                "x": 678.25,
+                "y": 642.0,
+                "w": 38.25,
+                "h": 48.0
+              }
+            ]
+          }
+        ],
+        "bitmap_bounds": {
+          "x": 562.0,
+          "y": 647.0,
+          "w": 167.0,
+          "h": 51.0
+        }
+      }
+    ]
+  }
+}

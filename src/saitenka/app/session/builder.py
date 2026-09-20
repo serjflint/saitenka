@@ -174,7 +174,7 @@ def _adopt_selected_subtitle(
     """
     native = presentation.native
     if native is None:
-        presentation.pipeline.invalidate()
+        presentation.invalidate_geometry()
         subtitle_modes.on_primary_changed(ports(), sid)
         return
     native.set_source(None, live=True)
@@ -526,11 +526,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     registrations.append(
         (
             SUBTITLE_REPLAY_PARTICIPANT,
-            session_resources.Starting(
-                lambda: subtitle_presentation.pipeline.connection_replaced(
-                    subtitle_presentation.target()
-                )
-            ),
+            session_resources.Starting(subtitle_presentation.connection_replaced),
         )
     )
     surface_router = surfaces.build_surface_router(
@@ -598,12 +594,17 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             timers=lifecycle_timers,
         )
     )
+
+    def subtitle_index_changed() -> None:
+        sidebar_controller.index_changed()
+        subtitle_presentation.refresh.arm()
+
     subtitle_navigation = navigation_ref.bind(
         SubtitleNavigationCoordinator(
             ipc=ipc,
             navigation=track_commands.navigation,
             geometry=lambda: subtitle_presentation.native,
-            get=playback_observation.query,
+            get=playback_observation.value,
             cue_text=lambda: playback_observation.cue.text,
             cue_retired=lambda: annotation_controller.view.retired,
             draw_cue=install_cue,
@@ -612,9 +613,12 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             ),
             invalidate=analysis_commands.invalidate,
             warm_tokens=lambda: profile_integration_ref.get().warm_episode(),
-            index_changed=sidebar_controller.index_changed,
+            index_changed=subtitle_index_changed,
             cue_revision=lambda: cue_ref.get().revision,
             invalidate_pipeline=subtitle_presentation.pipeline.invalidate,
+            color_navigation_started=lambda: subtitle_presentation.color_telemetry.begin(
+                "navigation"
+            ),
         )
     )
     profile_integration = profile_integration_ref.bind(
@@ -823,7 +827,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         )
     )
     episode_watch = episode_reslot.EpisodeWatch(
-        prop=playback_observation.value,
+        prop=playback_observation.query,
         replace_source=cue_coordinator.replace_source,
         mark_authored_probe_dirty=authored_subtitle_probe.mark_dirty,
     )
@@ -833,12 +837,12 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         _adopt_selected_subtitle(subtitle_presentation, track_commands.ports, sid)
 
     def subtitle_timing_changed() -> None:
+        subtitle_presentation.geometry_changed("sub-delay")
         if subtitle_presentation.native is not None:
             subtitle_presentation.native.record_clock_change(playback_observation.value)
 
-    def geometry_input_changed() -> None:
-        if subtitle_presentation.native is not None:
-            subtitle_presentation.refresh.arm()
+    def geometry_input_changed(property_name: str) -> None:
+        subtitle_presentation.geometry_changed(property_name)
 
     def pause_changed(*, paused: bool) -> None:
         log.debug("mpv pause -> %s", paused)
@@ -1111,8 +1115,6 @@ def _assemble_stateless_commands(
             cue=owners.subtitles.cue,
             annotation=owners.annotation,
             observed_property=owners.playback.value,
-            property_value=owners.playback.query,
-            text_property=owners.playback.text,
         ),
         SubtitleCommandApply(
             ipc=owners.ipc,

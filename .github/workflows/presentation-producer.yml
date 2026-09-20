@@ -1,0 +1,30 @@
+name: Presentation producer contract
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tools/presentation/**'
+      - '.github/workflows/presentation-producer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  producer:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: Install native build dependencies
+        run: brew install meson ninja pkgconf ffmpeg libplacebo freetype fribidi harfbuzz libunibreak fontconfig libpng
+      - name: Fetch upstream sources
+        run: |
+          git clone https://github.com/mpv-player/mpv.git "$RUNNER_TEMP/mpv-source"
+          git clone https://github.com/libass/libass.git "$RUNNER_TEMP/libass-source"
+      - name: Apply pinned patches, build both producers and run C contracts
+        run: >-
+          uv run --no-project tools/presentation/build.py "$RUNNER_TEMP/presentation-build"
+          --mpv-repo "$RUNNER_TEMP/mpv-source"
+          --libass-repo "$RUNNER_TEMP/libass-source"

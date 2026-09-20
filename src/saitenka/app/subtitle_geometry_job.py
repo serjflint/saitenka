@@ -118,10 +118,14 @@ class SubtitleGeometryWorker:
         *,
         cache_max: int = 3,
         submit: JobSubmitter | None = None,
+        on_prefetched: Callable[[GeometrySnapshot], None] | None = None,
+        on_invalidated: Callable[[], None] | None = None,
     ) -> None:
         if cache_max <= 0:
             raise ValueError("geometry result cache bound must be positive")
         self._coordinator = coordinator
+        self._on_prefetched = on_prefetched
+        self._on_invalidated = on_invalidated
         self._cache_max = cache_max
         self._cache: OrderedDict[str, GeometrySnapshot] = OrderedDict()
         self._condition = threading.Condition()
@@ -249,7 +253,13 @@ class SubtitleGeometryWorker:
         result outliving the fence it was built under is the design, not a leak.
         """
         with self._condition:
-            if self._closed or key in self._prefetched:
+            cached = self._prefetched.get(key)
+            epoch = self._prefetch_epoch
+        if cached is not None:
+            self._deliver_prefetched(key, epoch)
+            return False
+        with self._condition:
+            if self._closed:
                 return False
             self._prefetch_pending.pop(key, None)
             self._prefetch_pending[key] = build
@@ -300,7 +310,8 @@ class SubtitleGeometryWorker:
                 key, build = self._prefetch_pending.popitem(last=False)
                 self._prefetch_inflight_key = key
                 job = GeometryJob(self, None, (key, self._prefetch_epoch, build))
-                owed = []
+                epoch = self._prefetch_epoch
+                owed = [lambda: self._deliver_prefetched(key, epoch)]
             else:
                 return None
             self._inflight = True
@@ -373,6 +384,14 @@ class SubtitleGeometryWorker:
             settle()
         self._pump()
 
+    def _deliver_prefetched(self, key: str, epoch: int) -> None:
+        with self._condition:
+            cached = self._prefetched.get(key)
+            if self._closed or epoch != self._prefetch_epoch or cached is None:
+                return
+        if self._on_prefetched is not None:
+            self._on_prefetched(cached.snapshot)
+
     def _remember_provenance(self, key: str, reason: GeometryCacheReason) -> None:
         self._provenance.pop(key, None)
         self._provenance[key] = reason
@@ -427,6 +446,8 @@ class SubtitleGeometryWorker:
         return rebound_request
 
     def invalidate_cache(self, *, cause: GeometryCacheReason | None = None) -> None:
+        if self._on_invalidated is not None:
+            self._on_invalidated()
         with self._condition:
             self._prefetch_epoch += 1
             self._superseded += len(self._prefetch_waiters)

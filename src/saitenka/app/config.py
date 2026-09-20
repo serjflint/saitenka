@@ -347,8 +347,17 @@ class PerfOptions:
 
 @dataclass(frozen=True)
 class SubtitleGeometryOptions:
-    """Opt-in native-visible subtitle interaction backed by shadow libass geometry."""
+    """Native subtitle pixels with shadow or mpv-provided interaction geometry."""
 
+    source: str = field(
+        default="auto", metadata={"help": "Geometry source: auto, shadow, or mpv (scan-only)."}
+    )
+    coloring: str = field(
+        default="legacy",
+        metadata={
+            "help": "Native coloring: legacy, whole-cue-auto, whole-cue-osd, whole-cue-overpaint, boxes-only."
+        },
+    )
     native_visible: bool = field(
         default=False,
         metadata={"help": "Keep mpv subtitles visible and derive hover geometry with libass."},
@@ -373,6 +382,18 @@ class SubtitleGeometryOptions:
     #: stepping back is exactly what a viewer does when a line did not become scannable.
     cache_max: int = field(default=6, metadata={"help": "Current/lookahead geometry cache bound."})
     lookahead: int = field(default=2, metadata={"help": "Static cues to render ahead."})
+
+    def __post_init__(self) -> None:
+        if self.source not in {"shadow", "mpv", "auto"}:
+            raise ValueError("subtitle geometry source must be shadow, mpv or auto")
+        if self.coloring not in {
+            "legacy",
+            "whole-cue-auto",
+            "whole-cue-osd",
+            "whole-cue-overpaint",
+            "boxes-only",
+        }:
+            raise ValueError("invalid subtitle geometry coloring option")
 
 
 # Flat legacy kwarg name -> the ReaderOptions group it belongs to (used by with_overrides).
@@ -484,6 +505,8 @@ def subtitle_geometry_options(cfg: dict) -> SubtitleGeometryOptions:
     if not isinstance(native_formats, str):
         raise TypeError("subtitle_geometry.native_formats must be a string")
     return SubtitleGeometryOptions(
+        source=values.get("source", defaults.source),
+        coloring=values.get("coloring", defaults.coloring),
         native_visible=native_visible,
         native_formats=native_formats,
         library_path=library_path,

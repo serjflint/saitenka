@@ -602,6 +602,7 @@ invariants-taint = { shell = "uvx --python 3.13 semgrep scan --config tools/semg
 # function — 4122 lines, over half of a whole `poe all` log. The ratchet still bites: a raised complexity
 # exits 1 and names the function and both watermarks.
 complexity = { cmd = "uv run complexipy --failed" }
+presentation-live = { shell = "SAITENKA_PRESENTATION=1 SAITENKA_LIVE=1 uv run --no-sync pytest -q tests/test_live_presentation.py -m live" }
 # Regenerate the baseline after a DELIBERATE refactor changes function complexity on purpose (run,
 # review the snapshot diff, commit it alongside the refactor — never to silence a real regression).
 complexity-baseline = { cmd = "uv run complexipy --snapshot-create" }
@@ -636,6 +637,8 @@ cov = "uv run --extra full pytest -q -n auto --cov=saitenka --cov-report= --cov-
 # Render the per-file missing-line detail from the last `cov` run — what to open when coverage drops.
 cov-report = "uv run --extra full coverage report -m --skip-covered"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
+cue-replay = { cmd = "uv run --extra full python examples/bench_cue_replay.py" }
+cue-pyspy = { cmd = "bash tools/cue_pyspy.sh" }
 # Dict-free deterministic render bench — the CI/asv-safe gate target (no overlay.toml, no randomness).
 # --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
 synth-bench = "uv run --extra full python examples/bench_responsiveness.py --synth --reps 5 --loops 5"

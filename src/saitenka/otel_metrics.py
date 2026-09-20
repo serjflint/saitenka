@@ -141,6 +141,11 @@ subtitle_focus_writes_skipped: Counter | None = None
 #: covering it; `record_cue_arrival` / `record_color_up` are its two ends.
 subtitle_color_latency_ms: Histogram | None = None
 subtitle_color_late: Counter | None = None
+subtitle_color_outcomes: Counter | None = None
+subtitle_color_deadlines: Counter | None = None
+subtitle_color_pending: UpDownCounter | None = None
+subtitle_color_ack_ms: Histogram | None = None
+subtitle_color_withdrawals: Counter | None = None
 subtitle_layout_drift_px: Histogram | None = None
 #: The `compute_bounds` round trip, which is the only OSD-side cost we can time: mpv lays the payload
 #: out on its core thread and answers. Every other span in the draw path measures OUR side, so
@@ -173,7 +178,7 @@ def record_cue_arrival(cue: str) -> None:
     not restart the clock — it would report a wait shorter than the one actually sat through.
     """
     global _color_wait
-    if not cue:
+    if not cue or subtitle_color_latency_ms is None:
         return
     with _color_wait_lock:
         if _color_wait is not None and _color_wait[0] == cue:
@@ -275,6 +280,7 @@ SPANLESS_HISTOGRAMS = frozenset(
         "saitenka.block_cache.rendered_px",  # band pixel height — a measure, not a duration span
         "saitenka.mpv_effect.apply_ms",  # no span: the wait happens after the caller returned
         "saitenka.subtitle.color_latency_ms",  # spans two components; neither covers the wait
+        "saitenka.subtitle.color_ack_ms",
     }
 )
 
@@ -296,10 +302,24 @@ def timed(histogram: Histogram | None, **attributes: str) -> Generator[None]:
         histogram.record((time.perf_counter() - start) * 1000.0, attributes or None)
 
 
-#: Memoized resolution of `opentelemetry.trace`: `None` = not yet checked, ``False`` = confirmed
-#: unavailable (the telemetry extra isn't installed — this can't change at runtime, so caching
-#: it forever is correct). Avoids re-attempting (and re-catching ImportError from) a failing import
-#: on every single call from a hot call site like `traced()`.
+class ActiveGate:
+    """Cheap recording gate; concurrent flips may admit or omit one boundary span."""
+
+    __slots__ = ("_on",)
+
+    def __init__(self) -> None:
+        self._on = False
+
+    def __bool__(self) -> bool:
+        return self._on
+
+    def set(self, *, value: bool) -> None:
+        self._on = value
+
+
+span_gate = ActiveGate()
+
+# None means unresolved; False memoizes an unavailable optional SDK.
 _trace_available: bool | None = None
 _trace_module: ModuleType | None = None
 
@@ -315,6 +335,9 @@ def _resolve_trace_module() -> ModuleType | None:
     depend on some earlier test in the same process having resolved the module first.
     """
     global _trace_available, _trace_module
+
+    if not span_gate:
+        return None
     if _trace_available is False:
         return None
     if _trace_module is None:
@@ -344,6 +367,10 @@ class SpanSetter:
     def set(self, key: str, value: object) -> None:
         if self._span is not None:
             self._span.set_attribute(key, value)
+
+    @property
+    def recording(self) -> bool:
+        return self._span is not None and self._span.is_recording()
 
 
 _NOOP_SPAN = SpanSetter(None)
@@ -475,34 +502,29 @@ class DeferredSpan:
     submitting thread does next, and it outlives that scope anyway.
     """
 
-    __slots__ = ("_finished", "_lock", "_operation", "_span")
+    __slots__ = ("_finished", "_lock", "_span")
 
     def __init__(self, name: str, **attributes: str) -> None:
-        from saitenka.operation_summary import operations
-
-        self._operation = operations.start(name)
         self._finished = False
         self._lock = threading.Lock()
         trace = _resolve_trace_module()
         if trace is None:
             self._span: Any | None = None
             return
-        span = trace.get_tracer("saitenka.overlay").start_span(name)
+        span = trace.get_tracer("saitenka.overlay").start_span(
+            name, attributes={"timing": "operation-lifetime"}
+        )
         span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
-        span.set_attribute("timing", "operation-lifetime")
         for k, v in {**_causal_attributes(trace), **attributes}.items():
             span.set_attribute(k, v)
         self._span = span
 
     def finish(self, **attributes: object) -> None:
-        from saitenka.operation_summary import operations
-
         with self._lock:
             if self._finished:
                 return
             self._finished = True
             span, self._span = self._span, None
-        operations.finish(self._operation, str(attributes.get("outcome", "unknown")))
         if span is None:
             return
         for k, v in attributes.items():
@@ -610,6 +632,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
+    global subtitle_color_outcomes, subtitle_color_deadlines, subtitle_color_pending
+    global subtitle_color_ack_ms, subtitle_color_withdrawals
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -882,6 +906,27 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.color_late",
             description=f"cues whose color arrived more than {COLOR_LATENCY_BUDGET_MS:.0f}ms after the cue",
         )
+        subtitle_color_outcomes = meter.create_counter(
+            "saitenka.subtitle.color_outcomes",
+            description="retired color occurrences by terminal outcome",
+        )
+        subtitle_color_deadlines = meter.create_counter(
+            "saitenka.subtitle.color_deadline_misses",
+            description="occurrences with pending color past the deadline",
+        )
+        subtitle_color_pending = meter.create_up_down_counter(
+            "saitenka.subtitle.color_pending",
+            description="active color occurrences, including unresolved navigation",
+        )
+        subtitle_color_ack_ms = meter.create_histogram(
+            "saitenka.subtitle.color_ack_ms",
+            unit="ms",
+            description="occurrence-qualified first or complete color acknowledgment latency",
+        )
+        subtitle_color_withdrawals = meter.create_counter(
+            "saitenka.subtitle.color_withdrawals",
+            description="accepted writes that remove acknowledged token coverage",
+        )
         subtitle_layout_drift_px = meter.create_histogram(
             "saitenka.subtitle.layout_drift_px",
             unit="px",
@@ -958,6 +1003,8 @@ def unregister() -> None:
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
+    global subtitle_color_outcomes, subtitle_color_deadlines, subtitle_color_pending
+    global subtitle_color_ack_ms, subtitle_color_withdrawals
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -1039,6 +1086,11 @@ def unregister() -> None:
         subtitle_focus_writes_skipped = None
         subtitle_color_latency_ms = None
         subtitle_color_late = None
+        subtitle_color_outcomes = None
+        subtitle_color_deadlines = None
+        subtitle_color_pending = None
+        subtitle_color_ack_ms = None
+        subtitle_color_withdrawals = None
         subtitle_layout_drift_px = None
         subtitle_token_device = None
         subtitle_calibration_ms = None
