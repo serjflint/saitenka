@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789454470336,
+  "lastUpdate": 1789929042706,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -16739,6 +16739,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 4.935464,
             "range": "3 replicas; min 1.33617; max 61.566; MAD 3.5993; worst 61.566",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "021b4f8beff37d2a1c7917cba45ae09be072a6b0",
+          "message": "Merge pull request #533 from serjflint/fix/episode-native-support\n\nfeat(subtitles): add prepared whole-cue color and timed presentation",
+          "timestamp": "2026-09-20T21:28:29+03:00",
+          "tree_id": "0a3a24e6c02b30ffbe49cd51a2726cce3af48dcb",
+          "url": "https://github.com/serjflint/saitenka/commit/021b4f8beff37d2a1c7917cba45ae09be072a6b0"
+        },
+        "date": 1789929040991,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.384705,
+            "range": "3 replicas; min 4.94579; max 6.41055; MAD 0.025842",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.651814,
+            "range": "3 replicas; min 6.91291; max 8.86802; MAD 0.216204; worst 8.86802",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.936185,
+            "range": "3 replicas; min 14.5193; max 20.6851; MAD 1.74893",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.053491,
+            "range": "3 replicas; min 14.7246; max 20.8594; MAD 1.80592; worst 20.8594",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.480553,
+            "range": "3 replicas; min 13.197; max 207.988; MAD 0.283575",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.087502,
+            "range": "3 replicas; min 0.069966; max 0.118522; MAD 0.017536; worst 0.118522",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 39.26271,
+            "range": "3 replicas; min 30.6349; max 42.704; MAD 3.44125; worst 42.704",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.023268,
+            "range": "3 replicas; min 2.60539; max 10.5251; MAD 0.417881; worst 10.5251",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.219673,
+            "range": "3 replicas; min 1.08287; max 1.23931; MAD 0.019634; worst 1.23931",
             "unit": "ms"
           }
         ]
