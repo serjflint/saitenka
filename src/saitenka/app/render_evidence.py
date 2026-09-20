@@ -9,7 +9,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
-from saitenka.app import whole_cue_evidence
+from saitenka.app import timed_osd_evidence, whole_cue_evidence
 
 if TYPE_CHECKING:
     from saitenka_subtitles.geometry import GeometryRequest, GeometrySnapshot
@@ -365,6 +365,7 @@ def _owner(raw: dict) -> dict:
         "renderer_selection": _selection(raw.get("renderer_selection")),
         "geometry_sources": _source_history(raw.get("geometry_sources")),
         "whole_cue": whole_cue_evidence.safe_history(raw.get("whole_cue")),
+        "timed_osd": timed_osd_evidence.safe_history(raw.get("timed_osd")),
     }
 
 
@@ -460,6 +461,7 @@ class GeometryEvidence:
             "renderer_selection": {"history": [], "evicted": 0},
             "geometry_sources": {"history": [], "evicted": 0},
             "whole_cue": {"history": [], "evicted": 0, "counts": {}},
+            "timed_osd": {"history": [], "evicted": 0, "counts": {}},
         }
 
     def selection(self, *, pixel_owner: str, legacy_forced: bool) -> None:
@@ -488,6 +490,20 @@ class GeometryEvidence:
         evidence["history"].append(_source_record({**record, "captured_ns": time.time_ns()}))
         if len(evidence["history"]) > _SOURCE_DECISIONS:
             evidence["history"].pop(0)
+            evidence["evicted"] += 1
+        self._registry.update(self.owner, self._state)
+
+    def timed_osd(self, raw: dict) -> None:
+        record = timed_osd_evidence.safe_record(raw)
+        evidence = self._state["timed_osd"]
+        history = evidence["history"]
+        if history and {k: v for k, v in history[-1].items() if k != "captured_ns"} == record:
+            return
+        history.append({**record, "captured_ns": time.time_ns()})
+        event = record.get("event", "declined")
+        evidence["counts"][event] = evidence["counts"].get(event, 0) + 1
+        if len(history) > timed_osd_evidence.LIMIT:
+            history.pop(0)
             evidence["evicted"] += 1
         self._registry.update(self.owner, self._state)
 

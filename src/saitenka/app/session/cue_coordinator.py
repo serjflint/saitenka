@@ -113,6 +113,7 @@ class CueCoordinator:
         o = self._o
         cue, self._pending = self._pending, None
         if cue is None:
+            self._refine_color_occurrence()
             otel_metrics.record_cue_settle("no-observation")
             return
         if self._restore_navigation_transient(cue.text):
@@ -132,7 +133,19 @@ class CueCoordinator:
                 otel_metrics.record_cue_settle(settled, span)
         finally:
             self._settling = False
+        self._refine_color_occurrence()
         self._run_settled_hooks()
+
+    def _refine_color_occurrence(self) -> None:
+        o = self._o
+        tracker = o.presentation.color_telemetry
+        if (
+            tracker.current is not None
+            and tracker.cue_start_ms is None
+            and o.playback.cue.text.strip()
+            and not o.track_commands.navigation.current.sub_settle.open
+        ):
+            self._track_color_occurrence(o.playback.cue.text, provisional=False)
 
     def _run_settled_hooks(self) -> None:
         for hook in self._settled_hooks:
@@ -238,17 +251,14 @@ class CueCoordinator:
             index = navigation.sub_index
             delay = float(o.playback.value("sub-delay") or 0)
             position = o.playback.value("time-pos")
-            active = index.locate_active(
-                text=text,
-                sub_start=None if start is None else float(start) - delay,
-                time_pos=None if position is None else float(position) - delay,
-                preferred=navigation.nav_idx,
-            )
-            start = (
+            candidates = {
                 index.cues[active.position].start
-                if active.located and index.frame_text(active.position) == text
-                else None
-            )
+                for timestamp in (start, position)
+                if timestamp is not None
+                and (active := index.active_at(float(timestamp) - delay)).located
+                and index.frame_text(active.position) == text
+            }
+            start = candidates.pop() if len(candidates) == 1 else None
         state = o.playback.state
         tracker.bind(
             (

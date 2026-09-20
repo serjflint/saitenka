@@ -345,10 +345,13 @@ def _collect_telemetry(session: str | None = None) -> dict[str, str]:
     return members
 
 
+DIAGNOSTIC_JSON_LIMIT = 2 * 1024 * 1024
+
+
 def _diagnostic_json(path: Path) -> tuple[str, dict]:
     with path.open("rb") as stream:
-        raw = stream.read(128 * 1024 + 1)
-    if len(raw) > 128 * 1024:
+        raw = stream.read(DIAGNOSTIC_JSON_LIMIT + 1)
+    if len(raw) > DIAGNOSTIC_JSON_LIMIT:
         raise ValueError("diagnostic exceeds size limit")
     doc = json.loads(raw)
     if not isinstance(doc, dict):

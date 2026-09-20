@@ -294,6 +294,35 @@ def test_whole_event_osd_keeps_independent_underline():
     assert resolution == (1280, 720)
 
 
+def test_native_scan_boxes_do_not_rebuild_prepared_shadow_paint(monkeypatch):
+    from saitenka_subtitles import decoration, whole_cue
+
+    from saitenka.app.subtitle_render import NativeVisibleRenderer
+
+    source, prepared = prepared_source()
+    request = replace(
+        draw_request(
+            styles=[Style((255, 0, 0, 255), underline=(0, 255, 0, 255))],
+            boxes=[WordBox(0, 10, 20, 30, 40)],
+        ),
+        coloring="whole-cue-osd",
+        whole_cue=osd_template(source, prepared, fonts_blocked=False),
+        osd_shaper="complex",
+    )
+    renderer = NativeVisibleRenderer(coloring="whole-cue-osd")
+    expected = renderer.prepare_osd(request)
+
+    def forbidden(*_args):
+        pytest.fail("native scan geometry rebuilt the prepared paint artifact")
+
+    monkeypatch.setattr(whole_cue, "osd_payload", forbidden)
+    monkeypatch.setattr(decoration, "payload", forbidden)
+    published = renderer.prepare_osd(
+        replace(request, boxes=[WordBox(0, 11, 21, 31, 41)], paint_boxes=request.boxes)
+    )
+    assert published == expected
+
+
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 def test_empty_observation_retires_whole_cue_raster(tmp_path):

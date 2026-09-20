@@ -245,7 +245,9 @@ class SubtitlePresentation:
             "whole-cue-osd",
             "whole-cue-auto",
         }:
-            self.timed = TimedOsd(ipc, ports.geometry, self._timed_changed)
+            self.timed = TimedOsd(
+                ipc, ports.geometry, self._timed_changed, evidence=self.pipeline.record_timed_osd
+            )
             current.timed = self.timed
         if not settings.native_visible:
             return
@@ -608,6 +610,7 @@ class SubtitlePresentation:
                     lines=tokens.lines,
                     styles=tokens.styles,
                     boxes=boxes,
+                    paint_boxes=None,
                     whole_cue=cue,
                     osd=seen.osd,
                     paint_allowed=snapshot.paint_qualification is PaintQualification.STATIC,

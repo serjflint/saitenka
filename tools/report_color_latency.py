@@ -18,6 +18,19 @@ from pathlib import Path
 
 from saitenka.app.color_evidence import safe_color_metrics
 from saitenka.app.report_reader import read_member, trace_evidence
+from saitenka.app.timed_osd_evidence import safe_history
+
+
+def metadata_timed_history(path: Path) -> list[dict]:
+    try:
+        raw = read_member(path, "diagnostics/envelope.json")
+        envelope = json.loads(raw) if raw else {}
+        return [
+            safe_history(owner.get("timed_osd"))
+            for owner in envelope.get("effective_runtime_configuration", {}).get("owners", [])
+        ]
+    except (OSError, ValueError, AttributeError, TypeError):
+        return []
 
 
 def metadata_color_metrics(path: Path) -> dict:
@@ -477,9 +490,25 @@ def _eligible_in(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("report", type=Path, help="a saitenka report .zip")
+    parser.add_argument(
+        "--presentation-manifest",
+        type=Path,
+        help="independent appearance census for GPU composition qualification",
+    )
     args = parser.parse_args(argv)
 
+    if args.presentation_manifest is not None:
+        from saitenka.app.frame_presentation import qualify_report
+
+        document = json.loads(args.presentation_manifest.read_text(encoding="utf-8"))
+        result = qualify_report(args.report, document)
+        print(json.dumps(result, indent=2))
+        return 0 if result["qualified"] else 1
+
     evidence = trace_evidence(args.report)
+    for history in metadata_timed_history(args.report):
+        if history.get("status") == "partial":
+            print(f"timed publication history (not display): {json.dumps(history)}")
     metrics = metadata_color_metrics(args.report)
     if metrics.get("status") == "collected":
         print(

@@ -4979,7 +4979,9 @@ def test_track_load_in_blank_gap_prepares_first_cue_before_arrival(tmp_path, del
 
 
 @pytest.mark.parametrize("scenario", ["initial", "resume", "arrival"])
-def test_track_load_stages_timed_color_before_first_cue_notification(tmp_path, scenario):
+def test_track_load_stages_timed_color_before_first_cue_notification(
+    tmp_path, monkeypatch, scenario
+):
     result, ipc, _backend = reader(
         tmp_path,
         coloring="whole-cue-osd",
@@ -5015,6 +5017,13 @@ def test_track_load_stages_timed_color_before_first_cue_notification(tmp_path, s
             settle_jobs(result, ipc)
 
         if scenario == "arrival":
+            from saitenka_subtitles import decoration, whole_cue
+
+            def forbidden(*_args):
+                pytest.fail("warm cue arrival must not construct ASS or underline payloads")
+
+            monkeypatch.setattr(whole_cue, "osd_payload", forbidden)
+            monkeypatch.setattr(decoration, "payload", forbidden)
             ipc.props.update(
                 {
                     "time-pos": 1.25,

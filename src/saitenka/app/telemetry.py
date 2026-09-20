@@ -186,6 +186,9 @@ def _sample_counters() -> dict[str, float]:
 def configure(options: TelemetryOptions) -> None:
     """Idempotent: a no-op if disabled, if the extra isn't installed, or if already configured."""
     global _tracer_provider, _meter_provider, _span_processor
+    from saitenka.app.report_schema import startup_source_identity
+
+    startup_source_identity()
     if not options.enabled:
         return
     with _lock:

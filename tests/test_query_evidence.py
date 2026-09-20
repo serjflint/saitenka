@@ -204,6 +204,9 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
     from saitenka.app import option_evidence, player_evidence, profile_evidence, render_evidence
     from saitenka.app.config import ReaderOptions
     from saitenka.app.profiles import DEFAULT_PROFILE
+    from saitenka.app.report import DIAGNOSTIC_JSON_LIMIT
+    from saitenka.app.timed_osd_evidence import LIMIT, NUMBERS
+    from saitenka.app.whole_cue_evidence import REASONS
 
     _setup(monkeypatch, tmp_path)
     for _ in range(6):
@@ -221,6 +224,86 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
                 lambda *_args: {"error": "success", "data": 0}, "get_property", name, epoch=0
             )
         geometry = render_evidence.GeometryEvidence()
+        for occurrence in range(65):
+            geometry.whole_cue(
+                {
+                    **dict.fromkeys(
+                        (
+                            "generation",
+                            "cue_revision",
+                            "captured_ns",
+                            "write",
+                            "tokens",
+                            "requested_tokens",
+                            "permitted",
+                            "submitted",
+                            "acknowledged",
+                            "elapsed_ms",
+                            "first_ms",
+                            "complete_ms",
+                            "budget_ms",
+                            "source_epoch",
+                            "layers",
+                            "qualification_ms",
+                            "cue_start_ms",
+                        ),
+                        9999999999999999999,
+                    ),
+                    **dict.fromkeys(
+                        (
+                            "shadow_bounds",
+                            "osd_bounds",
+                            "osd_resolution",
+                            "frame_size",
+                            "margins",
+                            "delta",
+                            "mapping",
+                        ),
+                        [9999999999999999999] * 4,
+                    ),
+                    "event": "subtitle_color_outcome",
+                    "occurrence": occurrence,
+                    "requested": "whole-cue-overpaint",
+                    "device": "overpaint",
+                    "color_status": "policy-suppressed",
+                    "reason": "missing-coherent-evidence",
+                    "comparison": "shape-mismatch",
+                    "validation_scope": "ass-render-completion-not-display",
+                    "text_hash": "c" * 64,
+                    "color_session": "d" * 64,
+                    "blockers": sorted(REASONS),
+                    "accepted": True,
+                    "late": True,
+                    "scan_available": True,
+                }
+            )
+            geometry.geometry_source(
+                {
+                    "configured_source": "shadow",
+                    "selected_source": "shadow",
+                    "scan_source": "shadow",
+                    "paint_source": "shadow",
+                    "reason": "layout-unsupported-render-mode",
+                    "paint_reason": "shadow-paint-unqualified",
+                    "paint_allowed": True,
+                    "cue_revision": occurrence,
+                    "generation": 999999999999999999,
+                    "eligible_tokens": 999999999999999999,
+                }
+            )
+        for occurrence in range(LIMIT + 1):
+            geometry.timed_osd(
+                {
+                    **dict.fromkeys(NUMBERS, 9999999999999999999),
+                    "event": "selected",
+                    "state": "ready",
+                    "supported": True,
+                    "reason": "annotation-dependencies",
+                    "text_hash": "a" * 32,
+                    "payload_hash": "b" * 16,
+                    "occurrence": occurrence,
+                }
+            )
         player = player_evidence.PlayerEvidence()
         for width in range(1920, 1926):
             geometry.selection(
@@ -251,4 +334,12 @@ def test_all_evidence_histories_fit_the_report_reader_budget(monkeypatch, tmp_pa
     assert payload["producer"]["status"] == "collected"
     assert payload["player_query_health"]["owners_evicted"] == 4
     assert len(payload["player_query_health"]["owners"]) == 2
-    assert len((tmp_path / "diagnostics" / "session-runtime-test.json").read_bytes()) <= 128 * 1024
+    assert (
+        len((tmp_path / "diagnostics" / "session-runtime-test.json").read_bytes())
+        <= DIAGNOSTIC_JSON_LIMIT
+    )
+    histories = [o["timed_osd"] for o in payload["effective_runtime_configuration"]["owners"]]
+    assert all(len(h["history"]) == LIMIT and h["evicted"] == 1 for h in histories)
+    owners = payload["effective_runtime_configuration"]["owners"]
+    assert all(len(o["whole_cue"]["history"]) == 64 for o in owners)
+    assert all(len(o["geometry_sources"]["history"]) == 32 for o in owners)

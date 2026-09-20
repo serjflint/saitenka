@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app.subnav_policy import FILTER_OPTIONS, filters_can_drop_a_cue
+from saitenka.mpvio.diagnostics import payload_hash
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 
 if TYPE_CHECKING:
@@ -40,6 +41,7 @@ class StagedCue:
     payload: str
     resolution: tuple[int, int]
     epoch: int
+    payload_hash: str = ""
     state: str = "prepared"
 
 
@@ -91,7 +93,10 @@ class TimedOsd:
         ipc: MpvIPC,
         observe: Callable[[], GeometryObservation],
         changed: Callable[[], None],
+        *,
+        evidence: Callable[[dict], None] = lambda _: None,
     ) -> None:
+        self._evidence = evidence
         self._ipc = ipc
         self._observe = observe
         self._changed = changed
@@ -105,19 +110,29 @@ class TimedOsd:
         self._closed = False
 
     def _record(self, event: str, entry: StagedCue | None = None, **attrs: object) -> None:
+        record = dict(
+            event=event,
+            epoch=self._epoch,
+            connection_epoch=self._connection,
+            supported="unknown" if self.supported is None else self.supported,
+            **attrs,
+        )
+        if entry is not None:
+            record.update(
+                slot=entry.slot,
+                text_hash=entry.cue.text_hash,
+                start_ms=entry.cue.start_ms,
+                end_ms=entry.cue.end_ms,
+                video_start_ms=entry.cue.video_start_ms,
+                video_end_ms=entry.cue.video_end_ms,
+                state=entry.state,
+                entry_epoch=entry.epoch,
+                payload_hash=entry.payload_hash,
+            )
+        self._evidence(record)
         with otel_metrics.traced("subtitle_timed_osd", event=event) as span:
-            span.set("epoch", self._epoch)
-            span.set("supported", "unknown" if self.supported is None else self.supported)
-            for key, value in attrs.items():
+            for key, value in record.items():
                 span.set(key, value)
-            if entry is not None:
-                span.set("slot", entry.slot)
-                span.set("text_hash", entry.cue.text_hash)
-                span.set("start_ms", entry.cue.start_ms)
-                span.set("end_ms", entry.cue.end_ms)
-                span.set("video_start_ms", entry.cue.video_start_ms)
-                span.set("video_end_ms", entry.cue.video_end_ms)
-                span.set("state", entry.state)
 
     def discover(self) -> None:
         if self._closed or self.supported is not None or self._probing:
@@ -166,6 +181,8 @@ class TimedOsd:
         context = (seen.prop("path"), seen.prop("sid"), seen.osd, id(seen.index), delay)
         if self._context is not None and self._context != context:
             self.invalidate("context-changed")
+        if self._context != context:
+            self._record("context", delay_ms=delay, width=seen.osd[0], height=seen.osd[1])
         self._context = context
         return delay
 
@@ -184,14 +201,13 @@ class TimedOsd:
         existing = self._existing(cue, payload, resolution)
         if existing is not None:
             return existing
-        self._expire(seen)
         if not self._admit(cue, payload, seen):
             self._record("declined", reason="capacity")
             return None
         slot = next(
             i for i in range(FIRST_SLOT, FIRST_SLOT + MAX_ENTRIES) if i not in self._entries
         )
-        entry = StagedCue(slot, cue, payload, resolution, self._epoch)
+        entry = StagedCue(slot, cue, payload, resolution, self._epoch, payload_hash(payload))
         self._entries[slot] = entry
         self._record("prepared", entry)
         if self.supported:
@@ -237,13 +253,6 @@ class TimedOsd:
                 break
         return None
 
-    def _expire(self, seen: GeometryObservation) -> None:
-        position = seen.prop("time-pos")
-        if isinstance(position, int | float) and math.isfinite(position):
-            for entry in tuple(self._entries.values()):
-                if entry.cue.video_end_ms <= position * 1000:
-                    self._remove(entry)
-
     def _send_entry(self, entry: StagedCue) -> None:
         if (
             self._closed
@@ -268,6 +277,7 @@ class TimedOsd:
                 self._record("ack", entry)
                 self._changed()
             else:
+                self._record("stage-failed", entry)
                 self._failed = True
                 self.invalidate("stage-failed")
 
@@ -284,6 +294,7 @@ class TimedOsd:
             finished,
         ):
             self._failed = True
+            self._record("stage-rejected", entry)
             self.invalidate("stage-rejected")
 
     def present(
@@ -291,6 +302,8 @@ class TimedOsd:
         identity: tuple[str, float | None, int] | None,
         payload: str,
         resolution: tuple[int, int],
+        *,
+        occurrence: int | None = None,
     ) -> tuple[bool, bool]:
         """Return (owns base surface, acknowledged); pending writes never duplicate slots."""
         if self.supported is False:
@@ -314,7 +327,7 @@ class TimedOsd:
         entry = self.stage(timestamp, payload, resolution)
         if entry is None:
             return True, False
-        self._record("selected", entry)
+        self._record("selected", entry, occurrence=occurrence, generation=identity[2])
         return True, entry.state == "ready"
 
     def retire(self, identity: tuple[str, float | None, int] | None) -> None:
@@ -342,8 +355,10 @@ class TimedOsd:
             return
         if entry.state == "prepared":
             self._entries.pop(entry.slot, None)
+            self._record("discarded", entry)
             return
         entry.state = "retiring"
+        self._record("remove", entry)
 
         def finished(completion: EffectFinished) -> None:
             if self._entries.get(entry.slot) is not entry:
@@ -372,3 +387,4 @@ class TimedOsd:
         self.supported = None
         self._probing = False
         self._closed = False
+        self._record("connection-replaced")

@@ -8,6 +8,7 @@
 # Latin conjugation suffixes (siez, âtes, …) that read as English typos; never hand-edit, regenerate. The
 # French differential corpus + its seed word-list are likewise French vocabulary (vas, vai, …), not typos.
 extend-exclude = [
+    "tools/presentation/*.patch", # Verbatim upstream context and API identifiers.
     "tests/fixtures/uax14/",
     "deinflect/src/saitenka_deinflect/data/",
     "deinflect/tests/fixtures/french_transforms_cases.json",

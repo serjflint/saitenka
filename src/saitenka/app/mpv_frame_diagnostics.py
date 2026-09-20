@@ -28,7 +28,10 @@ def _launch_environment(binary: str, cache: Path, session: str) -> dict[str, str
     trace.unlink(missing_ok=True)
     with Path(binary).open("rb") as stream:
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    from saitenka.app.report_schema import startup_source_identity
+
     receipt = {
+        "consumer_source": dict(startup_source_identity()),
         "schema": 1,
         "session": session,
         "binary": str(Path(binary).resolve()),
@@ -61,6 +64,7 @@ def _record_player(ipc, cache: Path, session: str) -> None:
         ipc_peer=peer,
         mpv_version=ipc.query("mpv-version"),
         timed_osd=any(c.get("name") == "osd-overlay-timed" for c in commands),
+        timed_osd_api=[c for c in commands if c.get("name") == "osd-overlay-timed"],
         subtitle_layout=ipc.probe("subtitle-layout").get("error"),
         subtitle_clock={
             name: ipc.query(name)

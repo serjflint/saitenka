@@ -9,7 +9,7 @@ from saitenka.app.timed_osd import MAX_ENTRIES, TimedOsd, timed_cue
 from saitenka.runtime import EffectOutcome
 
 
-def consumer(*, supported=True, cues=None):
+def consumer(*, supported=True, cues=None, evidence=lambda _: None):
     ipc = FakeIPC()
     ipc.props.update(
         {
@@ -34,7 +34,7 @@ def consumer(*, supported=True, cues=None):
         0,
         lambda _: False,
     )
-    return TimedOsd(ipc, lambda: seen, lambda: None), ipc
+    return TimedOsd(ipc, lambda: seen, lambda: None, evidence=evidence), ipc
 
 
 def test_prepared_cue_uses_authored_identity_and_shifted_video_interval():
@@ -66,6 +66,21 @@ def test_pending_ack_does_not_duplicate_current_cue_publication():
 
     assert result == (True, False)
     assert [command[0] for _, command, _ in ipc.submitted] == ["osd-overlay-timed"]
+
+
+def test_backseek_reuses_prepared_entry_after_later_cue_is_staged():
+    owner, ipc = consumer(cues=[Cue(10, 11, "猫"), Cue(12, 13, "犬")])
+    entry = owner.stage(10001, "cat", (1280, 720))
+    assert entry is not None
+    ipc.props["time-pos"] = 6.1
+    owner.stage(12001, "dog", (1280, 720))
+    ipc.commands.clear()
+    ipc.props["time-pos"] = 4.01
+
+    result = owner.present((entry.cue.text_hash, 10000, 3), "cat", (1280, 720))
+
+    assert result == (True, True)
+    assert not ipc.commands
 
 
 @pytest.mark.parametrize(
@@ -233,3 +248,59 @@ def test_backward_seek_evicts_distant_cue_then_reuses_acknowledged_slot():
     assert [command for _, command, _ in ipc.submitted] == [
         ("osd-overlay-timed", 2001, 4000, 5000, "0", 1280, 720, 1)
     ]
+
+
+@pytest.mark.parametrize("old_reply_first", [False, True])
+def test_connection_replacement_fences_late_stage_reply(old_reply_first):
+    records = []
+    owner, ipc = consumer(evidence=records.append)
+    owner.discover()
+    ipc.correlate_commands = True
+    owner.stage(16121, "old", (1280, 720))
+    owner.connection_replaced()
+    if old_reply_first:
+        ipc.deliver_runtime_mpv(match="osd-overlay-timed")
+    owner.stage(16121, "new", (1280, 720))
+    ipc.deliver_runtime_mpv(match="command-list")
+    if not old_reply_first:
+        ipc.deliver_runtime_mpv(match="osd-overlay-timed")
+    ipc.deliver_runtime_mpv(match="osd-overlay-timed")
+    acknowledgments = [r for r in records if r["event"] == "ack"]
+    assert len(acknowledgments) == 1
+    assert acknowledgments[0]["connection_epoch"] == 1
+
+
+def test_runtime_clock_and_entry_retirement_survive_without_tracing(monkeypatch):
+    from saitenka.app import render_evidence
+    from saitenka.mpvio.diagnostics import payload_hash
+
+    monkeypatch.setattr(render_evidence, "registry", render_evidence.EvidenceRegistry())
+    evidence = render_evidence.GeometryEvidence()
+    owner, ipc = consumer(evidence=evidence.timed_osd)
+    owner.stage(16121, "private subtitle", (1280, 720))
+    ipc.props["sub-delay"] = -5
+    owner.stage(16121, "private subtitle", (1280, 720))
+    snapshot = render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())
+    timed = snapshot["owners"][0]["timed_osd"]
+    assert [r["delay_ms"] for r in timed["history"] if r["event"] == "context"] == [-6000, -5000]
+    acknowledgments = [r for r in timed["history"] if r["event"] == "ack"]
+    assert [r["video_start_ms"] for r in acknowledgments] == [10120, 11120]
+    assert all(r["payload_hash"] == payload_hash("private subtitle") for r in acknowledgments)
+    assert timed["counts"]["removed"] == 1
+    assert timed["display_counters"] is None
+    assert "private subtitle" not in str(snapshot)
+
+
+def test_history_eviction_remains_visible_in_report(monkeypatch):
+    from saitenka.app import render_evidence
+    from saitenka.app.timed_osd_evidence import LIMIT
+
+    monkeypatch.setattr(render_evidence, "registry", render_evidence.EvidenceRegistry())
+    evidence = render_evidence.GeometryEvidence()
+    for epoch in range(LIMIT + 2):
+        evidence.timed_osd({"event": "invalidate", "epoch": epoch})
+    snapshot = render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())
+    timed = snapshot["owners"][0]["timed_osd"]
+    assert len(timed["history"]) == LIMIT
+    assert timed["evicted"] == 2
+    assert timed["counts"]["invalidate"] == LIMIT + 2

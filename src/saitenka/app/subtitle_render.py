@@ -1510,6 +1510,7 @@ class NativeVisibleRenderer:
             # holds. A field trace read `tokens=0` for all 33 legacy draws before this.
             span.set("tokens", sum(len(line) for line in request.lines))
             span.set("measured_boxes", len(request.boxes))
+            span.set("scan_tokens", len({b.index for b in request.boxes if b.w > 0 and b.h > 0}))
             span.set("paint_allowed", request.paint_allowed)
             # The one attribute that makes the wait a viewer sees derivable from the trace alone:
             # group draws by cue, take the first, take the first with boxes, subtract. Without it the
@@ -1673,7 +1674,10 @@ class NativeVisibleRenderer:
     ) -> str:
         if self.timed is not None and whole_cue_device(request)[0] == "overprint":
             owned, acknowledged = self.timed.present(
-                request.whole_cue_identity, overprint, resolution
+                request.whole_cue_identity,
+                overprint,
+                resolution,
+                occurrence=request.color_occurrence,
             )
             if owned:
                 if overprint:
@@ -1695,7 +1699,7 @@ class NativeVisibleRenderer:
             decoration.TokenRule(
                 round(box.x * sx), round(box.y * sy), round(box.w * sx), round(box.h * sy), color
             )
-            for box in request.boxes
+            for box in (request.boxes if request.paint_boxes is None else request.paint_boxes)
             if device != "none"
             and request.paint_allowed
             and (color := _token_underline(request, box.index)) is not None

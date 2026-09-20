@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import platform
 import re
 import subprocess
 import sys
+import time
 from collections import Counter
+from functools import cache
 from importlib.metadata import PackageNotFoundError, distribution
+from pathlib import Path
 
 SCHEMA_VERSION = 1
 _OPERATIONS = frozenset(
@@ -47,6 +51,31 @@ _VERSION = re.compile(
 )
 
 
+@cache
+def startup_source_identity() -> dict:
+    import saitenka_subtitles
+
+    import saitenka
+
+    digest = hashlib.sha256()
+    try:
+        for package in (saitenka, saitenka_subtitles):
+            if package.__file__ is None:
+                return {"scope": "unavailable"}
+            root = Path(package.__file__).parent
+            for path in sorted(root.rglob("*.py")):
+                digest.update(str(path.relative_to(root)).encode())
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+        return {
+            "sha256": digest.hexdigest(),
+            "captured_ns": time.time_ns(),
+            "scope": "startup-python-source",
+        }
+    except OSError:
+        return {"scope": "unavailable"}
+
+
 def build_identity() -> dict:
     from saitenka.version import overlay_version
 
@@ -68,6 +97,7 @@ def build_identity() -> dict:
     gil = getattr(sys, "_is_gil_enabled", lambda: True)()
     return {
         "overlay_build": build,
+        "source": dict(startup_source_identity()),
         "python_version": platform.python_version(),
         "platform": sys.platform,
         "gil": "on" if gil else "off",
@@ -94,6 +124,17 @@ def safe_identity(raw: object) -> dict:
         result[key] = value if isinstance(value, str) and value in allowed else "unknown"
     value = source.get("editable")
     result["editable"] = value if type(value) is bool else None
+    identity = source.get("source")
+    if (
+        isinstance(identity, dict)
+        and isinstance(digest := identity.get("sha256"), str)
+        and re.fullmatch(r"[a-f0-9]{64}", digest)
+    ):
+        result["source"] = {
+            "sha256": digest,
+            "captured_ns": count(identity.get("captured_ns")),
+            "scope": "startup-python-source",
+        }
     result["loaded_native_runtime"] = "unknown"
     return result
 
@@ -212,13 +253,19 @@ def envelope(
     options: dict | None = None,
 ) -> dict:
     collector = safe_identity(collector)
-    identity = producer.get("identity", {})
+    identity = safe_identity(producer.get("identity", {}))
     differing = [
         key
         for key, value in identity.items()
-        if value not in {None, "unknown"}
-        and collector.get(key) not in {None, "unknown"}
-        and value != collector[key]
+        if value is not None
+        and value != "unknown"
+        and collector.get(key) is not None
+        and collector.get(key) != "unknown"
+        and (
+            value.get("sha256") != collector[key].get("sha256")
+            if key == "source"
+            else value != collector[key]
+        )
     ]
     return {
         "schema": SCHEMA_VERSION,

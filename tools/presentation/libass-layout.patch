@@ -1,0 +1,3230 @@
+diff --git a/Makefile.am b/Makefile.am
+index 2287369..8d0a9c5 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -25,7 +25,11 @@ EXTRA_DIST += gen_defs.py meson_options.txt meson.build \
+               libass/meson.build libass/ass/meson.build \
+               fuzz/meson.build checkasm/meson.build \
+               compare/meson.build \
+-              profile/meson.build test/meson.build
++              profile/meson.build test/meson.build \
++              test/render_api.c test/render_lifetime.c \
++              test/layout_contract.c test/layout_alloc.c \
++              test/subtitle_layout.c \
++              compare/test/font1.ttf
+ 
+ pkgconfigdir = $(libdir)/pkgconfig
+ pkgconfig_DATA = libass.pc
+@@ -43,6 +47,54 @@ TESTS =
+ include libass/Makefile_library.am
+ include Makefile_util.am
+ 
++# No -static here, unlike the programs in Makefile_util.am: those link the
++# always-static libass_internal.la, while these link the public libass.la and
++# must therefore resolve only against libass.sym. -static also breaks them in
++# a --disable-static build.
++check_PROGRAMS += test/render_api
++TESTS += test/render_api$(EXEEXT)
++test_render_api_SOURCES = test/render_api.c
++test_render_api_CPPFLAGS = $(AM_CPPFLAGS) \
++    -DASS_TEST_FONT='"$(abs_top_srcdir)/compare/test/font1.ttf"'
++test_render_api_LDADD = libass/libass.la
++test_render_api_LDFLAGS = $(AM_LDFLAGS)
++
++check_PROGRAMS += test/render-lifetime
++TESTS += test/render-lifetime$(EXEEXT)
++test_render_lifetime_SOURCES = test/render_lifetime.c
++test_render_lifetime_CPPFLAGS = $(AM_CPPFLAGS) \
++    -DASS_TEST_FONT='"$(abs_top_srcdir)/compare/test/font1.ttf"'
++test_render_lifetime_LDADD = libass/libass.la
++test_render_lifetime_LDFLAGS = $(AM_LDFLAGS)
++
++check_PROGRAMS += test/layout-contract
++TESTS += test/layout-contract$(EXEEXT)
++test_layout_contract_SOURCES = test/layout_contract.c
++test_layout_contract_CPPFLAGS = $(AM_CPPFLAGS) \
++    -DASS_TEST_FONT='"$(abs_top_srcdir)/compare/test/font1.ttf"'
++test_layout_contract_LDADD = libass/libass.la
++test_layout_contract_LDFLAGS = $(AM_LDFLAGS)
++
++# This one does link libass_internal.la, and -static with it: it reaches
++# ass_test_set_alloc_countdown, which is internal and deliberately absent from
++# libass.sym. Keeping it out of test/layout-contract is what lets that suite go
++# on proving the public library exports everything a caller needs.
++check_PROGRAMS += test/layout-alloc
++TESTS += test/layout-alloc$(EXEEXT)
++test_layout_alloc_SOURCES = test/layout_alloc.c
++test_layout_alloc_CPPFLAGS = $(AM_CPPFLAGS) \
++    -DASS_TEST_FONT='"$(abs_top_srcdir)/compare/test/font1.ttf"'
++test_layout_alloc_LDADD = libass/libass_internal.la
++test_layout_alloc_LDFLAGS = $(AM_LDFLAGS) -static
++
++if FONTCONFIG
++check_PROGRAMS += test/subtitle-layout
++TESTS += test/subtitle-layout$(EXEEXT)
++test_subtitle_layout_SOURCES = test/subtitle_layout.c
++test_subtitle_layout_LDADD = libass/libass.la
++test_subtitle_layout_LDFLAGS = $(AM_LDFLAGS)
++endif
++
+ # Tests
+ if ENABLE_FUZZ
+ check: check-art-fuzz
+diff --git a/libass/Makefile_library.am b/libass/Makefile_library.am
+index ec7bff9..53eba0c 100644
+--- a/libass/Makefile_library.am
++++ b/libass/Makefile_library.am
+@@ -1,6 +1,6 @@
+-LIBASS_LT_CURRENT = 13
+-LIBASS_LT_REVISION = 2
+-LIBASS_LT_AGE = 4
++LIBASS_LT_CURRENT = 14
++LIBASS_LT_REVISION = 0
++LIBASS_LT_AGE = 5
+ 
+ .asm.lo:
+ 	$(nasm_verbose)$(LIBTOOL) $(AM_V_lt) --tag=CC --mode=compile $(top_srcdir)/ltnasm.sh $(AS) $(ASFLAGS) -I$(top_srcdir)/libass/ -Dprivate_prefix=ass -o $@ $<
+@@ -11,7 +11,8 @@ libass_libass_internal_la_SOURCES = \
+     libass/ass_string.h libass/ass_string.c \
+     libass/ass_compat.h libass/ass_strtod.c \
+     libass/ass_filesystem.h libass/ass_filesystem.c \
+-    libass/ass_types.h libass/ass.h libass/ass_priv.h libass/ass.c \
++    libass/ass_types.h libass/ass_layout.h \
++    libass/ass.h libass/ass_priv.h libass/ass.c \
+     libass/ass_library.h libass/ass_library.c \
+     libass/ass_cache_template.h libass/ass_cache.h libass/ass_cache.c \
+     libass/ass_font.h libass/ass_font.c \
+@@ -72,7 +73,7 @@ libass_libass_la_LDFLAGS = -no-undefined -version-info $(LIBASS_LT_CURRENT):$(LI
+ libass_libass_la_LDFLAGS += -export-symbols $(top_srcdir)/libass/libass.sym
+ 
+ assheadersdir = $(includedir)/ass
+-dist_assheaders_HEADERS = libass/ass_types.h libass/ass.h
++dist_assheaders_HEADERS = libass/ass_types.h libass/ass_layout.h libass/ass.h
+ 
+ EXTRA_DIST += \
+     libass/x86/x86inc.asm libass/x86/utils.asm \
+diff --git a/libass/ass.h b/libass/ass.h
+index 851ca7c..7fdeb58 100644
+--- a/libass/ass.h
++++ b/libass/ass.h
+@@ -24,7 +24,7 @@
+ #include <stdarg.h>
+ #include "ass_types.h"
+ 
+-#define LIBASS_VERSION 0x01705000
++#define LIBASS_VERSION 0x01705010
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -613,10 +613,115 @@ void ass_set_cache_limits(ASS_Renderer *priv, int glyph_max,
+  * \param now video timestamp in milliseconds
+  * \param detect_change compare to the previous call and set to 1
+  * if positions may have changed, or set to 2 if content may have changed.
++ *
++ * The returned ASS_Images live until the next rendering call on the same
++ * renderer or ass_renderer_done().
+  */
+ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
+                             long long now, int *detect_change);
+ 
++/**
++ * Status of an ass_render_frame2() render operation.  This is independent
++ * from statuses of optional outputs added to ASS_RenderResult.
++ */
++typedef enum {
++    ASS_RENDER_OK = 0,
++    ASS_RENDER_INVALID_REQUEST,
++    ASS_RENDER_NOT_READY,
++} ASS_RenderStatus;
++
++/**
++ * \brief Status of the optional layout output, independent from the render
++ * status: layout can fail while ordinary images are still produced.
++ */
++typedef enum {
++    ASS_LAYOUT_NOT_REQUESTED = 0,
++    ASS_LAYOUT_OK,
++    ASS_LAYOUT_EMPTY,
++    ASS_LAYOUT_LIMIT_EXCEEDED,
++    ASS_LAYOUT_ALLOCATION_FAILED,
++    ASS_LAYOUT_FAILED,
++    ASS_LAYOUT_INVALID_REQUEST,
++} ASS_LayoutStatus;
++
++typedef struct ass_layout_request ASS_LayoutRequest;
++typedef struct ass_layout ASS_Layout;
++
++/**
++ * \brief Optional behavior bits for ASS_RenderRequest.flags.
++ */
++typedef enum {
++    /** Compute the same change classification as ass_render_frame(). */
++    ASS_RENDER_DETECT_CHANGE = 1u << 0,
++} ASS_RenderFlags;
++
++/**
++ * Inputs for ass_render_frame2().
++ *
++ * Initialize the complete structure to zero, set struct_size to sizeof the
++ * structure known to the caller, then populate the desired fields.  Missing
++ * tail fields have zero/default behavior.  Larger structures are accepted;
++ * unknown tail bytes are ignored.
++ *
++ * struct_size must cover at least track and now_ms; anything shorter is
++ * rejected.  Note that the nested layout request has the opposite convention:
++ * a zeroed ASS_LayoutRequest is invalid rather than default.  See ass_layout.h.
++ */
++typedef struct ass_render_request {
++    size_t struct_size;
++    ASS_Track *track;
++    long long now_ms;
++    unsigned flags;
++    const ASS_LayoutRequest *layout;
++} ASS_RenderRequest;
++
++/**
++ * Outputs from ass_render_frame2().
++ *
++ * The record is owned by the renderer; the caller never writes or frees it.
++ * struct_size is the end offset of the last field this runtime knows and has
++ * populated -- deliberately not sizeof, which a field appended into trailing
++ * padding would leave unchanged.  Read a field only when struct_size covers
++ * its complete extent:
++ *
++ *     if (result->struct_size >= offsetof(ASS_RenderResult, field)
++ *                                + sizeof(result->field))
++ *
++ * A shorter struct_size means the field is absent, not that its value is
++ * zero.  Copy fields individually behind that guard; copying the whole
++ * structure reads past the end of a shorter runtime's record.
++ *
++ * The record and everything reachable from it, including images and layout,
++ * are invalidated by the next rendering call on the same renderer or by
++ * ass_renderer_done().  Copy whatever must outlive that.
++ */
++typedef struct ass_render_result {
++    size_t struct_size;
++    ASS_RenderStatus status;
++    ASS_Image *images;
++    int change;  // -1 when no change classification was computed, which
++                 // includes a request that failed validation even if it
++                 // asked for ASS_RENDER_DETECT_CHANGE
++    const ASS_Layout *layout;
++    ASS_LayoutStatus layout_status;
++} ASS_RenderResult;
++
++/**
++ * \brief Render a frame through the extensible request/result interface.
++ * \param renderer renderer handle
++ * \param request inputs; see ASS_RenderRequest for the size rules
++ * \return a renderer-owned result, fully populated on every outcome
++ * including failure so status can be inspected without a separate error
++ * path, or NULL when no result record can exist at all: renderer or request
++ * is NULL, or request->struct_size does not cover through now_ms.
++ *
++ * Unknown flag bits render nothing and report ASS_RENDER_INVALID_REQUEST in
++ * the returned record.  The result is invalidated by the next rendering call
++ * on this renderer, including ass_render_frame().
++ */
++const ASS_RenderResult *ass_render_frame2(ASS_Renderer *renderer,
++                                          const ASS_RenderRequest *request);
++
+ 
+ /*
+  * The following functions operate on track objects and do not need
+diff --git a/libass/ass_layout.h b/libass/ass_layout.h
+new file mode 100644
+index 0000000..804ed44
+--- /dev/null
++++ b/libass/ass_layout.h
+@@ -0,0 +1,131 @@
++/*
++ * Copyright (C) 2024 libass contributors
++ *
++ * Permission to use, copy, modify, and distribute this software for any
++ * purpose with or without fee is hereby granted, provided that the above
++ * copyright notice and this permission notice appear in all copies.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++ */
++
++#ifndef LIBASS_LAYOUT_H
++#define LIBASS_LAYOUT_H
++
++#include "ass.h"
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++enum {
++    ASS_LAYOUT_UNBOUNDED = 1u << 0,
++};
++
++/*
++ * Aggregate limits across all active events in one returned layout.
++ *
++ * Unlike ASS_RenderRequest, a zeroed request is NOT a usable default: bounded
++ * collection requires every limit below to be non-zero, and a zero yields
++ * ASS_LAYOUT_INVALID_REQUEST. Unbounded collection must be asked for with
++ * ASS_LAYOUT_UNBOUNDED, so it can never be selected by accident; it is meant
++ * for trusted authoring input, not untrusted media.
++ */
++struct ass_layout_request {
++    size_t struct_size;
++    unsigned flags;
++    size_t max_events;
++    size_t max_text_bytes;
++    size_t max_units;
++    size_t max_bitmap_pixels;
++};
++
++typedef struct ass_layout_rect {
++    double x;
++    double y;
++    double w;
++    double h;
++} ASS_LayoutRect;
++
++/*
++ * A renderer positioning unit in the event's parsed logical text domain.
++ * text_start/text_end are half-open UTF-8 byte offsets. logical_bounds is the
++ * pre-transform typographic box after wrapping and collision placement.
++ */
++typedef struct ass_layout_unit {
++    size_t struct_size;
++    size_t text_start;
++    size_t text_end;
++    int line;
++    ASS_DVector pos;
++    ASS_DVector advance;
++    double asc;
++    double desc;
++    ASS_LayoutRect logical_bounds;
++    struct ass_layout_unit *next;
++} ASS_LayoutUnit;
++
++typedef struct ass_layout_event {
++    size_t struct_size;
++    long long start_ms;
++    long long duration_ms;
++    int has_duration;
++    char *text;  // parsed post-ASS-parse, pre-bidi UTF-8
++    size_t text_length;
++    ASS_LayoutUnit *units;
++    ASS_LayoutRect bitmap_bounds;
++    int has_bitmap_bounds;
++    struct ass_layout_event *next;
++    /*
++     * This event's index in track->events, valid for the track as it stands
++     * when the call returns. It is the only way to tell apart two events
++     * carrying identical text and timing, which layered signs and karaoke
++     * routinely produce.
++     *
++     * It identifies a slot, not a subtitle line, and its lifetime is the
++     * result's: read it before the next rendering call on this renderer, and
++     * before anything mutates the event array. ass_flush_events(),
++     * ass_process_chunk() and any compaction the caller performs itself all
++     * invalidate it. Automatic pruning (ass_configure_prune) does too, but
++     * never for the result in hand: a render prunes before it lays out, so the
++     * index it publishes already describes the pruned array.
++     */
++    int event_index;
++} ASS_LayoutEvent;
++
++typedef enum ass_layout_unit_mode {
++    ASS_LAYOUT_UNIT_SIMPLE_SCALAR = 0,
++    ASS_LAYOUT_UNIT_SHAPING_CLUSTER,
++} ASS_LayoutUnitMode;
++
++struct ass_layout {
++    size_t struct_size;
++    ASS_LayoutUnitMode unit_mode;
++    ASS_LayoutEvent *events;
++};
++
++/*
++ * Every record above publishes struct_size as the END OFFSET of the last field
++ * the runtime knows, never sizeof -- see the ASS_RenderResult documentation in
++ * ass.h for why, and for the gate a caller uses. The two differ whenever a
++ * record carries tail padding, so `if (rec->struct_size >= sizeof(*rec))` is
++ * the wrong test and will not pass on a runtime that matches your header.
++ */
++
++/*
++ * Layout is semantic geometry from the same invocation as result.images, not
++ * a stable prediction across libass versions, fonts, or configuration. The
++ * layout and images are owned by ASS_Renderer and remain valid until the next
++ * rendering call on that renderer or ass_renderer_done().
++ */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* LIBASS_LAYOUT_H */
+diff --git a/libass/ass_outline.h b/libass/ass_outline.h
+index 7644182..13e4610 100644
+--- a/libass/ass_outline.h
++++ b/libass/ass_outline.h
+@@ -31,10 +31,6 @@ typedef struct {
+     int32_t x, y;
+ } ASS_Vector;
+ 
+-typedef struct {
+-    double x, y;
+-} ASS_DVector;
+-
+ typedef struct {
+     int32_t x_min, y_min, x_max, y_max;
+ } ASS_Rect;
+diff --git a/libass/ass_render.c b/libass/ass_render.c
+index 18f856a..5a035e0 100644
+--- a/libass/ass_render.c
++++ b/libass/ass_render.c
+@@ -21,6 +21,7 @@
+ 
+ #include <assert.h>
+ #include <math.h>
++#include <stddef.h>
+ #include <string.h>
+ #include <stdbool.h>
+ 
+@@ -29,11 +30,13 @@
+ #endif
+ 
+ #include "ass.h"
++#include "ass_layout.h"
+ #include "ass_outline.h"
+ #include "ass_render.h"
+ #include "ass_parse.h"
+ #include "ass_priv.h"
+ #include "ass_shaper.h"
++#include "ass_utils.h"
+ 
+ #define MAX_GLYPHS_INITIAL 1024
+ #define MAX_LINES_INITIAL 64
+@@ -47,6 +50,12 @@
+ #define SUBPIXEL_ORDER 3  // ~ log2(64 / POSITION_PRECISION)
+ #define BLUR_PRECISION (1.0 / 256)  // blur error as fraction of full input range
+ 
++// The size tag every public record publishes. Never sizeof: tail padding makes
++// sizeof non-monotonic in field count, so a field appended into that padding
++// leaves sizeof unchanged and lets a newer caller read bytes an older runtime
++// never wrote.
++#define FIELD_END(type, field) \
++    (offsetof(type, field) + sizeof(((type *) 0)->field))
+ 
+ static bool text_info_init(TextInfo* text_info)
+ {
+@@ -177,6 +186,7 @@ void ass_renderer_done(ASS_Renderer *render_priv)
+     if (!render_priv)
+         return;
+ 
++    ass_free_metrics(render_priv);
+     ass_frame_unref(render_priv->images_root);
+     ass_frame_unref(render_priv->prev_images_root);
+ 
+@@ -1118,6 +1128,12 @@ init_render_context(RenderContext *state, ASS_Event *event)
+ {
+     ASS_Renderer *render_priv = state->renderer;
+ 
++    state->collect_metrics = false;
++    state->metrics_failed = false;
++    state->cluster_metrics = NULL;
++    state->cluster_metrics_tail = &state->cluster_metrics;
++    state->current_cluster_metrics = NULL;
++
+     state->event = event;
+     state->parsed_tags = 0;
+     state->evt_type = EVENT_NORMAL;
+@@ -1372,6 +1388,29 @@ static void calc_transform_matrix(RenderContext *state,
+     }
+ }
+ 
++static void metrics_fail(RenderContext *state, ASS_LayoutStatus status)
++{
++    state->metrics_failed = true;
++    if (state->renderer->metrics_status == ASS_LAYOUT_OK)
++        state->renderer->metrics_status = status;
++}
++
++static bool metrics_reserve(RenderContext *state, size_t *used,
++                            size_t amount, size_t limit)
++{
++    if (state->metrics_failed ||
++        state->renderer->metrics_status != ASS_LAYOUT_OK) {
++        state->metrics_failed = true;
++        return false;
++    }
++    if (amount > SIZE_MAX - *used || (limit && amount > limit - FFMIN(*used, limit))) {
++        metrics_fail(state, ASS_LAYOUT_LIMIT_EXCEEDED);
++        return false;
++    }
++    *used += amount;
++    return true;
++}
++
+ /**
+  * \brief Get bitmaps for a glyph
+  * \param info glyph info
+@@ -1902,10 +1941,10 @@ static void
+ wrap_lines_smart(RenderContext *state, double max_text_width)
+ {
+     char *unibrks = NULL;
++    TextInfo *text_info = &state->text_info;
+ 
+ #ifdef CONFIG_UNIBREAK
+     ASS_Renderer *render_priv = state->renderer;
+-    TextInfo *text_info = &state->text_info;
+     if (render_priv->track->parser_priv->feature_flags & FEATURE_MASK(ASS_FEATURE_WRAP_UNICODE)) {
+         unibrks = text_info->breaks;
+         set_linebreaks_utf32(
+@@ -1928,6 +1967,13 @@ wrap_lines_smart(RenderContext *state, double max_text_width)
+     wrap_lines_naive(state, max_text_width, unibrks);
+     wrap_lines_rebalance(state, max_text_width, unibrks);
+ 
++    int line = 0;
++    for (int i = 0; i < text_info->length; i++) {
++        if (text_info->glyphs[i].linebreak)
++            line++;
++        text_info->glyphs[i].line = line;
++    }
++
+     trim_whitespace(state);
+     measure_text(state);
+ }
+@@ -2108,6 +2154,9 @@ static bool parse_events(RenderContext *state, ASS_Event *event)
+ 
+         // Clear current GlyphInfo
+         memset(info, 0, sizeof(GlyphInfo));
++        info->cluster_start = text_info->length;
++        info->cluster_end = text_info->length + 1;
++        info->cluster_root = true;
+ 
+         // Parse drawing
+         if (drawing_text.str) {
+@@ -2118,6 +2167,7 @@ static bool parse_events(RenderContext *state, ASS_Event *event)
+ 
+         // Fill glyph information
+         info->symbol = code;
++        info->original_symbol = code;
+         info->font = state->font;
+         for (int i = 0; i < 4; i++)
+             info->c[i] = state->c[i];
+@@ -2443,6 +2493,49 @@ static double restore_blur(int qblur)
+     return sigma * sigma;
+ }
+ 
++static ASS_LayoutUnit *append_cluster_metrics(RenderContext *state,
++                                               GlyphInfo *info,
++                                               double device_x,
++                                               double device_y)
++{
++    if (!state->collect_metrics || state->metrics_failed || !info->cluster_root)
++        return NULL;
++
++    ASS_Renderer *renderer = state->renderer;
++    if (!metrics_reserve(state, &renderer->metrics_clusters, 1,
++                         renderer->metrics_limits.max_units))
++        return NULL;
++
++    ASS_LayoutUnit *cluster =
++        ass_alloc_should_fail(&state->renderer->test_alloc_countdown)
++        ? NULL : calloc(1, sizeof(*cluster));
++    if (!cluster) {
++        metrics_fail(state, ASS_LAYOUT_ALLOCATION_FAILED);
++        return NULL;
++    }
++
++    cluster->struct_size = FIELD_END(ASS_LayoutUnit, next);
++    cluster->text_start = info->cluster_start;
++    cluster->text_end = info->cluster_end;
++    cluster->line = info->line;
++    cluster->pos.x = device_x + d6_to_double(info->pos.x) * state->renderer->par_scale_x;
++    cluster->pos.y = device_y + d6_to_double(info->pos.y);
++    cluster->advance.x = d6_to_double(info->cluster_advance.x) *
++                         state->renderer->par_scale_x;
++    cluster->advance.y = d6_to_double(info->cluster_advance.y);
++    cluster->asc = d6_to_double(info->asc);
++    cluster->desc = d6_to_double(info->desc);
++    double end_x = cluster->pos.x + cluster->advance.x;
++    cluster->logical_bounds.x = FFMIN(cluster->pos.x, end_x);
++    cluster->logical_bounds.y = cluster->pos.y - cluster->asc;
++    cluster->logical_bounds.w = fabs(cluster->advance.x);
++    cluster->logical_bounds.h = cluster->asc + cluster->desc;
++
++    *state->cluster_metrics_tail = cluster;
++    state->cluster_metrics_tail = &cluster->next;
++    return cluster;
++}
++
+ // Convert glyphs to bitmaps, combine them, apply blur, generate shadows.
+ static void render_and_combine_glyphs(RenderContext *state,
+                                       double device_x, double device_y)
+@@ -2458,6 +2551,8 @@ static void render_and_combine_glyphs(RenderContext *state,
+     ASS_DVector offset;
+     for (int i = 0; i < text_info->length; i++) {
+         GlyphInfo *info = text_info->glyphs + i;
++        state->current_cluster_metrics = append_cluster_metrics(
++            state, info, device_x, device_y);
+         if (info->starts_new_run) new_run = true;
+         if (info->skip)
+             continue;
+@@ -2542,6 +2637,7 @@ static void render_and_combine_glyphs(RenderContext *state,
+             ASS_Vector pos, pos_o;
+             info->pos.x = double_to_d6(device_x + d6_to_double(info->pos.x) * render_priv->par_scale_x);
+             info->pos.y = double_to_d6(device_y) + info->pos.y;
++
+             get_bitmap_glyph(state, info, &current_info->leftmost_x, &pos, &pos_o,
+                              &offset, !current_info->bitmap_count, flags);
+ 
+@@ -2789,15 +2885,75 @@ static void add_background(RenderContext *state, EventImages *event_images)
+     }
+ }
+ 
++static bool finalize_metrics_text(RenderContext *state, ASS_LayoutEvent *metrics)
++{
++    TextInfo *text_info = &state->text_info;
++    size_t count = text_info->length;
++    if (count > (SIZE_MAX - 1) / 4) {
++        metrics_fail(state, ASS_LAYOUT_LIMIT_EXCEEDED);
++        return false;
++    }
++
++    size_t length = 0;
++    for (size_t i = 0; i < count; i++) {
++        char encoded[4];
++        length += ass_utf8_put_char(encoded, text_info->glyphs[i].original_symbol);
++    }
++    ASS_Renderer *renderer = state->renderer;
++    if (!metrics_reserve(state, &renderer->metrics_text_bytes, length,
++                         renderer->metrics_limits.max_text_bytes))
++        return false;
++
++    size_t *byte_offsets =
++        ass_alloc_should_fail(&renderer->test_alloc_countdown)
++        ? NULL : calloc(count + 1, sizeof(*byte_offsets));
++    char *text = ass_alloc_should_fail(&renderer->test_alloc_countdown)
++        ? NULL : malloc(length + 1);
++    if (!byte_offsets || !text) {
++        free(byte_offsets);
++        free(text);
++        metrics_fail(state, ASS_LAYOUT_ALLOCATION_FAILED);
++        return false;
++    }
++
++    length = 0;
++    for (size_t i = 0; i < count; i++) {
++        byte_offsets[i] = length;
++        length += ass_utf8_put_char(text + length,
++                                    text_info->glyphs[i].original_symbol);
++    }
++    byte_offsets[count] = length;
++    text[length] = '\0';
++
++    for (ASS_LayoutUnit *cluster = metrics->units;
++         cluster; cluster = cluster->next) {
++        if (cluster->text_start > cluster->text_end ||
++            cluster->text_end > count) {
++            free(byte_offsets);
++            free(text);
++            metrics_fail(state, ASS_LAYOUT_FAILED);
++            return false;
++        }
++        cluster->text_start = byte_offsets[cluster->text_start];
++        cluster->text_end = byte_offsets[cluster->text_end];
++    }
++
++    free(byte_offsets);
++    metrics->text = text;
++    metrics->text_length = length;
++    return true;
++}
++
+ /**
+  * \brief Main ass rendering function, glues everything together
+  * \param event event to render
+  * \param event_images struct containing resulting images, will also be initialized
++ * \param whether to collect metrics
+  * Process event, appending resulting ASS_Image's to images_root.
+  */
+ static bool
+ ass_render_event(RenderContext *state, ASS_Event *event,
+-                 EventImages *event_images)
++                 EventImages *event_images, bool collect_metrics)
+ {
+     ASS_Renderer *render_priv = state->renderer;
+     if (event->Style >= render_priv->track->n_styles) {
+@@ -2811,6 +2967,7 @@ ass_render_event(RenderContext *state, ASS_Event *event,
+ 
+     free_render_context(state);
+     init_render_context(state, event);
++    state->collect_metrics = collect_metrics;
+ 
+     if (!parse_events(state, event))
+         return false;
+@@ -3006,6 +3163,21 @@ ass_render_event(RenderContext *state, ASS_Event *event,
+     event_images->event = event;
+     event_images->imgs = render_text(state);
+ 
++    if (collect_metrics) {
++        event_images->metrics.struct_size =
++            FIELD_END(ASS_LayoutEvent, event_index);
++        event_images->metrics.start_ms = event->Start;
++        event_images->metrics.duration_ms = event->Duration;
++        event_images->metrics.has_duration = 1;
++        event_images->metrics.event_index =
++            (int) (event - render_priv->track->events);
++        event_images->metrics.units = state->cluster_metrics;
++        if (!finalize_metrics_text(state, &event_images->metrics)) {
++            event_images->metrics.text = NULL;
++            event_images->metrics.text_length = 0;
++        }
++    }
++
+     if (state->border_style == 4)
+         add_background(state, event_images);
+ 
+@@ -3045,20 +3217,28 @@ static void setup_shaper(ASS_Shaper *shaper, ASS_Renderer *render_priv)
+  */
+ static bool
+ ass_start_frame(ASS_Renderer *render_priv, ASS_Track *track,
+-                long long now)
++                long long now, ASS_RenderStatus *status)
+ {
++    *status = ASS_RENDER_OK;
++
+     if (!render_priv->settings.frame_width
+-        && !render_priv->settings.frame_height)
++        && !render_priv->settings.frame_height) {
++        *status = ASS_RENDER_NOT_READY;
+         return false;               // library not initialized
++    }
+ 
+-    if (!render_priv->fontselect)
++    if (!render_priv->fontselect) {
++        *status = ASS_RENDER_NOT_READY;
+         return false;
++    }
+ 
+-    if (render_priv->library != track->library)
++    if (!track || render_priv->library != track->library) {
++        *status = ASS_RENDER_INVALID_REQUEST;
+         return false;
++    }
+ 
+     if (track->n_events == 0)
+-        return false;               // nothing to do
++        return false;               // valid request, nothing to do
+ 
+     render_priv->track = track;
+     render_priv->time = now;
+@@ -3165,6 +3345,46 @@ shift_event(ASS_Renderer *render_priv, EventImages *ei, int shift)
+         cur = cur->next;
+     }
+     ei->top += shift;
++
++    ASS_LayoutUnit *cluster = ei->metrics.units;
++    while (cluster) {
++        cluster->pos.y += shift;
++        cluster->logical_bounds.y += shift;
++        cluster = cluster->next;
++    }
++}
++
++static void set_event_bitmap_bounds(ASS_Renderer *renderer,
++                                    EventImages *event_images)
++{
++    ASS_LayoutEvent *metrics = &event_images->metrics;
++    int left = INT_MAX, top = INT_MAX, right = INT_MIN, bottom = INT_MIN;
++
++    for (ASS_Image *image = event_images->imgs; image; image = image->next) {
++        if (image->w <= 0 || image->h <= 0 || !image->bitmap ||
++            (image->color & 0xff) == 0xff)
++            continue;
++        if ((size_t) image->w > SIZE_MAX / (size_t) image->h) {
++            metrics_fail(&renderer->state, ASS_LAYOUT_LIMIT_EXCEEDED);
++            return;
++        }
++        size_t pixels = (size_t) image->w * (size_t) image->h;
++        if (!metrics_reserve(&renderer->state, &renderer->metrics_bitmap_pixels,
++                             pixels, renderer->metrics_limits.max_bitmap_pixels))
++            return;
++        left = FFMIN(left, image->dst_x);
++        top = FFMIN(top, image->dst_y);
++        right = FFMAX(right, image->dst_x + image->w);
++        bottom = FFMAX(bottom, image->dst_y + image->h);
++    }
++
++    if (left == INT_MAX)
++        return;
++    metrics->bitmap_bounds.x = left;
++    metrics->bitmap_bounds.y = top;
++    metrics->bitmap_bounds.w = right - left;
++    metrics->bitmap_bounds.h = bottom - top;
++    metrics->has_bitmap_bounds = 1;
+ }
+ 
+ // dir: 1 - move down
+@@ -3358,8 +3578,39 @@ static ASS_Image *ass_free_image(ASS_Image *img) {
+     return next;
+ }
+ 
++static void configure_layout_request(ASS_Renderer *priv,
++                                     const ASS_LayoutRequest *request)
++{
++    priv->metrics_status = ASS_LAYOUT_INVALID_REQUEST;
++    if (!request || request->struct_size < FIELD_END(ASS_LayoutRequest, flags))
++        return;
++    if (request->flags & ~ASS_LAYOUT_UNBOUNDED)
++        return;
++
++    if (request->flags & ASS_LAYOUT_UNBOUNDED) {
++        priv->metrics_limits = (ASS_LayoutRequest) {
++            .struct_size = FIELD_END(ASS_LayoutRequest, max_bitmap_pixels),
++            .flags = request->flags,
++            .max_events = SIZE_MAX,
++            .max_text_bytes = SIZE_MAX,
++            .max_units = SIZE_MAX,
++            .max_bitmap_pixels = SIZE_MAX,
++        };
++        priv->metrics_status = ASS_LAYOUT_OK;
++        return;
++    }
++
++    if (request->struct_size < FIELD_END(ASS_LayoutRequest, max_bitmap_pixels) ||
++        !request->max_events || !request->max_text_bytes ||
++        !request->max_units || !request->max_bitmap_pixels)
++        return;
++
++    priv->metrics_limits = *request;
++    priv->metrics_status = ASS_LAYOUT_OK;
++}
++
+ /**
+- * \brief render a frame
++ * \brief render a frame or collect metrics
+  * \param priv library handle
+  * \param track track
+  * \param now current video timestamp (ms)
+@@ -3367,16 +3618,51 @@ static ASS_Image *ass_free_image(ASS_Image *img) {
+  *        0 if identical, 1 if different positions, 2 if different content.
+  *        Can be NULL, in that case no detection is performed.
+  */
+-ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
+-                            long long now, int *detect_change)
+-{
++static int ass_render_frame_internal(ASS_Renderer *priv, ASS_Track *track,
++                                     long long now, int *detect_change,
++                                     ASS_RenderStatus *render_status,
++                                     bool collect_metrics,
++                                     const ASS_LayoutRequest *limits)
++{
++    ass_free_metrics(priv);
++
++    memset(&priv->metrics_limits, 0, sizeof(priv->metrics_limits));
++    priv->metrics_status = collect_metrics ? ASS_LAYOUT_INVALID_REQUEST
++                                           : ASS_LAYOUT_NOT_REQUESTED;
++    priv->metrics_events = 0;
++    priv->metrics_text_bytes = 0;
++    priv->metrics_clusters = 0;
++    priv->metrics_bitmap_pixels = 0;
++    if (collect_metrics)
++        configure_layout_request(priv, limits);
++
+     // init frame
+-    if (!ass_start_frame(priv, track, now)) {
++    if (!ass_start_frame(priv, track, now, render_status)) {
++        if (collect_metrics && priv->metrics_status == ASS_LAYOUT_OK) {
++            priv->metrics_status = *render_status == ASS_RENDER_OK
++                                 ? ASS_LAYOUT_EMPTY
++                                 : ASS_LAYOUT_INVALID_REQUEST;
++        }
+         if (detect_change)
+             *detect_change = 2;
+-        return NULL;
++        return -1;
+     }
+ 
++    *render_status = ASS_RENDER_OK;
++
++    // Collect garbage before laying anything out, not after. Pruning memmoves
++    // track->events and lowers n_events, so anything the render says *about*
++    // the track -- ASS_LayoutEvent.event_index -- has to be derived from the
++    // array the caller will hold when the call returns.
++    //
++    // The set removed is the same either way: prune drops events whose end is
++    // before now - prune_delay, and an event is only rendered while now is
++    // still inside it, so a rendered event is never a pruned one. Running it
++    // here rather than at the tail also keeps the previous rule that a frame
++    // which failed to start prunes nothing.
++    if (track->parser_priv->prune_delay >= 0)
++        ass_prune_events(track, now - track->parser_priv->prune_delay);
++
+     // render events separately
+     int cnt = 0;
+     for (int i = 0; i < track->n_events; i++) {
+@@ -3389,8 +3675,21 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
+                     realloc(priv->eimg,
+                             priv->eimg_size * sizeof(EventImages));
+             }
+-            if (ass_render_event(&priv->state, event, priv->eimg + cnt))
++            memset(priv->eimg + cnt, 0, sizeof(*priv->eimg));
++            bool at_event_limit = collect_metrics &&
++                priv->metrics_status == ASS_LAYOUT_OK &&
++                priv->metrics_limits.max_events &&
++                priv->metrics_events >= priv->metrics_limits.max_events;
++            bool collect_event = collect_metrics &&
++                priv->metrics_status == ASS_LAYOUT_OK && !at_event_limit;
++            if (ass_render_event(&priv->state, event, priv->eimg + cnt,
++                                 collect_event)) {
++                if (collect_event)
++                    priv->metrics_events++;
++                else if (at_event_limit)
++                    priv->metrics_status = ASS_LAYOUT_LIMIT_EXCEEDED;
+                 cnt++;
++            }
+         }
+     }
+ 
+@@ -3408,6 +3707,11 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
+     if (cnt > 0)
+         fix_collisions(priv, last, priv->eimg + cnt - last);
+ 
++    if (collect_metrics) {
++        for (int i = 0; i < cnt; i++)
++            set_event_bitmap_bounds(priv, &priv->eimg[i]);
++    }
++
+     // concat lists, removing fully transparent bitmaps
+     ASS_Image **tail = &priv->images_root;
+     for (int i = 0; i < cnt; i++) {
+@@ -3436,10 +3740,128 @@ ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
+     ass_frame_unref(priv->prev_images_root);
+     priv->prev_images_root = NULL;
+ 
+-    if (track->parser_priv->prune_delay >= 0)
+-        ass_prune_events(track, now - track->parser_priv->prune_delay);
++    priv->metrics_count = collect_metrics ? cnt : 0;
++    if (collect_metrics && priv->metrics_status != ASS_LAYOUT_OK)
++        ass_free_metrics(priv);
++    else if (collect_metrics && cnt == 0)
++        priv->metrics_status = ASS_LAYOUT_EMPTY;
++
++    return cnt;
++}
++
++/**
++ * \brief render a frame
++ * \param priv library handle
++ * \param track track
++ * \param now current video timestamp (ms)
++ * \param detect_change a value describing how the new images differ from the previous ones will be written here:
++ *        0 if identical, 1 if different positions, 2 if different content.
++ *        Can be NULL, in that case no detection is performed.
++ */
++ASS_Image *ass_render_frame(ASS_Renderer *priv, ASS_Track *track,
++                            long long now, int *detect_change)
++{
++    // This call invalidates whatever ass_render_frame2() last returned, so a
++    // retained pointer must not keep showing the previous frame.
++    memset(&priv->render_result, 0, sizeof(priv->render_result));
++
++    ASS_RenderStatus status;
++    int cnt = ass_render_frame_internal(priv, track, now, detect_change,
++                                        &status, false, NULL);
++    return cnt >= 0 ? priv->images_root : NULL;
++}
++
++static ASS_Layout *link_layout(ASS_Renderer *priv, int count)
++{
++    if (count <= 0)
++        return NULL;
++
++    for (int i = 0; i < count - 1; i++)
++        priv->eimg[i].metrics.next = &priv->eimg[i + 1].metrics;
++    priv->eimg[count - 1].metrics.next = NULL;
++    priv->layout = (ASS_Layout) {
++        .struct_size = FIELD_END(ASS_Layout, events),
++        .unit_mode = priv->settings.shaper == ASS_SHAPING_SIMPLE
++                   ? ASS_LAYOUT_UNIT_SIMPLE_SCALAR
++                   : ASS_LAYOUT_UNIT_SHAPING_CLUSTER,
++        .events = &priv->eimg[0].metrics,
++    };
++    return &priv->layout;
++}
++
++/**
++ * \brief Free all memory that was allocated for metrics.
++ */
++void ass_free_metrics(ASS_Renderer *priv)
++{
++    memset(&priv->layout, 0, sizeof(priv->layout));
++    for (int i = 0; i < priv->metrics_count; i++) {
++        ASS_LayoutEvent *metrics = &priv->eimg[i].metrics;
++        free(metrics->text);
++        ASS_LayoutUnit *cluster = metrics->units;
++        while (cluster) {
++            ASS_LayoutUnit *next = cluster->next;
++            free(cluster);
++            cluster = next;
++        }
++        memset(metrics, 0, sizeof(*metrics));
++    }
++    priv->metrics_count = 0;
++}
++
++/*
++ * Arm the layout collector's allocation-failure seam: the nth metrics
++ * allocation from now returns NULL, and only that one. Zero disarms.
++ *
++ * Deliberately not in libass.sym -- this exists for the in-tree contract
++ * suite, which links the static library, and must not become API.
++ */
++void ass_test_set_alloc_countdown(ASS_Renderer *renderer, size_t n)
++{
++    if (renderer)
++        renderer->test_alloc_countdown = n;
++}
++
++const ASS_RenderResult *ass_render_frame2(ASS_Renderer *renderer,
++                                          const ASS_RenderRequest *request)
++{
++    // No result record can exist without a renderer to own it or a request
++    // long enough to interpret.
++    if (!renderer || !request ||
++        request->struct_size < FIELD_END(ASS_RenderRequest, now_ms))
++        return NULL;
+ 
+-    return priv->images_root;
++    ASS_RenderResult *result = &renderer->render_result;
++    memset(result, 0, sizeof(*result));
++    // Not sizeof: a field appended into the tail padding would not change it,
++    // and a newer caller would read a field this runtime never wrote.
++    result->struct_size = FIELD_END(ASS_RenderResult, layout_status);
++    result->change = -1;
++
++    unsigned flags = request->struct_size >= FIELD_END(ASS_RenderRequest, flags)
++                   ? request->flags : 0;
++    if ((flags & ~ASS_RENDER_DETECT_CHANGE) || !request->track) {
++        result->status = ASS_RENDER_INVALID_REQUEST;
++        return result;
++    }
++
++    const ASS_LayoutRequest *layout_request =
++        request->struct_size >= FIELD_END(ASS_RenderRequest, layout)
++        ? request->layout : NULL;
++
++    int change = -1;
++    int count = ass_render_frame_internal(
++        renderer, request->track, request->now_ms,
++        flags & ASS_RENDER_DETECT_CHANGE ? &change : NULL,
++        &result->status, layout_request != NULL, layout_request);
++    result->images = count >= 0 ? renderer->images_root : NULL;
++    result->change = change;
++    if (layout_request) {
++        result->layout_status = renderer->metrics_status;
++        result->layout = count >= 0 && renderer->metrics_status == ASS_LAYOUT_OK
++                       ? link_layout(renderer, count) : NULL;
++    }
++    return result;
+ }
+ 
+ /**
+diff --git a/libass/ass_render.h b/libass/ass_render.h
+index e1eb7d2..b69bfe2 100644
+--- a/libass/ass_render.h
++++ b/libass/ass_render.h
+@@ -30,6 +30,7 @@
+ #include <hb.h>
+ 
+ #include "ass.h"
++#include "ass_layout.h"
+ #include "ass_font.h"
+ #include "ass_bitmap.h"
+ #include "ass_cache.h"
+@@ -86,6 +87,7 @@ typedef struct {
+     int detect_collisions;
+     int shift_direction;
+     ASS_Event *event;
++    ASS_LayoutEvent metrics;
+ } EventImages;
+ 
+ typedef enum {
+@@ -125,6 +127,10 @@ typedef struct {
+ // GlyphInfo and TextInfo are used for text centering and word-wrapping operations
+ typedef struct glyph_info {
+     unsigned symbol;
++    unsigned original_symbol;
++    size_t cluster_start;
++    size_t cluster_end;
++    bool cluster_root;
+     bool skip;                  // skip glyph when layouting text
+     bool is_trimmed_whitespace;
+     ASS_Font *font;
+@@ -172,6 +178,7 @@ typedef struct glyph_info {
+     int fade;
+ 
+     int shape_run_id;
++    int line;
+ 
+     ASS_Vector shift;
+     Bitmap *bm, *bm_o;
+@@ -215,6 +222,12 @@ struct render_context {
+     ASS_Event *event;
+     ASS_Style *style;
+ 
++    bool collect_metrics;
++    bool metrics_failed;
++    ASS_LayoutUnit *cluster_metrics;
++    ASS_LayoutUnit **cluster_metrics_tail;
++    ASS_LayoutUnit *current_cluster_metrics;
++
+     ASS_Font *font;
+     double font_size;
+     int parsed_tags;
+@@ -318,9 +331,20 @@ struct ass_renderer {
+ 
+     ASS_Image *images_root;     // rendering result is stored here
+     ASS_Image *prev_images_root;
++    ASS_RenderResult render_result;  // reused storage returned by ass_render_frame2
+ 
+     EventImages *eimg;          // temporary buffer for sorting rendered events
+     int eimg_size;              // allocated buffer size
++    ASS_Layout layout;
++    int metrics_count;          // initialized EventImages metrics records
++    ASS_LayoutStatus metrics_status;
++    ASS_LayoutRequest metrics_limits;
++    size_t metrics_events;
++    size_t metrics_text_bytes;
++    size_t metrics_clusters;
++    size_t metrics_bitmap_pixels;
++    // Test-only; see ass_alloc_should_fail. Zero disables.
++    size_t test_alloc_countdown;
+ 
+     // frame-global data
+     int width, height;          // screen dimensions (the whole frame from ass_set_frame_size)
+@@ -353,6 +377,7 @@ typedef struct {
+ } Rect;
+ 
+ void ass_reset_render_context(RenderContext *state, ASS_Style *style);
++void ass_free_metrics(ASS_Renderer *priv);
+ void ass_frame_ref(ASS_Image *img);
+ void ass_frame_unref(ASS_Image *img);
+ ASS_Vector ass_layout_res(ASS_Renderer *render_priv);
+@@ -360,4 +385,11 @@ ASS_Vector ass_layout_res(ASS_Renderer *render_priv);
+ // XXX: this is actually in ass.c, includes should be fixed later on
+ void ass_lazy_track_init(ASS_Library *lib, ASS_Track *track);
+ 
++
++/* Test-only seam; see ass_alloc_should_fail. Declared here rather than left to
++ * an ad-hoc extern in each test, so the definition and its callers cannot drift
++ * apart silently -- this build enables neither -Wmissing-prototypes nor anything
++ * else that would notice. Deliberately absent from libass.sym. */
++void ass_test_set_alloc_countdown(ASS_Renderer *renderer, size_t n);
++
+ #endif /* LIBASS_RENDER_H */
+diff --git a/libass/ass_shaper.c b/libass/ass_shaper.c
+index d733d5d..2308745 100644
+--- a/libass/ass_shaper.c
++++ b/libass/ass_shaper.c
+@@ -624,6 +624,7 @@ shape_harfbuzz_process_run(GlyphInfo *glyphs, hb_buffer_t *buf, int offset)
+         unsigned idx = glyph_info[j].cluster + offset;
+         GlyphInfo *info = glyphs + idx;
+         GlyphInfo *root = info;
++        root->cluster_root = true;
+ 
+         // if we have more than one glyph per cluster, allocate a new one
+         // and attach to the root glyph
+@@ -652,6 +653,24 @@ shape_harfbuzz_process_run(GlyphInfo *glyphs, hb_buffer_t *buf, int offset)
+     }
+ }
+ 
++static void set_harfbuzz_cluster_ranges(GlyphInfo *glyphs, int start, int end)
++{
++    size_t next = end;
++    for (int i = end - 1; i >= start; i--) {
++        GlyphInfo *root = &glyphs[i];
++        if (!root->cluster_root)
++            continue;
++        root->cluster_start = i;
++        root->cluster_end = next;
++        for (GlyphInfo *glyph = root->next; glyph; glyph = glyph->next) {
++            glyph->cluster_start = root->cluster_start;
++            glyph->cluster_end = root->cluster_end;
++            glyph->cluster_root = false;
++        }
++        next = i;
++    }
++}
++
+ /**
+  * \brief Shape event text with HarfBuzz. Full OpenType shaping.
+  * \param glyphs glyph clusters
+@@ -664,12 +683,17 @@ static bool shape_harfbuzz(ASS_Shaper *shaper, GlyphInfo *glyphs, size_t len)
+     hb_segment_properties_t props = HB_SEGMENT_PROPERTIES_DEFAULT;
+ 
+     // Initialize: skip all glyphs, this is undone later as needed
+-    for (i = 0; i < len; i++)
++    for (i = 0; i < len; i++) {
+         glyphs[i].skip = true;
++        glyphs[i].cluster_root = false;
++    }
+ 
+     for (i = 0; i < len; i++) {
+         if (glyphs[i].drawing_text.str) {
+             glyphs[i].skip = false;
++            glyphs[i].cluster_root = true;
++            glyphs[i].cluster_start = i;
++            glyphs[i].cluster_end = i + 1;
+             continue;
+         }
+ 
+@@ -716,6 +740,7 @@ static bool shape_harfbuzz(ASS_Shaper *shaper, GlyphInfo *glyphs, size_t len)
+ 
+         shape_harfbuzz_process_run(glyphs, buf,
+                 shaper->whole_text_layout ? 0 : offset - lead_context);
++        set_harfbuzz_cluster_ranges(glyphs, offset, i + 1);
+         hb_buffer_reset(buf);
+ 
+         hb_font_destroy(font);
+diff --git a/libass/ass_types.h b/libass/ass_types.h
+index 4d9e0ec..be1d50f 100644
+--- a/libass/ass_types.h
++++ b/libass/ass_types.h
+@@ -305,4 +305,12 @@ typedef struct ass_track {
+     // New fields can be added here in new ABI-compatible library releases.
+ } ASS_Track;
+ 
++/**
++ * \brief A point in floating-point coordinates.  Used by layout outlines;
++ * see ass_layout.h.
++ */
++typedef struct {
++    double x, y;
++} ASS_DVector;
++
+ #endif /* LIBASS_TYPES_H */
+diff --git a/libass/ass_utils.h b/libass/ass_utils.h
+index 5b7cc7a..d319d92 100644
+--- a/libass/ass_utils.h
++++ b/libass/ass_utils.h
+@@ -106,6 +106,36 @@ void *ass_try_realloc_array(void *ptr, size_t nmemb, size_t size);
+ #define ASS_REALLOC_ARRAY(ptr, count) \
+     (errno = 0, (ptr) = ass_try_realloc_array(ptr, count, sizeof(*ptr)), !errno)
+ 
++/*
++ * Allocation-failure seam for the layout collector, and only for it.
++ *
++ * The layout contract says a limit or a failed allocation clears the layout and
++ * leaves the ordinary images untouched. libass has no allocator hook, so
++ * without a seam that claim can only be argued, and every allocation in the
++ * collector is an untested branch.
++ *
++ * The counter lives on the renderer rather than in a global, so two renderers
++ * cannot disturb each other and there is nothing to race. Zero -- the value a
++ * renderer is created with -- disables it entirely, so a production build takes
++ * one predictable branch per collected record and nothing else.
++ *
++ * The setter is absent from libass.sym, which keeps it out of the autotools
++ * build (libtool -export-symbols) and out of the meson Windows build (the
++ * generated .def). The meson shared build on other platforms applies no
++ * visibility control and exports it along with ~180 other internals; that build
++ * already declares itself unsuitable for distribution, so this is one more of a
++ * known set rather than a new exposure -- but it is not the absolute the
++ * sentence above would otherwise imply.
++ *
++ * Counting down to exactly one failure, rather than failing everything after a
++ * point, is what lets a test sweep the sites one at a time and assert the same
++ * outcome at each.
++ */
++static inline bool ass_alloc_should_fail(size_t *countdown)
++{
++    return countdown && *countdown && !--*countdown;
++}
++
+ unsigned ass_utf8_get_char(char **str);
+ unsigned ass_utf8_put_char(char *dest, uint32_t ch);
+ void ass_utf16be_to_utf8(char *dst, size_t dst_size, uint8_t *src, size_t src_size);
+diff --git a/libass/libass.sym b/libass/libass.sym
+index 4cc6215..5d968af 100644
+--- a/libass/libass.sym
++++ b/libass/libass.sym
+@@ -17,6 +17,7 @@ ass_set_line_spacing
+ ass_get_available_font_providers
+ ass_set_fonts
+ ass_render_frame
++ass_render_frame2
+ ass_new_track
+ ass_free_track
+ ass_alloc_style
+diff --git a/libass/meson.build b/libass/meson.build
+index 9eda958..f8c0a81 100644
+--- a/libass/meson.build
++++ b/libass/meson.build
+@@ -70,7 +70,7 @@ libass_src = files(
+ 
+ libass_link_with = []
+ 
+-libass_headers = files('ass.h', 'ass_types.h')
++libass_headers = files('ass.h', 'ass_types.h', 'ass_layout.h')
+ 
+ if fontconfig
+     libass_src += src_fontconfig
+diff --git a/meson.build b/meson.build
+index 91a0435..8b6c1f3 100644
+--- a/meson.build
++++ b/meson.build
+@@ -390,9 +390,7 @@ else
+     libass_for_tools = libass
+ endif
+ 
+-if get_option('test').enabled()
+-    subdir('test')
+-endif
++subdir('test')
+ if get_option('compare').enabled()
+     subdir('compare')
+ endif
+diff --git a/test/layout_alloc.c b/test/layout_alloc.c
+new file mode 100644
+index 0000000..679b589
+--- /dev/null
++++ b/test/layout_alloc.c
+@@ -0,0 +1,151 @@
++/*
++ * Atomic failure of layout collection, swept one allocation at a time.
++ *
++ * Separate from layout_contract because it is the one test that reaches an
++ * internal symbol, ass_test_set_alloc_countdown. That symbol is not in
++ * libass.sym, so this program links libass_internal.la; layout_contract stays
++ * on the public library and must resolve against libass.sym alone.
++ */
++
++/* Every check here is an assert(); a -DNDEBUG build must not turn this
++ * program into a silent no-op. */
++#undef NDEBUG
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++
++#include "../libass/ass.h"
++#include "../libass/ass_layout.h"
++/* ass_compat.h first, as every library source does: ass_utils.h uses
++ * __has_builtin, which only ass_compat.h defines away for tcc. */
++#include "../libass/ass_compat.h"
++#include "../libass/ass_render.h"   /* ass_test_set_alloc_countdown */
++
++#ifndef ASS_TEST_FONT
++#error ASS_TEST_FONT must name the bundled test font
++#endif
++
++static const char fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 320\n"
++    "PlayResY: 240\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,Aileron,28,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,layout ab\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(20,20)}second\n";
++
++static const ASS_RenderResult *render(ASS_Renderer *renderer, ASS_Track *track,
++                                      long long now,
++                                      const ASS_LayoutRequest *limits)
++{
++    ASS_RenderRequest request = {
++        .struct_size = sizeof(request),
++        .track = track,
++        .now_ms = now,
++        .layout = limits,
++    };
++    const ASS_RenderResult *result = ass_render_frame2(renderer, &request);
++    assert(result);
++    assert(result->status == ASS_RENDER_OK);
++    return result;
++}
++
++int main(void)
++{
++    ASS_Library *library = ass_library_init();
++    assert(library);
++    ASS_Track *track = ass_read_memory(library, (char *) fixture,
++                                       sizeof(fixture) - 1, NULL);
++    assert(track);
++    ASS_Renderer *renderer = ass_renderer_init(library);
++    assert(renderer);
++    ass_set_frame_size(renderer, 320, 240);
++    ass_set_storage_size(renderer, 320, 240);
++    ass_set_fonts(renderer, ASS_TEST_FONT, "Aileron",
++                  ASS_FONTPROVIDER_NONE, NULL, 1);
++
++    ASS_LayoutRequest limits = {
++        .struct_size = sizeof(ASS_LayoutRequest),
++        .max_events = SIZE_MAX,
++        .max_text_bytes = SIZE_MAX,
++        .max_units = SIZE_MAX,
++        .max_bitmap_pixels = SIZE_MAX,
++    };
++
++    /* "Untouched" has to mean the images, not how many there are: shifting
++     * every dst_x and rewriting every colour leaves the count alone. Snapshot
++     * the scalars from a clean render and compare those. Not the bitmap bytes
++     * -- those buffers are renderer-owned and recycled, so a pointer or a
++     * memcmp against an earlier render is not a safe comparison. */
++    struct img_snap { int w, h, stride, dst_x, dst_y; uint32_t color; };
++    struct img_snap clean[64];
++    size_t clean_images = 0;
++    for (ASS_Image *i = render(renderer, track, 1000, &limits)->images; i; i = i->next) {
++        assert(clean_images < sizeof(clean) / sizeof(clean[0]));
++        clean[clean_images++] = (struct img_snap) { i->w, i->h, i->stride,
++                                                    i->dst_x, i->dst_y, i->color };
++    }
++    assert(clean_images > 0);
++
++    /*
++     * Do NOT stop at the first success. Breaking there cannot tell "ran out of
++     * allocations" from "reached a site that fails quietly and reports OK",
++     * which is the atomicity break this sweep exists to find -- and the earlier
++     * that site sits, the less the sweep covers while staying green. So run the
++     * whole cap and require the successes to be a suffix.
++     */
++    size_t failures = 0, first_ok = 0;
++    for (size_t nth = 1; nth <= 200; nth++) {
++        ass_test_set_alloc_countdown(renderer, nth);
++        const ASS_RenderResult *result = render(renderer, track, 1000, &limits);
++        ass_test_set_alloc_countdown(renderer, 0);
++
++        if (result->layout_status == ASS_LAYOUT_OK) {
++            assert(result->layout);
++            if (!first_ok)
++                first_ok = nth;
++            continue;
++        }
++        /* A failure after a success means an allocation before it failed
++         * without saying so. */
++        assert(!first_ok);
++        assert(result->layout_status == ASS_LAYOUT_ALLOCATION_FAILED);
++        /* No partial layout survives a failure. */
++        assert(!result->layout);
++        /* The images are untouched -- the whole point of the guarantee. */
++        size_t k = 0;
++        for (ASS_Image *i = result->images; i; i = i->next, k++) {
++            assert(k < clean_images);
++            assert(i->w == clean[k].w && i->h == clean[k].h);
++            assert(i->stride == clean[k].stride);
++            assert(i->dst_x == clean[k].dst_x && i->dst_y == clean[k].dst_y);
++            assert(i->color == clean[k].color);
++        }
++        assert(k == clean_images);
++        failures++;
++    }
++    assert(first_ok && failures == first_ok - 1);
++    /*
++     * Locked census, same discipline as a golden: this fixture and these limits
++     * reach exactly three allocation sites -- the unit record and both text
++     * buffers. A change here means a site was added, removed, or stopped
++     * being reachable, and it should be re-blessed deliberately rather than
++     * relaxed. Without it, deleting a seam silently shrinks the sweep and
++     * every assertion still passes.
++     */
++    assert(failures == 19);
++
++    ass_free_track(track);
++    ass_renderer_done(renderer);
++    ass_library_done(library);
++    return 0;
++}
+diff --git a/test/layout_contract.c b/test/layout_contract.c
+new file mode 100644
+index 0000000..ed7ae82
+--- /dev/null
++++ b/test/layout_contract.c
+@@ -0,0 +1,457 @@
++/*
++ * Font-independent half of the layout contract: limits, statuses, and
++ * determinism.
++ *
++ * These need no system font, so unlike the shaping suite they run everywhere,
++ * including images that ship fontconfig without any fonts.
++ */
++
++/* Every check here is an assert(); a -DNDEBUG build must not turn this
++ * program into a silent no-op. */
++#undef NDEBUG
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "../libass/ass.h"
++#include "../libass/ass_layout.h"
++
++#ifndef ASS_TEST_FONT
++#error ASS_TEST_FONT must name the bundled test font
++#endif
++
++/* What every published size tag must equal. Spelled out here rather than
++ * shared with the library, so the test checks the rule instead of echoing
++ * whatever the library happens to compute. */
++#define END_OF(type, field) (offsetof(type, field) + sizeof(((type *) 0)->field))
++
++/* C99 spelling; _Alignof is C11 and this builds as gnu99, tcc included. */
++#define ALIGN_OF(type) offsetof(struct { char c_; type t_; }, t_)
++
++/*
++ * A published tag must equal the end of the named field AND leave less than one
++ * alignment unit unaccounted for.
++ *
++ * The equality alone is close to a tautology -- test and library name the same
++ * field by hand, so they drift together -- and it is outright vacuous on any
++ * record with no tail padding: two of the four on LP64, and all four on i386,
++ * where long long aligns to 4. The gap check needs no padding to exist. It
++ * holds on every ABI by construction and fails the moment a field appended
++ * past the named one grows sizeof without the tag following.
++ *
++ * Still invisible to both: a field appended INTO existing tail padding, which
++ * moves neither sizeof nor the tag.
++ */
++#define ASSERT_SIZE_TAG(type, last, tag)               \
++    do {                                               \
++        assert((tag) == END_OF(type, last));           \
++        assert(sizeof(type) - (tag) < ALIGN_OF(type)); \
++    } while (0)
++
++static const char fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 320\n"
++    "PlayResY: 240\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,Aileron,28,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,layout ab\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(20,20)}second\n";
++
++/* Two events identical in every field the payload reports, among two others
++ * filtered out by time.
++ *
++ * The filtered events are placed to break contiguity, not just to offset it.
++ * With both trailing, the twins sit at slots 0 and 1 -- their output order --
++ * and a plain rendered-event counter passes. With both leading, the twins sit
++ * at 1 and 2, and a counter biased by the number of leading filtered events
++ * still passes; that mutant survived the first version of this fixture.
++ * Interleaved, the twins are at slots 1 and 3, which no contiguous counter
++ * reaches. */
++static const char duplicate_fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 320\n"
++    "PlayResY: 240\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,Aileron,28,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:10.00,0:00:14.00,Default,,0,0,0,,later\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(20,20)}twin\n"
++    "Dialogue: 0,0:00:10.00,0:00:14.00,Default,,0,0,0,,later two\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(20,20)}twin\n";
++
++/*
++ * For the prune ordering. Two events have already ended at the render time
++ * used below, so libass drops them mid-call; one future event survives and is
++ * not rendered, which keeps the twins' surviving slots (1 and 2) different
++ * from their output order (0 and 1).
++ */
++static const char prune_fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 320\n"
++    "PlayResY: 240\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,Aileron,28,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,0:00:00.50,Default,,0,0,0,,gone one\n"
++    "Dialogue: 0,0:00:20.00,0:00:24.00,Default,,0,0,0,,future\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(20,20)}twin\n"
++    "Dialogue: 0,0:00:00.00,0:00:00.50,Default,,0,0,0,,gone two\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,{\\pos(20,20)}twin\n"
++    "Dialogue: 0,0:00:00.00,0:00:01.50,Default,,0,0,0,,inside the delay\n";
++
++static ASS_Renderer *new_renderer(ASS_Library *library)
++{
++    ASS_Renderer *renderer = ass_renderer_init(library);
++    assert(renderer);
++    ass_set_frame_size(renderer, 320, 240);
++    ass_set_storage_size(renderer, 320, 240);
++    ass_set_fonts(renderer, ASS_TEST_FONT, "Aileron",
++                  ASS_FONTPROVIDER_NONE, NULL, 1);
++    return renderer;
++}
++
++static ASS_LayoutRequest unbounded_limits(void)
++{
++    return (ASS_LayoutRequest) {
++        .struct_size = sizeof(ASS_LayoutRequest),
++        .max_events = SIZE_MAX,
++        .max_text_bytes = SIZE_MAX,
++        .max_units = SIZE_MAX,
++        .max_bitmap_pixels = SIZE_MAX,
++    };
++}
++
++static const ASS_RenderResult *render(ASS_Renderer *renderer, ASS_Track *track,
++                                      long long now,
++                                      const ASS_LayoutRequest *limits)
++{
++    ASS_RenderRequest request = {
++        .struct_size = sizeof(request),
++        .track = track,
++        .now_ms = now,
++        .layout = limits,
++    };
++    const ASS_RenderResult *result = ass_render_frame2(renderer, &request);
++    assert(result);
++    assert(result->status == ASS_RENDER_OK);
++    return result;
++}
++
++/* Aggregate what an unbounded run actually produced, so the limit tests can
++ * ask for exactly that much rather than guessing a number that drifts with
++ * the font. */
++struct usage {
++    size_t events, text_bytes, units;
++};
++
++static struct usage measure(const ASS_Layout *layout)
++{
++    struct usage u = {0};
++    for (const ASS_LayoutEvent *event = layout->events; event;
++         event = event->next) {
++        u.events++;
++        u.text_bytes += event->text_length;
++        for (const ASS_LayoutUnit *unit = event->units; unit;
++             unit = unit->next)
++            u.units++;
++    }
++    return u;
++}
++
++int main(void)
++{
++    ASS_Library *library = ass_library_init();
++    assert(library);
++    ASS_Track *track = ass_read_memory(library, (char *) fixture,
++                                       sizeof(fixture) - 1, NULL);
++    assert(track);
++    ASS_Renderer *renderer = new_renderer(library);
++
++    /* Collecting layout must not disturb the images. */
++    uint64_t plain_images = 0;
++    ASS_Image *plain = ass_render_frame(renderer, track, 1000, NULL);
++    assert(plain);
++    for (ASS_Image *i = plain; i; i = i->next)
++        plain_images++;
++
++    ASS_LayoutRequest limits = unbounded_limits();
++    const ASS_RenderResult *result = render(renderer, track, 1000, &limits);
++    assert(result->layout_status == ASS_LAYOUT_OK);
++    assert(result->layout);
++    uint64_t layout_images = 0;
++    for (ASS_Image *i = result->images; i; i = i->next)
++        layout_images++;
++    assert(layout_images == plain_images);
++
++    struct usage used = measure(result->layout);
++    assert(used.events == 2);
++    assert(used.units > 0);
++
++    /* A budget that fits exactly must be accepted. Only the rejecting side of
++     * each limit was covered before, so an off-by-one that rejects a
++     * sufficient budget -- making bounded mode unusable -- went unnoticed. */
++    ASS_LayoutRequest exact = {
++        .struct_size = sizeof(ASS_LayoutRequest),
++        .max_events = used.events,
++        .max_text_bytes = used.text_bytes,
++        .max_units = used.units,
++        .max_bitmap_pixels = SIZE_MAX,
++    };
++    result = render(renderer, track, 1000, &exact);
++    assert(result->layout_status == ASS_LAYOUT_OK);
++    assert(result->layout);
++    struct usage again = measure(result->layout);
++    assert(again.events == used.events);
++    assert(again.units == used.units);
++
++    /* One below each limit must be refused, and must not damage the images. */
++    const size_t *fields[] = {
++        &exact.max_events, &exact.max_text_bytes, &exact.max_units,
++    };
++    for (size_t f = 0; f < sizeof(fields) / sizeof(*fields); f++) {
++        ASS_LayoutRequest tight = exact;
++        size_t *field = (size_t *) ((char *) &tight +
++                                    ((const char *) fields[f] -
++                                     (const char *) &exact));
++        if (*field == 0)
++            continue;
++        (*field)--;
++        result = render(renderer, track, 1000, &tight);
++        assert(result->layout_status == ASS_LAYOUT_LIMIT_EXCEEDED);
++        assert(!result->layout);
++        uint64_t still = 0;
++        for (ASS_Image *i = result->images; i; i = i->next)
++            still++;
++        assert(still == plain_images);
++    }
++
++    /* Zero-initialised bounded limits are rejected, not treated as unlimited. */
++    ASS_LayoutRequest zeroed = {.struct_size = sizeof(ASS_LayoutRequest)};
++    result = render(renderer, track, 1000, &zeroed);
++    assert(result->layout_status == ASS_LAYOUT_INVALID_REQUEST);
++    assert(!result->layout);
++
++    /* Unbounded must be asked for explicitly and then really is unbounded. */
++    ASS_LayoutRequest trusted = {
++        .struct_size = sizeof(ASS_LayoutRequest),
++        .flags = ASS_LAYOUT_UNBOUNDED,
++    };
++    result = render(renderer, track, 1000, &trusted);
++    assert(result->layout_status == ASS_LAYOUT_OK);
++    assert(result->layout);
++    struct usage unbounded_use = measure(result->layout);
++    assert(unbounded_use.units == used.units);
++
++    /* An unknown flag is refused rather than ignored. */
++    ASS_LayoutRequest bogus = exact;
++    bogus.flags |= 1u << 20;
++    result = render(renderer, track, 1000, &bogus);
++    assert(result->layout_status == ASS_LAYOUT_INVALID_REQUEST);
++    assert(!result->layout);
++
++    /* A short request cannot reach the limit fields, so it is refused too. */
++    ASS_LayoutRequest truncated = exact;
++    truncated.struct_size = offsetof(ASS_LayoutRequest, max_bitmap_pixels);
++    result = render(renderer, track, 1000, &truncated);
++    assert(result->layout_status == ASS_LAYOUT_INVALID_REQUEST);
++    assert(!result->layout);
++
++    /* Every published size tag is the end offset of the record's last known
++     * field, never sizeof. See ASSERT_SIZE_TAG for what each half catches and
++     * what neither does. */
++    result = render(renderer, track, 1000, &limits);
++    assert(result->layout_status == ASS_LAYOUT_OK);
++    ASSERT_SIZE_TAG(ASS_RenderResult, layout_status, result->struct_size);
++    ASSERT_SIZE_TAG(ASS_Layout, events, result->layout->struct_size);
++    for (const ASS_LayoutEvent *e = result->layout->events; e; e = e->next) {
++        ASSERT_SIZE_TAG(ASS_LayoutEvent, event_index, e->struct_size);
++        for (const ASS_LayoutUnit *u = e->units; u; u = u->next)
++            ASSERT_SIZE_TAG(ASS_LayoutUnit, next, u->struct_size);
++    }
++
++    /*
++     * Two events with identical text and identical timing are one document's
++     * normal output -- a layered sign, a karaoke duplicate -- and every other
++     * field of the payload is the same for both. event_index is the only thing
++     * that tells the caller which is which.
++     */
++    ASS_Track *twins = ass_read_memory(library, (char *) duplicate_fixture,
++                                       sizeof(duplicate_fixture) - 1, NULL);
++    assert(twins);
++    assert(twins->n_events == 4);
++    result = render(renderer, twins, 1000, &limits);
++    assert(result->layout_status == ASS_LAYOUT_OK);
++
++    int claimed[4] = {0, 0, 0, 0};
++    size_t twin_count = 0;
++    const ASS_LayoutEvent *first = NULL;
++    for (const ASS_LayoutEvent *e = result->layout->events; e; e = e->next) {
++        assert(e->event_index >= 0 && e->event_index < twins->n_events);
++        /* Distinct: no two records may claim one slot. */
++        assert(!claimed[e->event_index]++);
++        /* Correct: the slot it claims has the timing it reports. An index that
++         * merely counted output order would pass the distinctness check above
++         * and fail here, because the third event is filtered out by time. */
++        assert(twins->events[e->event_index].Start == e->start_ms);
++        assert(twins->events[e->event_index].Duration == e->duration_ms);
++        if (!first)
++            first = e;
++        twin_count++;
++    }
++    assert(twin_count == 2);
++    /* The twins really are indistinguishable without the index. */
++    assert(first && first->next);
++    assert(first->text_length == first->next->text_length);
++    assert(!memcmp(first->text, first->next->text, first->text_length));
++    assert(first->start_ms == first->next->start_ms);
++    assert(first->duration_ms == first->next->duration_ms);
++    assert(first->event_index != first->next->event_index);
++    /* The events that never rendered are the slots nobody claimed: the twins
++     * are at 1 and 3, while their output order is 0 and 1. */
++    assert(!claimed[0]);
++    assert(!claimed[2]);
++
++    ass_free_track(twins);
++
++    /*
++     * libass prunes expired events inside the render call when the caller has
++     * enabled it. If that happens after the layout is collected, every
++     * published index describes an array the caller no longer has: at best out
++     * of range, at worst resolving to a different event that carries the same
++     * timing -- which is exactly the case event_index exists to disambiguate,
++     * so the timing assertion above would pass on it.
++     */
++    ASS_Track *pruned = ass_read_memory(library, (char *) prune_fixture,
++                                        sizeof(prune_fixture) - 1, NULL);
++    assert(pruned);
++    assert(pruned->n_events == 6);
++    /*
++     * A nonzero delay, so the `- prune_delay` term is observable. At now=2000
++     * the threshold is 1000: the two events ending at 1000 go, and the one
++     * ending at 1500 stays. Drop the delay term and the threshold becomes 2000,
++     * which takes that event too -- the n_events control below catches it.
++     */
++    ass_configure_prune(pruned, 1000);
++    result = render(renderer, pruned, 2000, &limits);
++    assert(result->layout_status == ASS_LAYOUT_OK);
++    /* The prune really ran, and took exactly the two fully-expired events. */
++    assert(pruned->n_events == 4);
++
++    size_t pruned_count = 0;
++    for (const ASS_LayoutEvent *e = result->layout->events; e; e = e->next) {
++        assert(e->event_index >= 0 && e->event_index < pruned->n_events);
++        assert(pruned->events[e->event_index].Start == e->start_ms);
++        assert(pruned->events[e->event_index].Duration == e->duration_ms);
++        /* Not the output ordinal: the surviving future event holds slot 0. */
++        assert(e->event_index == (int) pruned_count + 1);
++        pruned_count++;
++    }
++    assert(pruned_count == 2);
++
++    /*
++     * Moving the prune ahead of layout is only safe if it does not change what
++     * gets rendered. Same document, same time, prune off: the layout must be
++     * identical, which is the claim that a rendered event is never a prunable
++     * one.
++     */
++    ASS_Track *unpruned = ass_read_memory(library, (char *) prune_fixture,
++                                          sizeof(prune_fixture) - 1, NULL);
++    assert(unpruned);
++    const ASS_RenderResult *ref = render(renderer, unpruned, 2000, &limits);
++    assert(ref->layout_status == ASS_LAYOUT_OK);
++    assert(unpruned->n_events == 6);  /* untouched, so this is the control */
++
++    /*
++     * Walk both layouts in lockstep rather than comparing totals. Counting is
++     * the wrong oracle here: the way an earlier prune could change output is
++     * through the event array the render loop and collision resolution walk,
++     * and that moves geometry, not cardinality. This fixture's two rendered
++     * events are literal twins, so laying out the wrong one is invisible to
++     * every counter and visible in pos.
++     */
++    ASS_LayoutRequest ref_limits = limits;
++    const ASS_LayoutEvent *a = render(renderer, pruned, 2000, &ref_limits)->layout->events;
++    /* Both results cannot be live at once -- the record is renderer-owned and
++     * reused -- so the reference is re-rendered on a second renderer. */
++    ASS_Renderer *other = new_renderer(library);
++    const ASS_RenderResult *ref2 = render(other, unpruned, 2000, &ref_limits);
++    assert(ref2->layout_status == ASS_LAYOUT_OK);
++    const ASS_LayoutEvent *b = ref2->layout->events;
++
++    for (; a && b; a = a->next, b = b->next) {
++        assert(a->start_ms == b->start_ms && a->duration_ms == b->duration_ms);
++        assert(a->text_length == b->text_length);
++        assert(!memcmp(a->text, b->text, a->text_length));
++        /* event_index is expected to differ: the pruned array is shorter. */
++        const ASS_LayoutUnit *ua = a->units, *ub = b->units;
++        for (; ua && ub; ua = ua->next, ub = ub->next) {
++            assert(ua->pos.x == ub->pos.x && ua->pos.y == ub->pos.y);
++            assert(ua->advance.x == ub->advance.x && ua->advance.y == ub->advance.y);
++            assert(ua->line == ub->line);
++            assert(ua->text_start == ub->text_start && ua->text_end == ub->text_end);
++            assert(ua->logical_bounds.x == ub->logical_bounds.x);
++            assert(ua->logical_bounds.w == ub->logical_bounds.w);
++        }
++        assert(!ua && !ub);
++    }
++    assert(!a && !b);
++    ass_renderer_done(other);
++
++    /*
++     * A frame that fails to start prunes nothing. The prune sits after the
++     * ass_start_frame check for that reason, and nothing tested it. A renderer
++     * with a zero frame size returns NOT_READY before touching the track, so
++     * the event array must come back untouched. The render() helper asserts
++     * ASS_RENDER_OK, so this calls the entry point directly.
++     */
++    ASS_Renderer *stillborn = ass_renderer_init(library);
++    assert(stillborn);
++    ass_set_frame_size(stillborn, 0, 0);
++    ass_set_fonts(stillborn, ASS_TEST_FONT, "Aileron", ASS_FONTPROVIDER_NONE, NULL, 1);
++    ass_configure_prune(pruned, 0);
++    int before = pruned->n_events;
++    ASS_RenderRequest stillborn_req = {
++        .struct_size = sizeof(stillborn_req),
++        .track = pruned,
++        .now_ms = 100000,   /* everything is expired by now */
++        .layout = &limits,
++    };
++    const ASS_RenderResult *stillborn_res =
++        ass_render_frame2(stillborn, &stillborn_req);
++    assert(stillborn_res);
++    assert(stillborn_res->status == ASS_RENDER_NOT_READY);
++    assert(pruned->n_events == before);
++    ass_renderer_done(stillborn);
++
++    ass_free_track(unpruned);
++    ass_free_track(pruned);
++    ass_free_track(track);
++    ass_renderer_done(renderer);
++    ass_library_done(library);
++    return 0;
++}
+diff --git a/test/meson.build b/test/meson.build
+index 36e9785..980edc9 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -1,10 +1,86 @@
+-test_src = files('test.c')
++# The libpng-based comparison program stays behind the `test` option; the
++# public-API tests below need neither it nor libpng, and gating them there
++# meant a default meson build exercised none of ass_render_frame2.
++if get_option('test').enabled()
++    libass_test = executable(
++        'libass_test',
++        files('test.c'),
++        install: false,
++        include_directories: incs,
++        dependencies: deps + png_deps,
++        link_with: libass_for_tools,
++    )
++endif
+ 
+-libass_test = executable(
+-    'libass_test',
+-    test_src,
++render_api_test = executable(
++    'render_api_test',
++    'render_api.c',
+     install: false,
+     include_directories: incs,
+-    dependencies: deps + png_deps,
++    dependencies: deps,
+     link_with: libass_for_tools,
++    c_args: ['-DASS_TEST_FONT="' + join_paths(meson.project_source_root(),
++                                              'compare/test/font1.ttf') + '"'],
+ )
++
++test('render api', render_api_test)
++
++render_lifetime_test = executable(
++    'render_lifetime_test',
++    'render_lifetime.c',
++    install: false,
++    include_directories: incs,
++    dependencies: deps,
++    link_with: libass_for_tools,
++    c_args: ['-DASS_TEST_FONT="' + join_paths(meson.project_source_root(),
++                                              'compare/test/font1.ttf') + '"'],
++)
++
++test('render lifetime', render_lifetime_test)
++
++layout_contract_test = executable(
++    'layout_contract_test',
++    'layout_contract.c',
++    install: false,
++    include_directories: incs,
++    dependencies: deps,
++    link_with: libass_for_tools,
++    c_args: ['-DASS_TEST_FONT="' + join_paths(meson.project_source_root(),
++                                              'compare/test/font1.ttf') + '"'],
++)
++
++test('layout contract', layout_contract_test)
++
++# Reaches ass_test_set_alloc_countdown, which is internal and deliberately
++# absent from libass.sym. Autotools links it against libass_internal.la; meson
++# has no such convenience library, so it takes libass_for_tools and relies on
++# the shared build exporting internals -- which is true everywhere except
++# Windows, where the generated .def is honored. Skip it there rather than
++# exporting a test-only symbol to make one build system happy.
++if default_library != 'shared' or host_system != 'windows'
++    layout_alloc_test = executable(
++        'layout_alloc_test',
++        'layout_alloc.c',
++        install: false,
++        include_directories: incs,
++        dependencies: deps,
++        link_with: libass_for_tools,
++        c_args: ['-DASS_TEST_FONT="' + join_paths(meson.project_source_root(),
++                                                  'compare/test/font1.ttf') + '"'],
++    )
++
++    test('layout alloc', layout_alloc_test)
++endif
++
++if fontconfig
++    subtitle_layout_test = executable(
++        'subtitle_layout_test',
++        'subtitle_layout.c',
++        install: false,
++        include_directories: incs,
++        dependencies: deps,
++        link_with: libass_for_tools,
++    )
++
++    test('subtitle-layout', subtitle_layout_test)
++endif
+diff --git a/test/render_api.c b/test/render_api.c
+new file mode 100644
+index 0000000..e154f9d
+--- /dev/null
++++ b/test/render_api.c
+@@ -0,0 +1,250 @@
++/* Structural and compatibility tests for ass_render_frame2. */
++
++/* Every check here is an assert(); a -DNDEBUG build must not turn this
++ * program into a silent no-op. */
++#undef NDEBUG
++#include <assert.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "../libass/ass.h"
++
++#ifndef ASS_TEST_FONT
++#error ASS_TEST_FONT must name the bundled test font
++#endif
++
++#define FIELD_END(type, field) \
++    (offsetof(type, field) + sizeof(((type *) 0)->field))
++
++static const char fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 320\n"
++    "PlayResY: 240\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,Aileron,42,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,0:00:04.00,Default,,0,0,0,,render api\n";
++
++static uint64_t hash_bytes(uint64_t hash, const void *data, size_t size)
++{
++    const unsigned char *bytes = data;
++    for (size_t i = 0; i < size; i++) {
++        hash ^= bytes[i];
++        hash *= UINT64_C(1099511628211);
++    }
++    return hash;
++}
++
++static uint64_t hash_images(ASS_Image *image)
++{
++    uint64_t hash = UINT64_C(1469598103934665603);
++    for (; image; image = image->next) {
++        int fields[] = {
++            image->w, image->h, image->stride, image->dst_x, image->dst_y,
++            (int) image->color, image->type,
++        };
++        hash = hash_bytes(hash, fields, sizeof(fields));
++        for (int y = 0; y < image->h; y++)
++            hash = hash_bytes(hash, image->bitmap + y * image->stride,
++                              image->w);
++    }
++    return hash;
++}
++
++static ASS_Renderer *new_renderer(ASS_Library *library, int configure)
++{
++    ASS_Renderer *renderer = ass_renderer_init(library);
++    assert(renderer);
++    if (configure) {
++        ass_set_frame_size(renderer, 320, 240);
++        ass_set_storage_size(renderer, 320, 240);
++        ass_set_fonts(renderer, ASS_TEST_FONT, "Aileron",
++                      ASS_FONTPROVIDER_NONE, NULL, 1);
++    }
++    return renderer;
++}
++
++static ASS_RenderRequest request_for(ASS_Track *track, unsigned flags)
++{
++    ASS_RenderRequest request = {0};
++    request.struct_size = sizeof(request);
++    request.track = track;
++    request.now_ms = 1000;
++    request.flags = flags;
++    return request;
++}
++
++/* A caller may read a field only if its own sizeof and the runtime-reported
++ * struct_size both cover it. */
++static int field_available(const ASS_RenderResult *result, size_t field_end)
++{
++    return result->struct_size >= field_end;
++}
++
++int main(void)
++{
++    ASS_Library *library = ass_library_init();
++    assert(library);
++    ASS_Track *track = ass_read_memory(library, (char *) fixture,
++                                       sizeof(fixture) - 1, NULL);
++    assert(track);
++
++    ASS_Renderer *legacy_renderer = new_renderer(library, 1);
++    ASS_Renderer *new_api_renderer = new_renderer(library, 1);
++
++    int legacy_change = -1;
++    ASS_Image *legacy_images = ass_render_frame(legacy_renderer, track, 1000,
++                                                &legacy_change);
++    assert(legacy_images);
++    uint64_t legacy_hash = hash_images(legacy_images);
++
++    ASS_RenderRequest request = request_for(track, ASS_RENDER_DETECT_CHANGE);
++    const ASS_RenderResult *result =
++        ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++/* The reported size is the end of the last known field, not sizeof: a field
++     * appended into the tail padding would not move sizeof, and a newer caller
++     * would then read bytes this runtime never wrote. */
++    assert(result->struct_size ==
++           FIELD_END(ASS_RenderResult, layout_status));
++    assert(result->struct_size <= sizeof(ASS_RenderResult));
++    assert(result->status == ASS_RENDER_OK);
++    assert(result->images);
++    assert(result->change == legacy_change);
++    assert(hash_images(result->images) == legacy_hash);
++
++    /* The renderer owns one record and reuses it; the caller never frees it. */
++    const ASS_RenderResult *first_result = result;
++
++    request.flags = 0;
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result == first_result);
++    assert(result->status == ASS_RENDER_OK);
++    assert(result->change == -1);
++    assert(hash_images(result->images) == legacy_hash);
++
++    /* A request ending at now_ms defaults the absent flags field to zero. */
++    request = request_for(track, UINT32_MAX);
++    request.struct_size = FIELD_END(ASS_RenderRequest, now_ms);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++    assert(result->status == ASS_RENDER_OK);
++    assert(result->change == -1);
++
++    struct extended_request {
++        ASS_RenderRequest base;
++        unsigned char unknown[32];
++    } extended = {0};
++    extended.base = request_for(track, 0);
++    extended.base.struct_size = sizeof(extended);
++    memset(extended.unknown, 0xa5, sizeof(extended.unknown));
++    result = ass_render_frame2(new_api_renderer, &extended.base);
++    assert(result);
++    assert(result->status == ASS_RENDER_OK);
++
++    /* A newer caller against a shorter runtime record must treat the tail as
++     * absent rather than as a zero value. */
++    ASS_RenderResult older_runtime = {0};
++    older_runtime.struct_size = FIELD_END(ASS_RenderResult, images);
++    older_runtime.status = ASS_RENDER_OK;
++    older_runtime.images = legacy_images;
++    assert(field_available(&older_runtime, FIELD_END(ASS_RenderResult, images)));
++    assert(!field_available(&older_runtime, FIELD_END(ASS_RenderResult, change)));
++    assert(field_available(result, FIELD_END(ASS_RenderResult, layout_status)));
++
++    /*
++     * An old caller compiled a shorter ASS_RenderResult. Reading only its own
++     * prefix out of a longer runtime record must still give correct values.
++     */
++    struct old_result {
++        size_t struct_size;
++        ASS_RenderStatus status;
++        ASS_Image *images;
++        int change;
++    };
++    request = request_for(track, ASS_RENDER_DETECT_CHANGE);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++    assert(result->struct_size > FIELD_END(struct old_result, change));
++    struct old_result truncated;
++    memcpy(&truncated, result, FIELD_END(struct old_result, change));
++    assert(truncated.struct_size == result->struct_size);
++    assert(truncated.status == result->status);
++    assert(truncated.images == result->images);
++    assert(truncated.change == result->change);
++
++    /* A retained pointer never shows the previous frame after a failed call. */
++    request = request_for(track, 0);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result && result->images);
++    request.flags = UINT32_MAX;
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result == first_result);
++    assert(result->status == ASS_RENDER_INVALID_REQUEST);
++    assert(!result->images);
++    assert(result->change == -1);
++    assert(!result->layout);
++    assert(result->layout_status == ASS_LAYOUT_NOT_REQUESTED);
++
++    /* No record can exist when the request is unusable. */
++    request = request_for(track, 0);
++    request.struct_size = FIELD_END(ASS_RenderRequest, track);
++    assert(ass_render_frame2(new_api_renderer, &request) == NULL);
++    request = request_for(track, 0);
++    assert(ass_render_frame2(NULL, &request) == NULL);
++    assert(ass_render_frame2(new_api_renderer, NULL) == NULL);
++
++    /* A NULL track is reported in the record, not by returning NULL. */
++    request = request_for(NULL, 0);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++    assert(result->status == ASS_RENDER_INVALID_REQUEST);
++    assert(!result->images);
++
++    ASS_Renderer *unconfigured = new_renderer(library, 0);
++    request = request_for(track, ASS_RENDER_DETECT_CHANGE);
++    result = ass_render_frame2(unconfigured, &request);
++    assert(result);
++    assert(result->status == ASS_RENDER_NOT_READY);
++    assert(!result->images);
++    assert(result->change == 2);
++    /* Each renderer owns its own record. */
++    assert(result != first_result);
++
++    ASS_Track *empty = ass_new_track(library);
++    assert(empty);
++    request = request_for(empty, ASS_RENDER_DETECT_CHANGE);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++    assert(result->status == ASS_RENDER_OK);
++    assert(!result->images);
++    assert(result->change == 2);
++
++    /* Both entry points share invalidation/cache state without divergence. */
++    request = request_for(track, 0);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++    uint64_t alternating_hash = hash_images(result->images);
++    assert(hash_images(ass_render_frame(new_api_renderer, track, 1000, NULL)) ==
++           alternating_hash);
++    result = ass_render_frame2(new_api_renderer, &request);
++    assert(result);
++    assert(hash_images(result->images) == alternating_hash);
++
++    ass_free_track(empty);
++    ass_renderer_done(unconfigured);
++    ass_renderer_done(new_api_renderer);
++    ass_renderer_done(legacy_renderer);
++    ass_free_track(track);
++    ass_library_done(library);
++    return 0;
++}
+diff --git a/test/render_lifetime.c b/test/render_lifetime.c
+new file mode 100644
+index 0000000..f177490
+--- /dev/null
++++ b/test/render_lifetime.c
+@@ -0,0 +1,107 @@
++/* Repeated render replacement and teardown against the renderer-owned result.
++ * Pass an iteration count to run the long stress form. */
++/* Every check here is an assert(); a -DNDEBUG build must not turn this
++ * program into a silent no-op. */
++#undef NDEBUG
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#ifndef ASS_TEST_FONT
++#error ASS_TEST_FONT must name the bundled test font
++#endif
++
++#include "ass.h"
++#include "ass_layout.h"
++
++static const char fixture[] =
++    "[Script Info]\nScriptType: v4.00+\nPlayResX: 640\nPlayResY: 480\n\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
++    "Style: Default,Aileron,40,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,9:59:59.99,Default,,0,0,0,,Sample subtitle line\n";
++
++int main(int argc, char **argv)
++{
++    long iterations = argc > 1 ? strtol(argv[1], NULL, 10) : 2000;
++
++    ASS_Library *lib = ass_library_init();
++    assert(lib);
++    ASS_Renderer *ren = ass_renderer_init(lib);
++    assert(ren);
++    ass_set_frame_size(ren, 640, 480);
++    ass_set_storage_size(ren, 640, 480);
++    ass_set_fonts(ren, ASS_TEST_FONT, "Aileron", ASS_FONTPROVIDER_NONE, NULL, 1);
++
++    ASS_Track *track = ass_read_memory(lib, (char *) fixture,
++                                       sizeof(fixture) - 1, NULL);
++    assert(track);
++
++    ASS_LayoutRequest layout = {
++        .struct_size = sizeof(layout),
++        .max_events = 64,
++        .max_text_bytes = 1 << 16,
++        .max_units = 4096,
++        .max_bitmap_pixels = 1 << 22,
++    };
++    ASS_RenderRequest req = {
++        .struct_size = sizeof(req),
++        .track = track,
++        .flags = ASS_RENDER_DETECT_CHANGE,
++        .layout = &layout,
++    };
++
++    const ASS_RenderResult *stable = NULL;
++    long with_layout = 0;
++    for (long i = 0; i < iterations; i++) {
++        /* Move the timestamp so images and layout are genuinely replaced. */
++        req.now_ms = (i % 4096) * 7;
++        /* Alternate layout on/off to exercise the not-requested reset path. */
++        req.layout = (i & 1) ? &layout : NULL;
++
++        const ASS_RenderResult *res = ass_render_frame2(ren, &req);
++        assert(res);
++        assert(res->struct_size <= sizeof(ASS_RenderResult));
++        assert(res->status == ASS_RENDER_OK);
++        assert(res->images);
++        if (!stable)
++            stable = res;
++        /* The renderer must reuse one record, not reallocate per frame. */
++        assert(res == stable);
++
++        if (req.layout) {
++            assert(res->layout_status == ASS_LAYOUT_OK ||
++                   res->layout_status == ASS_LAYOUT_EMPTY);
++            if (res->layout) {
++                with_layout++;
++                /* Touch the tree so a stale/freed node would trap. */
++                for (const ASS_LayoutEvent *e = res->layout->events; e; e = e->next) {
++                    volatile size_t len = e->text_length;
++                    (void) len;
++                    for (const ASS_LayoutUnit *u = e->units; u; u = u->next) {
++                        volatile int line = u->line;
++                        (void) line;
++                    }
++                }
++            }
++        } else {
++            /* A layout-free call must clear the previous frame's layout. */
++            assert(!res->layout);
++            assert(res->layout_status == ASS_LAYOUT_NOT_REQUESTED);
++        }
++
++        /* Interleave the legacy entry point; it must not disturb the record. */
++        if ((i % 512) == 0)
++            ass_render_frame(ren, track, req.now_ms, NULL);
++    }
++
++    /* Without this the whole layout branch could go hollow and still pass. */
++    assert(with_layout > 0);
++    printf("iterations=%ld layouts=%ld\n", iterations, with_layout);
++    ass_free_track(track);
++    ass_renderer_done(ren);
++    ass_library_done(lib);
++    return 0;
++}
+diff --git a/test/subtitle_layout.c b/test/subtitle_layout.c
+new file mode 100644
+index 0000000..696ced3
+--- /dev/null
++++ b/test/subtitle_layout.c
+@@ -0,0 +1,844 @@
++/*
++ * Structural tests for the same-render subtitle layout API. Exact glyph
++ * coordinates are font-dependent; the tests cover text/range coherence,
++ * event separation, lifetime, and render identity.
++ */
++
++/* Every check here is an assert(); a -DNDEBUG build must not turn this
++ * program into a silent no-op. */
++#undef NDEBUG
++#include <assert.h>
++#include <limits.h>
++#include <math.h>
++#include <stddef.h>
++#include <stdint.h>
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <time.h>
++
++#include "../libass/ass.h"
++#include "../libass/ass_layout.h"
++
++#ifndef __has_feature
++#define __has_feature(x) 0
++#endif
++
++/* Size tags are the end offset of the last known field, never sizeof: a
++ * record with tail padding reports less than sizeof (ASS_LayoutEvent on
++ * LP64). Same rule and bound as layout_contract.c. */
++#define END_OF(type, field) (offsetof(type, field) + sizeof(((type *) 0)->field))
++#define ALIGN_OF(type) offsetof(struct { char c_; type t_; }, t_)
++#define ASSERT_SIZE_TAG(type, last, tag)               \
++    do {                                               \
++        assert((tag) == END_OF(type, last));           \
++        assert(sizeof(type) - (tag) < ALIGN_OF(type)); \
++    } while (0)
++
++static const char fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 640\n"
++    "PlayResY: 360\n"
++    "WrapStyle: 2\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,DejaVu Sans,32,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "Style: Plain,DejaVu Sans,32,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,0,0,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,0:00:02.00,Default,normalized,0,0,0,,"
++    "{\\b1}A\\hB\\nC\\N\\{D\\}\tE{\\p1}m 0 0 l 10 0 10 10 0 10{\\p0}F\n"
++    "Dialogue: 0,0:00:03.00,0:00:05.00,Default,bidi,0,0,0,,abc שלום\n"
++    "Dialogue: 0,0:00:06.00,0:00:08.00,Default,shape,0,0,0,,office "
++    "e\xcc\x81 日本語\n"
++    "Dialogue: 0,0:00:09.00,0:00:11.00,Default,collision-a,0,0,0,,same\n"
++    "Dialogue: 0,0:00:09.00,0:00:11.00,Default,collision-b,0,0,0,,same\n"
++    "Dialogue: 0,0:00:12.00,0:00:14.00,Default,soft-break,0,0,0,,"
++    "{\\q0}A\\nB\n"
++    "Dialogue: 0,0:00:15.00,0:00:17.00,Default,hard-break,0,0,0,,"
++    "{\\q2}A\\nB\n"
++    "Dialogue: 0,0:00:18.00,0:00:20.00,Default,whitespace,0,0,0,,\\h\n"
++    "Dialogue: 0,0:00:21.00,0:00:23.00,Default,karaoke,0,0,0,,"
++    "{\\k50}ka{\\k50}ra\n"
++    "Dialogue: 0,0:00:24.00,0:00:26.00,Default,transform,0,0,0,,"
++    "{\\t(0,2000,\\frz45)}turn\n"
++    "Dialogue: 0,0:00:27.00,0:00:29.00,Default,clip-blur,0,0,0,,"
++    "{\\pos(20,20)\\an7\\blur5\\clip(0,0,35,35)}clip\n"
++    "Dialogue: 0,0:00:30.00,0:00:32.00,Default,transparent,0,0,0,,"
++    "{\\alpha&HFF&}ghost\n"
++    "Dialogue: 0,0:00:34.00,0:00:36.00,Plain,single-cluster,0,0,0,,日\n"
++    "Dialogue: 0,0:00:38.00,0:00:40.00,Default,arabic,0,0,0,,مرحبا abc\n"
++    "Dialogue: 0,0:00:41.00,0:00:43.00,Default,ligature,0,0,0,,لا\n";
++
++static const char prune_fixture[] =
++    "[Script Info]\n"
++    "ScriptType: v4.00+\n"
++    "PlayResX: 640\n"
++    "PlayResY: 360\n"
++    "[V4+ Styles]\n"
++    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
++    "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, "
++    "ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, "
++    "MarginR, MarginV, Encoding\n"
++    "Style: Default,DejaVu Sans,32,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,"
++    "0,0,0,0,100,100,0,0,1,1,1,2,10,10,10,1\n"
++    "[Events]\n"
++    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
++    "Dialogue: 0,0:00:00.00,0:00:01.00,Default,expired,0,0,0,,expired\n"
++    "Dialogue: 0,0:00:01.50,0:00:04.50,Default,first,0,0,0,,first\n"
++    "Dialogue: 0,0:00:02.00,0:00:05.00,Default,second,0,0,0,,second\n";
++
++static void message_callback(int level, const char *format, va_list arguments,
++                             void *data)
++{
++    (void) data;
++    if (level <= 7) {
++        vfprintf(stderr, format, arguments);
++        fputc('\n', stderr);
++    }
++}
++
++static uint64_t hash_bytes(uint64_t hash, const unsigned char *data, size_t size)
++{
++    for (size_t i = 0; i < size; i++) {
++        hash ^= data[i];
++        hash *= UINT64_C(1099511628211);
++    }
++    return hash;
++}
++
++static uint64_t hash_images(ASS_Image *image)
++{
++    uint64_t hash = UINT64_C(1469598103934665603);
++    for (; image; image = image->next) {
++        int values[] = {
++            image->w, image->h, image->stride, image->dst_x, image->dst_y,
++            (int) image->color, image->type,
++        };
++        hash = hash_bytes(hash, (const unsigned char *) values, sizeof(values));
++        for (int y = 0; y < image->h; y++)
++            hash = hash_bytes(hash, image->bitmap + y * image->stride, image->w);
++    }
++    return hash;
++}
++
++static ASS_LayoutRect emitted_image_bounds(ASS_Image *image)
++{
++    int left = INT_MAX, top = INT_MAX, right = INT_MIN, bottom = INT_MIN;
++    for (; image; image = image->next) {
++        if (image->w <= 0 || image->h <= 0 ||
++            (image->color & 0xff) == 0xff)
++            continue;
++        left = left < image->dst_x ? left : image->dst_x;
++        top = top < image->dst_y ? top : image->dst_y;
++        right = right > image->dst_x + image->w ?
++            right : image->dst_x + image->w;
++        bottom = bottom > image->dst_y + image->h ?
++            bottom : image->dst_y + image->h;
++    }
++    if (left == INT_MAX)
++        return (ASS_LayoutRect) {0};
++    return (ASS_LayoutRect) {left, top, right - left, bottom - top};
++}
++
++static int utf8_boundary(const char *text, size_t length, size_t offset)
++{
++    return offset <= length &&
++           (offset == 0 || offset == length ||
++            (((unsigned char) text[offset] & 0xc0) != 0x80));
++}
++
++static double rightmost_cluster_logical(const ASS_LayoutEvent *metrics)
++{
++    double right = -HUGE_VAL;
++    for (ASS_LayoutUnit *cluster = metrics->units;
++         cluster; cluster = cluster->next) {
++        right = fmax(right, cluster->logical_bounds.x +
++                            cluster->logical_bounds.w);
++    }
++    return right;
++}
++
++static ASS_LayoutUnit *cluster_covering(ASS_LayoutEvent *metrics,
++                                            size_t start, size_t end)
++{
++    for (ASS_LayoutUnit *cluster = metrics->units;
++         cluster; cluster = cluster->next) {
++        if (cluster->text_start <= start && end <= cluster->text_end)
++            return cluster;
++    }
++    return NULL;
++}
++
++static ASS_LayoutUnit *cluster_at(ASS_LayoutEvent *metrics, size_t offset)
++{
++    for (ASS_LayoutUnit *cluster = metrics->units;
++         cluster; cluster = cluster->next) {
++        if (cluster->text_start <= offset && offset < cluster->text_end)
++            return cluster;
++    }
++    return NULL;
++}
++
++static size_t validate_metrics(ASS_LayoutEvent *metrics)
++{
++    size_t events = 0;
++    for (; metrics; metrics = metrics->next) {
++        ASSERT_SIZE_TAG(ASS_LayoutEvent, event_index, metrics->struct_size);
++        assert(metrics->has_duration);
++        assert(metrics->text);
++        assert(strlen(metrics->text) == metrics->text_length);
++        size_t previous = 0;
++        for (ASS_LayoutUnit *cluster = metrics->units;
++             cluster; cluster = cluster->next) {
++            ASSERT_SIZE_TAG(ASS_LayoutUnit, next, cluster->struct_size);
++            assert(cluster->text_start < cluster->text_end);
++            assert(cluster->text_start == previous);
++            assert(cluster->text_end <= metrics->text_length);
++            assert(utf8_boundary(metrics->text, metrics->text_length,
++                                 cluster->text_start));
++            assert(utf8_boundary(metrics->text, metrics->text_length,
++                                 cluster->text_end));
++            assert(cluster->line >= 0);
++            assert(cluster->logical_bounds.w >= 0);
++            assert(cluster->logical_bounds.h >= 0);
++            previous = cluster->text_end;
++        }
++        assert(previous == metrics->text_length);
++        events++;
++    }
++    return events;
++}
++
++static void assert_ranges(ASS_LayoutEvent *metrics, const size_t (*ranges)[2],
++                          size_t count)
++{
++    ASS_LayoutUnit *cluster = metrics->units;
++    for (size_t i = 0; i < count; i++) {
++        assert(cluster);
++        assert(cluster->text_start == ranges[i][0]);
++        assert(cluster->text_end == ranges[i][1]);
++        cluster = cluster->next;
++    }
++    assert(!cluster);
++}
++
++static ASS_LayoutRequest valid_limits(void)
++{
++    return (ASS_LayoutRequest) {
++        .struct_size = sizeof(ASS_LayoutRequest),
++        .max_events = SIZE_MAX,
++        .max_text_bytes = SIZE_MAX,
++        .max_units = SIZE_MAX,
++        .max_bitmap_pixels = SIZE_MAX,
++    };
++}
++
++static ASS_Renderer *new_renderer(ASS_Library *library)
++{
++    ASS_Renderer *renderer = ass_renderer_init(library);
++    assert(renderer);
++    ass_set_frame_size(renderer, 640, 360);
++    ass_set_storage_size(renderer, 640, 360);
++    ass_set_fonts(renderer, NULL, "DejaVu Sans", ASS_FONTPROVIDER_FONTCONFIG,
++                  NULL, 1);
++    return renderer;
++}
++
++static ASS_Image *render_bounded(ASS_Renderer *renderer, ASS_Track *track,
++                                 long long now, ASS_LayoutRequest *limits,
++                                 ASS_LayoutEvent **metrics,
++                                 ASS_LayoutStatus *status)
++{
++    ASS_RenderRequest request = {
++        .struct_size = sizeof(request),
++        .track = track,
++        .now_ms = now,
++        .layout = limits,
++    };
++    const ASS_RenderResult *result = ass_render_frame2(renderer, &request);
++    assert(result);
++    const ASS_Layout *layout = result->layout;
++    ASS_Image *images = result->images;
++    *status = result->layout_status;
++    if (layout) {
++        ASSERT_SIZE_TAG(ASS_Layout, events, layout->struct_size);
++        assert(layout->unit_mode == ASS_LAYOUT_UNIT_SIMPLE_SCALAR ||
++               layout->unit_mode == ASS_LAYOUT_UNIT_SHAPING_CLUSTER);
++    }
++    *metrics = layout ? layout->events : NULL;
++    return images;
++}
++
++static ASS_LayoutUnitMode last_unit_mode;
++
++/*
++ * The advertised use case, resolved with public data only: which text does a
++ * point on screen belong to? Coordinates are never asserted directly, only
++ * that the round trip lands somewhere usable.
++ */
++static ASS_LayoutUnit *hit_test(ASS_LayoutEvent *events, double x, double y,
++                                ASS_LayoutEvent **owner)
++{
++    for (ASS_LayoutEvent *event = events; event; event = event->next) {
++        for (ASS_LayoutUnit *unit = event->units; unit; unit = unit->next) {
++            const ASS_LayoutRect *box = &unit->logical_bounds;
++            if (box->w <= 0 || box->h <= 0)
++                continue;
++            if (x >= box->x && x < box->x + box->w &&
++                y >= box->y && y < box->y + box->h) {
++                if (owner)
++                    *owner = event;
++                return unit;
++            }
++        }
++    }
++    return NULL;
++}
++
++static ASS_Image *render_unbounded(ASS_Renderer *renderer, ASS_Track *track,
++                                   long long now, int *detect_change,
++                                   ASS_LayoutEvent **metrics)
++{
++    ASS_LayoutRequest layout_request = {
++        .struct_size = sizeof(layout_request),
++        .flags = ASS_LAYOUT_UNBOUNDED,
++    };
++    ASS_RenderRequest request = {
++        .struct_size = sizeof(request),
++        .track = track,
++        .now_ms = now,
++        .flags = detect_change ? ASS_RENDER_DETECT_CHANGE : 0,
++        .layout = &layout_request,
++    };
++    const ASS_RenderResult *result = ass_render_frame2(renderer, &request);
++    assert(result);
++    if (detect_change)
++        *detect_change = result->change;
++    const ASS_Layout *layout = result->layout;
++    ASS_LayoutStatus status = result->layout_status;
++    ASS_Image *images = result->images;
++    if (layout) {
++        assert(status == ASS_LAYOUT_OK);
++        ASSERT_SIZE_TAG(ASS_Layout, events, layout->struct_size);
++        assert(layout->unit_mode == ASS_LAYOUT_UNIT_SIMPLE_SCALAR ||
++               layout->unit_mode == ASS_LAYOUT_UNIT_SHAPING_CLUSTER);
++    }
++    *metrics = layout ? layout->events : NULL;
++    if (layout)
++        last_unit_mode = layout->unit_mode;
++    return images;
++}
++
++/*
++ * This suite needs a system font that shapes Japanese and Arabic; the bundled
++ * test font covers none of it, and libass CI installs -dev packages but never
++ * font files, so bare images (Alpine, OmniOS) and font-poor ones (NetBSD) turn
++ * up without it.
++ *
++ * Decide once, here, and skip the whole suite when a capability is absent.
++ * Weakening individual assertions instead would let the shaping contract pass
++ * silently on the very machines that cannot check it. The probe uses its own
++ * renderer so it cannot perturb cache, change detection, or pruning state.
++ */
++static const char *missing_capability(ASS_Library *library, ASS_Track *track)
++{
++    ASS_Renderer *probe = new_renderer(library);
++    const char *reason = NULL;
++    ASS_LayoutEvent *metrics = NULL;
++
++    if (!ass_render_frame(probe, track, 1000, NULL)) {
++        reason = "no usable system font";
++    } else if (!render_unbounded(probe, track, 42000, NULL, &metrics) ||
++               !metrics) {
++        reason = "no layout for the Arabic ligature event";
++    } else {
++        ASS_LayoutUnit *lam = cluster_at(metrics, 0);
++        ASS_LayoutUnit *alef = cluster_at(metrics, 2);
++        if (!lam || lam != alef)
++            reason = "font does not shape Arabic lam-alef as one cluster";
++    }
++
++    ass_renderer_done(probe);
++    return reason;
++}
++
++int main(void)
++{
++    ASS_Library *library = ass_library_init();
++    assert(library);
++    ass_set_message_cb(library, message_callback, NULL);
++    ASS_Renderer *renderer = new_renderer(library);
++    ASS_Track *track = ass_read_memory(library, (char *) fixture,
++                                       sizeof(fixture) - 1, NULL);
++    assert(track);
++    const char *missing = missing_capability(library, track);
++    if (missing) {
++        fprintf(stderr, "skipping layout suite: %s\n", missing);
++        ass_free_track(track);
++        ass_renderer_done(renderer);
++        ass_library_done(library);
++        return 77;
++    }
++
++    ASS_Image *plain = ass_render_frame(renderer, track, 1000, NULL);
++    assert(plain);
++    uint64_t plain_hash = hash_images(plain);
++
++    ASS_LayoutEvent *metrics = NULL;
++    ASS_Image *with_metrics = render_unbounded(
++        renderer, track, 1000, NULL, &metrics);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(validate_metrics(metrics) == 1);
++    assert(last_unit_mode == ASS_LAYOUT_UNIT_SHAPING_CLUSTER);
++    assert(metrics->has_bitmap_bounds);
++    assert(metrics->bitmap_bounds.w > 0);
++    assert(metrics->bitmap_bounds.h > 0);
++    ASS_LayoutRect pixels = emitted_image_bounds(with_metrics);
++    assert(metrics->bitmap_bounds.x == pixels.x);
++    assert(metrics->bitmap_bounds.y == pixels.y);
++    assert(metrics->bitmap_bounds.w == pixels.w);
++    assert(metrics->bitmap_bounds.h == pixels.h);
++    const char expected[] = "A\xc2\xa0" "B\nC\n{D} E\xef\xbf\xbc" "F";
++    assert(strcmp(metrics->text, expected) == 0);
++
++    ASS_LayoutStatus status = ASS_LAYOUT_OK;
++    ASS_LayoutRequest limits = valid_limits();
++    limits.max_text_bytes = 1;
++    with_metrics = render_bounded(renderer, track, 1000, &limits, &metrics,
++                                  &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_LIMIT_EXCEEDED);
++
++    limits = valid_limits();
++    limits.max_units = 1;
++    with_metrics = render_bounded(renderer, track, 1000, &limits, &metrics,
++                                  &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_LIMIT_EXCEEDED);
++
++    limits = valid_limits();
++    limits.max_bitmap_pixels = 1;
++    with_metrics = render_bounded(renderer, track, 1000, &limits, &metrics,
++                                  &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_LIMIT_EXCEEDED);
++
++    limits = valid_limits();
++    limits.max_events = 1;
++    ASS_Image *collision = ass_render_frame(renderer, track, 10000, NULL);
++    assert(collision);
++    uint64_t collision_hash = hash_images(collision);
++    with_metrics = render_bounded(renderer, track, 10000, &limits, &metrics,
++                                  &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == collision_hash);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_LIMIT_EXCEEDED);
++
++    const size_t limit_offsets[] = {
++        offsetof(ASS_LayoutRequest, max_events),
++        offsetof(ASS_LayoutRequest, max_text_bytes),
++        offsetof(ASS_LayoutRequest, max_units),
++        offsetof(ASS_LayoutRequest, max_bitmap_pixels),
++    };
++    for (size_t i = 0; i < sizeof(limit_offsets) / sizeof(*limit_offsets); i++) {
++        limits = valid_limits();
++        *(size_t *) ((char *) &limits + limit_offsets[i]) = 0;
++        with_metrics = render_bounded(renderer, track, 1000, &limits,
++                                      &metrics, &status);
++        assert(with_metrics);
++        assert(hash_images(with_metrics) == plain_hash);
++        assert(!metrics);
++        assert(status == ASS_LAYOUT_INVALID_REQUEST);
++    }
++    limits = valid_limits();
++    limits.struct_size = offsetof(ASS_LayoutRequest, max_bitmap_pixels);
++    with_metrics = render_bounded(renderer, track, 1000, &limits,
++                                  &metrics, &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_INVALID_REQUEST);
++
++    limits = valid_limits();
++    limits.struct_size = sizeof(limits) + 64;
++    with_metrics = render_bounded(renderer, track, 1000, &limits,
++                                  &metrics, &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(metrics);
++    assert(status == ASS_LAYOUT_OK);
++    with_metrics = render_bounded(renderer, track, 1000, NULL, &metrics,
++                                  &status);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) == plain_hash);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_NOT_REQUESTED);
++
++    limits = valid_limits();
++    with_metrics = render_bounded(renderer, track, 37000, &limits, &metrics,
++                                  &status);
++    assert(!with_metrics);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_EMPTY);
++
++    with_metrics = render_unbounded(renderer, track, 1000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++
++    with_metrics = render_unbounded(renderer, track, 4000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "abc שלום") == 0);
++    ASS_LayoutUnit *first_hebrew = cluster_covering(metrics, 4, 6);
++    ASS_LayoutUnit *last_hebrew = cluster_covering(metrics, 10, 12);
++    assert(first_hebrew && last_hebrew);
++    assert(first_hebrew->pos.x > last_hebrew->pos.x);
++
++    with_metrics = render_unbounded(renderer, track, 7000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "office e\xcc\x81 日本語") == 0);
++    ASS_LayoutUnit *combining_base = cluster_at(metrics, 7);
++    ASS_LayoutUnit *combining_mark = cluster_at(metrics, 8);
++    assert(combining_base && combining_mark);
++    assert(combining_base != cluster_at(metrics, 10));
++    assert(combining_base->text_start == 7);
++    assert(combining_mark->text_end == 10);
++    assert(combining_base == combining_mark ||
++           combining_base->text_end == combining_mark->text_start);
++
++    with_metrics = render_unbounded(renderer, track, 10000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 2);
++    ASS_LayoutEvent *first = metrics;
++    ASS_LayoutEvent *second = metrics->next;
++    assert(first && second && first->units && second->units);
++    assert(strcmp(first->text, second->text) == 0);
++    assert(first->units->pos.y != second->units->pos.y);
++
++    with_metrics = render_unbounded(renderer, track, 13000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "A B") == 0);
++    assert(cluster_at(metrics, 0)->line == cluster_at(metrics, 2)->line);
++
++    with_metrics = render_unbounded(renderer, track, 16000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "A\nB") == 0);
++    assert(cluster_at(metrics, 0)->line == 0);
++    assert(cluster_at(metrics, 2)->line == 1);
++
++    with_metrics = render_unbounded(renderer, track, 19000, NULL,
++                                                  &metrics);
++    assert(!with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "\xc2\xa0") == 0);
++    assert(!metrics->has_bitmap_bounds);
++
++    with_metrics = render_unbounded(renderer, track, 21250, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    uint64_t early_karaoke_hash = hash_images(with_metrics);
++    with_metrics = render_unbounded(renderer, track, 21750, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(hash_images(with_metrics) != early_karaoke_hash);
++
++    with_metrics = render_unbounded(renderer, track, 24250, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    uint64_t early_transform_hash = hash_images(with_metrics);
++    double early_logical_right = rightmost_cluster_logical(metrics);
++    with_metrics = render_unbounded(renderer, track, 25750, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(hash_images(with_metrics) != early_transform_hash);
++    assert(rightmost_cluster_logical(metrics) == early_logical_right);
++
++    with_metrics = render_unbounded(renderer, track, 28000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(metrics->has_bitmap_bounds);
++    assert(metrics->bitmap_bounds.x + metrics->bitmap_bounds.w <= 35);
++
++    with_metrics = render_unbounded(renderer, track, 31000, NULL,
++                                                  &metrics);
++    assert(!with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "ghost") == 0);
++    assert(!metrics->has_bitmap_bounds);
++
++    int stress_iterations = __has_feature(address_sanitizer) ? 50 : 1000;
++    const char *stress_env = getenv("ASS_LAYOUT_STRESS_ITERATIONS");
++    if (stress_env) {
++        char *end = NULL;
++        long requested = strtol(stress_env, &end, 10);
++        assert(end && !*end && requested > 0 && requested <= INT_MAX);
++        stress_iterations = requested;
++    }
++    for (int i = 0; i < stress_iterations; i++) {
++        long long timestamp = (i & 1) ? 4000 : 7000;
++        with_metrics = render_unbounded(renderer, track, timestamp,
++                                                      NULL, &metrics);
++        assert(with_metrics);
++        assert(validate_metrics(metrics) == 1);
++    }
++
++    if (getenv("ASS_LAYOUT_BENCHMARK")) {
++        int iterations = 5000;
++        const char *benchmark_env = getenv("ASS_LAYOUT_BENCHMARK_ITERATIONS");
++        if (benchmark_env) {
++            char *end = NULL;
++            long requested = strtol(benchmark_env, &end, 10);
++            assert(end && !*end && requested > 0 && requested <= INT_MAX);
++            iterations = requested;
++        }
++        volatile ASS_Image *sink = NULL;
++        clock_t started = clock();
++        for (int i = 0; i < iterations; i++)
++            sink = ass_render_frame(renderer, track, 4000, NULL);
++        double plain_ms = 1000.0 * (clock() - started) /
++                          CLOCKS_PER_SEC / iterations;
++        started = clock();
++        for (int i = 0; i < iterations; i++)
++            sink = render_unbounded(renderer, track, 4000, NULL,
++                                                  &metrics);
++        double metrics_ms = 1000.0 * (clock() - started) /
++                            CLOCKS_PER_SEC / iterations;
++        assert(sink);
++        fprintf(stderr,
++                "benchmark: plain=%.4f ms metrics=%.4f ms delta=%.4f ms "
++                "ratio=%.2fx\n",
++                plain_ms, metrics_ms, metrics_ms - plain_ms,
++                metrics_ms / plain_ms);
++    }
++
++    with_metrics = render_unbounded(renderer, track, 35000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(metrics->units && !metrics->units->next);
++
++    with_metrics = render_unbounded(renderer, track, 39000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "مرحبا abc") == 0);
++    assert(metrics->units && metrics->units->next);
++    ASS_LayoutUnit *first_arabic = cluster_at(metrics, 0);
++    ASS_LayoutUnit *last_arabic = cluster_at(metrics, 8);
++    assert(first_arabic && last_arabic);
++    assert(first_arabic->pos.x > last_arabic->pos.x);
++
++    with_metrics = render_unbounded(renderer, track, 42000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "لا") == 0);
++    ASS_LayoutUnit *lam = cluster_at(metrics, 0);
++    ASS_LayoutUnit *alef = cluster_at(metrics, 2);
++    assert(lam && lam == alef);
++    assert(lam->text_start == 0);
++    assert(lam->text_end == strlen(metrics->text));
++
++    const long long equivalence_times[] = {
++        1000, 4000, 7000, 10000, 13000, 16000, 19000, 21250,
++        21750, 24250, 25750, 28000, 31000, 35000, 39000, 42000,
++    };
++    for (size_t i = 0; i < sizeof(equivalence_times) / sizeof(*equivalence_times); i++) {
++        with_metrics = render_unbounded(
++            renderer, track, equivalence_times[i], NULL, &metrics);
++        uint64_t metrics_hash = hash_images(with_metrics);
++        plain = ass_render_frame(renderer, track, equivalence_times[i], NULL);
++        assert(hash_images(plain) == metrics_hash);
++    }
++
++    with_metrics = render_unbounded(renderer, track, 37000, NULL,
++                                                  &metrics);
++    assert(!with_metrics);
++    assert(!metrics);
++
++    int first_style = track->events[0].Style;
++    track->events[0].Style = INT_MAX;
++    with_metrics = render_unbounded(renderer, track, 1000, NULL,
++                                                  &metrics);
++    assert(!with_metrics);
++    assert(!metrics);
++    track->events[0].Style = first_style;
++
++    with_metrics = render_unbounded(renderer, track, 1000, NULL,
++                                                  &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++
++    ASS_Renderer *simple_renderer = new_renderer(library);
++    ass_set_shaper(simple_renderer, ASS_SHAPING_SIMPLE);
++    with_metrics = render_unbounded(simple_renderer, track, 39000,
++                                                  NULL, &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 1);
++    assert(strcmp(metrics->text, "مرحبا abc") == 0);
++    assert(last_unit_mode == ASS_LAYOUT_UNIT_SIMPLE_SCALAR);
++    const size_t simple_ranges[][2] = {
++        {0, 2}, {2, 4}, {4, 6}, {6, 8}, {8, 10},
++        {10, 11}, {11, 12}, {12, 13}, {13, 14},
++    };
++    assert_ranges(metrics, simple_ranges,
++                  sizeof(simple_ranges) / sizeof(*simple_ranges));
++    ass_renderer_done(simple_renderer);
++
++    ASS_Track *empty_track = ass_new_track(library);
++    assert(empty_track);
++    limits = valid_limits();
++    with_metrics = render_bounded(renderer, empty_track, 1000, &limits, &metrics,
++                                  &status);
++    assert(!with_metrics);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_EMPTY);
++
++    limits = valid_limits();
++    limits.struct_size = 0;
++    with_metrics = render_bounded(renderer, empty_track, 1000, &limits,
++                                  &metrics, &status);
++    assert(!with_metrics);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_INVALID_REQUEST);
++
++    with_metrics = render_unbounded(renderer, empty_track, 1000, NULL,
++                                    &metrics);
++    assert(!with_metrics);
++    assert(!metrics);
++
++    ASS_Renderer *unconfigured_renderer = ass_renderer_init(library);
++    assert(unconfigured_renderer);
++    limits = valid_limits();
++    with_metrics = render_bounded(unconfigured_renderer, track, 1000, &limits,
++                                  &metrics, &status);
++    assert(!with_metrics);
++    assert(!metrics);
++    assert(status == ASS_LAYOUT_INVALID_REQUEST);
++
++    with_metrics = render_unbounded(unconfigured_renderer, empty_track, 1000,
++                                    NULL, &metrics);
++    assert(!with_metrics);
++    assert(!metrics);
++    ass_renderer_done(unconfigured_renderer);
++    ass_free_track(empty_track);
++
++    ASS_Track *prune_track = ass_read_memory(library, (char *) prune_fixture,
++                                             sizeof(prune_fixture) - 1, NULL);
++    assert(prune_track);
++    ass_configure_prune(prune_track, 0);
++    with_metrics = render_unbounded(renderer, prune_track, 3000,
++                                                  NULL, &metrics);
++    assert(with_metrics);
++    assert(validate_metrics(metrics) == 2);
++    assert(prune_track->n_events == 2);
++    assert(metrics->start_ms == 1500);
++    assert(metrics->duration_ms == 3000);
++    assert(strcmp(metrics->text, "first") == 0);
++    assert(metrics->next->start_ms == 2000);
++    assert(metrics->next->duration_ms == 3000);
++    assert(strcmp(metrics->next->text, "second") == 0);
++    ass_free_track(prune_track);
++
++    /*
++     * Pointing at any laid-out unit resolves to a text range that a consumer
++     * can slice out, and pointing away from the subtitle resolves to nothing.
++     */
++    with_metrics = render_unbounded(renderer, track, 1000, NULL, &metrics);
++    assert(with_metrics);
++    size_t probed = 0;
++    for (ASS_LayoutEvent *event = metrics; event; event = event->next) {
++        for (ASS_LayoutUnit *unit = event->units; unit; unit = unit->next) {
++            const ASS_LayoutRect *box = &unit->logical_bounds;
++            if (box->w <= 0 || box->h <= 0)
++                continue;
++            ASS_LayoutEvent *owner = NULL;
++            ASS_LayoutUnit *hit = hit_test(metrics, box->x + box->w / 2,
++                                           box->y + box->h / 2, &owner);
++            assert(hit);
++            assert(owner);
++            assert(hit->text_start < hit->text_end);
++            assert(hit->text_end <= owner->text_length);
++            assert(utf8_boundary(owner->text, owner->text_length,
++                                 hit->text_start));
++            assert(utf8_boundary(owner->text, owner->text_length,
++                                 hit->text_end));
++            probed++;
++        }
++    }
++    assert(probed > 0);
++    assert(!hit_test(metrics, -1.0e6, -1.0e6, NULL));
++
++    /* Layout is a function of the render, not of accumulated renderer state. */
++    struct { size_t start, end; int line; ASS_LayoutRect box; } baseline[256];
++    size_t baseline_count = 0;
++    for (ASS_LayoutEvent *event = metrics; event; event = event->next) {
++        for (ASS_LayoutUnit *unit = event->units; unit; unit = unit->next) {
++            assert(baseline_count < 256);
++            baseline[baseline_count].start = unit->text_start;
++            baseline[baseline_count].end = unit->text_end;
++            baseline[baseline_count].line = unit->line;
++            baseline[baseline_count].box = unit->logical_bounds;
++            baseline_count++;
++        }
++    }
++    assert(baseline_count > 0);
++    ASS_LayoutEvent *elsewhere = NULL;
++    render_unbounded(renderer, track, 4000, NULL, &elsewhere);
++    with_metrics = render_unbounded(renderer, track, 1000, NULL, &metrics);
++    assert(with_metrics);
++    size_t again = 0;
++    for (ASS_LayoutEvent *event = metrics; event; event = event->next) {
++        for (ASS_LayoutUnit *unit = event->units; unit; unit = unit->next) {
++            assert(again < baseline_count);
++            assert(unit->text_start == baseline[again].start);
++            assert(unit->text_end == baseline[again].end);
++            assert(unit->line == baseline[again].line);
++            assert(unit->logical_bounds.x == baseline[again].box.x);
++            assert(unit->logical_bounds.y == baseline[again].box.y);
++            assert(unit->logical_bounds.w == baseline[again].box.w);
++            assert(unit->logical_bounds.h == baseline[again].box.h);
++            again++;
++        }
++    }
++    assert(again == baseline_count);
++
++    ass_flush_events(track);
++    with_metrics = render_unbounded(renderer, track, 1000, NULL,
++                                                  &metrics);
++    assert(!with_metrics);
++    assert(!metrics);
++
++    ass_free_track(track);
++    ass_renderer_done(renderer);
++    ass_library_done(library);
++    return 0;
++}

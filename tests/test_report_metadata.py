@@ -73,6 +73,18 @@ def _envelope():
     return json.loads(report.collect()["diagnostics/envelope.json"])
 
 
+@pytest.mark.parametrize("other_hash", ["a" * 64, "b" * 64])
+def test_source_identity_compares_code_fingerprint_not_capture_time(other_hash):
+    collector = {"source": {"sha256": "a" * 64, "captured_ns": 100}}
+    producer = {"identity": {"source": {"sha256": other_hash, "captured_ns": 200}}}
+    result = report_schema.envelope(
+        collector=collector, producer=producer, configuration={}, health={}
+    )
+    assert result["identity_comparison"]["differing_fields"] == (
+        [] if other_hash == "a" * 64 else ["source"]
+    )
+
+
 def test_default_zip_excludes_private_payloads_in_every_member(monkeypatch, tmp_path):
     config = _environment(monkeypatch, tmp_path)
     private = "PRIVATE-SENTENCE-秘密-93847"
@@ -187,7 +199,9 @@ def test_unrelated_or_unsupported_summary_cannot_claim_health(
     assert payload["operation_health"] == {"status": "unavailable"}
 
 
-@pytest.mark.parametrize("body", ['{"pending":', "[" * 2000, " " * (128 * 1024 + 1)])
+@pytest.mark.parametrize(
+    "body", ['{"pending":', "[" * 2000, " " * (report.DIAGNOSTIC_JSON_LIMIT + 1)]
+)
 def test_unreadable_summary_is_not_an_empty_success(monkeypatch, tmp_path, body):
     _environment(monkeypatch, tmp_path)
     _summary(tmp_path).write_text(body)

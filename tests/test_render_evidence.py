@@ -121,6 +121,30 @@ def _export():
     return json.loads(report.collect()["diagnostics/envelope.json"])
 
 
+def test_timed_publication_history_survives_metadata_only_report(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    pipeline.record_timed_osd({"event": "context", "epoch": 3, "delay_ms": -6000})
+    pipeline.record_timed_osd(
+        {
+            "event": "ack",
+            "epoch": 3,
+            "slot": 2001,
+            "payload_hash": "a" * 16,
+            "start_ms": 16000,
+            "video_start_ms": 10000,
+            "text": "private subtitle",
+        }
+    )
+    envelope = _export()
+    history = envelope["effective_runtime_configuration"]["owners"][0]["timed_osd"]
+    assert history["counts"] == {"context": 1, "ack": 1}
+    assert history["history"][0]["delay_ms"] == -6000
+    assert history["history"][1]["payload_hash"] == "a" * 16
+    assert history["display_counters"] is None
+    assert "private subtitle" not in json.dumps(envelope)
+
+
 def _owner():
     return render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())[
         "owners"

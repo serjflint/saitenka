@@ -1,0 +1,2156 @@
+diff --git a/DOCS/interface-changes/subtitle-layout.txt b/DOCS/interface-changes/subtitle-layout.txt
+new file mode 100644
+index 0000000000..c01ed6e5f5
+--- /dev/null
++++ b/DOCS/interface-changes/subtitle-layout.txt
+@@ -0,0 +1 @@
++add the `--subtitle-layout` option and structured layout commands and property
+diff --git a/DOCS/man/input.rst b/DOCS/man/input.rst
+index 4741e5570c..e37db579ec 100644
+--- a/DOCS/man/input.rst
++++ b/DOCS/man/input.rst
+@@ -1094,6 +1094,116 @@ OSD Commands
+         use the ``mp.create_osd_overlay()`` helper instead of invoking this
+         command directly.
+ 
++``subtitle-layout [<track>]``
++    Return the latest retained structured layout for ``primary`` subtitles.
++    ``track`` defaults to ``primary`` and no other value is supported. This
++    command is available even when the feature is disabled or was not compiled
++    in, so clients can inspect ``status`` and ``capabilities``.
++
++    The result always contains ``capabilities``, effective ``limits``,
++    ``available``, ``status``, and ``revision``. Builds without compatible
++    layout support return an empty capability list and limits map.
++    ``available`` is true exactly when ``status`` is ``ok`` and the response
++    also contains a snapshot. Other
++    status values are ``disabled``, ``unsupported-build``,
++    ``unsupported-format``, ``unsupported-render-mode``, ``empty``,
++    ``no-authoritative-render``, ``limit-exceeded``, ``collection-failed``, and
++    ``stale-identity``. An empty render is not a usable snapshot.
++
++    ``limits`` reports the effective aggregate bounds for events, parsed text
++    bytes, layout units, bitmap pixels, and retained snapshot bytes. Exceeding one reports
++    ``limit-exceeded`` without affecting ordinary subtitle rendering.
++
++    A successful result additionally contains:
++
++    ``snapshot_id``
++        Opaque identity for the immutable response.
++
++    ``media`` and ``track``
++        The playing playlist entry, primary track and decoder generation that
++        produced the snapshot. ``track`` also reports the source ``format``,
++        ``layout_engine`` and ``layout_unit_mode``. The mode is
++        ``harfbuzz-cluster`` for complex shaping and ``simple-scalar`` for
++        libass's simple shaper.
++
++    ``time``
++        Video and subtitle timestamps from the render which acquired this
++        layout. They remain part of the immutable snapshot until its semantic
++        contents change. Event start and end times use the subtitle clock after
++        mpv subtitle timing transforms. A null event end means that its
++        duration is unknown.
++
++    ``space``
++        The OSD width, height, margins and display pixel aspect ratio accepted
++        by the render, plus ``render_origin=output-render``. Rectangles are
++        half-open and use the same coordinates as ``osd-dimensions`` and
++        ``mouse-pos``. An embedding application must forward pointer positions
++        in this coordinate space or perform its own surface-to-OSD mapping.
++
++    ``events``
++        Active events in renderer order. Each event contains a snapshot-local
++        ID, order, timing, parsed logical ``text``, ``text_index_unit=utf8-byte``,
++        ``units``, and the final whole-event bitmap bounds when available.
++        Unit ranges are contiguous byte ranges over that event's text. The
++        range unit depends on ``layout_unit_mode`` and is not promised to be a
++        grapheme, word, or code point in complex shaping mode.
++
++        ``logical_rects`` are pre-transform typographic boxes after line layout
++        and collision placement. They do not represent final per-unit visible pixels.
++
++        The ``event-geometry-profile`` capability adds nullable ``geometry_profile``.
++        ``static-logical-v2`` identifies a restricted source grammar checked by
++        mpv against the exact rendered libass event: plain text, one static
++        ``pos`` tag, positive decimal ``fscx``/``fscy`` tags, decimal karaoke
++        timing tags (``k``, ``K``, ``kf``, ``ko``), and hexadecimal color/alpha
++        tags. Color values allow up to eight digits and an optional trailing
++        ampersand; alpha values allow up to two digits. Unknown or malformed
++        tags, resets, effects, rotation, vertical fonts and nonpositive style
++        scales are excluded. Admission requires requested libass pixel aspect 1 and
++        no ASS style override for authored ASS. Converted SubRip uses mpv's
++        generated style. Rectangles already include OSD margins.
++        Null means the event or rendering options are outside this profile,
++        or the runtime lacks the event index needed to verify them.
++
++        The ``event-track-index`` capability adds ``track_index``, the event's
++        index in the exact rendered libass track. Sorting by this index follows
++        the traversal used by mpv's subtitle text properties. It is scoped to
++        the retained snapshot, not a persistent source-file identity. Filtered,
++        empty or unrendered events can be absent; clients must verify their
++        complete active-event binding rather than assuming positional equality.
++        ``sub-text/ass-full`` serializes times at centisecond precision while
++        event timing in the layout retains millisecond precision.
++
++        This profile describes logical geometry, not final pixel visibility,
++        paint eligibility or a lease on future layout. Karaoke colors and alpha
++        may change or hide text without changing its semantic regions. All
++        snapshot validation and invalidation rules still apply. No outlines or
++        additional libass output flags are required.
++
++    The snapshot is replaced atomically. Repeated fetches return identical data
++    while the current ``snapshot_id`` and revision remain unchanged. Observe
++    ``subtitle-layout-revision`` and fetch after it changes; an
++    observation can be coalesced, so clients must treat the command as a latest
++    state snapshot rather than a lossless event stream. The command constructs
++    and serializes the bounded response synchronously, which can be expensive
++    near the reported limits. Do not poll it when the revision is unchanged.
++
++    JSON IPC example::
++
++        {"command":["subtitle-layout","primary"]}
++
++    A named libmpv command node or Lua command uses ``_name``::
++
++        mp.command_native({_name="subtitle-layout",
++                           track="primary"})
++
++``subtitle-layout-valid [<snapshot_id>]``
++    Return whether ``snapshot_id`` identifies the current retained snapshot for
++    the currently playing file, primary track, and decoder generation. This is
++    a point-in-time check: player state can change after the command returns.
++    Consumers should discard installed geometry whenever the observed revision
++    changes. An omitted or unknown ID returns false.
++
+ Input and Keybind Commands
+ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 
+@@ -3268,6 +3378,14 @@ Property list
+     The extradata is returned as a string as-is. This property is not
+     available for non-ASS subtitle tracks.
+ 
++``subtitle-layout-revision``
++    Monotonic revision of the latest structured subtitle-layout state. It
++    changes when a new immutable snapshot replaces the current one or when the
++    current snapshot becomes unavailable. Repeated equivalent renders retain
++    the original snapshot and its acquisition timestamps. The property is
++    observable, but updates may be coalesced; fetch ``subtitle-layout`` to
++    obtain the latest state. See ``--subtitle-layout``.
++
+ ``sub-text``
+     The current subtitle text regardless of sub visibility. Formatting is
+     stripped. If the subtitle is not text-based (i.e. DVD/BD subtitles), an
+diff --git a/DOCS/man/options.rst b/DOCS/man/options.rst
+index 09b9075e8f..4727b99a8a 100644
+--- a/DOCS/man/options.rst
++++ b/DOCS/man/options.rst
+@@ -2490,6 +2490,23 @@ Subtitles
+     Subtitles in ASS format are normally not changed intentionally, but
+     overriding them can be controlled with ``--sub-ass-override``.
+ 
++``--subtitle-layout=<yes|no>``
++    Enable collection of structured subtitle layout from the primary subtitle
++    renderer (default: no). The result is available through the
++    ``subtitle-layout`` command and the
++    ``subtitle-layout-revision`` property.
++
++    This requires a libass build with the layout API.
++    The initial supported source formats are ASS and SubRip. SubRip exercises
++    mpv's conversion into libass events; other converted text formats and
++    bitmap subtitle formats report ``unsupported-format``.
++
++    The API reports only the primary subtitle track in the ordinary OSD
++    output-render path. Subtitle filtering with ``vf=sub``, secondary
++    subtitles, stereo layouts, and ``--blend-subtitles=yes|video`` renders are
++    intentionally unsupported. Geometry describes the render selected by mpv;
++    it is not confirmation that the video output presented that frame.
++
+ ``--sub-demuxer=<[+]name>``
+     Force subtitle demuxer type for ``--sub-file``. Give the demuxer name as
+     printed by ``--sub-demuxer=help``.
+diff --git a/meson.build b/meson.build
+index e571904378..8a663ea1d7 100644
+--- a/meson.build
++++ b/meson.build
+@@ -280,6 +280,30 @@ sources = files(
+ 
+ # compiler stuff
+ cc = meson.get_compiler('c')
++libass_layout = cc.links('''
++    #include <ass/ass.h>
++    #include <ass/ass_layout.h>
++    int main(void) {
++        ASS_LayoutRequest layout_request = {
++            .struct_size = sizeof(ASS_LayoutRequest),
++            .max_events = 1,
++            .max_text_bytes = 1,
++            .max_units = 1,
++            .max_bitmap_pixels = 1,
++        };
++        ASS_RenderRequest request = {
++            .struct_size = sizeof(ASS_RenderRequest),
++            .layout = &layout_request,
++        };
++        ASS_LayoutEvent event = {.has_duration = 0, .units = 0, .event_index = 0};
++        ASS_LayoutUnit unit = {.text_start = 0, .logical_bounds = {0}};
++        if (event.units || unit.text_start)
++            return 1;
++        const ASS_RenderResult *result = ass_render_frame2(0, &request);
++        return result && result->layout_status == ASS_LAYOUT_OK;
++    }
++''', name: 'compatible libass subtitle layout API', dependencies: libass)
++features += {'libass-layout': libass_layout}
+ 
+ flags = ['-D_FILE_OFFSET_BITS=64']
+ flags_c = []
+diff --git a/options/options.c b/options/options.c
+index 2a5373d44d..a3890593b7 100644
+--- a/options/options.c
++++ b/options/options.c
+@@ -316,6 +316,8 @@ const struct m_sub_options mp_subtitle_sub_opts = {
+         {"sub-gauss", OPT_FLOAT(sub_gauss), M_RANGE(0.0, 3.0)},
+         {"sub-gray", OPT_BOOL(sub_gray)},
+         {"sub-ass", OPT_BOOL(ass_enabled), .flags = UPDATE_SUB_HARD},
++        {"subtitle-layout", OPT_BOOL(subtitle_layout),
++            .flags = UPDATE_SUB_HARD},
+         {"sub-scale-signs", OPT_BOOL(sub_scale_signs)},
+         {"sub-line-spacing", OPT_FLOAT(sub_line_spacing), M_RANGE(-1000, 1000)},
+         {"sub-ass-line-spacing", OPT_REPLACED("sub-line-spacing")},
+diff --git a/options/options.h b/options/options.h
+index 1524262379..8dac3005e7 100644
+--- a/options/options.h
++++ b/options/options.h
+@@ -114,6 +114,7 @@ struct mp_subtitle_opts {
+     float sub_gauss;
+     bool sub_gray;
+     bool ass_enabled;
++    bool subtitle_layout;
+     float sub_line_spacing;
+     bool ass_use_margins;
+     bool sub_use_margins;
+diff --git a/player/command.c b/player/command.c
+index a0dccf4a37..f4abf25755 100644
+--- a/player/command.c
++++ b/player/command.c
+@@ -3431,6 +3431,15 @@ static int mp_property_sub_ass_extradata(void *ctx, struct m_property *prop,
+     return M_PROPERTY_NOT_IMPLEMENTED;
+ }
+ 
++static int mp_property_subtitle_layout_revision(void *ctx,
++                                                struct m_property *prop,
++                                                int action, void *arg)
++{
++    MPContext *mpctx = ctx;
++    return m_property_int64_ro(
++        action, arg, osd_get_subtitle_layout_revision(mpctx->osd));
++}
++
+ static int mp_property_sub_text(void *ctx, struct m_property *prop,
+                                 int action, void *arg)
+ {
+@@ -4756,6 +4765,8 @@ static const struct m_property mp_properties_base[] = {
+     {"secondary-sub-pos", mp_property_sub_pos,
+         .priv = (void *)&(const int){1}},
+     {"sub-ass-extradata", mp_property_sub_ass_extradata},
++    {"subtitle-layout-revision",
++        mp_property_subtitle_layout_revision},
+     {"sub-text", mp_property_sub_text,
+         .priv = (void *)&(const int[]){0, SD_TEXT_TYPE_PLAIN}},
+     {"secondary-sub-text", mp_property_sub_text,
+@@ -4847,7 +4858,8 @@ static const char *const *const mp_event_property_change[] = {
+     E(MPV_EVENT_FILE_LOADED, "*"),
+     E(MP_EVENT_CHANGE_ALL, "*"),
+     E(MP_EVENT_TRACKS_CHANGED, "track-list", "current-tracks"),
+-    E(MP_EVENT_TRACK_SWITCHED, "track-list", "current-tracks"),
++    E(MP_EVENT_TRACK_SWITCHED, "track-list", "current-tracks",
++      "subtitle-layout-revision"),
+     E(MPV_EVENT_IDLE, "*"),
+     E(MPV_EVENT_TICK, "time-pos", "audio-pts", "stream-pos", "avsync",
+       "percent-pos", "time-remaining", "playtime-remaining", "playback-time",
+@@ -4858,18 +4870,21 @@ static const char *const *const mp_event_property_change[] = {
+       "decoder-frame-drop-count", "frame-drop-count", "video-frame-info",
+       "vf-metadata", "af-metadata", "sub-start", "sub-end", "secondary-sub-start",
+       "secondary-sub-end", "sub-lines", "secondary-sub-lines", "video-out-params",
+-      "video-dec-params", "video-params", "deinterlace-active", "video-target-params"),
++      "video-dec-params", "video-params", "deinterlace-active", "video-target-params",
++      "subtitle-layout-revision"),
+     E(MP_EVENT_DURATION_UPDATE, "duration"),
+     E(MPV_EVENT_VIDEO_RECONFIG, "video-out-params", "video-params",
+       "video-format", "video-codec", "video-bitrate", "dwidth", "dheight",
+       "width", "height", "container-fps", "aspect", "aspect-name", "vo-configured", "current-vo",
+       "video-dec-params", "osd-dimensions", "hwdec", "hwdec-current", "hwdec-interop",
+-      "window-id", "track-list", "current-tracks"),
++      "window-id", "track-list", "current-tracks",
++      "subtitle-layout-revision"),
+     E(MPV_EVENT_AUDIO_RECONFIG, "audio-format", "audio-codec", "audio-bitrate",
+       "samplerate", "channels", "audio", "volume", "volume-gain", "mute",
+       "current-ao", "audio-codec-name", "audio-params", "track-list", "current-tracks",
+       "audio-out-params", "volume-max", "volume-gain-min", "volume-gain-max", "mixer-active"),
+-    E(MPV_EVENT_SEEK, "seeking", "core-idle", "eof-reached"),
++    E(MPV_EVENT_SEEK, "seeking", "core-idle", "eof-reached",
++      "subtitle-layout-revision"),
+     E(MPV_EVENT_PLAYBACK_RESTART, "seeking", "core-idle", "eof-reached"),
+     E(MP_EVENT_METADATA_UPDATE, "metadata", "filtered-metadata", "media-title"),
+     E(MP_EVENT_CHAPTER_CHANGE, "chapter", "chapter-metadata"),
+@@ -4878,7 +4893,7 @@ static const char *const *const mp_event_property_change[] = {
+       "demuxer-cache-time", "cache-buffering-state", "cache-speed",
+       "demuxer-cache-state"),
+     E(MP_EVENT_WIN_RESIZE, "current-window-scale", "osd-width", "osd-height",
+-      "osd-par", "osd-dimensions"),
++      "osd-par", "osd-dimensions", "subtitle-layout-revision"),
+     E(MP_EVENT_WIN_STATE, "display-names", "display-fps", "display-width",
+       "display-height"),
+     E(MP_EVENT_WIN_STATE2, "display-hidpi-scale"),
+@@ -5541,6 +5556,252 @@ static void cmd_osd_overlay(void *p)
+     mp_wakeup_core(mpctx);
+ }
+ 
++#if HAVE_LIBASS_LAYOUT
++static void node_array_add_string(struct mpv_node *array, const char *value)
++{
++    struct mpv_node *entry = node_array_add(array, MPV_FORMAT_NONE);
++    entry->format = MPV_FORMAT_STRING;
++    entry->u.string = talloc_strdup(array->u.list, value);
++}
++#endif
++
++static void node_add_layout_rect(struct mpv_node *map, const char *key,
++                                 struct sub_layout_rect rect)
++{
++    struct mpv_node *out = node_map_add(map, key, MPV_FORMAT_NODE_MAP);
++    node_map_add_double(out, "x", rect.x);
++    node_map_add_double(out, "y", rect.y);
++    node_map_add_double(out, "w", rect.w);
++    node_map_add_double(out, "h", rect.h);
++}
++
++static void node_array_add_layout_rect(struct mpv_node *array,
++                                       struct sub_layout_rect rect)
++{
++    struct mpv_node *out = node_array_add(array, MPV_FORMAT_NODE_MAP);
++    node_map_add_double(out, "x", rect.x);
++    node_map_add_double(out, "y", rect.y);
++    node_map_add_double(out, "w", rect.w);
++    node_map_add_double(out, "h", rect.h);
++}
++
++static const char *subtitle_layout_origin_name(enum osd_render_origin origin)
++{
++    switch (origin) {
++    case OSD_RENDER_PRESENTATION: return "output-render";
++    case OSD_RENDER_SUB_FILTER_PRESENTATION: return "sub-filter-render";
++    case OSD_RENDER_CAPTURE: return "capture";
++    case OSD_RENDER_INTERMEDIATE: return "intermediate";
++    case OSD_RENDER_STEREO: return "stereo";
++    case OSD_RENDER_PROBE: return "probe";
++    }
++    return "unknown";
++}
++
++static const char *subtitle_layout_status_name(enum sub_layout_status status)
++{
++    switch (status) {
++    case SUB_LAYOUT_NONE: return "no-authoritative-render";
++    case SUB_LAYOUT_OK: return "ok";
++    case SUB_LAYOUT_EMPTY: return "empty";
++    case SUB_LAYOUT_LIMIT_EXCEEDED: return "limit-exceeded";
++    case SUB_LAYOUT_COLLECTION_FAILED: return "collection-failed";
++    case SUB_LAYOUT_COPY_REJECTED: return "collection-failed";
++    case SUB_LAYOUT_UNSUPPORTED: return "unsupported-build";
++    case SUB_LAYOUT_UNSUPPORTED_FORMAT: return "unsupported-format";
++    case SUB_LAYOUT_UNSUPPORTED_RENDER_MODE: return "unsupported-render-mode";
++    }
++    return "unknown";
++}
++
++static bool subtitle_layout_snapshot_is_current(
++    MPContext *mpctx, struct subtitle_layout_snapshot *snapshot)
++{
++    struct track *track = mpctx->current_track[0][STREAM_SUB];
++    int64_t playlist_entry_id = mpctx->playing ? mpctx->playing->id : -1;
++    return snapshot->layout && track &&
++           track->user_tid == snapshot->track_id &&
++           playlist_entry_id == snapshot->playlist_entry_id;
++}
++
++static void cmd_subtitle_layout_valid(void *p)
++{
++    struct mp_cmd_ctx *cmd = p;
++    MPContext *mpctx = cmd->mpctx;
++    struct subtitle_layout_snapshot snapshot;
++    osd_get_subtitle_layout_metadata(mpctx->osd, &snapshot);
++    bool valid = subtitle_layout_snapshot_is_current(mpctx, &snapshot);
++    if (valid) {
++        char snapshot_id[96];
++        snprintf(snapshot_id, sizeof(snapshot_id), "g%" PRIu64 "-r%" PRIu64,
++                 snapshot.decoder_generation, snapshot.revision);
++        valid = strcmp(snapshot_id, cmd->args[0].v.s) == 0;
++    }
++    cmd->result = (struct mpv_node) {
++        .format = MPV_FORMAT_FLAG,
++        .u.flag = valid,
++    };
++}
++
++static void cmd_subtitle_layout(void *p)
++{
++    struct mp_cmd_ctx *cmd = p;
++    MPContext *mpctx = cmd->mpctx;
++    struct mpv_node *root = &cmd->result;
++    node_init(root, MPV_FORMAT_NODE_MAP, NULL);
++
++#if HAVE_LIBASS_LAYOUT
++    struct mpv_node *capabilities =
++        node_map_add(root, "capabilities", MPV_FORMAT_NODE_ARRAY);
++    node_array_add_string(capabilities, "events");
++    node_array_add_string(capabilities, "unit-logical-rects");
++    node_array_add_string(capabilities, "event-geometry-profile");
++    node_array_add_string(capabilities, "event-track-index");
++    node_array_add_string(capabilities, "event-bitmap-bounds");
++    struct mpv_node *limits =
++        node_map_add(root, "limits", MPV_FORMAT_NODE_MAP);
++    node_map_add_int64(limits, "max_events", SUB_LAYOUT_MAX_EVENTS);
++    node_map_add_int64(limits, "max_text_bytes", SUB_LAYOUT_MAX_TEXT_BYTES);
++    node_map_add_int64(limits, "max_units", SUB_LAYOUT_MAX_UNITS);
++    node_map_add_int64(limits, "max_bitmap_pixels",
++                       SUB_LAYOUT_MAX_BITMAP_PIXELS);
++    node_map_add_int64(limits, "max_retained_bytes",
++                       SUB_LAYOUT_MAX_RETAINED_BYTES);
++#else
++    node_map_add(root, "capabilities", MPV_FORMAT_NODE_ARRAY);
++    node_map_add(root, "limits", MPV_FORMAT_NODE_MAP);
++#endif
++
++    if (!mpctx->opts->subs_rend->subtitle_layout) {
++        node_map_add_flag(root, "available", false);
++        node_map_add_string(root, "status", "disabled");
++        node_map_add_int64(root, "revision",
++                           osd_get_subtitle_layout_revision(mpctx->osd));
++        return;
++    }
++
++#if !HAVE_LIBASS_LAYOUT
++    node_map_add_flag(root, "available", false);
++    node_map_add_string(root, "status", "unsupported-build");
++    node_map_add_int64(root, "revision",
++                       osd_get_subtitle_layout_revision(mpctx->osd));
++    return;
++#else
++    struct track *track = mpctx->current_track[0][STREAM_SUB];
++    if (track && track->d_sub && !sub_uses_libass(track->d_sub)) {
++        node_map_add_flag(root, "available", false);
++        node_map_add_string(root, "status", "unsupported-format");
++        node_map_add_int64(root, "revision",
++                           osd_get_subtitle_layout_revision(mpctx->osd));
++        return;
++    }
++#endif
++
++    struct subtitle_layout_snapshot *snapshot =
++        osd_get_subtitle_layout_snapshot(NULL, mpctx->osd);
++    if (!snapshot->layout) {
++        node_map_add_flag(root, "available", false);
++        node_map_add_string(root, "status",
++                            subtitle_layout_status_name(snapshot->status));
++        node_map_add_int64(root, "revision", snapshot->revision);
++        talloc_free(snapshot);
++        return;
++    }
++
++    const struct sub_layout *layout = snapshot->layout;
++    if (!subtitle_layout_snapshot_is_current(mpctx, snapshot)) {
++        talloc_free(snapshot);
++        node_map_add_flag(root, "available", false);
++        node_map_add_string(root, "status", "stale-identity");
++        node_map_add_int64(root, "revision",
++            osd_get_subtitle_layout_revision(mpctx->osd));
++        return;
++    }
++    node_map_add_flag(root, "available", true);
++    node_map_add_string(root, "status", "ok");
++    node_map_add_int64(root, "revision", snapshot->revision);
++    char snapshot_id[96];
++    snprintf(snapshot_id, sizeof(snapshot_id), "g%" PRIu64 "-r%" PRIu64,
++             snapshot->decoder_generation, snapshot->revision);
++    node_map_add_string(root, "snapshot_id", snapshot_id);
++
++    struct mpv_node *media = node_map_add(root, "media", MPV_FORMAT_NODE_MAP);
++    node_map_add_int64(media, "playlist_entry_id", snapshot->playlist_entry_id);
++
++    struct mpv_node *track_node = node_map_add(root, "track", MPV_FORMAT_NODE_MAP);
++    node_map_add_int64(track_node, "id", snapshot->track_id);
++    node_map_add_int64(track_node, "decoder_generation",
++                       snapshot->decoder_generation);
++    node_map_add_string(track_node, "format", layout->source_format);
++    node_map_add_string(track_node, "layout_engine", "libass");
++    node_map_add_string(track_node, "layout_unit_mode",
++        layout->unit_mode == SUB_LAYOUT_UNIT_SIMPLE_SCALAR
++        ? "simple-scalar" : "harfbuzz-cluster");
++
++    struct mpv_node *time = node_map_add(root, "time", MPV_FORMAT_NODE_MAP);
++    node_map_add_double(time, "render_video_pts", snapshot->video_pts);
++    node_map_add_double(time, "render_subtitle_pts", layout->subtitle_pts);
++    node_map_add_string(time, "event_domain", "subtitle");
++
++    struct mpv_node *space = node_map_add(root, "space", MPV_FORMAT_NODE_MAP);
++    node_map_add_string(space, "name", "osd");
++    node_map_add_int64(space, "width", layout->space_w);
++    node_map_add_int64(space, "height", layout->space_h);
++    node_map_add_int64(space, "margin_top", layout->space_mt);
++    node_map_add_int64(space, "margin_bottom", layout->space_mb);
++    node_map_add_int64(space, "margin_left", layout->space_ml);
++    node_map_add_int64(space, "margin_right", layout->space_mr);
++    node_map_add_double(space, "display_par", layout->space_display_par);
++    node_map_add_string(space, "rect_semantics", "half-open");
++    node_map_add_string(space, "render_origin",
++                        subtitle_layout_origin_name(snapshot->origin));
++
++    struct mpv_node *events = node_map_add(root, "events", MPV_FORMAT_NODE_ARRAY);
++    for (int n = 0; n < layout->num_events; n++) {
++        const struct sub_layout_event *event = &layout->events[n];
++        struct mpv_node *event_node = node_array_add(events, MPV_FORMAT_NODE_MAP);
++        char event_id[32];
++        snprintf(event_id, sizeof(event_id), "e%d", n);
++        node_map_add_string(event_node, "id", event_id);
++        node_map_add_int64(event_node, "order", n);
++        node_map_add_int64(event_node, "track_index", event->track_index);
++        node_map_add_double(event_node, "start", event->start);
++        if (event->end == MP_NOPTS_VALUE)
++            node_map_add(event_node, "end", MPV_FORMAT_NONE);
++        else
++            node_map_add_double(event_node, "end", event->end);
++        node_map_add_bstr(event_node, "text",
++                          (bstr){event->text, event->text_length});
++        node_map_add_string(event_node, "text_index_unit", "utf8-byte");
++        if (event->static_logical_profile)
++            node_map_add_string(event_node, "geometry_profile", "static-logical-v2");
++        else
++            node_map_add(event_node, "geometry_profile", MPV_FORMAT_NONE);
++
++        struct mpv_node *units =
++            node_map_add(event_node, "units", MPV_FORMAT_NODE_ARRAY);
++        for (int c = 0; c < event->num_units; c++) {
++            const struct sub_layout_unit *unit = &event->units[c];
++            struct mpv_node *unit_node =
++                node_array_add(units, MPV_FORMAT_NODE_MAP);
++            node_map_add_int64(unit_node, "start", unit->text_start);
++            node_map_add_int64(unit_node, "end", unit->text_end);
++            node_map_add_int64(unit_node, "line", unit->line);
++            struct mpv_node *logical = node_map_add(
++                unit_node, "logical_rects", MPV_FORMAT_NODE_ARRAY);
++            node_array_add_layout_rect(logical, unit->logical_bounds);
++
++        }
++        if (event->has_bitmap_bounds) {
++            node_add_layout_rect(event_node, "bitmap_bounds",
++                                 event->bitmap_bounds);
++        } else {
++            node_map_add(event_node, "bitmap_bounds", MPV_FORMAT_NONE);
++        }
++    }
++    talloc_free(snapshot);
++}
++
+ static struct track *find_track_with_url(struct MPContext *mpctx, int type, const char *url)
+ {
+     char *path = mp_get_user_path(NULL, mpctx->global, url);
+@@ -7906,7 +8167,20 @@ const struct mp_cmd_def mp_cmds[] = {
+         },
+         .is_noisy = true,
+     },
+-
++    { "subtitle-layout", cmd_subtitle_layout,
++        {
++            {"track", OPT_CHOICE(v.i, {"primary", 0}), OPTDEF_INT(0),
++                .flags = MP_CMD_OPT_ARG},
++        },
++        .is_noisy = true,
++    },
++    { "subtitle-layout-valid", cmd_subtitle_layout_valid,
++        {
++            {"snapshot_id", OPT_STRING(v.s), OPTDEF_STR(""),
++                .flags = MP_CMD_OPT_ARG},
++        },
++        .is_noisy = true,
++    },
+     { "write-watch-later-config", cmd_write_watch_later_config },
+     { "delete-watch-later-config", cmd_delete_watch_later_config,
+         {{"filename", OPT_STRING(v.s), .flags = MP_CMD_OPT_ARG} }},
+@@ -8241,6 +8515,7 @@ void mp_option_run_callback(struct MPContext *mpctx, struct mp_option_callback *
+         mp_update_logging(mpctx, false);
+ 
+     if (flags & (UPDATE_OSD | UPDATE_SUB_FILT | UPDATE_SUB_HARD)) {
++        osd_clear_subtitle_layout(mpctx->osd);
+         for (int n = 0; n < num_ptracks[STREAM_SUB]; n++) {
+             struct track *track = mpctx->current_track[n][STREAM_SUB];
+             struct dec_sub *sub = track ? track->d_sub : NULL;
+diff --git a/player/playloop.c b/player/playloop.c
+index d899fba123..99d2699e11 100644
+--- a/player/playloop.c
++++ b/player/playloop.c
+@@ -383,6 +383,8 @@ static void mp_seek(MPContext *mpctx, struct seek_params seek)
+         return;
+     }
+ 
++    osd_clear_subtitle_layout(mpctx->osd);
++
+     mpctx->play_dir = play_dir;
+ 
+     // Seek external, extra files too:
+@@ -455,6 +457,7 @@ void queue_seek(struct MPContext *mpctx, enum seek_type type, double amount,
+                 enum seek_precision exact, int flags)
+ {
+     struct seek_params *seek = &mpctx->seek;
++    osd_clear_subtitle_layout(mpctx->osd);
+ 
+     mp_wakeup_core(mpctx);
+ 
+diff --git a/player/screenshot.c b/player/screenshot.c
+index d21a53abdc..fb7e1a5098 100644
+--- a/player/screenshot.c
++++ b/player/screenshot.c
+@@ -330,11 +330,11 @@ static void add_osd(struct MPContext *mpctx, struct mp_image *image, int mode)
+                             osd_res_from_image_params(&image->params);
+     if (mode & MODE_SUBTITLES) {
+         osd_draw_on_image(mpctx->osd, res, mpctx->video_pts,
+-                          OSD_DRAW_SUB_ONLY, image);
++                          OSD_DRAW_SUB_ONLY, OSD_RENDER_CAPTURE, image);
+     }
+     if (mode & MODE_OSD) {
+         osd_draw_on_image(mpctx->osd, res, mpctx->video_pts,
+-                          OSD_DRAW_OSD_ONLY, image);
++                          OSD_DRAW_OSD_ONLY, OSD_RENDER_CAPTURE, image);
+     }
+ }
+ 
+diff --git a/player/sub.c b/player/sub.c
+index b5dcb0ceb5..9a173e9b78 100644
+--- a/player/sub.c
++++ b/player/sub.c
+@@ -24,6 +24,7 @@
+ #include "mpv_talloc.h"
+ 
+ #include "common/msg.h"
++#include "common/playlist.h"
+ #include "options/options.h"
+ #include "common/common.h"
+ 
+@@ -79,7 +80,9 @@ void uninit_sub(struct MPContext *mpctx, struct track *track)
+         sub_select(track->d_sub, false);
+         if (order >= 0) {
+             term_osd_set_subs(mpctx, NULL, order);
+-            osd_set_sub(mpctx->osd, order, NULL);
++            osd_set_sub(mpctx->osd, order, NULL,
++                        mpctx->playing ? mpctx->playing->id : -1,
++                        track->user_tid);
+         }
+         sub_destroy(track->d_sub);
+         track->d_sub = NULL;
+@@ -229,7 +232,9 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
+ 
+     sub_select(track->d_sub, true);
+     int order = get_order(mpctx, track);
+-    osd_set_sub(mpctx->osd, order, track->d_sub);
++    osd_set_sub(mpctx->osd, order, track->d_sub,
++                mpctx->playing ? mpctx->playing->id : -1,
++                track->user_tid);
+ 
+     // When paused we have to wait for packets to be available.
+     // Retry on a timeout until we get a packet. If still not successful,
+diff --git a/sub/ass_layout_profile.h b/sub/ass_layout_profile.h
+new file mode 100644
+index 0000000000..19524cfa95
+--- /dev/null
++++ b/sub/ass_layout_profile.h
+@@ -0,0 +1,96 @@
++#ifndef MPV_ASS_LAYOUT_PROFILE_H
++#define MPV_ASS_LAYOUT_PROFILE_H
++#include <stdbool.h>
++#include <math.h>
++#include <stdlib.h>
++#include <string.h>
++
++static bool layout_decimal(const unsigned char **cursor, double low, double high)
++{
++    const unsigned char *p = *cursor;
++    if (*p == '+' || *p == '-') p++;
++    unsigned digits = 0;
++    while (*p >= '0' && *p <= '9') { p++; digits++; }
++    if (*p == '.') {
++        p++;
++        while (*p >= '0' && *p <= '9') { p++; digits++; }
++    }
++    if (!digits || p - *cursor > 32) return false;
++    char *end;
++    double value = strtod((const char *)*cursor, &end);
++    if ((const unsigned char *)end != p || !isfinite(value) || value < low || value > high)
++        return false;
++    *cursor = p;
++    return true;
++}
++
++static bool layout_static_text(const char *text)
++{
++    const unsigned char *p = (const unsigned char *)text;
++    bool positioned = false;
++    while (*p) {
++        if (*p == '}')
++            return false;
++        if (*p++ != '{')
++            continue;
++        do {
++            if (*p++ != '\\')
++                return false;
++            bool timing = *p == 'k' || *p == 'K';
++            bool alpha = false;
++            if (!strncmp((const char *)p, "pos(", 4)) {
++                if (positioned) return false;
++                positioned = true;
++                p += 4;
++                if (!layout_decimal(&p, -1000000, 1000000) || *p++ != ',' ||
++                    !layout_decimal(&p, -1000000, 1000000) || *p++ != ')')
++                    return false;
++            } else if (!strncmp((const char *)p, "fscx", 4) ||
++                       !strncmp((const char *)p, "fscy", 4)) {
++                p += 4;
++                if (!layout_decimal(&p, 0.000001, 10000)) return false;
++            } else if (timing) {
++                bool lower = *p++ == 'k';
++                if (lower && (*p == 'f' || *p == 'o'))
++                    p++;
++                unsigned value = 0;
++                if (*p < '0' || *p > '9')
++                    return false;
++                do {
++                    value = value * 10 + (*p++ - '0');
++                    if (value > 1000000)
++                        return false;
++                } while (*p >= '0' && *p <= '9');
++            } else {
++                if (!strncmp((const char *)p, "alpha", 5)) {
++                    alpha = true;
++                    p += 5;
++                } else {
++                    bool numbered = *p >= '1' && *p <= '4';
++                    if (numbered)
++                        p++;
++                    if (*p != 'c' && !(numbered && *p == 'a'))
++                        return false;
++                    alpha = *p++ == 'a';
++                }
++                if (*p++ != '&' || *p++ != 'H')
++                    return false;
++                unsigned digits = 0;
++                while ((*p >= '0' && *p <= '9') ||
++                       (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')) {
++                    p++;
++                    if (++digits > (alpha ? 2 : 8))
++                        return false;
++                }
++                if (!digits) return false;
++                if (*p == '&') p++;
++            }
++            if (*p != '\\' && *p != '}')
++                return false;
++        } while (*p != '}');
++        p++;
++    }
++    return true;
++}
++
++#endif
+diff --git a/sub/dec_sub.c b/sub/dec_sub.c
+index 33b3878660..0c29abe068 100644
+--- a/sub/dec_sub.c
++++ b/sub/dec_sub.c
+@@ -581,6 +581,14 @@ bool sub_is_secondary_visible(struct dec_sub *sub)
+     return ret;
+ }
+ 
++bool sub_uses_libass(struct dec_sub *sub)
++{
++    mp_mutex_lock(&sub->lock);
++    bool uses_libass = sub->sd && sub->sd->driver == &sd_ass;
++    mp_mutex_unlock(&sub->lock);
++    return uses_libass;
++}
++
+ static int sub_line_cmp(const void *a, const void *b)
+ {
+     const struct sub_line *la = a, *lb = b;
+diff --git a/sub/dec_sub.h b/sub/dec_sub.h
+index d8f1539685..e712c949e4 100644
+--- a/sub/dec_sub.h
++++ b/sub/dec_sub.h
+@@ -73,6 +73,7 @@ void sub_set_recorder_sink(struct dec_sub *sub, struct mp_recorder_sink *sink);
+ void sub_set_play_dir(struct dec_sub *sub, int dir);
+ bool sub_is_primary_visible(struct dec_sub *sub);
+ bool sub_is_secondary_visible(struct dec_sub *sub);
++bool sub_uses_libass(struct dec_sub *sub);
+ 
+ int sub_control(struct dec_sub *sub, enum sd_ctrl cmd, void *arg);
+ 
+diff --git a/sub/osd.c b/sub/osd.c
+index ef646b6775..5d191138e2 100644
+--- a/sub/osd.c
++++ b/sub/osd.c
+@@ -43,6 +43,139 @@
+ #include "video/mp_image.h"
+ #include "video/mp_image_pool.h"
+ 
++static struct sub_layout *sub_layout_copy(void *parent,
++                                          const struct sub_layout *in);
++
++struct subtitle_layout_ref {
++    atomic_uint refcount;
++    struct sub_layout *layout;
++};
++
++static struct subtitle_layout_ref *subtitle_layout_ref_new(
++    const struct sub_layout *layout)
++{
++    struct subtitle_layout_ref *ref =
++        talloc_zero(NULL, struct subtitle_layout_ref);
++    atomic_init(&ref->refcount, 1);
++    ref->layout = sub_layout_copy(ref, layout);
++    if (!ref->layout) {
++        talloc_free(ref);
++        return NULL;
++    }
++    return ref;
++}
++
++static void subtitle_layout_ref_add(struct subtitle_layout_ref *ref)
++{
++    if (ref)
++        atomic_fetch_add_explicit(&ref->refcount, 1, memory_order_relaxed);
++}
++
++static void subtitle_layout_ref_release(struct subtitle_layout_ref *ref)
++{
++    if (ref && atomic_fetch_sub_explicit(&ref->refcount, 1,
++                                         memory_order_acq_rel) == 1)
++        talloc_free(ref);
++}
++
++static struct sub_layout *retained_subtitle_layout(struct osd_state *osd)
++{
++    return osd->subtitle_layout ? osd->subtitle_layout->layout : NULL;
++}
++
++static bool sub_layout_rect_equal(const struct sub_layout_rect *a,
++                                  const struct sub_layout_rect *b)
++{
++    return a->x == b->x && a->y == b->y && a->w == b->w && a->h == b->h;
++}
++
++static bool sub_layout_equal(const struct sub_layout *a,
++                             enum osd_render_origin a_origin,
++                             const struct sub_layout *b,
++                             enum osd_render_origin b_origin)
++{
++    if (a_origin != b_origin || a->unit_mode != b->unit_mode ||
++        strcmp(a->source_format, b->source_format) != 0 ||
++        a->space_w != b->space_w || a->space_h != b->space_h ||
++        a->space_mt != b->space_mt || a->space_mb != b->space_mb ||
++        a->space_ml != b->space_ml || a->space_mr != b->space_mr ||
++        a->space_display_par != b->space_display_par ||
++        a->num_events != b->num_events)
++        return false;
++
++    for (int n = 0; n < a->num_events; n++) {
++        const struct sub_layout_event *ae = &a->events[n];
++        const struct sub_layout_event *be = &b->events[n];
++        if (ae->text_length != be->text_length ||
++            (ae->text_length && memcmp(ae->text, be->text, ae->text_length)) ||
++            ae->start != be->start || ae->end != be->end ||
++            ae->has_bitmap_bounds != be->has_bitmap_bounds ||
++            ae->static_logical_profile != be->static_logical_profile ||
++            ae->track_index != be->track_index ||
++            !sub_layout_rect_equal(&ae->bitmap_bounds, &be->bitmap_bounds) ||
++            ae->num_units != be->num_units)
++            return false;
++
++        for (int c = 0; c < ae->num_units; c++) {
++            const struct sub_layout_unit *au = &ae->units[c];
++            const struct sub_layout_unit *bu = &be->units[c];
++            if (au->text_start != bu->text_start ||
++                au->text_end != bu->text_end || au->line != bu->line ||
++                !sub_layout_rect_equal(&au->logical_bounds,
++                                       &bu->logical_bounds))
++                return false;
++
++        }
++    }
++    return true;
++}
++
++// Caller holds osd->lock.
++static void publish_subtitle_layout(struct osd_state *osd,
++                                    const struct sub_layout *layout,
++                                    enum sub_layout_status status,
++                                    double video_pts,
++                                    enum osd_render_origin origin)
++{
++    if (!layout) {
++        bool changed = osd->subtitle_layout ||
++                       osd->subtitle_layout_status != status;
++        if (!changed)
++            return;
++        subtitle_layout_ref_release(osd->subtitle_layout);
++        osd->subtitle_layout = NULL;
++        osd->subtitle_layout_status = status;
++        atomic_fetch_add(&osd->subtitle_layout_revision, 1);
++        return;
++    }
++
++    if (osd->subtitle_layout &&
++        sub_layout_equal(osd->subtitle_layout->layout,
++                         osd->subtitle_layout_origin, layout, origin))
++        return;
++
++    struct subtitle_layout_ref *copy = subtitle_layout_ref_new(layout);
++    if (!copy)
++        return;
++    subtitle_layout_ref_release(osd->subtitle_layout);
++    osd->subtitle_layout = copy;
++    osd->subtitle_layout_video_pts = video_pts;
++    osd->subtitle_layout_origin = origin;
++    osd->subtitle_layout_status = SUB_LAYOUT_OK;
++    atomic_fetch_add(&osd->subtitle_layout_revision, 1);
++}
++
++// Caller holds osd->lock. Explicit state transitions must remain observable
++// even when there is no retained layout to clear.
++static void invalidate_subtitle_layout(struct osd_state *osd)
++{
++    uint64_t revision = atomic_load(&osd->subtitle_layout_revision);
++    publish_subtitle_layout(osd, NULL, SUB_LAYOUT_NONE, MP_NOPTS_VALUE,
++                            OSD_RENDER_PROBE);
++    if (atomic_load(&osd->subtitle_layout_revision) == revision)
++        atomic_fetch_add(&osd->subtitle_layout_revision, 1);
++}
++
+ #define OPT_BASE_STRUCT struct osd_style_opts
+ static const m_option_t style_opts[] = {
+     {"font", OPT_STRING(font)},
+@@ -193,6 +326,7 @@ void osd_free(struct osd_state *osd)
+         return;
+     osd_destroy_backend(osd);
+     talloc_free(osd->objs[OSDTYPE_EXTERNAL2]->external2);
++    subtitle_layout_ref_release(osd->subtitle_layout);
+     mp_mutex_destroy(&osd->lock);
+     talloc_free(osd);
+ }
+@@ -212,11 +346,18 @@ void osd_set_text(struct osd_state *osd, const char *text)
+     mp_mutex_unlock(&osd->lock);
+ }
+ 
+-void osd_set_sub(struct osd_state *osd, int index, struct dec_sub *dec_sub)
++void osd_set_sub(struct osd_state *osd, int index, struct dec_sub *dec_sub,
++                 int64_t playlist_entry_id, int track_id)
+ {
+     mp_mutex_lock(&osd->lock);
+     if (index >= 0 && index < 2) {
+         struct osd_object *obj = osd->objs[OSDTYPE_SUB + index];
++        if (index == 0 && obj->sub != dec_sub) {
++            osd->subtitle_decoder_generation++;
++            osd->subtitle_playlist_entry_id = playlist_entry_id;
++            osd->subtitle_track_id = track_id;
++            invalidate_subtitle_layout(osd);
++        }
+         obj->sub = dec_sub;
+         obj->vo_change_id += 1;
+     }
+@@ -237,6 +378,7 @@ void osd_set_render_subs_in_filter(struct osd_state *osd, bool s)
+     mp_mutex_lock(&osd->lock);
+     if (osd->render_subs_in_filter != s) {
+         osd->render_subs_in_filter = s;
++        invalidate_subtitle_layout(osd);
+ 
+         int change_id = 0;
+         for (int n = 0; n < MAX_OSD_PARTS; n++)
+@@ -306,6 +448,20 @@ static void check_obj_resize(struct osd_state *osd, struct mp_osd_res res,
+ void osd_resize(struct osd_state *osd, struct mp_osd_res res)
+ {
+     mp_mutex_lock(&osd->lock);
++    if (osd->subtitle_layout) {
++        const struct sub_layout *layout = retained_subtitle_layout(osd);
++        struct mp_osd_res published = {
++            .w = layout->space_w,
++            .h = layout->space_h,
++            .mt = layout->space_mt,
++            .mb = layout->space_mb,
++            .ml = layout->space_ml,
++            .mr = layout->space_mr,
++            .display_par = layout->space_display_par,
++        };
++        if (!osd_res_equals(res, published))
++            invalidate_subtitle_layout(osd);
++    }
+     int types[] = {OSDTYPE_OSD, OSDTYPE_EXTERNAL, OSDTYPE_EXTERNAL2, -1};
+     for (int n = 0; types[n] >= 0; n++)
+         check_obj_resize(osd, res, osd->objs[types[n]]);
+@@ -361,6 +517,7 @@ static struct sub_bitmaps *render_object(struct osd_state *osd,
+ // draw_flags is a bit field of OSD_DRAW_* constants
+ struct sub_bitmap_list *osd_render(struct osd_state *osd, struct mp_osd_res res,
+                                    double video_pts, int draw_flags,
++                                   enum osd_render_origin origin,
+                                    const bool formats[SUBBITMAP_COUNT])
+ {
+     mp_mutex_lock(&osd->lock);
+@@ -397,8 +554,25 @@ struct sub_bitmap_list *osd_render(struct osd_state *osd, struct mp_osd_res res,
+         struct sub_bitmaps *imgs =
+             render_object(osd, obj, res, video_pts, formats);
+ 
++        bool authoritative = origin == OSD_RENDER_PRESENTATION &&
++                             !osd->render_subs_in_filter;
+         stats_time_end(osd->stats, stat_type_render);
+ 
++        bool accepted = imgs && (!imgs->num_parts || formats[imgs->format]);
++        if (n == OSDTYPE_SUB) {
++            if (authoritative) {
++                publish_subtitle_layout(osd, accepted ? imgs->layout : NULL,
++                                        accepted ? imgs->layout_status : SUB_LAYOUT_NONE,
++                                        video_pts, origin);
++            } else if (origin == OSD_RENDER_SUB_FILTER_PRESENTATION ||
++                       origin == OSD_RENDER_INTERMEDIATE ||
++                       origin == OSD_RENDER_STEREO) {
++                publish_subtitle_layout(
++                    osd, NULL, SUB_LAYOUT_UNSUPPORTED_RENDER_MODE,
++                                        MP_NOPTS_VALUE, origin);
++            }
++        }
++
+         if (imgs && imgs->num_parts > 0) {
+             if (formats[imgs->format]) {
+                 talloc_steal(list, imgs);
+@@ -426,12 +600,12 @@ struct sub_bitmap_list *osd_render(struct osd_state *osd, struct mp_osd_res res,
+ 
+ // Warning: this function should be considered legacy. Use osd_render() instead.
+ void osd_draw(struct osd_state *osd, struct mp_osd_res res,
+-              double video_pts, int draw_flags,
++              double video_pts, int draw_flags, enum osd_render_origin origin,
+               const bool formats[SUBBITMAP_COUNT],
+               void (*cb)(void *ctx, struct sub_bitmaps *imgs), void *cb_ctx)
+ {
+     struct sub_bitmap_list *list =
+-        osd_render(osd, res, video_pts, draw_flags, formats);
++        osd_render(osd, res, video_pts, draw_flags, origin, formats);
+ 
+     stats_time_start(osd->stats, "draw");
+ 
+@@ -446,9 +620,10 @@ void osd_draw(struct osd_state *osd, struct mp_osd_res res,
+ // Calls mp_image_make_writeable() on the dest image if something is drawn.
+ // draw_flags as in osd_render().
+ void osd_draw_on_image(struct osd_state *osd, struct mp_osd_res res,
+-                       double video_pts, int draw_flags, struct mp_image *dest)
++                       double video_pts, int draw_flags,
++                       enum osd_render_origin origin, struct mp_image *dest)
+ {
+-    osd_draw_on_image_p(osd, res, video_pts, draw_flags, NULL, dest);
++    osd_draw_on_image_p(osd, res, video_pts, draw_flags, origin, NULL, dest);
+ }
+ 
+ // Like osd_draw_on_image(), but if dest needs to be copied to make it
+@@ -456,10 +631,11 @@ void osd_draw_on_image(struct osd_state *osd, struct mp_osd_res res,
+ // optimization to reduce "real" image sized memory allocations.)
+ void osd_draw_on_image_p(struct osd_state *osd, struct mp_osd_res res,
+                          double video_pts, int draw_flags,
++                         enum osd_render_origin origin,
+                          struct mp_image_pool *pool, struct mp_image *dest)
+ {
+     struct sub_bitmap_list *list =
+-        osd_render(osd, res, video_pts, draw_flags, mp_draw_sub_formats);
++        osd_render(osd, res, video_pts, draw_flags, origin, mp_draw_sub_formats);
+ 
+     if (!list->num_items) {
+         talloc_free(list);
+@@ -566,6 +742,92 @@ void osd_rescale_bitmaps(struct sub_bitmaps *imgs, int frame_w, int frame_h,
+     }
+ }
+ 
++static struct sub_layout *sub_layout_copy(void *parent,
++                                          const struct sub_layout *in)
++{
++    if (!in)
++        return NULL;
++
++    struct sub_layout *out = talloc(parent, struct sub_layout);
++    *out = *in;
++    out->source_format = talloc_strdup(out, in->source_format);
++    out->events = talloc_array(out, struct sub_layout_event, in->num_events);
++    for (int n = 0; n < in->num_events; n++) {
++        const struct sub_layout_event *src_event = &in->events[n];
++        struct sub_layout_event *dst_event = &out->events[n];
++        *dst_event = *src_event;
++        dst_event->text = talloc_strndup(out, src_event->text,
++                                        src_event->text_length);
++        dst_event->units = talloc_array(out, struct sub_layout_unit,
++                                           src_event->num_units);
++        for (int c = 0; c < src_event->num_units; c++) {
++            const struct sub_layout_unit *src_unit = &src_event->units[c];
++            struct sub_layout_unit *dst_unit = &dst_event->units[c];
++            *dst_unit = *src_unit;
++
++        }
++    }
++    return out;
++}
++
++uint64_t osd_get_subtitle_layout_revision(struct osd_state *osd)
++{
++    return atomic_load(&osd->subtitle_layout_revision);
++}
++
++static void subtitle_layout_snapshot_destroy(void *ptr)
++{
++    struct subtitle_layout_snapshot *snapshot = ptr;
++    subtitle_layout_ref_release(snapshot->layout_ref);
++}
++
++struct subtitle_layout_snapshot *osd_get_subtitle_layout_snapshot(
++    void *parent, struct osd_state *osd)
++{
++    mp_mutex_lock(&osd->lock);
++    struct subtitle_layout_snapshot *snapshot =
++        talloc(parent, struct subtitle_layout_snapshot);
++    *snapshot = (struct subtitle_layout_snapshot) {
++        .revision = atomic_load(&osd->subtitle_layout_revision),
++        .decoder_generation = osd->subtitle_decoder_generation,
++        .playlist_entry_id = osd->subtitle_playlist_entry_id,
++        .track_id = osd->subtitle_track_id,
++        .video_pts = osd->subtitle_layout_video_pts,
++        .origin = osd->subtitle_layout_origin,
++        .status = osd->subtitle_layout_status,
++        .layout = retained_subtitle_layout(osd),
++        .layout_ref = osd->subtitle_layout,
++    };
++    subtitle_layout_ref_add(snapshot->layout_ref);
++    mp_mutex_unlock(&osd->lock);
++    talloc_set_destructor(snapshot, subtitle_layout_snapshot_destroy);
++    return snapshot;
++}
++
++void osd_get_subtitle_layout_metadata(
++    struct osd_state *osd, struct subtitle_layout_snapshot *snapshot)
++{
++    mp_mutex_lock(&osd->lock);
++    *snapshot = (struct subtitle_layout_snapshot) {
++        .revision = atomic_load(&osd->subtitle_layout_revision),
++        .decoder_generation = osd->subtitle_decoder_generation,
++        .playlist_entry_id = osd->subtitle_playlist_entry_id,
++        .track_id = osd->subtitle_track_id,
++        .video_pts = osd->subtitle_layout_video_pts,
++        .origin = osd->subtitle_layout_origin,
++        .status = osd->subtitle_layout_status,
++        .layout = retained_subtitle_layout(osd),
++    };
++    mp_mutex_unlock(&osd->lock);
++}
++
++void osd_clear_subtitle_layout(struct osd_state *osd)
++{
++    mp_mutex_lock(&osd->lock);
++    invalidate_subtitle_layout(osd);
++    mp_mutex_unlock(&osd->lock);
++}
++
+ // Copy *in and return a new allocation of it. Free with talloc_free(). This
+ // will contain a refcounted copy of the image data.
+ //
+@@ -580,7 +842,8 @@ void osd_rescale_bitmaps(struct sub_bitmaps *imgs, int frame_w, int frame_h,
+ struct sub_bitmaps *sub_bitmaps_copy(struct sub_bitmap_copy_cache **p_cache,
+                                      struct sub_bitmaps *in)
+ {
+-    if (!in || !in->num_parts)
++    if (!in || (!in->num_parts && !in->layout &&
++                in->layout_status == SUB_LAYOUT_NONE))
+         return NULL;
+ 
+     struct sub_bitmaps *res = talloc(NULL, struct sub_bitmaps);
+@@ -590,14 +853,19 @@ struct sub_bitmaps *sub_bitmaps_copy(struct sub_bitmap_copy_cache **p_cache,
+ 
+     // The bitmaps being refcounted is essential for performance, and for
+     // not invalidating in->parts[*].bitmap pointers.
+-    mp_assert(in->packed && in->packed->bufs[0]);
++    mp_assert(!in->num_parts || (in->packed && in->packed->bufs[0]));
+ 
+-    res->packed = mp_image_new_ref(res->packed);
+-    talloc_steal(res, res->packed);
++    if (res->packed) {
++        res->packed = mp_image_new_ref(res->packed);
++        talloc_steal(res, res->packed);
++    }
+ 
+     res->parts = NULL;
+-    MP_RESIZE_ARRAY(res, res->parts, res->num_parts);
+-    memcpy(res->parts, in->parts, sizeof(res->parts[0]) * res->num_parts);
++    if (res->num_parts) {
++        MP_RESIZE_ARRAY(res, res->parts, res->num_parts);
++        memcpy(res->parts, in->parts, sizeof(res->parts[0]) * res->num_parts);
++    }
++    res->layout = sub_layout_copy(res, in->layout);
+ 
+     return res;
+ }
+diff --git a/sub/osd.h b/sub/osd.h
+index 44cf2edc1a..cbd61883de 100644
+--- a/sub/osd.h
++++ b/sub/osd.h
+@@ -59,6 +59,83 @@ struct sub_bitmap {
+     };
+ };
+ 
++struct sub_layout_rect {
++    double x, y, w, h;
++};
++
++#define SUB_LAYOUT_MAX_EVENTS 64
++#define SUB_LAYOUT_MAX_TEXT_BYTES (1024 * 1024)
++#define SUB_LAYOUT_MAX_UNITS 4096
++#define SUB_LAYOUT_MAX_BITMAP_PIXELS (16 * 1024 * 1024)
++#define SUB_LAYOUT_MAX_RETAINED_BYTES (1024 * 1024)
++
++struct sub_layout_unit {
++    size_t text_start, text_end;
++    int line;
++    struct sub_layout_rect logical_bounds;
++};
++
++struct sub_layout_event {
++    char *text;
++    size_t text_length;
++    double start, end;
++    struct sub_layout_unit *units;
++    int num_units;
++    struct sub_layout_rect bitmap_bounds;
++    bool has_bitmap_bounds;
++    bool static_logical_profile;
++    int track_index;
++};
++
++enum sub_layout_unit_mode {
++    SUB_LAYOUT_UNIT_SIMPLE_SCALAR = 0,
++    SUB_LAYOUT_UNIT_HARFBUZZ_CLUSTER,
++};
++
++struct sub_layout {
++    enum sub_layout_unit_mode unit_mode;
++    char *source_format;
++    double subtitle_pts;
++    int space_w, space_h;
++    int space_mt, space_mb, space_ml, space_mr;
++    double space_display_par;
++    struct sub_layout_event *events;
++    int num_events;
++};
++
++enum osd_render_origin {
++    OSD_RENDER_PRESENTATION,
++    OSD_RENDER_SUB_FILTER_PRESENTATION,
++    OSD_RENDER_CAPTURE,
++    OSD_RENDER_INTERMEDIATE,
++    OSD_RENDER_STEREO,
++    OSD_RENDER_PROBE,
++};
++
++enum sub_layout_status {
++    SUB_LAYOUT_NONE = 0,
++    SUB_LAYOUT_OK,
++    SUB_LAYOUT_EMPTY,
++    SUB_LAYOUT_LIMIT_EXCEEDED,
++    SUB_LAYOUT_COLLECTION_FAILED,
++    SUB_LAYOUT_COPY_REJECTED,
++    SUB_LAYOUT_UNSUPPORTED,
++    SUB_LAYOUT_UNSUPPORTED_FORMAT,
++    SUB_LAYOUT_UNSUPPORTED_RENDER_MODE,
++};
++
++struct subtitle_layout_snapshot {
++    uint64_t revision;
++    uint64_t decoder_generation;
++    int64_t playlist_entry_id;
++    int track_id;
++    double video_pts;
++    enum osd_render_origin origin;
++    enum sub_layout_status status;
++    struct sub_layout *layout;
++    struct subtitle_layout_ref *layout_ref;
++};
++
+ struct sub_bitmaps {
+     // For VO cache state (limited by MAX_OSD_PARTS)
+     int render_index;
+@@ -83,6 +160,11 @@ struct sub_bitmaps {
+     int change_id;  // Incremented on each change (0 is never used)
+ 
+     bool video_color_space; // True if the bitmap is in video color space
++
++    // Optional semantic sidecar from the same subtitle render. It is valid
++    // independently of num_parts and owned by this allocation.
++    struct sub_layout *layout;
++    enum sub_layout_status layout_status;
+ };
+ 
+ struct sub_bitmap_list {
+@@ -193,7 +275,8 @@ void osd_free(struct osd_state *osd);
+ bool osd_query_and_reset_want_redraw(struct osd_state *osd);
+ 
+ void osd_set_text(struct osd_state *osd, const char *text);
+-void osd_set_sub(struct osd_state *osd, int index, struct dec_sub *dec_sub);
++void osd_set_sub(struct osd_state *osd, int index, struct dec_sub *dec_sub,
++                 int64_t playlist_entry_id, int track_id);
+ 
+ bool osd_get_render_subs_in_filter(struct osd_state *osd);
+ void osd_set_render_subs_in_filter(struct osd_state *osd, bool s);
+@@ -217,21 +300,24 @@ enum mp_osd_draw_flags {
+ };
+ 
+ void osd_draw(struct osd_state *osd, struct mp_osd_res res,
+-              double video_pts, int draw_flags,
++              double video_pts, int draw_flags, enum osd_render_origin origin,
+               const bool formats[SUBBITMAP_COUNT],
+               void (*cb)(void *ctx, struct sub_bitmaps *imgs), void *cb_ctx);
+ 
+ struct sub_bitmap_list *osd_render(struct osd_state *osd, struct mp_osd_res res,
+                                    double video_pts, int draw_flags,
++                                   enum osd_render_origin origin,
+                                    const bool formats[SUBBITMAP_COUNT]);
+ 
+ struct mp_image;
+ void osd_draw_on_image(struct osd_state *osd, struct mp_osd_res res,
+-                       double video_pts, int draw_flags, struct mp_image *dest);
++                       double video_pts, int draw_flags,
++                       enum osd_render_origin origin, struct mp_image *dest);
+ 
+ struct mp_image_pool;
+ void osd_draw_on_image_p(struct osd_state *osd, struct mp_osd_res res,
+                          double video_pts, int draw_flags,
++                         enum osd_render_origin origin,
+                          struct mp_image_pool *pool, struct mp_image *dest);
+ 
+ void osd_resize(struct osd_state *osd, struct mp_osd_res res);
+@@ -241,6 +327,13 @@ struct mp_osd_res osd_res_from_image_params(const struct mp_image_params *p);
+ 
+ struct mp_osd_res osd_get_vo_res(struct osd_state *osd);
+ 
++uint64_t osd_get_subtitle_layout_revision(struct osd_state *osd);
++struct subtitle_layout_snapshot *osd_get_subtitle_layout_snapshot(
++    void *parent, struct osd_state *osd);
++void osd_get_subtitle_layout_metadata(
++    struct osd_state *osd, struct subtitle_layout_snapshot *snapshot);
++void osd_clear_subtitle_layout(struct osd_state *osd);
++
+ void osd_rescale_bitmaps(struct sub_bitmaps *imgs, int frame_w, int frame_h,
+                          struct mp_osd_res res, double compensate_par);
+ 
+diff --git a/sub/osd_state.h b/sub/osd_state.h
+index cd4ca15a04..ef724146d5 100644
+--- a/sub/osd_state.h
++++ b/sub/osd_state.h
+@@ -83,6 +83,15 @@ struct osd_state {
+     struct stats_ctx *stats;
+ 
+     struct mp_draw_sub_cache *draw_cache;
++
++    struct subtitle_layout_ref *subtitle_layout;
++    atomic_uint_fast64_t subtitle_layout_revision;
++    uint64_t subtitle_decoder_generation;
++    int64_t subtitle_playlist_entry_id;
++    int subtitle_track_id;
++    double subtitle_layout_video_pts;
++    enum osd_render_origin subtitle_layout_origin;
++    enum sub_layout_status subtitle_layout_status;
+ };
+ 
+ // defined in osd_libass.c
+diff --git a/sub/sd_ass.c b/sub/sd_ass.c
+index db4d67daca..38b6feddd3 100644
+--- a/sub/sd_ass.c
++++ b/sub/sd_ass.c
+@@ -20,13 +20,18 @@
+ #include <string.h>
+ #include <math.h>
+ #include <limits.h>
++#include <stddef.h>
++
++#include "config.h"
+ 
+ #include <libavutil/common.h>
+ #include <ass/ass.h>
++#if HAVE_LIBASS_LAYOUT
++#include <ass/ass_layout.h>
++#endif
+ 
+ #include "mpv_talloc.h"
+ 
+-#include "config.h"
+ #include "options/m_config.h"
+ #include "options/options.h"
+ #include "options/path.h"
+@@ -39,8 +44,24 @@
+ #include "dec_sub.h"
+ #include "ass_mp.h"
+ #include "packer.h"
++#if HAVE_LIBASS_LAYOUT
++#include "ass_layout_profile.h"
++#endif
+ #include "sd.h"
+ 
++#define UNKNOWN_DURATION (INT_MAX / 1000)
++
++#if HAVE_LIBASS_LAYOUT
++#define ASS_FIELD_END(type, field) \
++    (offsetof(type, field) + sizeof(((type *)0)->field))
++
++static bool is_unknown_duration(long long duration)
++{
++    // Conversion can round the seconds sentinel back to either value.
++    return duration >= UNKNOWN_DURATION * 1000LL;
++}
++#endif
++
+ struct sd_ass_priv {
+     struct ass_library *ass_library;
+     struct ass_renderer *ass_renderer;
+@@ -69,6 +90,158 @@ struct seen_packet {
+     int animated; // -1 is unknown
+ };
+ 
++#if HAVE_LIBASS_LAYOUT
++static bool layout_format_supported(struct sd *sd)
++{
++    return sd->codec && (!strcmp(sd->codec->codec, "ass") ||
++                         !strcmp(sd->codec->codec, "subrip"));
++}
++
++static bool layout_static_event(ASS_Track *track, int index)
++{
++    if (index < 0 || index >= track->n_events)
++        return false;
++    const ASS_Event *event = &track->events[index];
++    if (event->Style < 0 || event->Style >= track->n_styles || !event->Text ||
++        (event->Effect && event->Effect[0]))
++        return false;
++    const ASS_Style *style = &track->styles[event->Style];
++    if (!isfinite(style->Angle) || style->Angle != 0 ||
++        !isfinite(style->ScaleX) || style->ScaleX <= 0 ||
++        !isfinite(style->ScaleY) || style->ScaleY <= 0 ||
++        !style->FontName || style->FontName[0] == '@')
++        return false;
++    return layout_static_text(event->Text);
++}
++
++static bool layout_account(size_t *total, size_t count, size_t size)
++{
++    if (count > (SUB_LAYOUT_MAX_RETAINED_BYTES - *total) / size)
++        return false;
++    *total += count * size;
++    return true;
++}
++
++static struct sub_layout *build_sub_layout(const ASS_Layout *source,
++                                           ASS_Track *track, bool profile_options,
++                                           struct mp_osd_res dim,
++                                           long long subtitle_ts,
++                                           const char *source_format,
++                                           enum sub_layout_status *status)
++{
++    *status = SUB_LAYOUT_COPY_REJECTED;
++    struct sub_layout *layout = NULL;
++    if (!source ||
++        source->struct_size < ASS_FIELD_END(ASS_Layout, events) ||
++        !source->events ||
++        (source->unit_mode != ASS_LAYOUT_UNIT_SIMPLE_SCALAR &&
++         source->unit_mode != ASS_LAYOUT_UNIT_SHAPING_CLUSTER))
++        return NULL;
++
++    int num_events = 0;
++    for (ASS_LayoutEvent *event = source->events; event; event = event->next) {
++        if (++num_events > SUB_LAYOUT_MAX_EVENTS)
++            goto limit;
++    }
++
++    size_t total = sizeof(struct sub_layout);
++    const char *format = source_format ? source_format : "unknown";
++    if (!layout_account(&total, num_events, sizeof(struct sub_layout_event)) ||
++        !layout_account(&total, strlen(format) + 1, 1))
++        goto limit;
++
++    layout = talloc_zero(NULL, struct sub_layout);
++    layout->unit_mode = source->unit_mode ==
++                        ASS_LAYOUT_UNIT_SIMPLE_SCALAR
++                      ? SUB_LAYOUT_UNIT_SIMPLE_SCALAR
++                      : SUB_LAYOUT_UNIT_HARFBUZZ_CLUSTER;
++    layout->source_format = talloc_strdup(layout, format);
++    layout->subtitle_pts = subtitle_ts / 1000.0;
++    layout->space_w = dim.w;
++    layout->space_h = dim.h;
++    layout->space_mt = dim.mt;
++    layout->space_mb = dim.mb;
++    layout->space_ml = dim.ml;
++    layout->space_mr = dim.mr;
++    layout->space_display_par = dim.display_par;
++    layout->events = talloc_zero_array(layout, struct sub_layout_event, num_events);
++    layout->num_events = num_events;
++
++    int event_index = 0;
++    int total_units = 0;
++    for (ASS_LayoutEvent *src_event = source->events;
++         src_event; src_event = src_event->next) {
++        if (src_event->struct_size < ASS_FIELD_END(ASS_LayoutEvent, next) ||
++            !src_event->text)
++            goto fail;
++        if (!layout_account(&total, src_event->text_length + 1, 1))
++            goto limit;
++
++        struct sub_layout_event *event = &layout->events[event_index++];
++        event->text = talloc_strndup(layout, src_event->text,
++                                    src_event->text_length);
++        event->text_length = src_event->text_length;
++        event->start = src_event->start_ms / 1000.0;
++        event->end = !src_event->has_duration ||
++                     is_unknown_duration(src_event->duration_ms)
++                   ? MP_NOPTS_VALUE
++                   : (src_event->start_ms + src_event->duration_ms) /
++                     1000.0;
++        event->bitmap_bounds = (struct sub_layout_rect) {
++            src_event->bitmap_bounds.x, src_event->bitmap_bounds.y,
++            src_event->bitmap_bounds.w, src_event->bitmap_bounds.h,
++        };
++        event->has_bitmap_bounds = src_event->has_bitmap_bounds;
++        event->track_index = src_event->struct_size >= ASS_FIELD_END(ASS_LayoutEvent, event_index)
++            ? src_event->event_index : -1;
++        event->static_logical_profile = profile_options &&
++            src_event->struct_size >= ASS_FIELD_END(ASS_LayoutEvent, event_index) &&
++            layout_static_event(track, src_event->event_index);
++
++        int num_units = 0;
++        for (ASS_LayoutUnit *unit = src_event->units;
++             unit; unit = unit->next) {
++            if (++num_units > SUB_LAYOUT_MAX_UNITS - total_units)
++                goto limit;
++        }
++        total_units += num_units;
++        if (!layout_account(&total, num_units, sizeof(struct sub_layout_unit)))
++            goto limit;
++        event->units = talloc_zero_array(layout, struct sub_layout_unit,
++                                            num_units);
++        event->num_units = num_units;
++
++        int unit_index = 0;
++        for (ASS_LayoutUnit *src_unit = src_event->units;
++             src_unit; src_unit = src_unit->next) {
++            if (src_unit->struct_size < ASS_FIELD_END(ASS_LayoutUnit, next) ||
++                src_unit->text_start >= src_unit->text_end ||
++                src_unit->text_end > event->text_length)
++                goto fail;
++
++            struct sub_layout_unit *unit = &event->units[unit_index++];
++            unit->text_start = src_unit->text_start;
++            unit->text_end = src_unit->text_end;
++            unit->line = src_unit->line;
++            unit->logical_bounds = (struct sub_layout_rect) {
++                src_unit->logical_bounds.x, src_unit->logical_bounds.y,
++                src_unit->logical_bounds.w, src_unit->logical_bounds.h,
++            };
++
++
++        }
++    }
++    *status = SUB_LAYOUT_OK;
++    return layout;
++
++limit:
++    *status = SUB_LAYOUT_LIMIT_EXCEEDED;
++fail:
++    talloc_free(layout);
++    return NULL;
++}
++#endif
++
+ #undef OPT_BASE_STRUCT
+ #define OPT_BASE_STRUCT struct mp_sub_filter_opts
+ 
+@@ -449,8 +622,6 @@ static bool check_packet_seen(struct sd *sd, struct demux_packet *packet)
+     return false;
+ }
+ 
+-#define UNKNOWN_DURATION (INT_MAX / 1000)
+-
+ static void decode(struct sd *sd, struct demux_packet *packet)
+ {
+     struct sd_ass_priv *ctx = sd->priv;
+@@ -735,6 +906,8 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+     ASS_Track *track = no_ass ? ctx->shadow_track : ctx->ass_track;
+     ASS_Renderer *renderer = ctx->ass_renderer;
+     struct sub_bitmaps *res = &(struct sub_bitmaps){0};
++    struct sub_layout *layout = NULL;
++    enum sub_layout_status layout_status = SUB_LAYOUT_NONE;
+ 
+     // Always update the osd_res
+     struct mp_osd_res old_osd = ctx->osd;
+@@ -778,12 +951,70 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
+         fill_plaintext(sd, pts);
+ 
+     int changed;
+-    ASS_Image *imgs = ass_render_frame(renderer, track, ts, &changed);
++    ASS_Image *imgs;
++    if (opts->subtitle_layout && sd->order == 0) {
++#if HAVE_LIBASS_LAYOUT
++        if (!layout_format_supported(sd)) {
++            imgs = ass_render_frame(renderer, track, ts, &changed);
++            layout_status = SUB_LAYOUT_UNSUPPORTED_FORMAT;
++        } else {
++            ASS_LayoutRequest limits = {
++                .struct_size = sizeof(limits),
++                .max_events = SUB_LAYOUT_MAX_EVENTS,
++                .max_text_bytes = SUB_LAYOUT_MAX_TEXT_BYTES,
++                .max_units = SUB_LAYOUT_MAX_UNITS,
++                .max_bitmap_pixels = SUB_LAYOUT_MAX_BITMAP_PIXELS,
++            };
++            ASS_RenderRequest request = {
++                .struct_size = sizeof(request),
++                .track = track,
++                .now_ms = ts,
++                .flags = ASS_RENDER_DETECT_CHANGE,
++                .layout = &limits,
++            };
++            const ASS_RenderResult *result =
++                ass_render_frame2(renderer, &request);
++            if (!result) {
++                imgs = NULL;
++                changed = 2;
++                layout_status = SUB_LAYOUT_COLLECTION_FAILED;
++            } else {
++                imgs = result->images;
++                changed = result->change;
++                if (result->status != ASS_RENDER_OK) {
++                    layout_status = SUB_LAYOUT_COLLECTION_FAILED;
++                } else if (result->struct_size <
++                           ASS_FIELD_END(ASS_RenderResult, layout_status)) {
++                    layout_status = SUB_LAYOUT_UNSUPPORTED;
++                } else if (result->layout_status == ASS_LAYOUT_OK) {
++                    bool profile_options = !no_ass && scale == 1.0 &&
++                        (converted || !shared_opts->ass_style_override[sd->order]);
++                    layout = build_sub_layout(result->layout, track, profile_options,
++                                              dim, ts, sd->codec->codec, &layout_status);
++                } else if (result->layout_status == ASS_LAYOUT_EMPTY) {
++                    layout_status = SUB_LAYOUT_EMPTY;
++                } else if (result->layout_status == ASS_LAYOUT_LIMIT_EXCEEDED) {
++                    layout_status = SUB_LAYOUT_LIMIT_EXCEEDED;
++                } else {
++                    layout_status = SUB_LAYOUT_COLLECTION_FAILED;
++                }
++            }
++        }
++#else
++        imgs = ass_render_frame(renderer, track, ts, &changed);
++        layout_status = SUB_LAYOUT_UNSUPPORTED;
++#endif
++    } else {
++        imgs = ass_render_frame(renderer, track, ts, &changed);
++    }
+     mp_sub_packer_pack_ass(ctx->packer, &imgs, 1, changed, !converted, format, res);
+ 
+ done:
++    res->layout = layout;
++    res->layout_status = layout_status;
+     // mangle_colors() modifies the color field, so copy the thing _before_.
+     res = sub_bitmaps_copy(&ctx->copy_cache, res);
++    talloc_free(layout);
+ 
+     if (!converted && res)
+         mangle_colors(sd, res);
+diff --git a/test/ass_layout_profile.c b/test/ass_layout_profile.c
+new file mode 100644
+index 0000000000..513175efb0
+--- /dev/null
++++ b/test/ass_layout_profile.c
+@@ -0,0 +1,23 @@
++#undef NDEBUG
++#include <assert.h>
++#include "sub/ass_layout_profile.h"
++
++int main(void)
++{
++    const char *valid[] = {
++        "text", "{\\pos(340,496)\\fscx50}A{\\fscx100}B",
++        "{\\pos(-5.5,+12)\\fscy150}M", "{\\c&H0000FFFF}yellow",
++        "{\\1c&HFFFF&}yellow", "{\\kf100}karaoke", "{\\alpha&H80&}alpha",
++    };
++    const char *invalid[] = {
++        "{\\pos(0,0)\\pos(1,1)}X", "{\\pos(1,)}X", "{\\pos(NaN,0)}X",
++        "{\\fscx0}X", "{\\fscy-1}X", "{\\fscxnan}X", "{\\fscx1e2}X",
++        "{\\t(\\fscx50)}X", "{\\clip(0,0,100,100)}X", "{\\move(1,2,3,4)}X",
++        "{\\frz5}X", "{\\rOther}X", "{\\c&H123456789}X", "{\\alpha&HFFF}X",
++        "{\\pos(1,2)", "}", "{\\p1}m 0 0 l 1 1", "{\\fscx}",
++    };
++    for (unsigned i = 0; i < sizeof(valid)/sizeof(valid[0]); i++)
++        assert(layout_static_text(valid[i]));
++    for (unsigned i = 0; i < sizeof(invalid)/sizeof(invalid[0]); i++)
++        assert(!layout_static_text(invalid[i]));
++}
+diff --git a/test/meson.build b/test/meson.build
+index ed20640346..a1111bf288 100644
+--- a/test/meson.build
++++ b/test/meson.build
+@@ -203,3 +203,7 @@ if refdir != ''
+         test('scale-zimg', scale_zimg, args: [refdir, outdir], suite: 'ffmpeg')
+     endif
+ endif
++
++layout_profile = executable('ass-layout-profile', 'ass_layout_profile.c',
++                            include_directories: incdir, dependencies: libm)
++test('ass-layout-profile', layout_profile)
+diff --git a/video/filter/vf_sub.c b/video/filter/vf_sub.c
+index de7f787744..fe83fe4cd1 100644
+--- a/video/filter/vf_sub.c
++++ b/video/filter/vf_sub.c
+@@ -102,7 +102,8 @@ static void vf_sub_process(struct mp_filter *f)
+         frame = (struct mp_frame){MP_FRAME_VIDEO, mpi};
+     }
+ 
+-    osd_draw_on_image_p(osd, dim, mpi->pts, OSD_DRAW_SUB_FILTER, priv->pool, mpi);
++    osd_draw_on_image_p(osd, dim, mpi->pts, OSD_DRAW_SUB_FILTER,
++                        OSD_RENDER_SUB_FILTER_PRESENTATION, priv->pool, mpi);
+ 
+     mp_pin_in_write(f->ppins[1], frame);
+     return;
+diff --git a/video/out/gpu/osd.c b/video/out/gpu/osd.c
+index d6788f8c0e..6257ef23db 100644
+--- a/video/out/gpu/osd.c
++++ b/video/out/gpu/osd.c
+@@ -316,14 +316,21 @@ static void set_res(struct mpgl_osd *ctx, struct mp_osd_res res, int stereo_mode
+ }
+ 
+ void mpgl_osd_generate(struct mpgl_osd *ctx, struct mp_osd_res res, double pts,
+-                       int stereo_mode, int draw_flags)
++                       int stereo_mode, int draw_flags,
++                       enum osd_render_origin origin)
+ {
+     for (int n = 0; n < MAX_OSD_PARTS; n++)
+         ctx->parts[n]->num_subparts = 0;
+ 
+     set_res(ctx, res, stereo_mode);
+ 
+-    osd_draw(ctx->osd, ctx->osd_res, pts, draw_flags, ctx->formats, gen_osd_cb, ctx);
++    int div[2];
++    mp_get_3d_side_by_side(stereo_mode, div);
++    if (div[0] > 1 || div[1] > 1)
++        origin = OSD_RENDER_STEREO;
++
++    osd_draw(ctx->osd, ctx->osd_res, pts, draw_flags, origin,
++             ctx->formats, gen_osd_cb, ctx);
+     ctx->stereo_mode = stereo_mode;
+ 
+     // Parts going away does not necessarily result in gen_osd_cb() being called
+@@ -337,16 +344,18 @@ void mpgl_osd_generate(struct mpgl_osd *ctx, struct mp_osd_res res, double pts,
+ }
+ 
+ // See osd_resize() for remarks. This function is an optional optimization too.
+-void mpgl_osd_resize(struct mpgl_osd *ctx, struct mp_osd_res res, int stereo_mode)
++void mpgl_osd_resize(struct mpgl_osd *ctx, struct mp_osd_res res, int stereo_mode,
++                     bool authoritative)
+ {
+     set_res(ctx, res, stereo_mode);
+-    osd_resize(ctx->osd, ctx->osd_res);
++    if (authoritative)
++        osd_resize(ctx->osd, ctx->osd_res);
+ }
+ 
+ bool mpgl_osd_check_change(struct mpgl_osd *ctx, struct mp_osd_res *res,
+                            double pts)
+ {
+     ctx->change_flag = false;
+-    mpgl_osd_generate(ctx, *res, pts, 0, 0);
++    mpgl_osd_generate(ctx, *res, pts, 0, 0, OSD_RENDER_PRESENTATION);
+     return ctx->change_flag;
+ }
+diff --git a/video/out/gpu/osd.h b/video/out/gpu/osd.h
+index 1b05e254f8..c7a520ee87 100644
+--- a/video/out/gpu/osd.h
++++ b/video/out/gpu/osd.h
+@@ -13,8 +13,10 @@ struct mpgl_osd *mpgl_osd_init(struct ra *ra, struct mp_log *log,
+ void mpgl_osd_destroy(struct mpgl_osd *ctx);
+ 
+ void mpgl_osd_generate(struct mpgl_osd *ctx, struct mp_osd_res res, double pts,
+-                       int stereo_mode, int draw_flags);
+-void mpgl_osd_resize(struct mpgl_osd *ctx, struct mp_osd_res res, int stereo_mode);
++                       int stereo_mode, int draw_flags,
++                       enum osd_render_origin origin);
++void mpgl_osd_resize(struct mpgl_osd *ctx, struct mp_osd_res res, int stereo_mode,
++                     bool authoritative);
+ bool mpgl_osd_draw_prepare(struct mpgl_osd *ctx, int index,
+                            struct gl_shader_cache *sc);
+ void mpgl_osd_draw_finish(struct mpgl_osd *ctx, int index,
+diff --git a/video/out/gpu/video.c b/video/out/gpu/video.c
+index 656c11c29f..1293c4a966 100644
+--- a/video/out/gpu/video.c
++++ b/video/out/gpu/video.c
+@@ -3126,7 +3126,12 @@ static void pass_draw_osd(struct gl_video *p, int osd_flags, int frame_flags,
+     if ((osd_flags & OSD_DRAW_SUB_ONLY) && (osd_flags & OSD_DRAW_OSD_ONLY))
+         return;
+ 
+-    mpgl_osd_generate(p->osd, rect, pts, p->image_params.stereo3d, osd_flags);
++    enum osd_render_origin origin = frame_flags & RENDER_FRAME_CAPTURE
++                                  ? OSD_RENDER_CAPTURE
++                                  : cms ? OSD_RENDER_PRESENTATION
++                                        : OSD_RENDER_INTERMEDIATE;
++    mpgl_osd_generate(p->osd, rect, pts, p->image_params.stereo3d,
++                      osd_flags, origin);
+ 
+     timer_pool_start(p->osd_timer);
+     for (int n = 0; n < MAX_OSD_PARTS; n++) {
+@@ -3669,6 +3674,11 @@ done:
+     pass_report_performance(p);
+ }
+ 
++static void gl_video_resize_internal(struct gl_video *p,
++                                     struct mp_rect *src, struct mp_rect *dst,
++                                     struct mp_osd_res *osd,
++                                     bool authoritative);
++
+ void gl_video_screenshot(struct gl_video *p, struct vo_frame *frame,
+                          struct voctrl_screenshot *args)
+ {
+@@ -3716,7 +3726,7 @@ void gl_video_screenshot(struct gl_video *p, struct vo_frame *frame,
+             .w = mp_rect_w(dst),
+             .h = mp_rect_h(dst),
+         };
+-        gl_video_resize(p, &src, &dst, &osd);
++        gl_video_resize_internal(p, &src, &dst, &osd, false);
+     }
+ 
+     gl_video_reset_surfaces(p);
+@@ -3753,6 +3763,7 @@ void gl_video_screenshot(struct gl_video *p, struct vo_frame *frame,
+         flags |= RENDER_FRAME_OSD;
+     if (args->scaled)
+         flags |= RENDER_SCREEN_COLOR;
++    flags |= RENDER_FRAME_CAPTURE;
+     gl_video_render_frame(p, nframe, &(struct ra_fbo){target}, flags);
+ 
+     res = mp_image_alloc(mpfmt, params.w, params.h);
+@@ -3774,7 +3785,7 @@ void gl_video_screenshot(struct gl_video *p, struct vo_frame *frame,
+ done:
+     talloc_free(nframe);
+     ra_tex_free(p->ra, &target);
+-    gl_video_resize(p, &old_src, &old_dst, &old_osd);
++    gl_video_resize_internal(p, &old_src, &old_dst, &old_osd, false);
+     gl_video_reset_surfaces(p);
+     if (!ok)
+         TA_FREEP(&res);
+@@ -3799,9 +3810,10 @@ bool gl_video_check_osd_change(struct gl_video *p, struct mp_osd_res *res,
+     return p->osd ? mpgl_osd_check_change(p->osd, res, pts) : false;
+ }
+ 
+-void gl_video_resize(struct gl_video *p,
+-                     struct mp_rect *src, struct mp_rect *dst,
+-                     struct mp_osd_res *osd)
++static void gl_video_resize_internal(struct gl_video *p,
++                                     struct mp_rect *src, struct mp_rect *dst,
++                                     struct mp_osd_res *osd,
++                                     bool authoritative)
+ {
+     if (mp_rect_equals(&p->src_rect, src) &&
+         mp_rect_equals(&p->dst_rect, dst) &&
+@@ -3815,7 +3827,15 @@ void gl_video_resize(struct gl_video *p,
+     gl_video_reset_surfaces(p);
+ 
+     if (p->osd)
+-        mpgl_osd_resize(p->osd, p->osd_rect, p->image_params.stereo3d);
++        mpgl_osd_resize(p->osd, p->osd_rect, p->image_params.stereo3d,
++                        authoritative);
++}
++
++void gl_video_resize(struct gl_video *p,
++                     struct mp_rect *src, struct mp_rect *dst,
++                     struct mp_osd_res *osd)
++{
++    gl_video_resize_internal(p, src, dst, osd, true);
+ }
+ 
+ static void frame_perf_data(struct pass_info pass[], struct mp_frame_perf *out)
+diff --git a/video/out/gpu/video.h b/video/out/gpu/video.h
+index a5b03adfbf..b72e5ce183 100644
+--- a/video/out/gpu/video.h
++++ b/video/out/gpu/video.h
+@@ -191,6 +191,7 @@ enum {
+     RENDER_FRAME_OSD = 1 << 1,
+     RENDER_FRAME_VF_SUBS = 1 << 2,
+     RENDER_SCREEN_COLOR = 1 << 3, // 3D LUT and dithering
++    RENDER_FRAME_CAPTURE = 1 << 4,
+     RENDER_FRAME_DEF = RENDER_FRAME_SUBS | RENDER_FRAME_OSD | RENDER_SCREEN_COLOR,
+ };
+ 
+diff --git a/video/out/libmpv_sw.c b/video/out/libmpv_sw.c
+index a4f8189255..1372cfd3a6 100644
+--- a/video/out/libmpv_sw.c
++++ b/video/out/libmpv_sw.c
+@@ -184,7 +184,8 @@ static int render(struct render_backend *ctx, mpv_render_param *params,
+     }
+ 
+     if (p->osd)
+-        osd_draw_on_image(p->osd, p->osd_rc, img ? img->pts : 0, 0, &wrap_img);
++        osd_draw_on_image(p->osd, p->osd_rc, img ? img->pts : 0, 0,
++                          OSD_RENDER_PRESENTATION, &wrap_img);
+ 
+     return 0;
+ }
+diff --git a/video/out/vo_direct3d.c b/video/out/vo_direct3d.c
+index 384cb20d0e..d5d2347dab 100644
+--- a/video/out/vo_direct3d.c
++++ b/video/out/vo_direct3d.c
+@@ -1106,7 +1106,9 @@ static void update_osd(d3d_priv *priv)
+         priv->osd_cache = mp_draw_sub_alloc(priv, priv->vo->global);
+ 
+     struct sub_bitmap_list *sbs = osd_render(priv->vo->osd, priv->osd_res,
+-                                             priv->osd_pts, 0, mp_draw_sub_formats);
++                                             priv->osd_pts, 0,
++                                             OSD_RENDER_PRESENTATION,
++                                             mp_draw_sub_formats);
+ 
+     struct mp_rect act_rc[MAX_OSD_RECTS], mod_rc[64];
+     int num_act_rc = 0, num_mod_rc = 0;
+diff --git a/video/out/vo_dmabuf_wayland.c b/video/out/vo_dmabuf_wayland.c
+index 1e8de72f1c..03d1ec68f2 100644
+--- a/video/out/vo_dmabuf_wayland.c
++++ b/video/out/vo_dmabuf_wayland.c
+@@ -562,7 +562,9 @@ static bool draw_osd(struct vo *vo, struct mp_image *cur, double pts)
+     struct mp_osd_res *res = &p->screen_osd_res;
+     bool draw = false;
+ 
+-    struct sub_bitmap_list *sbs = osd_render(vo->osd, *res, pts, 0, mp_draw_sub_formats);
++    struct sub_bitmap_list *sbs = osd_render(vo->osd, *res, pts, 0,
++                                             OSD_RENDER_PRESENTATION,
++                                             mp_draw_sub_formats);
+ 
+     if (!sbs)
+         return draw;
+diff --git a/video/out/vo_drm.c b/video/out/vo_drm.c
+index 28fd7db6fa..df85030fcd 100644
+--- a/video/out/vo_drm.c
++++ b/video/out/vo_drm.c
+@@ -232,10 +232,12 @@ static void draw_image(struct vo *vo, mp_image_t *mpi, struct framebuffer *buf)
+             mp_image_clear(p->cur_frame, p->dst.x1, p->dst.y0, p->cur_frame->w, p->dst.y1);
+ 
+             mp_sws_scale(p->sws, p->cur_frame_cropped, &src);
+-            osd_draw_on_image(vo->osd, p->osd, src.pts, 0, p->cur_frame);
++            osd_draw_on_image(vo->osd, p->osd, src.pts, 0,
++                              OSD_RENDER_PRESENTATION, p->cur_frame);
+         } else {
+             mp_image_clear(p->cur_frame, 0, 0, p->cur_frame->w, p->cur_frame->h);
+-            osd_draw_on_image(vo->osd, p->osd, 0, 0, p->cur_frame);
++            osd_draw_on_image(vo->osd, p->osd, 0, 0,
++                              OSD_RENDER_PRESENTATION, p->cur_frame);
+         }
+ 
+         memcpy_pic(buf->map, p->cur_frame->planes[0],
+diff --git a/video/out/vo_gpu_next.c b/video/out/vo_gpu_next.c
+index bf4f80b7ee..eb3148d169 100644
+--- a/video/out/vo_gpu_next.c
++++ b/video/out/vo_gpu_next.c
+@@ -316,15 +316,19 @@ static struct mp_image *get_image(struct vo *vo, int imgfmt, int w, int h,
+ static void update_overlays(struct vo *vo, struct mp_osd_res res,
+                             int flags, enum pl_overlay_coords coords,
+                             struct osd_state *state, struct pl_frame *frame,
+-                            struct mp_image *src, int stereo_mode, float ref_luma)
++                            struct mp_image *src, int stereo_mode, float ref_luma,
++                            enum osd_render_origin origin)
+ {
+     struct priv *p = vo->priv;
+     double pts = src ? src->pts : 0;
+     int div[2];
+     mp_get_3d_side_by_side(stereo_mode, div);
++    if (div[0] > 1 || div[1] > 1)
++        origin = OSD_RENDER_STEREO;
+     res.w /= div[0];
+     res.h /= div[1];
+-    struct sub_bitmap_list *subs = osd_render(vo->osd, res, pts, flags, mp_draw_sub_formats);
++    struct sub_bitmap_list *subs = osd_render(vo->osd, res, pts, flags, origin,
++                                              mp_draw_sub_formats);
+ 
+     frame->overlays = state->overlays;
+     frame->num_overlays = 0;
+@@ -1515,7 +1519,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     update_overlays(vo, p->osd_res,
+                     (frame->current && opts->blend_subs) ? OSD_DRAW_OSD_ONLY : 0,
+                     PL_OVERLAY_COORDS_DST_FRAME, &p->osd_state, &target, frame->current,
+-                    frame->current ? frame->current->params.stereo3d : 0, get_ref_luma(p));
++                    frame->current ? frame->current->params.stereo3d : 0, get_ref_luma(p),
++                    OSD_RENDER_PRESENTATION);
+     stats_time_end(p->stats, "osd-update");
+     apply_crop(&target, p->dst, swframe.fbo->params.w, swframe.fbo->params.h);
+     update_tm_viz(&pars->color_map_params, &target);
+@@ -1591,7 +1596,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+                     stats_time_start(p->stats, "osd-blend-update");
+                     update_overlays(vo, res, OSD_DRAW_SUB_ONLY,
+                                     rel, &fp->subs, image, mpi,
+-                                    mpi->params.stereo3d, get_ref_luma(p));
++                                    mpi->params.stereo3d, get_ref_luma(p),
++                                    OSD_RENDER_INTERMEDIATE);
+                     stats_time_end(p->stats, "osd-blend-update");
+                     fp->osd_sync = p->osd_sync;
+                 }
+@@ -1940,12 +1946,12 @@ static void video_screenshot(struct vo *vo, struct voctrl_screenshot *args)
+             ? PL_OVERLAY_COORDS_SRC_CROP : PL_OVERLAY_COORDS_DST_CROP;
+         update_overlays(vo, res, osd_flags,
+                         rel, &fp->subs, &image, mpi,
+-                        mpi->params.stereo3d, 0);
++                        mpi->params.stereo3d, 0, OSD_RENDER_CAPTURE);
+     } else {
+         // Disable overlays when blend_subs is disabled
+         update_overlays(vo, osd, osd_flags, PL_OVERLAY_COORDS_DST_FRAME,
+                         &p->osd_state, &target, mpi,
+-                        mpi->params.stereo3d, 0);
++                        mpi->params.stereo3d, 0, OSD_RENDER_CAPTURE);
+         image.num_overlays = 0;
+     }
+ 
+diff --git a/video/out/vo_image.c b/video/out/vo_image.c
+index f1fbb26c24..2aa10da9ab 100644
+--- a/video/out/vo_image.c
++++ b/video/out/vo_image.c
+@@ -102,7 +102,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     p->current = frame->current;
+ 
+     struct mp_osd_res dim = osd_res_from_image_params(vo->params);
+-    osd_draw_on_image(vo->osd, dim, frame->current->pts, OSD_DRAW_SUB_ONLY, p->current);
++    osd_draw_on_image(vo->osd, dim, frame->current->pts, OSD_DRAW_SUB_ONLY,
++                      OSD_RENDER_CAPTURE, p->current);
+ 
+ done:
+     return VO_TRUE;
+diff --git a/video/out/vo_kitty.c b/video/out/vo_kitty.c
+index 5d90bae655..ec3f29395f 100644
+--- a/video/out/vo_kitty.c
++++ b/video/out/vo_kitty.c
+@@ -320,7 +320,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     }
+ 
+     struct mp_osd_res res = { .w = p->width, .h = p->height, .display_par = p->display_par };
+-    osd_draw_on_image(vo->osd, res, mpi ? mpi->pts : 0, 0, p->frame);
++    osd_draw_on_image(vo->osd, res, mpi ? mpi->pts : 0, 0,
++                      OSD_RENDER_PRESENTATION, p->frame);
+ 
+ 
+     if (p->opts.use_shm && !create_shm(vo))
+diff --git a/video/out/vo_lavc.c b/video/out/vo_lavc.c
+index a03901c713..7f6fce170f 100644
+--- a/video/out/vo_lavc.c
++++ b/video/out/vo_lavc.c
+@@ -188,7 +188,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *voframe)
+     struct mp_image *mpi = voframe->frames[0];
+ 
+     struct mp_osd_res dim = osd_res_from_image_params(vo->params);
+-    osd_draw_on_image(vo->osd, dim, mpi->pts, OSD_DRAW_SUB_ONLY, mpi);
++    osd_draw_on_image(vo->osd, dim, mpi->pts, OSD_DRAW_SUB_ONLY,
++                      OSD_RENDER_CAPTURE, mpi);
+ 
+     if (vc->shutdown)
+         goto done;
+diff --git a/video/out/vo_sdl.c b/video/out/vo_sdl.c
+index 5ba12b20cb..e752a6f3f8 100644
+--- a/video/out/vo_sdl.c
++++ b/video/out/vo_sdl.c
+@@ -812,7 +812,8 @@ static void draw_osd(struct vo *vo)
+         [SUBBITMAP_BGRA] = true,
+     };
+ 
+-    osd_draw(vo->osd, vc->osd_res, vc->osd_pts, 0, osdformats, draw_osd_cb, vo);
++    osd_draw(vo->osd, vc->osd_res, vc->osd_pts, 0,
++             OSD_RENDER_PRESENTATION, osdformats, draw_osd_cb, vo);
+ }
+ 
+ static int preinit(struct vo *vo)
+diff --git a/video/out/vo_sixel.c b/video/out/vo_sixel.c
+index 9d58a0a4a3..78e89e8f06 100644
+--- a/video/out/vo_sixel.c
++++ b/video/out/vo_sixel.c
+@@ -434,7 +434,8 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+         .w = priv->width,
+         .h = priv->height
+     };
+-    osd_draw_on_image(vo->osd, dim, mpi ? mpi->pts : 0, 0, priv->frame);
++    osd_draw_on_image(vo->osd, dim, mpi ? mpi->pts : 0, 0,
++                      OSD_RENDER_PRESENTATION, priv->frame);
+ 
+     // Copy from mpv to RGB format as required by libsixel
+     memcpy_pic(priv->buffer, priv->frame->planes[0], priv->width * depth,
+diff --git a/video/out/vo_vaapi.c b/video/out/vo_vaapi.c
+index bb551012fa..866ec605ee 100644
+--- a/video/out/vo_vaapi.c
++++ b/video/out/vo_vaapi.c
+@@ -643,6 +643,7 @@ static void draw_osd(struct vo *vo)
+         p->osd_cache = mp_draw_sub_alloc(p, vo->global);
+ 
+     struct sub_bitmap_list *sbs = osd_render(vo->osd, *res, pts, 0,
++                                             OSD_RENDER_PRESENTATION,
+                                              mp_draw_sub_formats);
+ 
+     struct mp_rect act_rc[1], mod_rc[64];
+diff --git a/video/out/vo_vdpau.c b/video/out/vo_vdpau.c
+index 2ba0be0dc8..5910c29b80 100644
+--- a/video/out/vo_vdpau.c
++++ b/video/out/vo_vdpau.c
+@@ -690,7 +690,8 @@ static void draw_osd(struct vo *vo)
+     };
+ 
+     double pts = vc->current_image ? vc->current_image->pts : 0;
+-    osd_draw(vo->osd, vc->osd_rect, pts, 0, formats, draw_osd_cb, vo);
++    osd_draw(vo->osd, vc->osd_rect, pts, 0, OSD_RENDER_PRESENTATION,
++             formats, draw_osd_cb, vo);
+ }
+ 
+ static int update_presentation_queue_status(struct vo *vo)
+diff --git a/video/out/vo_wlshm.c b/video/out/vo_wlshm.c
+index 3e7e635cfb..79a38dc1af 100644
+--- a/video/out/vo_wlshm.c
++++ b/video/out/vo_wlshm.c
+@@ -282,10 +282,12 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+             mp_image_clear(&buf->mpi, 0, dst_rc.y0, dst_rc.x0, dst_rc.y1);
+         if (buf->mpi.w > dst_rc.x1)
+             mp_image_clear(&buf->mpi, dst_rc.x1, dst_rc.y0, buf->mpi.w, dst_rc.y1);
+-        osd_draw_on_image(vo->osd, p->osd, src->pts, 0, &buf->mpi);
++        osd_draw_on_image(vo->osd, p->osd, src->pts, 0,
++                          OSD_RENDER_PRESENTATION, &buf->mpi);
+     } else {
+         mp_image_clear(&buf->mpi, 0, 0, buf->mpi.w, buf->mpi.h);
+-        osd_draw_on_image(vo->osd, p->osd, 0, 0, &buf->mpi);
++        osd_draw_on_image(vo->osd, p->osd, 0, 0,
++                          OSD_RENDER_PRESENTATION, &buf->mpi);
+     }
+     wl_surface_attach(wl->surface, buf->buffer, 0, 0);
+ 
+diff --git a/video/out/vo_x11.c b/video/out/vo_x11.c
+index 8391b431f4..86a46bba4c 100644
+--- a/video/out/vo_x11.c
++++ b/video/out/vo_x11.c
+@@ -355,7 +355,9 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+         mp_image_clear(img, 0, 0, img->w, img->h);
+     }
+ 
+-    osd_draw_on_image(vo->osd, p->osd, frame->current ? frame->current->pts : 0, 0, img);
++    osd_draw_on_image(vo->osd, p->osd,
++                      frame->current ? frame->current->pts : 0, 0,
++                      OSD_RENDER_PRESENTATION, img);
+ 
+     if (frame->current != p->original_image)
+         p->original_image = frame->current;
+diff --git a/video/out/vo_xv.c b/video/out/vo_xv.c
+index deeb7b1276..4348db25e4 100644
+--- a/video/out/vo_xv.c
++++ b/video/out/vo_xv.c
+@@ -724,7 +724,9 @@ static bool draw_frame(struct vo *vo, struct vo_frame *frame)
+     }
+ 
+     struct mp_osd_res res = osd_res_from_image_params(vo->params);
+-    osd_draw_on_image(vo->osd, res, frame->current ? frame->current->pts : 0, 0, &xv_buffer);
++    osd_draw_on_image(vo->osd, res,
++                      frame->current ? frame->current->pts : 0, 0,
++                      OSD_RENDER_PRESENTATION, &xv_buffer);
+ 
+     if (frame->current != ctx->original_image)
+         ctx->original_image = frame->current;
