@@ -440,6 +440,17 @@ def authored_ass_rows_at(
     )
 
 
+def active_ass_text(source: bytes, track_id: SubtitleTrackId, active_rows: str) -> str:
+    """Decode observed rows using the authored document's event and wrapping rules."""
+    parsed = _parsed_source(source, track_id)
+    return "\n".join(
+        event.text
+        for event in _match_active_events(
+            active_rows, track_id, parsed.signature_index, parsed.soft_break
+        )
+    )
+
+
 def prepare_ass_hit_map_frame(
     source: bytes,
     track_id: SubtitleTrackId,

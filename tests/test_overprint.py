@@ -340,8 +340,10 @@ class FakeSurfaces:
         if on_settled is not None:
             on_settled(True)  # noqa: FBT003 -- surface settlement callback contract
 
-    def remove(self, oid, *, owner) -> None:
+    def remove(self, oid, *, owner, on_settled=None) -> None:
         self.calls.append(("remove", oid, owner))
+        if on_settled is not None:
+            on_settled(True)  # noqa: FBT003 -- surface settlement callback contract
 
     def overpaint_traffic(self) -> list[str]:
         """Just the raster slot: the focus slot and the fallback share this recorder."""

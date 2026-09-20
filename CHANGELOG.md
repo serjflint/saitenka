@@ -47,6 +47,10 @@ logs.
 
 ### Fixed
 
+- Indexed subtitle navigation seeks to the cue it prepares, including rapid repeated steps and
+  subtitle delay. Whole-cue OSD lookahead caches final color/underline payloads and publishes the
+  current cue before replenishing lookahead.
+
 - Automatic subtitle coloring uses the prepared event policy, preserving static speaker colors
   across cached geometry. Suppressed color demand and policy-driven withdrawal remain visible in traces.
 

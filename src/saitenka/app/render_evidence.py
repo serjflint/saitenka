@@ -9,6 +9,8 @@ from collections import OrderedDict
 from copy import deepcopy
 from typing import TYPE_CHECKING
 
+from saitenka.app import whole_cue_evidence
+
 if TYPE_CHECKING:
     from saitenka_subtitles.geometry import GeometryRequest, GeometrySnapshot
 
@@ -55,8 +57,7 @@ def _source_record(raw: object) -> dict:
     result["paint_reason"] = (
         paint_reason
         if isinstance(paint_reason, str)
-        and paint_reason
-        in {"eligible", "no-scan-regions", "scan-only-policy", "shadow-paint-unqualified"}
+        and paint_reason in whole_cue_evidence.REASONS | {"shadow-paint-unqualified"}
         else "unknown"
     )
     result["paint_allowed"] = (
@@ -286,6 +287,7 @@ def _reference(raw: object, revisions: set[int], *, generation: int | None = Non
     if isinstance(mask_source, str) and mask_source in {
         "native-original",
         "request-document",
+        "whole-cue-layers",
         "unknown",
     }:
         runtime["mask_source"] = mask_source
@@ -362,6 +364,7 @@ def _owner(raw: dict) -> dict:
         "last_published": _reference(raw.get("last_published"), revisions),
         "renderer_selection": _selection(raw.get("renderer_selection")),
         "geometry_sources": _source_history(raw.get("geometry_sources")),
+        "whole_cue": whole_cue_evidence.safe_history(raw.get("whole_cue")),
     }
 
 
@@ -443,6 +446,8 @@ class GeometryEvidence:
         self.owner = self._registry.allocate()
         self._key: object = None
         self._revision = 0
+        self._last_whole_decision: dict | None = None
+        self._whole_occurrences: OrderedDict[tuple, set[str]] = OrderedDict()
         self._state: dict = {
             "owner": self.owner,
             "closed": False,
@@ -454,6 +459,7 @@ class GeometryEvidence:
             "last_published": None,
             "renderer_selection": {"history": [], "evicted": 0},
             "geometry_sources": {"history": [], "evicted": 0},
+            "whole_cue": {"history": [], "evicted": 0, "counts": {}},
         }
 
     def selection(self, *, pixel_owner: str, legacy_forced: bool) -> None:
@@ -482,6 +488,37 @@ class GeometryEvidence:
         evidence["history"].append(_source_record({**record, "captured_ns": time.time_ns()}))
         if len(evidence["history"]) > _SOURCE_DECISIONS:
             evidence["history"].pop(0)
+            evidence["evicted"] += 1
+        self._registry.update(self.owner, self._state)
+
+    def whole_cue(self, raw: dict) -> None:
+        record = whole_cue_evidence.safe_record(raw)
+        if record.get("event") == "decision":
+            if record == self._last_whole_decision:
+                return
+            self._last_whole_decision = record
+        evidence = self._state["whole_cue"]
+        history = evidence["history"]
+        if history and {k: v for k, v in history[-1].items() if k != "captured_ns"} == record:
+            return
+        history.append({**record, "captured_ns": time.time_ns()})
+        if record.get("event") == "decision":
+            reason = record.get("reason", "unknown")
+            key = (record.get("color_session"), record.get("occurrence"))
+            if key[1] is None:
+                key = (record.get("text_hash"), record.get("generation"))
+            reasons = self._whole_occurrences.setdefault(key, set())
+            if reason not in reasons:
+                evidence["counts"][reason] = evidence["counts"].get(reason, 0) + 1
+                reasons.add(reason)
+            if len(self._whole_occurrences) > whole_cue_evidence.LIMIT:
+                self._whole_occurrences.popitem(last=False)
+        if record.get("event") == "subtitle_color_outcome":
+            counts = evidence.setdefault("outcomes", {})
+            status = record.get("color_status", "unknown")
+            counts[status] = counts.get(status, 0) + 1
+        if len(history) > whole_cue_evidence.LIMIT:
+            history.pop(0)
             evidence["evicted"] += 1
         self._registry.update(self.owner, self._state)
 

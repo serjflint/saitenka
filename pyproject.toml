@@ -636,6 +636,8 @@ cov = "uv run --extra full pytest -q -n auto --cov=saitenka --cov-report= --cov-
 # Render the per-file missing-line detail from the last `cov` run — what to open when coverage drops.
 cov-report = "uv run --extra full coverage report -m --skip-covered"
 bench = "uv run --extra full python examples/bench_responsiveness.py --pathological --reps 8"
+cue-replay = { cmd = "uv run --extra full python examples/bench_cue_replay.py" }
+cue-pyspy = { cmd = "bash tools/cue_pyspy.sh" }
 # Dict-free deterministic render bench — the CI/asv-safe gate target (no overlay.toml, no randomness).
 # --loops characterizes run-to-run variance (CV); --bench-json emits the gh-pages history JSON.
 synth-bench = "uv run --extra full python examples/bench_responsiveness.py --synth --reps 5 --loops 5"

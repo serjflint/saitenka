@@ -49,9 +49,16 @@ class SettleWindow:
 
 
 def swallows(
-    window: SettleWindow, *, text: str, nav_prev_text: str, identity_reinstall: bool
+    window: SettleWindow,
+    *,
+    text: str,
+    nav_prev_text: str,
+    identity_reinstall: bool,
+    superseded_texts: frozenset[str] = frozenset(),
 ) -> bool:
     """Whether this observation is a mid-seek transient the open window should absorb."""
     if not window.open:
         return False
-    return not text.strip() or (text == nav_prev_text and not identity_reinstall)
+    return not text.strip() or (
+        (text == nav_prev_text or text in superseded_texts) and not identity_reinstall
+    )

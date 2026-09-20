@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app import subnav, subnav_settle, subtitle_intents, subtitle_modes
+from saitenka.app import subnav, subnav_settle, subtitle_intents, subtitle_modes, subtitle_selection
 from saitenka.app.intents import Announce
 from saitenka.app.media import copy_clipboard
 from saitenka.app.mpv_egress import send_correlated
@@ -121,6 +121,7 @@ class SubtitleNavigationCoordinator:
     index_changed: Callable[[], None]
     cue_revision: Callable[[], int]
     invalidate_pipeline: Callable[[], object]
+    color_navigation_started: Callable[[], None] = lambda: None
 
     def ports(self) -> subnav.NavPorts:
         def geometry_hint(cue) -> None:
@@ -145,8 +146,8 @@ class SubtitleNavigationCoordinator:
     def load_index(self, path) -> None:
         subnav.load_sub_index(self.ports(), path)
 
-    def reconcile(self, text: str) -> None:
-        subnav.reconcile_sub_text(self.ports(), text)
+    def reconcile(self, text: str, *, confirmed: bool = True) -> None:
+        subnav.reconcile_sub_text(self.ports(), text, confirmed=confirmed)
 
     def seek(self, effect: subtitle_intents.SeekCue) -> bool:
         with otel_metrics.traced("sub_nav_identity") as span:
@@ -157,18 +158,24 @@ class SubtitleNavigationCoordinator:
                 return False
             span.set("outcome", "executed")
         self.invalidate_pipeline()
-        self.navigate(effect.delta)
+        self.color_navigation_started()
+        destination = subnav.sub_nav(self.ports(), effect.delta)
+        command = (
+            ("sub-seek", str(effect.delta))
+            if destination is None
+            else ("seek", str(destination), "absolute+exact")
+        )
         send_correlated(
             self.ipc,
             "sub-seek",
-            "sub-seek",
-            str(effect.delta),
+            *command,
             owner=Owner.SUBTITLE,
         )
         return True
 
     def navigate(self, delta: int) -> bool:
-        return subnav.sub_nav(self.ports(), delta)
+        self.color_navigation_started()
+        return subnav.sub_nav(self.ports(), delta) is not None
 
     def open_settle(self) -> None:
         window = self.navigation.current.sub_settle.begin()
@@ -192,6 +199,7 @@ class SubtitleNavigationCoordinator:
         self.navigation.current.sub_settle = self.navigation.current.sub_settle.due(identity)
 
     def retire_settle(self) -> None:
+        self.navigation.current.nav_superseded_texts = frozenset()
         if not self.navigation.current.sub_settle.open:
             return
         self.navigation.current.sub_settle = self.navigation.current.sub_settle.retire()
@@ -209,8 +217,6 @@ class SubtitleCommandRead:
     cue: CueRenderStore
     annotation: AnnotationViewSource
     observed_property: Callable[[str], object]
-    property_value: Callable[[str], object | None]
-    text_property: Callable[[str], str | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,8 +243,6 @@ class SubtitleCommandCoordinator:
         self._apply = apply
 
     def inputs(self) -> subtitle_intents.SubtitleInputs:
-        from saitenka.app.subtitle_modes import _current_external_sub
-
         read = self._read
         episode = read.navigation.current
         index = episode.sub_index
@@ -246,15 +250,27 @@ class SubtitleCommandCoordinator:
         track = read.tracks.current
         cue = read.cue.current
         playhead = read.observed_property("time-pos")
+        tracks = read.observed_property("track-list")
+        subs = (
+            [t for t in tracks if isinstance(t, dict) and t.get("type") == "sub"]
+            if isinstance(tracks, list)
+            else []
+        )
+        selected = min(
+            (t for t in subs if t.get("selected")),
+            key=lambda t: t.get("main-selection", 0),
+            default={},
+        )
+        path = read.observed_property("path")
         return subtitle_intents.SubtitleInputs(
-            tracks=subtitle_modes.discover_tracks(read.ipc, track.slang, track.second_slang),
-            active_sid=read.property_value("sid"),
+            tracks=subtitle_selection.discover(subs, track.slang, track.second_slang),
+            active_sid=read.observed_property("sid"),
             language=track.language,
             annotation_mode=read.annotation.view.mode,
             has_cue=bool(cue_facts.text.strip()),
             retry_in_flight=self._apply.acquisition.retry_in_flight,
-            media_path=read.text_property("path"),
-            has_external_sub=_current_external_sub(read.ipc) is not None,
+            media_path=path if isinstance(path, str) else None,
+            has_external_sub=bool(selected.get("external-filename")),
             has_cue_lines=bool(cue.lines),
             cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),
             playhead=None if playhead is None else float(playhead),  # type: ignore[arg-type]

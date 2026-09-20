@@ -116,6 +116,35 @@ def test_end_to_end_span_reaches_the_ctf_trace_file(tmp_path):
     assert any(e["name"] == "load_deps_async" for e in data["traceEvents"])
 
 
+def test_configured_telemetry_exports_cue_checkpoints_without_extra_opt_in(tmp_path, monkeypatch):
+    import json
+
+    from opentelemetry import trace
+
+    from saitenka.app.cue_transition_diagnostics import transition_probe
+
+    monkeypatch.delenv("SAITENKA_CUE_TRANSITION_PROBE", raising=False)
+    export = tmp_path / "telemetry"
+    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
+    provider = telemetry._tracer_provider
+    assert provider is not None
+    # OTel's global provider cannot be replaced between tests; use this configured provider.
+    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+
+    with transition_probe() as mark:
+        mark("identity_clear")
+    telemetry.shutdown()
+
+    path = telemetry.latest_trace(export)
+    assert path is not None
+    events = json.loads(path.read_text())["traceEvents"]
+    probes = [event for event in events if event.get("name") == "cue_transition_probe"]
+    assert len(probes) == 1
+    assert {"identity_clear.wall_ms", "identity_clear.cpu_ms", "identity_clear.offset_ms"} <= (
+        probes[0]["args"].keys()
+    )
+
+
 def test_sample_counters_reads_gil_enabled_and_dropped_spans(tmp_path):
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
     values = telemetry._sample_counters()

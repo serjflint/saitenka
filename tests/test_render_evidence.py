@@ -14,6 +14,99 @@ from saitenka.app import render_evidence, report, telemetry
 from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
 
 
+@pytest.mark.timeout(5)
+def test_whole_cue_refusal_survives_shutdown_in_metadata_only_report(monkeypatch, tmp_path):
+    from test_diagnostic_findings import read_envelope
+    from test_native_subtitles import reader, settle_jobs
+
+    from saitenka.app.subtitle_report import render_geometry, source_history
+
+    _setup(monkeypatch, tmp_path)
+    session, ipc, _backend = reader(tmp_path, coloring="whole-cue-osd")
+    session.graph.playback.observe("sub-text", "猫を見る")
+    session.graph.cue.settle()
+    settle_jobs(session, ipc)
+    session.close()
+    telemetry.save_operation_summary()
+    bundle = report.build_report_bundle(tmp_path / "reports")
+    evidence = read_envelope(bundle)["effective_runtime_configuration"]["owners"][0]["whole_cue"]
+    decisions = [row for row in evidence["history"] if row.get("event") == "decision"]
+    assert decisions[-1]["requested"] == "whole-cue-osd"
+    assert decisions[-1]["device"] == "none"
+    assert decisions[-1]["text_hash"]
+    assert "猫" not in json.dumps(evidence, ensure_ascii=False)
+    formatted = render_geometry(bundle, source_history(bundle))
+    assert "whole-cue-osd" in formatted
+    assert "terminal-outcomes=" in formatted
+    assert evidence["outcomes"]
+
+
+def test_whole_cue_history_bounds_and_sanitizes_records():
+    from saitenka.app.whole_cue_evidence import LIMIT, safe_history
+
+    evidence = render_evidence.GeometryEvidence()
+    for occurrence in range(LIMIT + 3):
+        evidence.whole_cue(
+            {
+                "event": "decision",
+                "occurrence": occurrence,
+                "reason": "font-access",
+                "text": "PRIVATE",
+                "blockers": ["font-access", "PRIVATE"],
+            }
+        )
+    exported = render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())
+    result = exported["owners"][-1]["whole_cue"]
+    assert len(result["history"]) == LIMIT
+    assert result["evicted"] == 3
+    assert result["counts"] == {"font-access": LIMIT + 3}
+    assert "PRIVATE" not in json.dumps(result)
+    assert safe_history({"history": [None] * (LIMIT + 1)})["status"] == "invalid"
+
+
+def test_redraw_acknowledgments_do_not_duplicate_cue_decision_counts():
+    evidence = render_evidence.GeometryEvidence()
+    decision = {"event": "decision", "occurrence": 1, "reason": "font-access"}
+    for _ in range(4):
+        evidence.whole_cue(decision)
+        evidence.whole_cue({"event": "subtitle_color_ack", "occurrence": 1, "accepted": True})
+    result = render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())[
+        "owners"
+    ][-1]["whole_cue"]
+    assert result["counts"] == {"font-access": 1}
+    assert len([row for row in result["history"] if row["event"] == "decision"]) == 1
+
+
+@pytest.mark.timeout(5)
+def test_delayed_cue_decision_uses_subtitle_timestamp(monkeypatch, tmp_path):
+    from test_native_subtitles import reader, settle_jobs
+
+    _setup(monkeypatch, tmp_path)
+    session, ipc, _backend = reader(tmp_path, coloring="whole-cue-osd")
+    try:
+        session.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+        for name, value in (
+            ("sub-delay", 2.0),
+            ("sub-start", 3.0),
+            ("sub-end", 5.0),
+            ("time-pos", 3.25),
+            ("sub-text", "猫を見る"),
+        ):
+            ipc.set_prop(name, value)
+        session.pump()
+        session.graph.cue.settle()
+        settle_jobs(session, ipc)
+        owners = render_evidence.safe_runtime_configuration(render_evidence.registry.snapshot())[
+            "owners"
+        ]
+        rows = owners[-1]["whole_cue"]["history"]
+        decisions = [row for row in rows if row.get("event") == "decision"]
+        targets = [row for row in rows if row.get("event") == "subtitle_color_target"]
+        assert decisions[-1]["cue_start_ms"] == targets[-1]["cue_start_ms"] == 1000
+    finally:
+        session.close()
+
+
 def _setup(monkeypatch, tmp_path):
     from saitenka import session
 

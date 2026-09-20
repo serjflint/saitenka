@@ -25,6 +25,21 @@ from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 
 
 @pytest.mark.parametrize(
+    "mode", ["legacy", "whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"]
+)
+def test_session_evidence_preserves_coloring_mode(mode, monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    options = _build_attach_options(
+        {"subtitle_geometry": {"coloring": mode}}, mine={}, config_source="config-file"
+    )
+    option_evidence.record(options)
+    fields = option_evidence.safe_snapshot(option_evidence.registry.snapshot())["owners"][0][
+        "fields"
+    ]
+    assert fields["subtitle_geometry.coloring"] == {"value": mode, "origin": "config-file"}
+
+
+@pytest.mark.parametrize(
     ("arguments", "expected"), [([], "config-file"), (["--tip-scale", "0"], "cli")]
 )
 def test_cli_origin_survives_construction_summary_and_zip(

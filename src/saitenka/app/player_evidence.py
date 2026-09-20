@@ -52,6 +52,8 @@ _ENUM = {
     "sub-ass-override": {"no", "yes", "force", "scale", "strip"},
     "blend-subtitles": {"no", "yes", "video"},
     "sub-shaper": {"simple", "complex"},
+    "osd-shaper": {"simple", "complex"},
+    "osd-justify": {"auto", "left", "center", "right"},
     "sub-hinting": {"none", "light", "normal", "native"},
     "sub-font-provider": {"auto", "none", "fontconfig"},
     "osd-font-provider": {"auto", "none", "fontconfig"},
@@ -62,6 +64,7 @@ _ENUM = {
 _PRIVATE = frozenset(
     {
         "sub-font",
+        "osd-font",
         "sub-fonts-dir",
         "osd-fonts-dir",
         "sub-ass-style-overrides",

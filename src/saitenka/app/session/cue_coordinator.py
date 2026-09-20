@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from functools import partial
@@ -11,6 +12,7 @@ from saitenka_tokenize.languages import SECOND_LANG
 
 from saitenka import otel_metrics
 from saitenka.app import native_subtitles, subnav_settle, subtitle_modes, subtitle_raster
+from saitenka.app.cue_transition_diagnostics import transition_probe
 from saitenka.app.features.annotation.annotation_controller import AnnotationInputs
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.runtime import CueCommandState
@@ -113,6 +115,9 @@ class CueCoordinator:
         if cue is None:
             otel_metrics.record_cue_settle("no-observation")
             return
+        if self._restore_navigation_transient(cue.text):
+            otel_metrics.record_cue_settle("navigation-transient")
+            return
         before = o.playback.cue.text
         self._settling = True
         try:
@@ -120,7 +125,9 @@ class CueCoordinator:
             with otel_metrics.traced(
                 "cue_reconcile", cue_revision=str(self.revision), cue=cue_digest(cue.text)
             ) as span:
-                o.navigation.reconcile(cue.text)
+                o.navigation.reconcile(
+                    cue.text, confirmed=not o.playback.state.cue_text_unconfirmed
+                )
                 settled = "adopted" if o.playback.cue.text != before else "reinstalled"
                 otel_metrics.record_cue_settle(settled, span)
         finally:
@@ -145,6 +152,7 @@ class CueCoordinator:
             "sub-text change: %d chars, paused=%s", len(text.strip()), o.playback.value("pause")
         )
         _track_color_wait(text)
+        self._track_color_occurrence(text, provisional=provisional_navigation)
         with otel_metrics.instrumented(
             otel_metrics.cue_redraw_duration_ms, "cue_redraw", cue=cue_digest(text)
         ):
@@ -179,14 +187,25 @@ class CueCoordinator:
             )
         )
         o.presentation.pipeline.cue_changed(o.presentation.target(), nonempty=bool(text.strip()))
-        with otel_metrics.traced("teardown_tip"):
-            o.tooltip.teardown()
-        o.tooltip.retire_selection()
-        o.playback.dispatch(events.CueTextReplaced(text))
-        self.clear_identity()
-        o.track_commands.navigation.current.nav_idx = -1
-        with otel_metrics.traced("hide_preview"):
-            o.preview.hide()
+        with transition_probe() as mark:
+            with otel_metrics.traced("teardown_tip"):
+                mark("teardown_span_enter")
+                o.tooltip.teardown()
+                mark("teardown_body")
+            mark("teardown_span_exit")
+            o.tooltip.retire_selection()
+            mark("selection_retire")
+            o.playback.dispatch(events.CueTextReplaced(text))
+            mark("text_replace")
+            self.clear_identity()
+            mark("identity_clear")
+            o.track_commands.navigation.current.nav_idx = -1
+            mark("navigation_reset")
+            with otel_metrics.traced("hide_preview"):
+                mark("preview_span_enter")
+                o.preview.hide()
+                mark("preview_body")
+            mark("preview_span_exit")
         if not text.strip():
             o.presentation.cue.reset()
             if o.presentation.native is not None:
@@ -205,6 +224,43 @@ class CueCoordinator:
         transition = o.annotation.replace(text, self.annotation_inputs())
         self.apply_annotation_transition(transition, draw=True)
         o.presentation.pipeline.flush_focus(o.presentation.target())
+
+    def _track_color_occurrence(self, text: str, *, provisional: bool) -> None:
+        o = self._o
+        tracker = o.presentation.color_telemetry
+        if not text.strip():
+            tracker.retire("blank")
+            return
+        navigation = o.track_commands.navigation.current
+        hint = navigation.geometry_cue_hint
+        start = hint.start if hint is not None else o.playback.value("sub-start")
+        if hint is None and navigation.sub_index is not None:
+            index = navigation.sub_index
+            delay = float(o.playback.value("sub-delay") or 0)
+            position = o.playback.value("time-pos")
+            active = index.locate_active(
+                text=text,
+                sub_start=None if start is None else float(start) - delay,
+                time_pos=None if position is None else float(position) - delay,
+                preferred=navigation.nav_idx,
+            )
+            start = (
+                index.cues[active.position].start
+                if active.located and index.frame_text(active.position) == text
+                else None
+            )
+        state = o.playback.state
+        tracker.bind(
+            (
+                state.connection.epoch,
+                state.media.source,
+                state.track.track,
+                state.track.role,
+                None if start is None else round(float(start) * 1000),
+                hashlib.blake2s(text.encode(), digest_size=16).hexdigest(),
+            ),
+            reconcile=(not provisional and navigation.sub_settle.open),
+        )
 
     def _record_session_cue(self, text: str, *, revise: bool, provisional_navigation: bool) -> None:
         o = self._o
@@ -257,7 +313,7 @@ class CueCoordinator:
             o.presentation.cue.install_tokenized(transition.cue)
         if transition.schedule_geometry and o.presentation.native is not None:
             o.presentation.cue.replace_geometry(boxes=[])
-            o.presentation.native.schedule(self.geometry_observation())
+            o.presentation.native.schedule(self.geometry_observation(), redraw=False)
         if o.presentation.layout is not None:
             o.presentation.refresh.arm()
         if draw:
@@ -333,12 +389,40 @@ class CueCoordinator:
             hover_span=tooltip.metadata.span,
             styles=o.presentation.cue.current.styles,
             boxes=o.presentation.cue.current.boxes,
-            paint_allowed=o.presentation.cue.current.paint_allowed,
+            paint_allowed=o.presentation.paint_allowed,
             paint_boxes=o.presentation.paint_boxes,
+            coloring=o.presentation.coloring,
+            record_whole_cue=o.presentation.pipeline.record_whole_cue,
+            whole_cue_identity=(
+                hashlib.blake2s(o.playback.cue.text.encode(), digest_size=16).hexdigest(),
+                o.presentation.color_telemetry.cue_start_ms,
+                o.presentation.pipeline.generation,
+            ),
+            whole_cue=(
+                o.presentation.pipeline.current.whole_cue
+                if o.presentation.pipeline.current is not None
+                else None
+            ),
+            osd_shaper=str(o.playback.value("options/osd-shaper")),
+            whole_cue_origin=(
+                o.presentation.native.paint_origin if o.presentation.native is not None else (0, 0)
+            ),
             owed_color=None
             if o.presentation.native is None
             else o.presentation.native.eligible_tokens,
             paused=bool(o.playback.value("pause")),
+            color_telemetry=o.presentation.color_telemetry,
+            paint_reason=o.presentation.paint_reason,
+            color_token_indices=(
+                o.presentation.native.eligible_token_indices
+                if o.presentation.native is not None
+                else None
+            ),
+            color_occurrence=(
+                o.presentation.color_telemetry.current.occurrence
+                if o.presentation.color_telemetry.current is not None
+                else None
+            ),
         )
 
     def configure_subtitle_mode(
@@ -381,14 +465,15 @@ class CueCoordinator:
 
     def retire(self, reason: str) -> None:
         o = self._o
+        transient = reason == playback.RetireReason.CUE_TEXT.value and self._mid_seek_transient()
         if o.presentation.layout is not None:
-            o.presentation.layout.invalidate()
+            o.presentation.layout.invalidate(shared=not transient)
         if not o.annotation.retire_cue():
             self._request_playback_retirement()
             return
         log.debug("cue interaction retired: %s", reason)
         self._request_playback_retirement()
-        if reason == playback.RetireReason.CUE_TEXT.value and self._mid_seek_transient():
+        if transient:
             # Our own sub-seek pre-armed the target cue's surfaces; mpv reports an empty (or the
             # pre-nav) `sub-text` while the seek is in flight. The identity is retired like any
             # other — the reconcile that adopts the landed cue keys off it — but the surfaces
@@ -406,23 +491,38 @@ class CueCoordinator:
                 o.presentation.native.mark_empty()
             o.presentation.pipeline.clear(o.surfaces, o.ipc)
 
-    def _mid_seek_transient(self) -> bool:
+    def _restore_navigation_transient(self, text: str) -> bool:
+        navigation = self._o.navigation.navigation.current
+        index = navigation.sub_index
+        if index is None or navigation.nav_idx < 0:
+            return False
+        target = index.frame_text(navigation.nav_idx)
+        if text == target or not self._mid_seek_transient(text):
+            return False
+        self._o.playback.dispatch(events.CueTextReplaced(target))
+        return True
+
+    def _mid_seek_transient(self, text: str | None = None) -> bool:
         current = self._o.navigation.navigation.current
         return subnav_settle.swallows(
             current.sub_settle,
-            text=self._o.playback.cue.text,
+            text=self._o.playback.cue.text if text is None else text,
             nav_prev_text=current.nav_prev_text,
+            superseded_texts=current.nav_superseded_texts,
             identity_reinstall=False,
         )
 
     def replace_source(self, path: object = None, *, reason: str) -> None:
         o = self._o
+        o.presentation.invalidate_timed("source-replaced")
+        o.presentation.color_telemetry.retire("source-changed")
         o.navigation.retire_settle()
         o.playback.dispatch(events.SourceReplaced(path))
         self.retire(reason)
 
     def rebind_episode(self) -> None:
         o = self._o
+        o.presentation.color_telemetry.retire("episode-changed")
         o.picker.close()
         o.acquisition.retire_episode()
         o.annotation.retire_episode_warm()

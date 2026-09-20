@@ -41,18 +41,11 @@ class SidebarViewOwners:
     timers: LifecycleTimers
 
 
-_UNREAD = object()
-
-
 class SidebarController:
     def __init__(self, ipc: MpvIPC) -> None:
         self.store: SidebarStore = SIDEBAR_STATEFUL_BINDING.store(ipc)
         self.panel = sidebar.SidebarPanel()
         self._view_owners: SidebarViewOwners | None = None
-        #: The episode's navigation state the cached path was read for — the object itself, not its
-        #: id, which the allocator hands to the next episode's; a sentinel so the first read happens.
-        self._video_path_key: object = _UNREAD
-        self._video_path_value: str | None = None
 
     def bind_view(self, owners: SidebarViewOwners) -> None:
         if self._view_owners is not None:
@@ -82,7 +75,7 @@ class SidebarController:
             osd=owners.screen.osd,
             chrome_scale=owners.screen.chrome_scale(),
             surfaces=owners.surfaces,
-            video=self._video_path(navigation, playback),
+            video=self._video_path(playback),
             backlog=owners.history.ensure_backlog,
             mined=lambda: owners.mining.store,
             mined_exists=owners.mining.store_exists,
@@ -93,18 +86,10 @@ class SidebarController:
             can_mine=owners.mining.configured,
         )
 
-    def _video_path(self, episode: object, playback: PlaybackObservationController) -> str | None:
-        """The media path, read from mpv once per episode rather than on every turn.
-
-        `view()` is built every turn ahead of the cue settle, and `path` is not an observed
-        property, so reading it live put a blocking round trip on the color path — 250 ms while
-        mpv is mid-seek. Keyed on the navigation state, which the episode rebind replaces whether
-        or not a sub-index ever loads for it.
-        """
-        if self._video_path_key is not episode:
-            self._video_path_key = episode
-            self._video_path_value = playback.text("path")
-        return self._video_path_value
+    @staticmethod
+    def _video_path(playback: PlaybackObservationController) -> str | None:
+        path = playback.value("path")
+        return path if isinstance(path, str) else None
 
     def show(self) -> None:
         sidebar.show(self.view())

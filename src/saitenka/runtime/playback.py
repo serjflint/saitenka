@@ -81,12 +81,17 @@ RENDER_SPACE_PROPERTIES = frozenset(
         "options/sub-scale-by-window",
         "options/blend-subtitles",
         "options/sub-filter-sdh",
+        "options/sub-filter-regex-enable",
+        "options/sub-filter-regex",
+        "options/sub-filter-jsre",
         "options/sub-font-provider",
         "options/embeddedfonts",
         "options/sub-fonts-dir",
         "options/sub-font",
         "options/osd-fonts-dir",
         "options/osd-font-provider",
+        "options/osd-font",
+        "options/osd-justify",
         # `converted.STYLE_OPTIONS` — the style mpv applies to a track it converted. Observed so
         # `_render_inputs` does not block on them per cue, and counted a render-space input so a
         # mid-episode change re-measures the boxes it just moved.
@@ -111,6 +116,7 @@ RENDER_SPACE_PROPERTIES = frozenset(
         # Renderer state, not document style: mpv sets each on the libass renderer, so a
         # mid-episode change moves the boxes without touching the track.
         "options/sub-shaper",
+        "options/osd-shaper",
         "options/sub-ass-justify",
         "options/sub-line-spacing",
         "options/sub-hinting",
@@ -123,6 +129,9 @@ _AUTHORED_STALE_PROPERTIES = frozenset({"sub-text"}) | TRACK_PROPERTIES
 #: rows and their timing. Wider than the render space: a new cue changes the geometry inputs
 #: without changing the space they are laid out in.
 GEOMETRY_INPUT_PROPERTIES = RENDER_SPACE_PROPERTIES | {
+    "options/sub-speed",
+    "options/sub-fps",
+    "options/play-direction",
     "sub-text/ass-full",
     "sub-start",
     "sub-end",
@@ -344,6 +353,7 @@ class PlaybackState:
     timing: TimingFacts = TimingFacts()
     pointer: PointerFacts = PointerFacts()
     paused: bool = False
+    cue_text_unconfirmed: bool = False
     properties: Mapping[str, object] = _EMPTY_PROPERTIES
 
     def value(self, name: str) -> object:
@@ -396,8 +406,14 @@ class PlaybackProjection:
         if not name:
             return Projected(state)
         changed = not state.observes(name) or state.value(name) != data
+        confirming = name == "sub-text" and state.cue_text_unconfirmed
+        if confirming:
+            state = replace(state, cue_text_unconfirmed=False)
         state = state._with_property(name, data)
         if not changed:
+            # An observed echo confirms an optimistically installed navigation target.
+            if confirming:
+                return Projected(state, (CueObservationChanged(state.identity()),))
             return Projected(state)
         state, deltas = self._interpret(state, name, data)
         return Projected(state, self._publish(deltas))
@@ -480,6 +496,9 @@ class PlaybackProjection:
         timed = _TIMED_RETIREMENT.get(name)
         if timed is not None and (data is None or data == getattr(state.cue.installed, timed)):
             return state, ()
+        if timed is not None and getattr(state.cue.installed, timed) is None:
+            installed = replace(state.cue.installed, **{timed: data})
+            return replace(state, cue=replace(state.cue, installed=installed)), ()
         return self.retire(state, reason)
 
     # --- identity lifecycle, owned by the projection ------------------------------------------
@@ -514,7 +533,7 @@ class PlaybackProjection:
         if text == state.cue.text:
             return state
         cue = replace(state.cue, text=text, cue=state.cue.cue.advance())
-        return replace(state, cue=cue)._with_property("sub-text", text)
+        return replace(state, cue=cue, cue_text_unconfirmed=True)._with_property("sub-text", text)
 
     def source_replaced(self, state: PlaybackState, path: object = None) -> Projected:
         """A new media source is live: bump the source revision and retire the old identity."""

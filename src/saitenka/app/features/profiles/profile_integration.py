@@ -54,6 +54,7 @@ class ProfileIntegration:
         self.annotation.enable_async()
 
     def dependencies_changed(self) -> None:
+        self.presentation.invalidate_timed("annotation-dependencies")
         self.analysis.invalidate(vocabulary_changed=True)
         self.invalidate_dictionary()
         transition = self.annotation.dependencies_changed(

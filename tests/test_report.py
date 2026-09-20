@@ -12,6 +12,23 @@ from saitenka_dict.schema import SCHEMA_VERSION
 from saitenka.app import report
 
 
+def test_detailed_report_bundles_only_its_frame_session(monkeypatch, tmp_path):
+    _hermetic(monkeypatch, tmp_path)
+    (tmp_path / "cache" / "overlay.log").write_text('{"session":"wanted"}\n')
+    (tmp_path / "cache" / "mpv-frame-wanted.json").write_text(
+        json.dumps({"session": "wanted", "subtitle_clock": {"sub-delay": -6}})
+    )
+    (tmp_path / "cache" / "mpv-frame-wanted.tsv").write_text(
+        "# health recorded=0 attempted=0 overflow=0\n"
+    )
+
+    members = report.collect(diagnostic_detail=True)
+
+    assert "diagnostics/mpv-frame.tsv" in members
+    assert json.loads(members["diagnostics/mpv-frame.json"])["subtitle_clock"]["sub-delay"] == -6
+    assert "diagnostics/mpv-frame.tsv" not in report.collect(diagnostic_detail=False)
+
+
 def test_rotation_losing_a_segment_does_not_abort_collection(monkeypatch, tmp_path):
     _hermetic(monkeypatch, tmp_path)
     active = tmp_path / "overlay.log"

@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, cast
 
 from saitenka_subtitles.geometry import PaintQualification
 
 from saitenka import otel_metrics
 from saitenka.app import geometry_refresh, native_subtitles
+from saitenka.app.color_telemetry import ColorTelemetry
 from saitenka.app.mpv_layout_source import LayoutPorts, MpvLayoutSource
 from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
 from saitenka.app.subtitle_geometry_job import configure_runtime_job as configure_geometry_lane
 from saitenka.app.subtitle_pipeline import CurrentSubtitleRenderer, SubtitleModeCoordinator
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleTarget
+from saitenka.app.timed_osd import TimedOsd
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka_subtitles import GeometryBackend
+    from saitenka_subtitles import GeometryBackend, GeometrySnapshot
     from saitenka_tokenize.japanese import Token
 
     from saitenka.app.config import SubtitleGeometryOptions, TooltipOptions
@@ -217,12 +219,14 @@ class SubtitlePresentation:
             raise ValueError("mpv geometry source conflicts with an injected shadow backend")
         current: CurrentSubtitleRenderer = renderer if renderer is not None else _default_renderer()
         if settings.native_visible and renderer is None:
-            current = NativeVisibleRenderer()
+            current = NativeVisibleRenderer(coloring=settings.coloring)
         self.pipeline = SubtitleModeCoordinator(current, backend)
+        self.color_telemetry = ColorTelemetry(ipc, evidence=self.pipeline.record_whole_cue)
         self.visual = visual
         self.cue = CueRenderStore()
         self._ports = ports
         self._source = settings.source
+        self.coloring = settings.coloring
         self._scan_source = "none"
         self._layout_warnings: set[str] = set()
         self._last_geometry_record: dict[str, str | int | bool] = {}
@@ -235,6 +239,14 @@ class SubtitlePresentation:
             generation=lambda: self.pipeline.generation,
             refresh=self._refresh_geometry,
         )
+        self.timed: TimedOsd | None = None
+        self._timed_redraw_pending = False
+        if isinstance(current, NativeVisibleRenderer) and settings.coloring in {
+            "whole-cue-osd",
+            "whole-cue-auto",
+        }:
+            self.timed = TimedOsd(ipc, ports.geometry, self._timed_changed)
+            current.timed = self.timed
         if not settings.native_visible:
             return
         if settings.source in {"mpv", "auto"}:
@@ -261,6 +273,8 @@ class SubtitlePresentation:
                 self.pipeline,
                 cache_max=settings.cache_max,
                 submit=configure_geometry_lane(ipc),
+                on_prefetched=self._warm_prefetched,
+                on_invalidated=lambda: self.invalidate_timed("prepared-inputs"),
             ),
             native_subtitles.GeometryPorts(
                 pipeline=self.pipeline,
@@ -276,6 +290,7 @@ class SubtitlePresentation:
             ),
             lookahead=settings.lookahead,
             formats=native_subtitles.native_formats(settings.native_formats),
+            coloring=settings.coloring,
         )
         native_subtitles.connect_drift_sink(current, self.native)
 
@@ -293,7 +308,11 @@ class SubtitlePresentation:
     def publish_geometry(self, boxes: list, origin: tuple[int, int] | None = None) -> None:
         self._shadow_boxes = boxes
         self._shadow_generation = self.pipeline.generation
-        if self.using_layout:
+        if (
+            self._scan_source == "mpv"
+            and self.layout is not None
+            and self.layout.current is not None
+        ):
             self.cue.replace_geometry(paint_allowed=self._paint_ready())
             self._record_geometry()
             return
@@ -329,21 +348,24 @@ class SubtitlePresentation:
             else PaintQualification.MISSING.value
         )
 
+    @property
+    def paint_allowed(self) -> bool:
+        return self.cue.current.paint_allowed and (
+            self.coloring == "legacy" or self._shadow_paint_allowed()
+        )
+
+    @property
+    def paint_reason(self) -> str:
+        return self._paint_diagnosis(allowed=self.paint_allowed)
+
     def _warn_layout_failure(self, reason: str) -> None:
+        if self._source == "auto":
+            return
         detail = _LAYOUT_WARNINGS.get(reason)
         if detail is None or reason in self._layout_warnings:
             return
         self._layout_warnings.add(reason)
-        fallback = (
-            self._source == "auto"
-            and self.layout is not None
-            and self.layout.fallback_reason is not None
-        )
-        message = (
-            f"Using shadow subtitle geometry: {detail}."
-            if fallback
-            else f"Subtitle scanning unavailable: {detail}. Try shadow geometry."
-        )
+        message = f"Subtitle scanning unavailable: {detail}. Try shadow geometry."
         self._ports.notify(message, "warn")
 
     def _record_geometry(self) -> None:
@@ -385,6 +407,9 @@ class SubtitlePresentation:
 
     def _publish_layout(self, boxes: list[WordBox]) -> bool:
         if self.use_native_renderer():
+            if not boxes and self._source == "auto":
+                self._clear_layout()
+                return True
             self._scan_source = "mpv"
             self.cue.publish_geometry(boxes, (0, 0), paint_allowed=self._paint_ready())
             self.draw()
@@ -394,8 +419,7 @@ class SubtitlePresentation:
     @property
     def using_layout(self) -> bool:
         return self.layout is not None and (
-            self._source == "mpv"
-            or (self.layout.supported is not False and self.layout.fallback_reason is None)
+            self._source == "mpv" or self.layout.supported is not False
         )
 
     @property
@@ -403,7 +427,7 @@ class SubtitlePresentation:
         return self._shadow_boxes if self.using_layout else None
 
     def _shadow_paint_allowed(self) -> bool:
-        if self._source != "auto":
+        if self._source != "auto" and self.coloring == "legacy":
             return True
         snapshot = self.pipeline.current
         return (
@@ -413,34 +437,29 @@ class SubtitlePresentation:
         )
 
     def _paint_ready(self) -> bool:
-        if self._source != "auto" or self.layout is None or self.layout.current is None:
-            return False
-        if not self._shadow_boxes or not self._shadow_paint_allowed():
-            return False
-        snapshot = self.pipeline.current
-        if snapshot is None:
-            return False
-        events = snapshot.frame_id.active_event_ids
-        frame = self.layout.current
-        return len(events) == len(frame.events) and all(
-            event.start_ms == round(native.start * 1000)
-            and event.end_ms == round(native.end * 1000)
-            for event, native in zip(events, frame.events, strict=True)
-        )
+        return self._source == "auto" and bool(self._shadow_boxes) and self._shadow_paint_allowed()
 
     def _clear_layout(self) -> None:
-        if self.using_layout:
-            if self._shadow_boxes and self._shadow_paint_allowed():
+        if self._source == "auto":
+            if self._shadow_boxes and self._shadow_generation == self.pipeline.generation:
                 self._scan_source = "shadow"
-                self.cue.publish_geometry(self._shadow_boxes, (0, 0), paint_allowed=True)
+                self.cue.publish_geometry(
+                    self._shadow_boxes, (0, 0), paint_allowed=self._shadow_paint_allowed()
+                )
                 self.draw()
             else:
                 self.clear_native_interaction()
+        else:
+            self.clear_native_interaction()
 
     def _clear_shadow(self) -> None:
         self._shadow_boxes = []
         self._shadow_generation = -1
-        if self.using_layout:
+        if (
+            self._scan_source == "mpv"
+            and self.layout is not None
+            and self.layout.current is not None
+        ):
             self.cue.replace_geometry(paint_allowed=False)
             self.draw()
         else:
@@ -463,6 +482,14 @@ class SubtitlePresentation:
             )
 
     def geometry_changed(self, property_name: str = "") -> None:
+        if property_name not in {
+            "subtitle-layout-revision",
+            "options/subtitle-layout",
+            "sub-text/ass-full",
+            "sub-start",
+            "sub-end",
+        }:
+            self.invalidate_timed(property_name or "geometry-input")
         if self.layout is not None:
             if self.native is not None and property_name in {
                 "sub-text/ass-full",
@@ -489,6 +516,7 @@ class SubtitlePresentation:
             self.refresh.arm()
 
     def invalidate_geometry(self) -> None:
+        self.invalidate_timed("annotation-or-geometry")
         if self.layout is not None:
             self.layout.invalidate()
         elif self.native is not None:
@@ -503,6 +531,7 @@ class SubtitlePresentation:
         self.pipeline.connection_replaced(self.target())
 
     def toggle_renderer(self) -> bool:
+        self.invalidate_timed("renderer-changed")
         if self.layout is not None:
             self.layout.suspend()
         if self.native is not None:
@@ -523,12 +552,14 @@ class SubtitlePresentation:
 
     def clear_pixels(self) -> None:
         """Clear native-owned pixels; legacy rendering has no retained subtitle surface."""
+        self.invalidate_timed("clear-pixels")
         if self.native is not None or self.layout is not None:
             target = self.target()
             self.pipeline.clear(target.surfaces, target.ipc)
 
     def close_raster(self) -> None:
         """Close whichever object owns the active subtitle raster."""
+        self.color_telemetry.retire("shutdown")
         if self.native is not None:
             self.native.close()
         else:
@@ -560,11 +591,55 @@ class SubtitlePresentation:
         renderer = self.pipeline.renderer
         return isinstance(renderer, NativeVisibleRenderer) and renderer.assertion_in_flight
 
-    def _refresh_geometry(self) -> None:
+    def _warm_prefetched(self, snapshot: GeometrySnapshot) -> None:
+        renderer = self.renderer
+        if not isinstance(renderer, NativeVisibleRenderer) or self.pipeline.legacy_forced:
+            return
+        seen = self._ports.geometry()
+        cue = snapshot.whole_cue
+        if cue is None:
+            return
         if self.native is not None:
-            self.native.refresh(self._ports.geometry())
+            prepared = self.native.prefetched_cue(snapshot, seen)
+            if prepared is not None:
+                tokens, boxes = prepared
+                request = replace(
+                    self.target().draw_request(),
+                    lines=tokens.lines,
+                    styles=tokens.styles,
+                    boxes=boxes,
+                    whole_cue=cue,
+                    osd=seen.osd,
+                    paint_allowed=snapshot.paint_qualification is PaintQualification.STATIC,
+                    color_token_indices=frozenset(box.index for box in boxes),
+                )
+                artifact = renderer.prepare_osd(request)
+                if artifact is not None and renderer.can_stage_timed and self.timed is not None:
+                    self.timed.stage(snapshot.timestamp_ms, *artifact)
+        if not seen.text.strip():
+            renderer.warm_osd(self.target(), cue, self.pipeline.record_whole_cue)
+
+    def _refresh_geometry(self) -> None:
+        if self.timed is not None:
+            self.timed.discover()
+        if self.native is not None:
+            seen = self._ports.geometry()
+            if not seen.text.strip() and not self.pipeline.legacy_forced:
+                self.renderer.activate(self.target())
+            self.native.refresh(seen)
         if self.layout is not None:
             self.layout.refresh()
+        if self._timed_redraw_pending:
+            self._timed_redraw_pending = False
+            self.draw()
+
+    def _timed_changed(self) -> None:
+        self._timed_redraw_pending = True
+        self.refresh.arm()
+
+    def invalidate_timed(self, reason: str) -> None:
+        if self.timed is not None:
+            self.timed.invalidate(reason)
 
 
 def _default_renderer() -> SubtitleRenderer:

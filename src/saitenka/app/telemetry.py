@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, final
 
+from saitenka.app.color_evidence import safe_color_metrics
 from saitenka.app.paths import cache_dir
 
 #: Per-session trace rotation: each run writes its own ``trace-<timestamp>.json`` (a CTF doc is one
@@ -276,6 +277,7 @@ def save_operation_summary(*, end: str = "unknown") -> None:
 def _save_operation_summary(*, end: str) -> None:
     import json
 
+    from saitenka import otel_metrics
     from saitenka.app.option_evidence import registry as option_registry
     from saitenka.app.player_evidence import registry as player_registry
     from saitenka.app.profile_evidence import registry as profile_registry
@@ -319,6 +321,7 @@ def _save_operation_summary(*, end: str) -> None:
         player_configuration=player_configuration,
         player_queries=player_queries,
         session_configuration=session_configuration,
+        subtitle_color_metrics=safe_color_metrics(otel_metrics.snapshot()).get("metrics", {}),
     )
     try:
         directory.mkdir(parents=True, exist_ok=True)

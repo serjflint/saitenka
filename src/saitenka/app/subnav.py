@@ -1,8 +1,4 @@
-"""Subtitle navigation (Alt+←/→/↓): render the target cue from a parsed subtitle-file index
-INSTANTLY, then let mpv's own ``sub-seek`` catch the video up behind it.
-
-Takes ``reader: SessionController`` (the AGENTS.md seam pattern) with thin delegating methods on SessionController.
-"""
+"""Indexed subtitle navigation: present and seek to one selected destination."""
 
 from __future__ import annotations
 
@@ -90,19 +86,18 @@ def _get_float(get: Callable[[str], object], prop: str) -> float | None:
         return None
 
 
-def sub_nav(ports: NavPorts, delta: int) -> bool:
-    """Render the cue ``delta`` steps away (-1 prev / 0 replay / +1 next) in the overlay right now,
-    from the parsed index — the perceived-instant half of subtitle navigation. Returns True if it
-    drew a target line. The caller still issues the real ``sub-seek`` so the video catches up; the
-    poll loop reconciles to mpv's ``sub-text`` once the seek settles.
+def sub_nav(ports: NavPorts, delta: int) -> float | None:
+    """Present an indexed cue and return its absolute playback destination.
 
-    Chaining works while the video seek is still in flight (time-pos/sub-start are stale): after a
-    nav render ``sub_text`` is the line we drew, so ``locate`` finds it by text and ``_nav_idx``
-    disambiguates duplicates — next/next/next steps forward predictably."""
+    A missing destination delegates to mpv without publishing a provisional cue.
+    """
     episode = ports.episode
     idx = episode.sub_index
     if idx is None:
-        return False
+        return None
+    delay = subnav_policy.indexed_delay(ports.get)
+    if delay is None:
+        return None
     # The index is the subtitle FILE's cues; mpv's filters run between the file and the screen. With
     # one active, stepping by index can land on a cue mpv drops — the instant render shows a line
     # that never appears and the seek settles somewhere else. mpv's own `sub-seek` cannot make that
@@ -110,31 +105,35 @@ def sub_nav(ports: NavPorts, delta: int) -> bool:
     if subnav_policy.filters_can_drop_a_cue(
         {name: ports.get(f"options/{name}") for name in subnav_policy.FILTER_OPTIONS}
     ):
-        return False
-    # Span covers the decision AND the render it triggers below — set_subtitle's own "cue_redraw"
-    # span nests inside this one, so the span's total duration IS the keypress → drawn latency for
-    # the instant-nav path.
+        return None
     with otel_metrics.instrumented(otel_metrics.sub_seek_duration_ms, "sub_seek") as span:
         target = subnav_policy.resolve_target(
             idx,
             delta=delta,
             text=ports.cue_text(),
-            sub_start=_get_float(ports.get, "sub-start"),
-            time_pos=_get_float(ports.get, "time-pos"),
+            sub_start=subnav_policy.subtitle_time(_get_float(ports.get, "sub-start"), delay),
+            time_pos=subnav_policy.subtitle_time(_get_float(ports.get, "time-pos"), delay),
             nav_idx=episode.nav_idx,
         )
         if target is None:
-            return False  # no index match / out of range → let mpv's sub-seek handle it
+            return None  # no index match / out of range → let mpv's sub-seek handle it
+        destination = subnav_policy.seek_position(target.cue, delay)
+        if destination is None:
+            return None
+        span.set("seek_position", destination)
+        span.set("delta", delta)
+        span.set("target_index", target.index)
+        span.set("target_start", target.cue.start)
         # A step measured inside an overlap and one measured from a lone cue land the user in
         # different places, and only the trace can tell them apart afterwards.
         span.set("overlapping", target.overlapping)
         # The digest of what gets DRAWN, so this span joins the draw it causes. Digesting the
         # stepped-to event instead gave an overlap two identities and split one wait across them.
         span.set("cue", cue_digest(target.drawn_text))
-        # Captured BEFORE set_subtitle overwrites sub_text — mpv's OWN native sub-seek (fired right
-        # after this by the caller) often re-reports THIS pre-nav text as a transient mid-seek value
-        # before landing on the real target; reconcile below must not mistake that for a correction.
+        # Earlier seeks can still report any cue superseded in this navigation burst.
         episode.nav_prev_text = ports.cue_text()
+        previous = episode.nav_superseded_texts if episode.sub_settle.open else frozenset()
+        episode.nav_superseded_texts = previous | {episode.nav_prev_text}
         ports.geometry_hint(target.cue)
         try:
             ports.draw_cue(
@@ -147,22 +146,17 @@ def sub_nav(ports: NavPorts, delta: int) -> bool:
         # Guard the reconcile: mpv's sub-text briefly reads empty (or the pre-nav cue) mid-seek;
         # ignoring that avoids reverting the render before it settles.
         ports.open_settle()
-    return True
+    return destination
 
 
-def reconcile_sub_text(ports: NavPorts, text: str) -> None:
-    """Poll-loop hook: adopt mpv's current ``sub-text`` when it changed. mpv is the source of truth
-    (it corrects the line if our instant-nav index guessed wrong), EXCEPT for two transient values
-    mpv emits mid-seek right after a manual sub-nav: an empty blip, and mpv re-reporting the PRE-nav
-    cue's text before it catches up to the real target (confirmed live: a real ``sub-seek`` fired
-    from inside the target cue's own span briefly re-reports the cue we just navigated AWAY from).
-    Naively adopting either would flash the wrong text and — worse — silently reset ``_nav_idx``
-    (any ``set_subtitle`` call does), breaking next/next/next chaining even though the render was
-    already correct. Swallow both within the settle window."""
+def reconcile_sub_text(ports: NavPorts, text: str, *, confirmed: bool = True) -> None:
+    """Adopt observations, absorbing superseded navigation cues until the seek settles."""
     # Empty is a stable retired state: the first transition already cleared every interaction
     # surface, so reinstalling the same empty observation would only repeat teardown every poll.
     episode, drawn = ports.episode, ports.cue_text()
     if text == drawn and (not ports.cue_retired() or not text.strip()):
+        if confirmed:
+            ports.retire_settle()
         return
     identity_reinstall = text == drawn and ports.cue_retired()
     window = episode.sub_settle
@@ -170,6 +164,7 @@ def reconcile_sub_text(ports: NavPorts, text: str) -> None:
         window,
         text=text,
         nav_prev_text=episode.nav_prev_text,
+        superseded_texts=episode.nav_superseded_texts,
         identity_reinstall=identity_reinstall,
     ):
         return
@@ -190,4 +185,5 @@ def reconcile_sub_text(ports: NavPorts, text: str) -> None:
         episode.nav_provisional_cue_counted = False
         if identity_reinstall:
             episode.nav_idx = nav_idx
-    ports.retire_settle()
+    if confirmed:
+        ports.retire_settle()

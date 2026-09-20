@@ -429,3 +429,33 @@ def test_an_attachments_own_family_name_is_what_the_overprint_stands_down_on(
 
     assert resolved.osd_unreachable().blocks("noto sans")
     assert not resolved.osd_unreachable().blocks("helvetica")
+
+
+def test_osd_fallback_family_is_part_of_resolved_environment(tmp_path):
+    settings = {"osd-font": "Custom Fallback", "sub-font": "Subtitle Fallback"}
+    resolved = subtitle_fonts.resolve(
+        expand=expander(None),
+        settings=settings,
+        video=None,
+        cache_dir=tmp_path,
+    )
+    assert resolved.osd_setup.default_family == "Custom Fallback"
+    assert resolved.setup.default_family == "Subtitle Fallback"
+    assert resolved.options != subtitle_fonts.option_snapshot({**settings, "osd-font": "Other"})
+
+
+def test_identical_attachment_in_osd_directory_is_reachable(tmp_path, monkeypatch):
+    data = REPO_FONT.read_bytes()
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "attachment.ttf").write_bytes(data)
+    monkeypatch.setattr(subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("a.ttf", data),))
+    resolved = subtitle_fonts.resolve(
+        expand=expander(None),
+        settings={"embeddedfonts": True, "osd-fonts-dir": str(fonts)},
+        video=tmp_path / "episode.mkv",
+        cache_dir=tmp_path,
+    )
+    assert resolved.attachment_families
+    assert not resolved.osd_unreachable().families
+    assert resolved.osd_setup.fonts_dir == str(fonts)

@@ -1,5 +1,69 @@
 # Native mpv subtitles with Saitenka interaction
 
+## Optional whole-cue coloring
+
+Set `coloring` under `[subtitle_geometry]` alongside `native_visible = true`:
+
+| Coloring | Behavior |
+|---|---|
+| `legacy` (default) | Existing per-token overprint/overpaint selection. |
+| `whole-cue-auto` | Whole-event ASS OSD when qualified; otherwise whole-cue raster; otherwise scan boxes only. |
+| `whole-cue-osd` | Qualified whole-event ASS OSD, otherwise scan boxes only. |
+| `whole-cue-overpaint` | Whole-cue raster, otherwise scan boxes only. |
+| `boxes-only` | Scanning without coloring or level underlines. |
+
+Use geometry source `auto` or `shadow` for coloring; explicit `mpv` remains scan-only.
+The new modes retain the original subtitle track and the secondary translation slot. Raster coloring
+renders complete authored events through libass and keeps its positioned fill layers, without glyph
+matching or fractional probes. Changes to reading-state colors reuse those layers. Level underlines
+use the existing vector decoration path.
+
+The OSD path keeps complete static events, including explicit line breaks, style resets and multiple
+independently positioned events. It maps script coordinates into the displayed video rectangle,
+including letterbox offsets. Default alignment and margins are lowered to explicit positions.
+On the preparation worker, one authored render and one OSD-context render must agree in positioned
+fill masks. Recoloring reuses the prepared template; it adds no qualification IPC round trip.
+
+Lookahead also prepares the final ASS color and underline payload. A bounded presentation cache
+reuses those bytes while their layout, selected colors and underline inputs match. Hover remains
+dynamic; a changed input rebuilds the affected artifact. Current-cue publication precedes lookahead
+replenishment. Diagnostic traces label artifact hits with `subtitle_osd_artifact`.
+
+With a patched mpv exposing `osd-overlay-timed`, the OSD modes also upload prepared colors ahead
+of playback. mpv activates and expires them on its video clock, so the first native subtitle frame
+can already contain its colors. Cue notifications continue to update scanning and interaction.
+This path requires indexed static cues, normal subtitle speed/FPS, forward playback, unblended
+subtitles and no cue-dropping filters. Co-timed events share one interval; changing overlaps or
+unsupported timing keep scanning without timed color. Subtitle delay is
+applied to the display interval while authored timestamps remain part of cue identity. Stock mpv
+keeps reactive OSD publication. Traces record capability, staging, acknowledgment, removal and refusal
+under `subtitle_timed_osd`; acknowledgments alone do not prove first-frame display.
+
+Indexed subtitle navigation presents and seeks to the same destination, using an absolute exact
+seek with subtitle delay applied. Cue-dropping filters, non-default subtitle speed/FPS and reverse
+playback retain mpv's relative navigation without a speculative cue. mpv still owns video seeking
+and display scheduling; an OSD acknowledgment is not a displayed-frame timestamp.
+
+OSD retains complex shaping. Kerning differences, unsupported automatic wrapping, fractional aspect
+scaling, custom OSD justification or inaccessible fonts can still produce a refusal. These cues keep
+scan boxes in explicit OSD mode; auto mode can use the retained whole-cue raster. The comparison is
+between two shadow renders, not a measurement of mpv's displayed pixels. Libass/font differences
+between installations still require live qualification.
+
+Attachment fonts reach OSD only when separately available there. Supplying the identical font files
+through mpv's `osd-fonts-dir` lets the qualifier use them; Saitenka does not install fonts or change
+that option automatically. Missing access reports `font-access`. Raster uses the existing subtitle
+font environment. Karaoke, alpha, dynamic effects, clipping and unproven occlusion remain independently
+restricted for coloring. Underlines use the existing vector decoration path.
+
+Normal reports retain a bounded history of whole-cue decisions, submissions, acknowledgments and
+terminal outcomes even with tracing disabled. They include the requested mode, paint device, refusal
+reasons, cue text hash plus numeric timestamp, occurrence/generation, and shadow-predicted bounds.
+Reason counts and eviction counts remain after individual rows age out. `saitenka subtitle-report PATH`
+formats these decisions; diagnostic traces additionally include bounded per-unit shadow geometry.
+Actual displayed geometry remains unknown unless separately measured. Upload acknowledgment does not
+measure physical display latency. These options are experimental; the default remains `legacy`.
+
 ## Geometry source
 
 With `subtitle_geometry.native_visible = true`, `subtitle_geometry.source` selects where

@@ -16,6 +16,7 @@ class NavigationState:
         self.nav_idx = -1
         self.sub_settle = SettleWindow()
         self.nav_prev_text = ""
+        self.nav_superseded_texts: frozenset[str] = frozenset()
         self.geometry_cue_hint: Cue | None = None
         self.nav_provisional_cue_counted = False
 

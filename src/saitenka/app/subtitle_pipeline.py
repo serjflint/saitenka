@@ -167,6 +167,10 @@ class SubtitleModeCoordinator:
         with self._state_lock:
             self._evidence.geometry_source(record)
 
+    def record_whole_cue(self, record: dict) -> None:
+        with self._state_lock:
+            self._evidence.whole_cue(record)
+
     def draw_current(self, target: SubtitleTarget) -> DrawResult | None:
         """Draw the current cue and hand the geometry back. The one place a draw is staged.
 

@@ -71,6 +71,152 @@ def test_ack_readout_keeps_missing_repeated_and_unknown_arrivals():
     ]
 
 
+def test_occurrence_readout_retains_pending_and_orphaned_terminal_records():
+    def event(name, occurrence, **attrs):
+        return {
+            "ph": "X",
+            "name": name,
+            "ts": occurrence,
+            "args": {"color_session": "session", "occurrence": occurrence, **attrs},
+        }
+
+    rows = latency.color_arrivals(
+        {
+            "traceEvents": [
+                event("subtitle_color_arrival", 1, kind="navigation"),
+                event(
+                    "subtitle_color_outcome",
+                    1,
+                    kind="navigation",
+                    status="complete",
+                    complete_ms=40,
+                ),
+                event("subtitle_color_arrival", 2, kind="navigation"),
+                event(
+                    "subtitle_color_outcome", 3, kind="natural", status="complete", complete_ms=5
+                ),
+            ]
+        }
+    )
+
+    assert [(row["status"], row["wait_ms"]) for row in rows] == [
+        ("complete", 40),
+        ("pending", None),
+        ("unknown-correlation", None),
+    ]
+
+
+@pytest.mark.parametrize(("duration_ms", "expected"), [(40, 50.0), (100, None)])
+def test_color_ack_uses_completion_and_cannot_cross_occurrence_retirement(duration_ms, expected):
+    events = [
+        {"ph": "X", "name": "cue_reconcile", "ts": 0, "args": {"cue_revision": "1"}},
+        {
+            "ph": "X",
+            "name": "subtitle_draw",
+            "ts": 1000,
+            "args": {"cue_revision": "1", "owed_color": 1},
+        },
+        {
+            "ph": "X",
+            "name": "surface_write",
+            "ts": 10000,
+            "dur": duration_ms * 1000,
+            "args": {
+                "cue_revision": "1",
+                "slot": latency._COLOR_SLOT,
+                "events": 1,
+                "outcome": "succeeded",
+            },
+        },
+        {"ph": "X", "name": "cue_reconcile", "ts": 100000, "args": {"cue_revision": "2"}},
+    ]
+
+    row = latency.color_arrivals({"traceEvents": events})[0]
+
+    assert row["wait_ms"] == expected
+    assert row["status"] == ("acknowledged" if expected is not None else "no-matching-ack")
+
+
+def test_metadata_only_bundle_reports_color_metrics_without_a_trace(tmp_path, capsys):
+    report = tmp_path / "report.zip"
+    envelope = {
+        "operation_health": {
+            "subtitle_color": {
+                "status": "collected",
+                "metrics": {
+                    "saitenka.subtitle.color_deadline_misses": {"value": 3},
+                },
+            }
+        }
+    }
+    with zipfile.ZipFile(report, "w") as bundle:
+        bundle.writestr("diagnostics/envelope.json", json.dumps(envelope))
+
+    result = latency.main([str(report)])
+
+    assert result == 0
+    assert '"saitenka.subtitle.color_deadline_misses": {"value": 3}' in capsys.readouterr().out
+
+
+def test_active_occurrence_reports_acknowledged_progress_before_retirement():
+    events = [
+        {
+            "ph": "X",
+            "ts": 0,
+            "name": "subtitle_color_arrival",
+            "args": {"color_session": "s", "occurrence": 1, "kind": "navigation"},
+        },
+        {
+            "ph": "X",
+            "ts": 1,
+            "name": "subtitle_color_progress",
+            "args": {
+                "color_session": "s",
+                "occurrence": 1,
+                "status": "unset",
+                "color_status": "complete",
+                "first_ms": 20,
+                "complete_ms": 25,
+                "late": True,
+            },
+        },
+    ]
+
+    row = latency.color_arrivals({"traceEvents": events})[0]
+
+    assert (row["status"], row["wait_ms"], row["late"], row["finalized"]) == (
+        "complete-provisional",
+        25,
+        True,
+        False,
+    )
+
+
+def test_corrected_target_clears_abandoned_progress_latencies():
+    events = [
+        {"name": "subtitle_color_arrival", "args": {"kind": "navigation"}},
+        {
+            "name": "subtitle_color_progress",
+            "args": {
+                "color_status": "complete",
+                "first_ms": 5,
+                "complete_ms": 5,
+            },
+        },
+        {"name": "subtitle_color_outcome", "args": {"color_status": "unknown"}},
+    ]
+    for number, event in enumerate(events):
+        event.update(ph="X", ts=number)
+        event["args"].update(color_session="s", occurrence=1, status="unset")
+
+    row = latency.occurrence_outcomes({"traceEvents": events})[0]
+
+    assert row["status"] == "unknown"
+    assert row["first_ms"] is None
+    assert row["complete_ms"] is None
+    assert row["wait_ms"] is None
+
+
 def test_the_wait_is_the_gap_to_the_first_draw_that_carried_boxes() -> None:
     """Not the last, and not the geometry's completion — the first draw color could be seen in."""
     shown = read([draw(100, "aa", 0), draw(140, "aa", 0), draw(180, "aa", 7), draw(220, "aa", 7)])

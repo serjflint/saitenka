@@ -47,12 +47,15 @@ def test_auto_keeps_ordinary_shadow_paint_and_effects_scan_only(prefix, text, mo
         ),
     ) as (_tmp, session, _ipc):
         presentation = session.graph.subtitle_presentation
-        if not prefix:
-            poll_until(
-                session,
-                lambda: presentation.cue.current.paint_allowed,
-                "ordinary native geometry never admitted shadow paint",
-            )
+        poll_until(
+            session,
+            lambda: (
+                presentation.layout.current is not None
+                and presentation.cue.current.paint_allowed is (not bool(prefix))
+                and all(box.hit_regions for box in presentation.cue.current.boxes)
+            ),
+            "native scanning and independent paint eligibility never settled",
+        )
         request = session.graph.cue.draw_request()
         records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
         assert records[-1] == IsPartialDict(
@@ -247,10 +250,18 @@ def test_blended_subtitles_keep_shadow_scanning_and_eligible_color(prefix, monke
             ("--sub-ass-override=no", "--blend-subtitles=yes"),
         ),
     ) as (_, session, ipc):
+        poll_until(
+            session,
+            lambda: (
+                session.graph.subtitle_presentation.layout.fallback_reason
+                == "layout-unsupported-render-mode"
+            ),
+            "blended output never selected shadow fallback",
+        )
         request = session.graph.cue.draw_request()
         records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
         assert records[-1] == IsPartialDict(
-            selected_source="shadow",
+            selected_source="mpv",
             scan_source="shadow",
             reason="layout-unsupported-render-mode",
             paint_source="none" if "kf" in prefix else "shadow",
@@ -272,12 +283,21 @@ def test_disabling_blending_returns_auto_to_native_scanning():
         ),
     ) as (_, session, ipc):
         presentation = session.graph.subtitle_presentation
-        assert not presentation.using_layout
+        poll_until(
+            session,
+            lambda: presentation.layout.fallback_reason == "layout-unsupported-render-mode",
+            "blended output never selected shadow fallback",
+        )
+        assert presentation.layout.supported is True
+        assert presentation.layout.current is None
+        assert presentation.cue.current.boxes
 
         ipc.command("set_property", "blend-subtitles", "no")
         poll_until(
             session,
-            lambda: presentation.using_layout and bool(presentation.cue.current.boxes),
+            lambda: (
+                presentation.layout.current is not None and bool(presentation.cue.current.boxes)
+            ),
             "auto did not recover native geometry",
         )
 
@@ -300,9 +320,14 @@ def test_auto_preserves_shadow_scanning_for_unsupported_native_geometry(cues, re
             "auto", os.environ["SAITENKA_LAYOUT_MPV"], ("--sub-ass-override=no",)
         ),
     ) as (_, session, _ipc):
+        poll_until(
+            session,
+            lambda: session.graph.subtitle_presentation.layout.fallback_reason == reason,
+            "native geometry never reported the unsupported profile",
+        )
         records = [span["attrs"] for span in spans if span["name"] == "subtitle_geometry_source"]
         assert records[-1] == IsPartialDict(
-            selected_source="shadow", scan_source="shadow", reason=reason
+            selected_source="mpv", scan_source="shadow", reason=reason
         )
         cue = session.graph.subtitle_presentation.cue.current
         for surface in ("猫", "犬") if len(cues) > 1 else ("猫",):

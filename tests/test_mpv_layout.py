@@ -201,13 +201,13 @@ class LayoutIPC(FakeIPC):
         return super().submit_runtime_mpv(**kwargs)
 
 
-def source():
+def source(*, text="猫犬"):
     ipc = LayoutIPC()
     tokens = [Token("猫犬", "猫犬", "", "名詞", 0, 2)]
     seen = GeometryObservation(
         prop=ipc.props.get,
         osd=(1280, 720),
-        text="猫犬",
+        text=text,
         tokens=tokens,
         lines=[tokens],
         index=None,
@@ -232,6 +232,16 @@ def source():
     producer.refresh()
     producer.refresh()
     return producer, ipc, frames, ticks
+
+
+def test_seek_transition_without_cue_does_not_fetch_rendered_layout():
+    producer, ipc, frames, _ticks = source(text="")
+
+    assert producer.status == "awaiting-cue"
+    assert not frames
+    assert [command for command in ipc.commands if command[0] == "subtitle-layout"] == [
+        ("subtitle-layout", "primary")
+    ]
 
 
 def test_native_regions_keep_the_gap_between_wrapped_parts_unscannable():
@@ -380,6 +390,7 @@ def test_missing_api_is_cached_until_a_new_connection(unknown_command, monkeypat
         return original(*args)
 
     monkeypatch.setattr(ipc, "command", command)
+    producer.connection_replaced()
     producer.refresh()
     count = len(ipc.commands)
     for _ in range(10):
@@ -449,7 +460,7 @@ def test_native_source_publishes_through_the_real_session_and_retires_on_revisio
     ("field", "value", "reason"),
     [
         ("events", [], "layout-event-count"),
-        ("capabilities", [], "unsupported-api"),
+        ("capabilities", [], "layout-capabilities"),
         ("available", False, "layout-unavailable"),
         ("available", True, "scan-only"),
     ],
@@ -480,6 +491,7 @@ def test_acquisition_outcome_survives_the_text_free_report(monkeypatch, field, v
 def test_cached_api_refusal_remains_explainable_after_invalidation(monkeypatch):
     producer, ipc, _frames, _ticks = source()
     ipc.layout["capabilities"] = []
+    producer.connection_replaced()
     producer.refresh()
     spans = record_spans(monkeypatch)
 
@@ -542,17 +554,15 @@ def test_incompatible_render_mode_warns_once_in_the_overlay(source_name, monkeyp
             ipc.fire_runtime_timer("subtitle:geometry-refresh")
             session.pump()
 
-        expected = (
-            "Using shadow subtitle geometry"
-            if source_name == "auto"
-            else "Subtitle scanning unavailable"
-        )
         warnings = [message for message in messages if "render mode" in message]
-        assert warnings == [
-            f"{expected}: the mpv render mode does not expose subtitle geometry."
-            + (" Try shadow geometry." if source_name == "mpv" else "")
-        ]
-        assert session.graph.subtitle_presentation.using_layout is (source_name == "mpv")
+        assert warnings == (
+            [
+                "Subtitle scanning unavailable: the mpv render mode does not expose subtitle geometry. Try shadow geometry."
+            ]
+            if source_name == "mpv"
+            else []
+        )
+        assert session.graph.subtitle_presentation.layout.supported is True
     finally:
         session.close()
 
@@ -674,3 +684,86 @@ def test_multiple_event_acquisition_matches_mpv_centisecond_rows(mismatch):
     if frames:
         assert token_at(frames[-1], (510, 110), (0, 0), is_skippable=lambda _: False) == 0
         assert token_at(frames[-1], (110, 110), (0, 0), is_skippable=lambda _: False) == 1
+
+
+@pytest.mark.parametrize("invalid_command", [False, True])
+def test_bad_frame_does_not_revoke_discovered_api(invalid_command, monkeypatch):
+    producer, ipc, frames, _ticks = source()
+    original = ipc.command
+
+    def command(*args):
+        if args[0] == "subtitle-layout":
+            return (
+                {"error": "invalid command"} if invalid_command else {"data": {"capabilities": []}}
+            )
+        return original(*args)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ipc, "command", command)
+        producer.input_changed(shared=False)
+        producer.refresh()
+        assert producer.supported is True
+        assert not frames
+
+    producer.refresh()
+
+    assert producer.status == "scan-only"
+    assert frames[-1]
+    assert producer.supported is True
+
+
+def test_unreadable_collection_option_is_cached_until_reconnection():
+    producer, ipc, frames, _ticks = source()
+    producer.connection_replaced()
+    ipc.props["subtitle-layout"] = None
+    producer.refresh()
+    assert producer.status == "unsupported-option"
+    assert producer.supported is False
+    assert not frames
+    ipc.commands.clear()
+    producer.refresh()
+    assert ipc.commands == []
+
+    ipc.props["subtitle-layout"] = True
+    producer.connection_replaced()
+    producer.refresh()
+    producer.refresh()
+    assert producer.status == "scan-only"
+    assert frames[-1]
+
+
+def test_auto_can_use_mpv_when_shadow_source_is_too_large(tmp_path):
+    from session_builder import build_session
+    from test_native_subtitles import _ExistsDS
+
+    from saitenka.app import native_subtitles
+    from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
+    from saitenka.app.session.factory import SessionServices
+
+    ipc = LayoutIPC()
+    ipc.props.update({"osd-dimensions": {"w": 1280, "h": 720}, "pause": True})
+    session = build_session(
+        ipc,
+        options=ReaderOptions(
+            subtitle_geometry=SubtitleGeometryOptions(native_visible=True, source="auto")
+        ),
+        services=SessionServices(dictionaries=_ExistsDS()),
+    )
+    try:
+        source_path = tmp_path / "large.ass"
+        source_path.write_bytes(b" " * (native_subtitles.MAX_ASS_SOURCE_BYTES + 1))
+        presentation = session.graph.subtitle_presentation
+        presentation.native.set_source(source_path)
+        assert presentation.native.source_unsupported
+        session.graph.playback.install_seed(ipc.props)
+        session.graph.playback.observe("sub-text", "猫犬")
+        session.graph.cue.settle()
+        for _ in range(8):
+            ipc.fire_runtime_timer("subtitle:geometry-refresh")
+            session.pump()
+        assert presentation.layout.status == "scan-only"
+        assert not presentation.cue.current.paint_allowed
+        assert session.graph.tooltip.hit(120, 120) == 0
+        assert ipc.props["sub-visibility"] is True
+    finally:
+        session.close()

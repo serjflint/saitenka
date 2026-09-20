@@ -239,12 +239,16 @@ class MpvLayoutSource:
             self.status = "disabled-externally"
             self._record_status()
             return
+        seen = self._ports.observe()
+        if self._configured and not seen.text.strip():
+            self.status = "awaiting-cue"
+            self._record_status()
+            return
         self._busy = True
         self._dirty = False
         self.attempt += 1
         self.status = "fetching"
         generation = self._pipeline.generation
-        seen = self._ports.observe()
         self._request_generation = generation
         self._request_cue_revision = seen.cue_revision
         self._record_status()
@@ -254,15 +258,18 @@ class MpvLayoutSource:
             ("subtitle-layout", "primary"), partial(self._received, generation, seen, binding)
         )
 
+    def _discover_capabilities(self, value: object) -> bool:
+        if self.supported is None:
+            self.supported = supports_layout(value)
+        return self.supported
+
     def _received(
         self, generation: int, seen: GeometryObservation, binding: tuple[object, ...], value: object
     ) -> None:
-        if not supports_layout(value):
-            self.supported = False
+        if not self._discover_capabilities(value):
             self._refuse("unsupported-api")
             self._ports.unavailable()
             return
-        self.supported = True
         if not self._configured:
             self._configure()
             return
@@ -315,8 +322,9 @@ class MpvLayoutSource:
     def _configure(self) -> None:
         def option(value: object) -> None:
             if type(value) is not bool:
-                self.status = "unsupported-option"
-                self._finish()
+                self.supported = False
+                self._refuse("unsupported-option")
+                self._ports.unavailable()
                 return
             if value:
                 self._saw_enabled = True
@@ -346,6 +354,7 @@ class MpvLayoutSource:
             if completion.outcome is not EffectOutcome.SUCCEEDED:
                 if (
                     command[0] == "subtitle-layout"
+                    and self.supported is None
                     and completion.error is EffectError.INVALID_RESULT
                 ):
                     self.supported = False

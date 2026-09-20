@@ -141,6 +141,11 @@ subtitle_focus_writes_skipped: Counter | None = None
 #: covering it; `record_cue_arrival` / `record_color_up` are its two ends.
 subtitle_color_latency_ms: Histogram | None = None
 subtitle_color_late: Counter | None = None
+subtitle_color_outcomes: Counter | None = None
+subtitle_color_deadlines: Counter | None = None
+subtitle_color_pending: UpDownCounter | None = None
+subtitle_color_ack_ms: Histogram | None = None
+subtitle_color_withdrawals: Counter | None = None
 subtitle_layout_drift_px: Histogram | None = None
 #: The `compute_bounds` round trip, which is the only OSD-side cost we can time: mpv lays the payload
 #: out on its core thread and answers. Every other span in the draw path measures OUR side, so
@@ -275,6 +280,7 @@ SPANLESS_HISTOGRAMS = frozenset(
         "saitenka.block_cache.rendered_px",  # band pixel height — a measure, not a duration span
         "saitenka.mpv_effect.apply_ms",  # no span: the wait happens after the caller returned
         "saitenka.subtitle.color_latency_ms",  # spans two components; neither covers the wait
+        "saitenka.subtitle.color_ack_ms",
     }
 )
 
@@ -344,6 +350,10 @@ class SpanSetter:
     def set(self, key: str, value: object) -> None:
         if self._span is not None:
             self._span.set_attribute(key, value)
+
+    @property
+    def recording(self) -> bool:
+        return self._span is not None and self._span.is_recording()
 
 
 _NOOP_SPAN = SpanSetter(None)
@@ -610,6 +620,8 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
+    global subtitle_color_outcomes, subtitle_color_deadlines, subtitle_color_pending
+    global subtitle_color_ack_ms, subtitle_color_withdrawals
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -882,6 +894,27 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.color_late",
             description=f"cues whose color arrived more than {COLOR_LATENCY_BUDGET_MS:.0f}ms after the cue",
         )
+        subtitle_color_outcomes = meter.create_counter(
+            "saitenka.subtitle.color_outcomes",
+            description="retired color occurrences by terminal outcome",
+        )
+        subtitle_color_deadlines = meter.create_counter(
+            "saitenka.subtitle.color_deadline_misses",
+            description="occurrences with pending color past the deadline",
+        )
+        subtitle_color_pending = meter.create_up_down_counter(
+            "saitenka.subtitle.color_pending",
+            description="active color occurrences, including unresolved navigation",
+        )
+        subtitle_color_ack_ms = meter.create_histogram(
+            "saitenka.subtitle.color_ack_ms",
+            unit="ms",
+            description="occurrence-qualified first or complete color acknowledgment latency",
+        )
+        subtitle_color_withdrawals = meter.create_counter(
+            "saitenka.subtitle.color_withdrawals",
+            description="accepted writes that remove acknowledged token coverage",
+        )
         subtitle_layout_drift_px = meter.create_histogram(
             "saitenka.subtitle.layout_drift_px",
             unit="px",
@@ -958,6 +991,8 @@ def unregister() -> None:
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
     global subtitle_overprint_demotions, subtitle_overpaint_frames
     global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
+    global subtitle_color_outcomes, subtitle_color_deadlines, subtitle_color_pending
+    global subtitle_color_ack_ms, subtitle_color_withdrawals
     global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
     global subtitle_calibration_ms
 
@@ -1039,6 +1074,11 @@ def unregister() -> None:
         subtitle_focus_writes_skipped = None
         subtitle_color_latency_ms = None
         subtitle_color_late = None
+        subtitle_color_outcomes = None
+        subtitle_color_deadlines = None
+        subtitle_color_pending = None
+        subtitle_color_ack_ms = None
+        subtitle_color_withdrawals = None
         subtitle_layout_drift_px = None
         subtitle_token_device = None
         subtitle_calibration_ms = None

@@ -633,6 +633,10 @@ class TooltipController:
         )
         return self._preparation.worker_count
 
+    @property
+    def prefetch_snapshot(self) -> prefetch.PrefetchSnapshot:
+        return self._preparation.snapshot
+
     def update_prefetch(self) -> None:
         if self._preparation.update(
             self.prefetch_ports,

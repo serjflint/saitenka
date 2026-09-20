@@ -4,6 +4,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from dataclasses import replace
+from itertools import permutations
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
@@ -42,7 +43,7 @@ from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -292,6 +293,8 @@ class FakeBackend:
         self.font_size: float | None = None
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
+        from saitenka_subtitles.whole_cue import FillLayer
+
         self.requests.append(request)
         if self.error is not None:
             raise self.error
@@ -318,6 +321,24 @@ class FakeBackend:
             request.variant,
             tokens,
             paint_qualification=request.paint_qualification,
+            whole_cue=(
+                replace(
+                    request.whole_cue,
+                    layers=tuple(
+                        FillLayer(
+                            token.token_index,
+                            token.bounds.x,
+                            token.bounds.y,
+                            token.bounds.width,
+                            token.bounds.height,
+                            b"\xff" * (token.bounds.width * token.bounds.height),
+                        )
+                        for token in tokens
+                    ),
+                )
+                if request.whole_cue is not None
+                else None
+            ),
         )
 
     def close(self) -> None:
@@ -399,6 +420,7 @@ def reader(
     annotation_jobs: bool = False,
     annotations_ready: bool = True,
     geometry_source: str = "shadow",
+    coloring: str = "legacy",
 ) -> tuple[TestSession, FakeIPC, FakeBackend]:
     source = tmp_path / "episode.ass"
     source.write_bytes(ASS)
@@ -406,7 +428,7 @@ def reader(
     backend = FakeBackend()
     options = ReaderOptions(
         subtitle_geometry=SubtitleGeometryOptions(
-            native_visible=native_visible, source=geometry_source
+            native_visible=native_visible, source=geometry_source, coloring=coloring
         ),
         prefetch=False,
     )
@@ -854,7 +876,7 @@ def test_navigation_lands_on_the_target_cue_under_either_renderer(
         "も",
         "見る",
     ]
-    assert ("sub-seek", "1") in [command[:2] for command in ipc.commands if len(command) >= 2]
+    assert ("seek", "4.01", "absolute+exact") in ipc.commands
     result.close()
 
 
@@ -2158,6 +2180,24 @@ def test_ownership_ack_before_geometry_does_not_present_the_cue_twice(tmp_path: 
     assert native.worker.stats.presented == 1
     assert native.worker.stats.superseded == 0
     assert result.graph.subtitle_presentation.cue.current.boxes
+    result.close()
+
+
+def test_ownership_ack_after_geometry_paints_without_another_cue_event(tmp_path: Path) -> None:
+    result, ipc, _backend = reader(
+        tmp_path, scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])))
+    )
+    ipc.correlate_commands = True
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.graph.cue.settle()
+    settle_jobs(result, ipc)
+    ipc.props["sub-visibility"] = True
+
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")
+    assert ipc.deliver_runtime_mpv(match="sub-visibility")
+    assert ipc.deliver_runtime_mpv(match="ass-events")
+
+    assert any(r"\fnArial" in payload for payload in overlay_payloads(ipc))
     result.close()
 
 
@@ -4891,5 +4931,494 @@ def test_auto_fallback_uses_the_prepared_event_paint_policy(
             if style_alpha or "alpha" in prefix
             else "karaoke"
         )
+    finally:
+        result.close()
+
+
+@pytest.mark.parametrize("delay", [0.0, 2.0])
+def test_track_load_in_blank_gap_prepares_first_cue_before_arrival(tmp_path, delay):
+    result, ipc, backend = reader(tmp_path, coloring="whole-cue-osd")
+    ipc.props.update(
+        {
+            "sub-text": "",
+            "sub-text/ass-full": "",
+            "sub-start": None,
+            "sub-end": None,
+            "time-pos": 0.0,
+            "sub-delay": delay,
+        }
+    )
+    result.graph.playback.install_seed(ipc.props)
+
+    result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    settle_jobs(result, ipc)
+
+    assert len(backend.requests) == 1
+    assert backend.requests[0].whole_cue is not None
+    assert ("set_property", "sub-visibility", True) in ipc.commands
+    assert result.graph.subtitle_presentation.pipeline.current is None
+    assert not result.graph.subtitle_presentation.native.status.geometry_ready
+    ipc.props.update(
+        {
+            "time-pos": 1.25 + delay,
+            "sub-start": 1.0 + delay,
+            "sub-end": 3.0 + delay,
+            "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
+        }
+    )
+    result.graph.playback.install_seed(ipc.props)
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.graph.cue.settle()
+    settle_jobs(result, ipc)
+
+    assert result.graph.subtitle_presentation.native.status.geometry_ready
+    assert len(backend.requests) == 1
+    assert result.graph.subtitle_presentation.native.worker.stats.ready_before_presented == 1
+    result.close()
+
+
+@pytest.mark.parametrize("scenario", ["initial", "resume", "arrival"])
+def test_track_load_stages_timed_color_before_first_cue_notification(tmp_path, scenario):
+    result, ipc, _backend = reader(
+        tmp_path,
+        coloring="whole-cue-osd",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    try:
+        ipc.props.update(
+            {
+                "command-list": [{"name": "osd-overlay-timed"}],
+                "sub-text": "",
+                "sub-text/ass-full": "",
+                "time-pos": 0.0,
+                "sub-start": None,
+                "sub-end": None,
+                "options/sub-speed": 1.0,
+                "options/sub-fps": 0.0,
+                "options/play-direction": "forward",
+                "options/osd-shaper": "complex",
+            }
+        )
+        result.graph.playback.install_seed(ipc.props)
+
+        result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+
+        if scenario == "resume":
+            presentation = result.graph.subtitle_presentation
+            presentation.renderer.suspend_for_overlay(presentation.target())
+            ipc.commands.clear()
+            presentation.renderer.resume_after_overlay(presentation.target())
+            settle_geometry(result, ipc)
+            settle_jobs(result, ipc)
+
+        if scenario == "arrival":
+            ipc.props.update(
+                {
+                    "time-pos": 1.25,
+                    "sub-start": 1.0,
+                    "sub-end": 3.0,
+                    "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
+                }
+            )
+            result.graph.playback.install_seed(ipc.props)
+            result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+            result.graph.cue.settle()
+            settle_jobs(result, ipc)
+
+        staged = [c for c in ipc.commands if c[0] == "osd-overlay-timed"]
+        assert len(staged) == 1
+        assert staged[0][2:4] == (1000, 3000)
+        assert "猫" in staged[0][4]
+        assert ("osd-overlay", staged[0][1], "none", "") not in ipc.commands
+        if scenario != "arrival":
+            assert result.graph.subtitle_presentation.pipeline.current is None
+    finally:
+        result.close()
+
+
+def test_late_stock_capability_reply_repaints_ready_cue(tmp_path, monkeypatch):
+    from saitenka.runtime import Owner
+
+    result, ipc, _backend = reader(
+        tmp_path,
+        coloring="whole-cue-osd",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    pending = []
+    submit = ipc.submit_runtime_mpv
+
+    def delayed_capability(**kwargs):
+        if kwargs["command"] == ("get_property", "command-list"):
+            pending.append(kwargs)
+            return True
+        return submit(**kwargs)
+
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", delayed_capability)
+    try:
+        ipc.props["options/osd-shaper"] = "complex"
+        result.graph.playback.install_seed(ipc.props)
+        result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+        result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+        assert result.graph.subtitle_presentation.native.status.geometry_ready
+        assert len(pending) == 1
+        ipc.commands.clear()
+
+        pending[0]["on_finished"](
+            EffectFinished(
+                EffectId(0),
+                Owner.SUBTITLE,
+                pending[0]["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=[],
+            )
+        )
+        settle_geometry(result, ipc)
+
+        assert any(
+            c[:3] == ("osd-overlay", 1001, "ass-events") and "猫" in c[3] for c in ipc.commands
+        )
+    finally:
+        result.close()
+
+
+def test_first_cue_publishes_prepared_ass_before_any_lookahead_work(tmp_path, monkeypatch):
+    from saitenka_subtitles import decoration, whole_cue
+
+    spans = record_spans(monkeypatch)
+    result, ipc, backend = reader(
+        tmp_path,
+        coloring="whole-cue-osd",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    try:
+        ipc.props.update(
+            {
+                "sub-text": "",
+                "sub-text/ass-full": "",
+                "time-pos": 0.0,
+                "sub-start": None,
+                "sub-end": None,
+                "options/osd-shaper": "complex",
+            }
+        )
+        result.graph.playback.install_seed(ipc.props)
+        result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+        before = len(backend.requests)
+        assert any(s["name"] == "subtitle_osd_artifact" for s in spans)
+
+        def unprepared(*_args):
+            pytest.fail("lookahead must have lowered the final ASS artifact before cue arrival")
+
+        monkeypatch.setattr(whole_cue, "osd_payload", unprepared)
+        monkeypatch.setattr(decoration, "payload", unprepared)
+        native = result.graph.subtitle_presentation.native
+        assert native is not None
+        prefetch = native._prefetch
+
+        def replenish(*args):
+            assert any(
+                c[:3] == ("osd-overlay", 1001, "ass-events") and "猫" in c[3] for c in ipc.commands
+            ), "future planning preceded current publication"
+            return prefetch(*args)
+
+        monkeypatch.setattr(native, "_prefetch", replenish)
+        ipc.commands.clear()
+        spans.clear()
+        ipc.props.update(
+            {
+                "sub-start": 1.0,
+                "sub-end": 3.0,
+                "time-pos": 1.25,
+                "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0000,0000,0000,,猫を見る",
+            }
+        )
+        result.graph.playback.install_seed(ipc.props)
+
+        result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+        result.graph.cue.settle()
+
+        assert any(
+            c[:3] == ("osd-overlay", 1001, "ass-events") and "猫" in c[3] for c in ipc.commands
+        )
+        assert result.graph.cue.draw_request().boxes
+        assert len(backend.requests) == before
+        assert len([s for s in spans if s["name"] == "subtitle_draw"]) == 1
+        settle_geometry(result, ipc)
+    finally:
+        result.close()
+
+
+@pytest.mark.parametrize("coloring", ["legacy", "whole-cue-osd"])
+def test_split_initial_timing_keeps_prepared_cue_visible(tmp_path, coloring):
+    result, ipc, backend = reader(tmp_path, coloring=coloring)
+    ipc.props.update({"sub-start": None, "sub-end": None, "sub-text": ""})
+    result.graph.playback.install_seed(ipc.props)
+    result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
+    result.graph.cue.settle()
+    settle_jobs(result, ipc)
+    assert result.graph.cue.draw_request().boxes
+    ipc.commands.clear()
+
+    for name, value in (("sub-start", 1.0), ("sub-end", 3.0)):
+        ipc.props[name] = value
+        result.graph.playback.observe_event({"name": name, "data": value})
+        settle_geometry(result, ipc)
+        assert result.graph.cue.draw_request().boxes
+        assert result.graph.subtitle_presentation.native.status.geometry_ready
+    assert len(backend.requests) == 1
+    assert ("osd-overlay", 1001, "none", "") not in ipc.commands
+    result.close()
+
+
+@pytest.mark.parametrize(
+    "response",
+    ["held", "unsupported", "valid", "unmapped", "revision", "viewport", "track", "degrade"],
+)
+def test_auto_paints_from_shadow_without_waiting_for_mpv_layout(tmp_path, monkeypatch, response):
+    from test_mpv_layout import payload
+
+    backend = FakeBackend()
+    monkeypatch.setattr("saitenka.app.session.factory._geometry_backend", lambda _settings: backend)
+    result, ipc, _ = reader(
+        tmp_path,
+        geometry_source="auto",
+        coloring="whole-cue-osd",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+        correlated_surfaces=True,
+    )
+    pending = []
+    original_submit = ipc.submit_runtime_mpv
+    original_command = ipc.command
+    data = payload()
+    source = tmp_path / "pair.ass"
+    source.write_bytes(ASS.replace("猫を見る".encode(), "猫犬".encode()))
+    result.graph.subtitle_presentation.native.set_source(source)
+    ipc.props.update(
+        {
+            "playlist": [{"id": 1, "current": True}],
+            "subtitle-layout": True,
+            "options/subtitle-layout": True,
+            "options/osd-shaper": "complex",
+            "subtitle-layout-revision": 2,
+            "sub-text": "",
+            "sub-text/ass-full": "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫犬",
+        }
+    )
+
+    def submit(**kwargs):
+        if kwargs["command"][0] == "subtitle-layout":
+            pending.append(kwargs)
+            return True
+        return original_submit(**kwargs)
+
+    def command(*args):
+        if args[0] == "subtitle-layout":
+            return {"data": data, "error": "success"}
+        if args[0] == "subtitle-layout-valid":
+            return {"data": True, "error": "success"}
+        return original_command(*args)
+
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", submit)
+    monkeypatch.setattr(ipc, "command", command)
+    result.graph.playback.install_seed(ipc.props)
+    result.graph.playback.observe_event({"name": "sub-text", "data": "猫犬"})
+    result.graph.cue.settle()
+    settle_geometry(result, ipc)
+    settle_jobs(result, ipc)
+
+    request = result.graph.cue.draw_request()
+    assert pending
+    assert request.boxes and request.paint_allowed
+    assert subtitle_render.whole_cue_device(request) == ("overprint", "eligible")
+    assert any(c[:3] == ("osd-overlay", 1001, "ass-events") and c[3] for c in ipc.commands)
+    ipc.commands.clear()
+    if response != "held":
+        if response == "unsupported":
+            data["capabilities"] = []
+        if response in {"unmapped", "degrade"}:
+            data["events"][0]["units"] = []
+        original_submit(**pending.pop(0))
+        for _ in range(3):
+            settle_geometry(result, ipc)
+            if pending:
+                original_submit(**pending.pop(0))
+        request = result.graph.cue.draw_request()
+        assert request.boxes and request.paint_allowed
+        assert ("osd-overlay", 1001, "ass-events", "") not in ipc.commands
+        if response in {"valid", "revision", "viewport", "track"}:
+            assert result.graph.subtitle_presentation.layout.status == "scan-only"
+            assert request.boxes[0].y == 100
+        if response == "revision":
+            result.graph.playback.observe_event({"name": "subtitle-layout-revision", "data": 3})
+            assert result.graph.cue.draw_request().boxes
+            assert result.graph.cue.draw_request().paint_allowed
+            assert ("osd-overlay", 1001, "ass-events", "") not in ipc.commands
+        elif response in {"viewport", "track", "degrade"}:
+            if response == "degrade":
+                result.graph.subtitle_presentation.degrade_native_geometry()
+            else:
+                name, value = (
+                    ("osd-dimensions", {"w": 640, "h": 360})
+                    if response == "viewport"
+                    else ("sid", 3)
+                )
+                result.graph.playback.observe_event({"name": name, "data": value})
+            assert not result.graph.cue.draw_request().boxes
+            assert ("osd-overlay", 1001, "ass-events", "") in ipc.commands
+    result.close()
+
+
+@pytest.mark.parametrize(
+    "order", list(permutations(("sub-text", "sub-text/ass-full", "sub-start", "sub-end")))
+)
+def test_split_cue_observations_never_render_mixed_text_and_rows(tmp_path, caplog, order):
+    result, ipc, _backend = reader(tmp_path, coloring="whole-cue-osd")
+    path = tmp_path / "episode.ass"
+    path.write_bytes(ASS_TWO)
+    result.graph.subtitle_navigation.load_index(path)
+    ipc.set_prop("sub-text", "猫を見る")
+    result.pump()
+    result.graph.cue.settle()
+    settle_geometry(result, ipc)
+    settle_jobs(result, ipc)
+    caplog.clear()
+    values = {
+        "sub-text": "犬も見る",
+        "sub-text/ass-full": "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,犬も見る",
+        "sub-start": 4.0,
+        "sub-end": 6.0,
+    }
+    try:
+        for name in order:
+            ipc.set_prop(name, values[name])
+            result.pump()
+            result.graph.cue.settle()
+            settle_geometry(result, ipc)
+            settle_jobs(result, ipc)
+        assert "semantic-projection-mismatch" not in caplog.text
+        assert "subtitle-frame-unsupported" not in caplog.text
+        assert result.graph.cue.draw_request().boxes
+        assert result.graph.subtitle_presentation.native.status.geometry_ready
+        assert result.graph.subtitle_presentation.native.worker.stats.failures == 0
+    finally:
+        result.close()
+
+
+@pytest.mark.parametrize("terminal_state", ["blank", "invalid-bounds", "active", "retired"])
+def test_lookahead_warms_only_an_idle_current_document(tmp_path, monkeypatch, terminal_state):
+    spans = record_spans(monkeypatch)
+    result, ipc, backend = reader(tmp_path, coloring="whole-cue-osd")
+    ipc.props.update(
+        {
+            "sub-text": "",
+            "sub-text/ass-full": "",
+            "sub-start": None,
+            "sub-end": None,
+            "time-pos": 0.0,
+        }
+    )
+    ipc.osd_bounds = {"x0": 100, "y0": 600, "x1": 300, "y1": 640}
+    if terminal_state == "invalid-bounds":
+        ipc.osd_bounds["x1"] = float("nan")
+    result.graph.playback.install_seed(ipc.props)
+    result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    assert backend.requests
+    if terminal_state == "active":
+        ipc.set_prop("sub-text", "猫を見る")
+        result.pump()
+    elif terminal_state == "retired":
+        result.graph.subtitle_presentation.native.set_source(None)
+    ipc.commands.clear()
+    try:
+        settle_jobs(result, ipc)
+        warm = [
+            cmd
+            for cmd in ipc.commands
+            if cmd[:3] == ("osd-overlay", 1001, "ass-events") and cmd[-2:] == (True, True)
+        ]
+        assert bool(warm) is (terminal_state in {"blank", "invalid-bounds"})
+        if warm:
+            assert "猫" in warm[0][3]
+            evidence = [row["attrs"] for row in spans if row["name"] == "subtitle_osd_warmup"]
+            assert evidence[-1]["validation_scope"] == "ass-render-completion-not-display"
+            assert evidence[-1]["color_status"] == (
+                "complete" if terminal_state == "blank" else "unknown"
+            )
+            assert not result.graph.subtitle_presentation.native.status.geometry_ready
+    finally:
+        result.close()
+
+
+def test_late_warmup_failure_cannot_retire_presented_color(tmp_path, monkeypatch):
+    spans = record_spans(monkeypatch)
+    result, ipc, _backend = reader(
+        tmp_path,
+        coloring="whole-cue-osd",
+        scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"]))),
+    )
+    ipc.props.update(
+        {
+            "sub-text": "",
+            "sub-text/ass-full": "",
+            "sub-start": None,
+            "sub-end": None,
+            "time-pos": 0.0,
+            "options/osd-shaper": "complex",
+        }
+    )
+    result.graph.playback.install_seed(ipc.props)
+    pending = []
+    original_submit = ipc.submit_runtime_mpv
+
+    def submit(**kwargs):
+        if kwargs["command"][:3] == ("osd-overlay", 1001, "ass-events") and kwargs["command"][
+            -2:
+        ] == (True, True):
+            callback = kwargs["on_finished"]
+            kwargs["on_finished"] = lambda completion: pending.append((callback, completion))
+        return original_submit(**kwargs)
+
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", submit)
+    result.graph.subtitle_navigation.load_index(tmp_path / "episode.ass")
+    assert ipc.fire_runtime_timer("subtitle:geometry-refresh")
+    settle_jobs(result, ipc)
+    assert pending
+    try:
+        for name, value in (
+            ("sub-text/ass-full", ASS.decode().splitlines()[-1]),
+            ("sub-start", 1.0),
+            ("sub-end", 3.0),
+            ("sub-text", "猫を見る"),
+        ):
+            ipc.set_prop(name, value)
+        result.pump()
+        result.graph.cue.settle()
+        settle_geometry(result, ipc)
+        settle_jobs(result, ipc)
+        presentation = result.graph.subtitle_presentation
+        presentation.pipeline.draw_current(presentation.target())
+        assert any(
+            c[:3] == ("osd-overlay", 1001, "ass-events") and c[3] and c[-1] is not True
+            for c in ipc.commands
+        )
+        ipc.commands.clear()
+        callback, completion = pending[0]
+        callback(replace(completion, outcome=EffectOutcome.FAILED, error=EffectError.DISCONNECTED))
+        presentation = result.graph.subtitle_presentation
+        presentation.pipeline.draw_current(presentation.target())
+        assert presentation.cue.current.boxes
+        assert not any(c[:2] == ("osd-overlay", 1001) for c in ipc.commands)
+        evidence = [row["attrs"] for row in spans if row["name"] == "subtitle_osd_warmup"]
+        assert evidence[-1]["accepted"] is False
+        assert evidence[-1]["color_status"] == "unknown"
     finally:
         result.close()

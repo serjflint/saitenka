@@ -107,6 +107,7 @@
 # them, so a release's typesetting no longer costs the episode's interaction; a track outside the
 # envelope stays visible but non-interactive.
 # [subtitle_geometry]
+# coloring = "legacy"                             # or whole-cue-auto, whole-cue-osd, whole-cue-overpaint, boxes-only
 # native_visible = false
 # source = "auto"                                  # mpv capabilities, otherwise shadow; "mpv" is scan-only
 # native_formats = "authored-ass"                  # or "all": also the SubRip tracks mpv converts

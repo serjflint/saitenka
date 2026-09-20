@@ -111,10 +111,15 @@ def _coloring():
 
 
 def _session(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cues: tuple[Cue, ...], *, scorer=None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cues: tuple[Cue, ...],
+    *,
+    scorer=None,
+    geometry_source="shadow",
 ):
     spans = record_spans(monkeypatch)
-    result, ipc, backend = reader(tmp_path, scorer=scorer)
+    result, ipc, backend = reader(tmp_path, scorer=scorer, geometry_source=geometry_source)
     source = tmp_path / "timeline.ass"
     source.write_bytes(_source(cues))
     assert result.graph.subtitle_presentation.native is not None
@@ -701,6 +706,26 @@ def test_a_seek_keeps_its_pre_armed_color_while_mpv_catches_up(
         result.close()
 
 
+def test_auto_seek_blank_preserves_prepared_color(tmp_path, monkeypatch):
+    result, ipc, _backend, _spans = _session(
+        tmp_path, monkeypatch, TIMELINE, scorer=_coloring(), geometry_source="auto"
+    )
+    try:
+        _show(result, ipc, TIMELINE[0])
+        before_seek = len(_color_writes(ipc))
+        assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+        _settle(result, ipc)
+        assert _color_writes(ipc)[before_seek:]
+        before = len(_focus_writes(ipc))
+
+        _blank(result, ipc, at=TIMELINE[1].start + 0.01)
+
+        assert not any(command[2] == "none" for command in _focus_writes(ipc)[before:])
+        assert result.graph.cue.draw_request().paint_allowed
+    finally:
+        result.close()
+
+
 def test_a_cue_owing_no_color_takes_the_previous_color_down(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -855,3 +880,39 @@ def test_policy_withdrawal_preserves_demand_and_reports_lost_color(tmp_path, mon
         assert draw["lost_color"] is True
     finally:
         result.close()
+
+
+def test_occurrence_accounting_keeps_repeated_text_and_final_cue_in_denominator(
+    tmp_path, monkeypatch
+):
+    with _telemetry():
+        result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+        try:
+            for cue in TIMELINE:
+                _show(result, ipc, cue)
+        finally:
+            result.close()
+        outcomes = [span["attrs"] for span in spans if span["name"] == "subtitle_color_outcome"]
+        snapshot = otel_metrics.snapshot()
+
+    assert len(outcomes) == len(TIMELINE)
+    assert len({outcome["occurrence"] for outcome in outcomes}) == len(TIMELINE)
+    assert all(outcome["color_status"] == "complete" for outcome in outcomes)
+    assert all(outcome["acknowledged"] == outcome["permitted"] > 0 for outcome in outcomes)
+    assert snapshot["saitenka.subtitle.color_pending"]["value"] == 0
+
+
+def test_text_first_then_timing_refines_one_color_occurrence(tmp_path, monkeypatch):
+    with _telemetry():
+        result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
+        try:
+            _show_without_timings(result, ipc, TIMELINE[0])
+            ipc.set_prop("sub-start", TIMELINE[0].start)
+            ipc.set_prop("sub-end", TIMELINE[0].end)
+            _settle(result, ipc)
+        finally:
+            result.close()
+        outcomes = [span["attrs"] for span in spans if span["name"] == "subtitle_color_outcome"]
+
+    assert len(outcomes) == 1
+    assert outcomes[0]["color_status"] == "complete"

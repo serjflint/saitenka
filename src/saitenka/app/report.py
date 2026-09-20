@@ -501,6 +501,13 @@ def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dic
             members["mpv.log"] = redact(text)
         members["logs/mpv.collection.json"] = json.dumps(info)
 
+    if include_log:
+        from saitenka.app.mpv_frame_diagnostics import collect as collect_frames
+
+        members.update(
+            {name: redact(text) for name, text in collect_frames(cache_dir(), session).items()}
+        )
+
     members.update(_collect_dict_inventory())
     members.update(_collect_crashes())
     members.update(_collect_player_crashes())
@@ -560,6 +567,7 @@ def _collect_metadata(session: str | None) -> dict[str, str]:
 
 
 def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dict, dict]:
+    from saitenka.app.color_evidence import safe_color_metrics
     from saitenka.app.option_evidence import safe_snapshot as safe_options
     from saitenka.app.paths import cache_dir
     from saitenka.app.player_evidence import safe_snapshot
@@ -593,6 +601,7 @@ def _metadata_producer(session: str | None) -> tuple[dict, dict, dict, dict, dic
                     else "unknown",
                 }
                 health = operation_health(raw)
+                health["subtitle_color"] = safe_color_metrics(raw.get("subtitle_color_metrics"))
                 runtime = safe_runtime_configuration(raw.get("runtime_configuration"))
                 player = safe_snapshot(raw.get("player_configuration"))
                 queries = safe_queries(raw.get("player_queries"))

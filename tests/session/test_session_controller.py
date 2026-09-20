@@ -534,14 +534,14 @@ def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
 
 def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
     """Next must render the following cue's text in the overlay right away AND still issue the real
-    sub-seek so the video catches up behind it."""
+    absolute seek to the same destination."""
     r, ipc = _reader_with_index(monkeypatch)
     ipc.props["sub-text"] = "いち"
     r.graph.cue.set_subtitle("いち")  # currently on cue 1
     ipc.props["sub-start"] = 1.0
     r.command(_msg_for(ipc, "Alt+RIGHT"))
     assert r.graph.playback.cue.text == "に"  # cue 2 rendered instantly, before any seek settles
-    assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]  # video seek still fired
+    assert ("seek", "4.01", "absolute+exact") in ipc.commands  # video seek still fired
 
 
 def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
@@ -617,9 +617,8 @@ def test_sub_nav_prev_and_replay(monkeypatch):
     r.graph.cue.set_subtitle("に")  # cue 2
     ipc.props["sub-start"] = 4.0
     r.command(_msg_for(ipc, "Alt+LEFT"))
-    assert r.graph.playback.cue.text == "いち" and ("sub-seek", "-1") in [
-        (c[0], c[1]) for c in ipc.commands
-    ]
+    assert r.graph.playback.cue.text == "いち"
+    assert ("seek", "1.01", "absolute+exact") in ipc.commands
     r.graph.cue.set_subtitle("に")
     ipc.props["sub-start"] = 4.0
     r.command(_msg_for(ipc, "Alt+DOWN"))  # replay → same cue
@@ -4065,9 +4064,7 @@ def test_the_sidebar_follows_the_cue_when_the_cue_settles(monkeypatch, make_sess
 
 
 def test_the_sidebar_reads_the_next_episode_path_even_without_a_sub_index(make_session):
-    """The path is read once per episode, not per turn. Two episodes whose subtitle index never
-    loads must not share the read: the sidebar's mined and backlog rows, and a relink write, key
-    on it."""
+    """Observed paths follow episode changes without a sidebar-triggered IPC read."""
     ipc = FakeIPC()
     r = make_session(
         ipc,
@@ -4075,12 +4072,14 @@ def test_the_sidebar_reads_the_next_episode_path_even_without_a_sub_index(make_s
         options=ReaderOptions().with_overrides(prefetch=False),
     )
     ipc.props["path"] = "/ep1.mkv"
+    r.graph.playback.install_seed({"path": "/ep1.mkv"})
     assert r.graph.track_commands.navigation.current.sub_index is None
     assert r.graph.sidebar.view().video == "/ep1.mkv"
 
     ipc.props["path"] = "/ep2.mkv"
     assert r.graph.sidebar.view().video == "/ep1.mkv"  # same episode: no read
     r.graph.cue.rebind_episode()
+    r.graph.playback.observe("path", "/ep2.mkv")
 
     assert r.graph.sidebar.view().video == "/ep2.mkv"
     r.close()

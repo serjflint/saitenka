@@ -16,7 +16,20 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from saitenka.app.report_reader import trace_evidence
+from saitenka.app.color_evidence import safe_color_metrics
+from saitenka.app.report_reader import read_member, trace_evidence
+
+
+def metadata_color_metrics(path: Path) -> dict:
+    if path.suffix != ".zip":
+        return {}
+    try:
+        raw = read_member(path, "diagnostics/envelope.json")
+        envelope = json.loads(raw) if raw is not None else {}
+        color = envelope.get("operation_health", {}).get("subtitle_color", {})
+        return safe_color_metrics(color.get("metrics")) if isinstance(color, dict) else {}
+    except (OSError, ValueError, AttributeError, RecursionError):
+        return {}
 
 
 def draws(trace: dict) -> list[dict]:
@@ -153,6 +166,11 @@ def color_on_screen(trace: dict) -> list[tuple[str, float]]:
 
 def color_arrivals(trace: dict) -> list[dict]:
     """Occurrence-qualified overprint acknowledgments; no draw fallback in latency statistics."""
+    if any(
+        event.get("name") in {"subtitle_color_arrival", "subtitle_color_outcome"}
+        for event in trace.get("traceEvents", ())
+    ):
+        return occurrence_outcomes(trace)
     spans = sorted(
         (event for event in trace.get("traceEvents", []) if event.get("ph") == "X"),
         key=lambda event: event["ts"],
@@ -196,11 +214,63 @@ def color_arrivals(trace: dict) -> list[dict]:
                 if owed
                 else "unknown-eligibility"
             )
-            ack = next((event for event in candidates if _is_color_ack(event)), None)
+            acknowledgments = [
+                event
+                for event in candidates
+                if _is_color_ack(event) and _completion_us(event) < horizon
+            ]
+            ack = min(acknowledgments, key=_completion_us, default=None)
             if ack is not None and owed:
-                row.update(status="acknowledged", wait_ms=(ack["ts"] - arrival["ts"]) / 1000)
+                row.update(
+                    status="acknowledged",
+                    wait_ms=(_completion_us(ack) - arrival["ts"]) / 1000,
+                )
         results.append(row)
     return results
+
+
+def occurrence_outcomes(trace: dict) -> list[dict]:
+    """Retain unfinished appearances and orphaned terminal evidence in a truncated trace."""
+    rows: dict[tuple[object, object], dict] = {}
+    for event in sorted(trace.get("traceEvents", ()), key=lambda item: item.get("ts", 0)):
+        if event.get("ph") != "X" or event.get("name") not in {
+            "subtitle_color_arrival",
+            "subtitle_color_outcome",
+            "subtitle_color_progress",
+        }:
+            continue
+        args = event.get("args") or {}
+        key = (args.get("color_session"), args.get("occurrence"))
+        if None in key:
+            continue
+        row = rows.setdefault(
+            key,
+            {
+                "color_session": key[0],
+                "occurrence": key[1],
+                "endpoint": "mpv-acknowledgment",
+                "wait_ms": None,
+                "status": "unknown-correlation",
+                "arrival_recorded": False,
+            },
+        )
+        if event["name"] == "subtitle_color_arrival":
+            row.update(kind=args.get("kind"), status="pending", arrival_recorded=True)
+        else:
+            row.update(first_ms=None, complete_ms=None, requested=None)
+            row.update(args)
+            row["status"] = args.get("color_status", args.get("status"))
+            row["finalized"] = event["name"] == "subtitle_color_outcome"
+            if not row["finalized"]:
+                row["status"] = "complete-provisional" if row["status"] == "complete" else "pending"
+            row["wait_ms"] = args.get("complete_ms") if row["arrival_recorded"] else None
+            if not row["arrival_recorded"]:
+                row["status"] = "unknown-correlation"
+    return list(rows.values())
+
+
+def _completion_us(event: dict) -> float:
+    return event["ts"] + event.get("dur", 0)
 
 
 def _is_color_ack(event: dict) -> bool:
@@ -410,10 +480,42 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     evidence = trace_evidence(args.report)
+    metrics = metadata_color_metrics(args.report)
+    if metrics.get("status") == "collected":
+        print(
+            f"cumulative color metrics (snapshot, not per-occurrence trace): {json.dumps(metrics)}"
+        )
     trace = {"traceEvents": evidence.pop("events")}
     print(f"input evidence: {json.dumps(evidence)}")
     if evidence["status"] == "invalid":
         return 1
+    if evidence["status"] == "missing" and metrics.get("status") == "collected":
+        return 0
+    occurrences = occurrence_outcomes(trace)
+    if occurrences:
+        print(f"{len(occurrences)} color occurrences (acknowledgment, not physical display)")
+        for kind in sorted({str(row.get("kind", "unknown")) for row in occurrences}):
+            rows = [row for row in occurrences if str(row.get("kind", "unknown")) == kind]
+            print(f"  {kind}: {dict(collections.Counter(row['status'] for row in rows))}")
+            print(
+                f"    late={sum(bool(row.get('late')) for row in rows)}"
+                f" coverage withdrawals={sum(row.get('withdrawals', 0) for row in rows)}"
+                f" eligibility withdrawn={sum(row.get('eligibility_withdrawn', 0) for row in rows)}"
+            )
+            for endpoint in ("first_ms", "complete_ms"):
+                samples = sorted(
+                    row[endpoint]
+                    for row in rows
+                    if row.get(endpoint) is not None and row["arrival_recorded"]
+                )
+                if samples:
+                    print(
+                        f"    {endpoint}: n={len(samples)}/{len(rows)}"
+                        f" p50={statistics.median(samples):.1f}"
+                        f" p95={samples[min(int(len(samples) * 0.95), len(samples) - 1)]:.1f}"
+                        f" max={samples[-1]:.1f}"
+                    )
+        return 0
     spans = draws(trace)
     if not spans:
         print("no subtitle_draw spans — the bundle predates them, or telemetry was off")

@@ -8,13 +8,43 @@ exercised without an IPC fake.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
     from saitenka_subtitles import Cue, CueIndex
+
+
+def indexed_delay(get: Callable[[str], object]) -> float | None:
+    """Only the ordinary subtitle clock is handled locally; mpv owns other transforms."""
+    try:
+        speed = get("options/sub-speed")
+        fps = get("options/sub-fps")
+        if (speed is not None and float(str(speed)) != 1) or (
+            fps is not None and float(str(fps)) != 0
+        ):
+            return None
+        if get("options/play-direction") not in {None, "forward", 1}:
+            return None
+        delay = float(str(get("sub-delay") or 0))
+    except (TypeError, ValueError):
+        return None
+    return delay if math.isfinite(delay) else None
+
+
+def subtitle_time(value: float | None, delay: float) -> float | None:
+    return None if value is None else value - delay
+
+
+def seek_position(cue: Cue, delay: float) -> float | None:
+    """Seek inside the event, avoiding exact-boundary subtitle/video PTS rounding."""
+    position = cue.start + delay + min(0.01, (cue.end - cue.start) / 2)
+    if cue.end <= cue.start or not math.isfinite(position) or position < 0:
+        return None
+    return position
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,12 +174,28 @@ def resolve_target(
     inside = cue_is_on_screen(
         index.cues[current], text=text, sub_start=sub_start, time_pos=time_pos
     )
-    target = index.target(current, delta, inside=inside)
+    target = _distinct_start_target(index, current, delta, inside=inside)
     if target < 0:  # out of range / ambiguous
         return None
     return NavigationTarget(
         target, index.cues[target], active.overlapping, index.frame_text(target)
     )
+
+
+def _distinct_start_target(index: CueIndex, current: int, delta: int, *, inside: bool) -> int:
+    # Co-timed ASS events are one navigation destination, even when their end times differ.
+    positions = [
+        i for i, cue in enumerate(index.cues) if i == 0 or cue.start != index.cues[i - 1].start
+    ]
+    group = next(
+        i
+        for i, position in enumerate(positions)
+        if index.cues[position].start == index.cues[current].start
+    )
+    destination = (
+        group + delta if inside else group if delta > 0 else group - 1 if delta < 0 else -1
+    )
+    return positions[destination] if 0 <= destination < len(positions) else -1
 
 
 def anchor_delay(

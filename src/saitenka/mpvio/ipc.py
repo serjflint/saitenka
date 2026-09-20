@@ -17,6 +17,7 @@ import queue
 import sys
 import threading
 import time
+import uuid
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
@@ -142,6 +143,7 @@ class MpvIPC:
 
     def __init__(self, path: str):
         self.path = normalize_ipc_path(path)
+        self.diagnostic_id = uuid.uuid4().hex
         self._transport: Transport | None = None  # set by connect() (or injected in tests)
         self._buf = b""  # reader-thread-only accumulation buffer
         self._feed_lock = threading.Lock()
@@ -227,6 +229,7 @@ class MpvIPC:
         try:
             while not closed.is_set():
                 chunk = transport.read(65536)
+                received_ns = time.time_ns()
                 if not chunk:
                     log.info(
                         "mpv IPC reader: EOF after %d byte(s) — mpv closed the pipe",
@@ -237,7 +240,7 @@ class MpvIPC:
                     log.info("mpv IPC reader: first data from mpv (%d byte(s))", len(chunk))
                     first = False
                 self._bytes_read += len(chunk)
-                self._feed(chunk, connection_epoch=epoch)
+                self._feed(chunk, connection_epoch=epoch, received_ns=received_ns)
         except OSError as e:
             log.warning("mpv IPC reader: read failed (%s) — treating as disconnect", e)
         finally:
@@ -247,15 +250,19 @@ class MpvIPC:
             if sink is not None:
                 sink("lost", epoch)
 
-    def _feed(self, chunk: bytes, *, connection_epoch: int | None = None) -> None:
+    def _feed(
+        self, chunk: bytes, *, connection_epoch: int | None = None, received_ns: int | None = None
+    ) -> None:
         """Accumulate bytes, split complete JSON lines, route events vs replies. SessionController-thread only
         (except tests, which drive it directly to exercise parsing without a real transport)."""
         with self._feed_lock:
             if connection_epoch is not None and connection_epoch != self._connection_epoch:
                 return
-            self._feed_current(chunk, self._connection_epoch)
+            self._feed_current(chunk, self._connection_epoch, received_ns)
 
-    def _feed_current(self, chunk: bytes, connection_epoch: int) -> None:
+    def _feed_current(
+        self, chunk: bytes, connection_epoch: int, received_ns: int | None = None
+    ) -> None:
         self._buf += chunk
         while b"\n" in self._buf:
             line, _, self._buf = self._buf.partition(b"\n")
@@ -265,10 +272,27 @@ class MpvIPC:
                 msg = json.loads(line.decode())
             except (ValueError, UnicodeDecodeError):
                 continue  # never let a garbled line kill the reader
-            self._route_message(msg, connection_epoch)
+            self._route_message(msg, connection_epoch, received_ns)
 
-    def _route_message(self, msg: dict, connection_epoch: int) -> None:
+    def _route_message(
+        self, msg: dict, connection_epoch: int, received_ns: int | None = None
+    ) -> None:
         if "event" in msg:
+            if msg.get("name") in {
+                "sub-delay",
+                "options/sub-speed",
+                "options/sub-fps",
+                "options/play-direction",
+            }:
+                with otel_metrics.traced(
+                    "mpv_subtitle_clock",
+                    ipc_connection=self.diagnostic_id,
+                    connection_epoch=str(connection_epoch),
+                    property=msg["name"],
+                    value=str(msg.get("data")),
+                    received_wall_ns=str(received_ns) if received_ns is not None else "unknown",
+                ):
+                    pass
             with self._events_lock:
                 sink = self._event_sink
                 if sink is not None:
@@ -288,6 +312,15 @@ class MpvIPC:
             log.debug("mpv IPC: late/unknown reply %d dropped", request_id)
             return
         _epoch, future = pending
+        with otel_metrics.traced(
+            "mpv_ipc_reply",
+            ipc_connection=self.diagnostic_id,
+            connection_epoch=str(connection_epoch),
+            request_id=str(request_id),
+            received_wall_ns=str(received_ns) if received_ns is not None else "unknown",
+            outcome=str(msg.get("error", "unknown")),
+        ):
+            pass
         if not future.done():
             future.set_result(msg)
 
@@ -330,7 +363,15 @@ class MpvIPC:
         closed = None
         try:
             transport, closed = self._write_target(epoch)
-            transport.write(data)
+            with otel_metrics.traced(
+                "mpv_ipc_write",
+                ipc_connection=self.diagnostic_id,
+                connection_epoch=str(epoch),
+                request_id=str(request_id),
+            ) as span:
+                span.set("write_start_wall_ns", str(time.time_ns()))
+                transport.write(data)
+                span.set("write_end_wall_ns", str(time.time_ns()))
         except OSError as error:
             log.warning("mpv IPC: queued write failed (%s) — disconnected", error)
             # Close BEFORE completing the future: resolving it releases the waiting caller, so the
@@ -373,6 +414,17 @@ class MpvIPC:
                     return IPCRequest(request_id, epoch, future, accepted=False)
                 self._pending[request_id] = (epoch, future)
             payload = json.dumps({"command": list(args), "request_id": request_id}).encode() + b"\n"
+            from saitenka.mpvio.diagnostics import command_identity
+
+            with otel_metrics.traced(
+                "mpv_ipc_enqueue",
+                ipc_connection=self.diagnostic_id,
+                connection_epoch=str(epoch),
+                request_id=str(request_id),
+            ) as span:
+                if span.recording:
+                    for key, value in command_identity(args).items():
+                        span.set(key, value)
             try:
                 self._outbound.put_nowait((epoch, request_id, payload, future))
             except queue.Full:
@@ -582,6 +634,13 @@ class MpvIPC:
             )
             self._closed.set()
             return False
+        with otel_metrics.traced(
+            "mpv_ipc_peer",
+            ipc_connection=self.diagnostic_id,
+            connection_epoch=str(self._connection_epoch),
+            ipc_peer="unmapped-after-reconnect",
+        ):
+            pass
         return True
 
     def receive_session(self, timeout: float | None, handle: Callable[[object], None]) -> None:

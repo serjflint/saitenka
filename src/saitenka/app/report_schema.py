@@ -176,22 +176,27 @@ def configured_metadata(raw: dict) -> dict:
 
 
 def _configured_geometry(geometry: object) -> dict:
-    fields = {}
-    if isinstance(geometry, dict):
-        for key in ("native_visible", "cache_max", "lookahead"):
-            value = geometry.get(key)
-            expected = bool if key == "native_visible" else int
-            if type(value) is expected and abs(value) <= 1e9:
-                fields[f"subtitle_geometry.{key}"] = {
-                    "value": value,
-                    "origin": "collector-config-file",
-                }
-        value = geometry.get("native_formats")
-        if isinstance(value, str) and value in {"authored-ass", "all"}:
-            fields["subtitle_geometry.native_formats"] = {
+    fields: dict[str, dict] = {}
+    if not isinstance(geometry, dict):
+        return fields
+    for key in ("native_visible", "cache_max", "lookahead"):
+        value = geometry.get(key)
+        expected = bool if key == "native_visible" else int
+        if type(value) is expected and abs(value) <= 1e9:
+            fields[f"subtitle_geometry.{key}"] = {
                 "value": value,
                 "origin": "collector-config-file",
             }
+    for key, choices in (
+        ("native_formats", {"authored-ass", "all"}),
+        (
+            "coloring",
+            {"legacy", "whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"},
+        ),
+    ):
+        value = geometry.get(key)
+        if isinstance(value, str) and value in choices:
+            fields[f"subtitle_geometry.{key}"] = {"value": value, "origin": "collector-config-file"}
     return fields
 
 
