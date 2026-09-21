@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789929042706,
+  "lastUpdate": 1789990424101,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18489,6 +18489,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 9.744384,
             "range": "3 replicas; min 9.13818; max 9.78125; MAD 0.036864",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "021b4f8beff37d2a1c7917cba45ae09be072a6b0",
+          "message": "Merge pull request #533 from serjflint/fix/episode-native-support\n\nfeat(subtitles): add prepared whole-cue color and timed presentation",
+          "timestamp": "2026-09-20T18:28:29Z",
+          "url": "https://github.com/serjflint/saitenka/commit/021b4f8beff37d2a1c7917cba45ae09be072a6b0"
+        },
+        "date": 1789990422497,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 21.942012,
+            "range": "3 replicas; min 20.9045; max 24.1292; MAD 1.03751; worst 24.1292",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 24.978417,
+            "range": "3 replicas; min 22.1195; max 28.9668; MAD 2.85894; worst 28.9668",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 8.9088,
+            "range": "3 replicas; min 8.68762; max 9.61331; MAD 0.221184",
             "unit": "MB"
           }
         ]
