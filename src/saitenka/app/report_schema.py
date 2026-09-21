@@ -26,7 +26,6 @@ _OPERATIONS = frozenset(
         "tooltip_lifetime",
         "scroll_lifetime",
         "tooltip_quality_submission",
-        "subtitle_calibration",
         "subtitle_device_upload",
     }
 )

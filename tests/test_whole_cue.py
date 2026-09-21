@@ -13,9 +13,10 @@ from saitenka_subtitles import (
 from saitenka_subtitles.geometry import PaintQualification
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
 from saitenka_subtitles.whole_cue import FillLayer, WholeCue, compose, osd_payload, osd_template
+from subtitle_test_support import Style, draw_request
 from test_ass_geometry import ASS
-from test_libass_geometry_backend import _recording_factory, probeable_request
-from test_overprint import Style, draw_request
+from test_libass_geometry_backend import _recording_factory
+from test_libass_geometry_backend import request as geometry_request
 
 from saitenka.app.config import subtitle_geometry_options
 from saitenka.app.subtitle_render import whole_cue_device
@@ -23,14 +24,14 @@ from saitenka.app.subtitles import WordBox
 
 
 @pytest.mark.parametrize(
-    "mode", ["legacy", "whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"]
+    "mode", ["whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"]
 )
 def test_coloring_option_roundtrips(mode):
     assert subtitle_geometry_options({"subtitle_geometry": {"coloring": mode}}).coloring == mode
 
 
 def test_coloring_option_preserves_default_and_rejects_typos():
-    assert subtitle_geometry_options({}).coloring == "legacy"
+    assert subtitle_geometry_options({}).coloring == "whole-cue-auto"
     with pytest.raises(ValueError, match="coloring"):
         subtitle_geometry_options({"subtitle_geometry": {"coloring": "whole-cue"}})
 
@@ -39,7 +40,7 @@ def test_whole_cue_backend_retains_layers_without_rendering_native_or_probes():
     created = []
     backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
     request = replace(
-        probeable_request(),
+        geometry_request(),
         native_ass=b"native reference",
         coloring="whole-cue-auto",
         whole_cue=WholeCue(),
@@ -105,7 +106,7 @@ def test_later_unannotated_fill_or_effect_refuses_paint_but_retains_scanning(ima
     )
     backend = LibassGeometryBackend(renderer_factory=lambda *_a, **_kw: FakeRenderer(layers))
     request = replace(
-        probeable_request(palette_size=1),
+        geometry_request(palette_size=1),
         coloring="whole-cue-auto",
         whole_cue=WholeCue(),
         paint_qualification=PaintQualification.STATIC,
@@ -218,7 +219,6 @@ def test_observed_cue_uses_optional_coloring_without_changing_scan_boxes(tmp_pat
         assert result.graph.subtitle_presentation.cue.current.boxes
         assert bool(presented_overpaints(ipc)) is painted
         assert backend.requests[-1].coloring == mode
-        assert backend.requests[-1].keep_coverage is False
         assert ipc.props["sub-visibility"] is True
         assert not any(command[0] == "sub-add" for command in ipc.commands)
     finally:
@@ -271,7 +271,7 @@ def test_explicit_shadow_keeps_boxes_when_backend_refuses_paint(tmp_path, monkey
 
 
 def test_whole_event_osd_keeps_independent_underline():
-    from test_overprint import FakeSurfaces
+    from subtitle_test_support import FakeSurfaces
 
     from saitenka.app.subtitle_render import NativeVisibleRenderer
 

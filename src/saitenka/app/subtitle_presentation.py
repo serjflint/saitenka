@@ -299,7 +299,6 @@ class SubtitlePresentation:
             formats=native_subtitles.native_formats(settings.native_formats),
             coloring=settings.coloring,
         )
-        native_subtitles.connect_drift_sink(current, self.native)
 
     @property
     def renderer(self) -> CurrentSubtitleRenderer:
@@ -357,9 +356,7 @@ class SubtitlePresentation:
 
     @property
     def paint_allowed(self) -> bool:
-        return self.cue.current.paint_allowed and (
-            self.coloring == "legacy" or self._shadow_paint_allowed()
-        )
+        return self.cue.current.paint_allowed and self._shadow_paint_allowed()
 
     @property
     def paint_reason(self) -> str:
@@ -434,8 +431,6 @@ class SubtitlePresentation:
         return self._shadow_boxes if self.using_layout else None
 
     def _shadow_paint_allowed(self) -> bool:
-        if self._source != "auto" and self.coloring == "legacy":
-            return True
         snapshot = self.pipeline.current
         return (
             snapshot is not None

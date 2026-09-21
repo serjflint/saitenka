@@ -133,7 +133,6 @@ subtitle_boxes_dropped: Counter | None = None
 #: labeled reason=. The overprint stands down rather than coloring words in a substitute face. Each
 #: demotion is a device the ladder could not use, so this is where "the color went missing" stops
 #: being invisible and becomes a number a report can show.
-subtitle_overprint_demotions: Counter | None = None
 subtitle_overpaint_frames: Counter | None = None
 subtitle_focus_writes_skipped: Counter | None = None
 #: Cue arrival → the color for that cue acknowledged by mpv, and the count of those past
@@ -146,16 +145,6 @@ subtitle_color_deadlines: Counter | None = None
 subtitle_color_pending: UpDownCounter | None = None
 subtitle_color_ack_ms: Histogram | None = None
 subtitle_color_withdrawals: Counter | None = None
-subtitle_layout_drift_px: Histogram | None = None
-#: The `compute_bounds` round trip, which is the only OSD-side cost we can time: mpv lays the payload
-#: out on its core thread and answers. Every other span in the draw path measures OUR side, so
-#: without this the leg that actually draws has no number and the measuring renderer looks expensive
-#: by comparison purely because it is the only one instrumented.
-subtitle_calibration_ms: Histogram | None = None
-#: labeled device=overprint|overpaint|none. The demotion counter next door only reports the negative,
-#: so a session with none of them is indistinguishable from one where the text device silently drew
-#: nothing — and the raster device below it colors the cue correctly either way.
-subtitle_token_device: Counter | None = None
 #: labeled outcome=word|no-word|no-geometry|popup|outside. `hover_route_decisions` counts what the
 #: machine decided, and a `Cancel` reads the same whether the cursor was off the words or the cue had
 #: no geometry to test against — which is the difference between working and unusable.
@@ -630,12 +619,11 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
-    global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_overpaint_frames
     global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
     global subtitle_color_outcomes, subtitle_color_deadlines, subtitle_color_pending
     global subtitle_color_ack_ms, subtitle_color_withdrawals
-    global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
-    global subtitle_calibration_ms
+    global hover_target_outcomes
 
     with _lock:
         _reader = reader
@@ -885,10 +873,6 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
             "saitenka.subtitle.boxes_dropped",
             description="boxes withheld because the cue has no token at that index",
         )
-        subtitle_overprint_demotions = meter.create_counter(
-            "saitenka.subtitle.overprint_demotions",
-            description="cues left uncolored because no device could draw them faithfully (reason=)",
-        )
         subtitle_overpaint_frames = meter.create_counter(
             "saitenka.subtitle.overpaint_frames",
             description="frames the raster device colored after the text device stood down",
@@ -926,24 +910,6 @@ def register(reader: InMemoryMetricReader, meter: Meter) -> None:
         subtitle_color_withdrawals = meter.create_counter(
             "saitenka.subtitle.color_withdrawals",
             description="accepted writes that remove acknowledged token coverage",
-        )
-        subtitle_layout_drift_px = meter.create_histogram(
-            "saitenka.subtitle.layout_drift_px",
-            unit="px",
-            description=(
-                "worst edge disagreement between mpv's OSD layout and our measurement, after "
-                "discounting the tile libass pads the right and bottom by — not comparable with a "
-                "series recorded before that discount existed"
-            ),
-        )
-        subtitle_token_device = meter.create_counter(
-            "saitenka.subtitle.token_device",
-            description="color device each token was drawn by (device=overprint|overpaint|none)",
-        )
-        subtitle_calibration_ms = meter.create_histogram(
-            "saitenka.subtitle.calibration_ms",
-            unit="ms",
-            description="compute_bounds round trip — mpv's OSD renderer laying out our payload",
         )
         hover_target_outcomes = meter.create_counter(
             "saitenka.hover.target_outcomes",
@@ -1001,12 +967,11 @@ def unregister() -> None:
     global hover_pause_claim, mpv_effect_apply_ms, mpv_effect_outcome
     global hover_route_decisions, hover_pause_release, cue_settles
     global subtitle_geometry_font_sources, subtitle_renderer_forced, subtitle_boxes_dropped
-    global subtitle_overprint_demotions, subtitle_overpaint_frames
+    global subtitle_overpaint_frames
     global subtitle_focus_writes_skipped, subtitle_color_latency_ms, subtitle_color_late
     global subtitle_color_outcomes, subtitle_color_deadlines, subtitle_color_pending
     global subtitle_color_ack_ms, subtitle_color_withdrawals
-    global subtitle_layout_drift_px, subtitle_token_device, hover_target_outcomes
-    global subtitle_calibration_ms
+    global hover_target_outcomes
 
     with _lock:
         _reader = None
@@ -1081,7 +1046,6 @@ def unregister() -> None:
         subtitle_geometry_font_sources = None
         subtitle_renderer_forced = None
         subtitle_boxes_dropped = None
-        subtitle_overprint_demotions = None
         subtitle_overpaint_frames = None
         subtitle_focus_writes_skipped = None
         subtitle_color_latency_ms = None
@@ -1091,9 +1055,6 @@ def unregister() -> None:
         subtitle_color_pending = None
         subtitle_color_ack_ms = None
         subtitle_color_withdrawals = None
-        subtitle_layout_drift_px = None
-        subtitle_token_device = None
-        subtitle_calibration_ms = None
         hover_target_outcomes = None
         mpv_effect_apply_ms = None
         mpv_effect_outcome = None

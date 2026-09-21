@@ -1,12 +1,4 @@
-"""The vectorised extraction against the per-pixel loop it replaced, on generated layers.
-
-`_collect_layer` and `_blit_coverage` were rewritten from per-pixel Python to whole-array numpy
-because together they were ~97% and ~4 ms of a geometry render. A rewrite that is only checked by
-the existing cases is checked against the shapes someone already thought of; this checks it against
-the previous implementation itself, which is the only oracle that knows every shape.
-
-The reference below is the code as it stood at `72492865`, transcribed unchanged.
-"""
+"""The vectorised geometry extraction against the per-pixel loop it replaced."""
 
 from __future__ import annotations
 
@@ -17,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 import pytest
 from saitenka_subtitles.geometry import Rect
-from saitenka_subtitles.libass_backend import _blit_coverage, _collect_layer, _TokenKey
+from saitenka_subtitles.libass_backend import _collect_layer, _TokenKey
 
 FRAME = (64, 48)
 
@@ -62,16 +54,6 @@ def reference_collect(layer, palette, reserved, owners, frame_size, bounds, segm
         painted = True
     if painted:
         segments[key].append(Rect(layer.dst_x, layer.dst_y, layer.width, layer.height))
-
-
-def reference_blit(layer, mask: bytearray, extent: list[int]) -> None:
-    stride = extent[2] - extent[0]
-    for offset, value in enumerate(layer.bitmap):
-        if not value:
-            continue
-        x = layer.dst_x + offset % layer.width - extent[0]
-        y = layer.dst_y + offset // layer.width - extent[1]
-        mask[y * stride + x] = max(mask[y * stride + x], value)
 
 
 def key_for(index: int) -> _TokenKey:
@@ -131,58 +113,6 @@ def test_the_vectorised_collect_agrees_with_the_loop_it_replaced(seed: int) -> N
         # accumulator away — so agreeing here would mean pinning which pixel got blamed.
         return
     assert (fast_bounds, fast_segments) == (slow_bounds, slow_segments)
-
-
-def painted_extent(layer: Layer) -> list[int] | None:
-    """The crop production actually passes: the union of PAINTED pixels, not the bitmap rect.
-
-    The distinction is the whole test. A glyph with bearing has blank top/left rows, so the ink
-    starts inside the bitmap and the layer's origin sits ABOVE and LEFT of the crop — which makes
-    the offsets negative. Cropping to the bitmap rect instead makes them always zero, and a first
-    version of this test did exactly that and passed while the vectorised blit silently dropped
-    every such layer's coverage.
-    """
-    rows, columns = np.nonzero(
-        np.frombuffer(layer.bitmap, dtype=np.uint8).reshape(layer.height, layer.width)
-    )
-    if not rows.size:
-        return None
-    return [
-        layer.dst_x + int(columns.min()),
-        layer.dst_y + int(rows.min()),
-        layer.dst_x + int(columns.max()) + 1,
-        layer.dst_y + int(rows.max()) + 1,
-    ]
-
-
-@pytest.mark.parametrize("seed", range(300))
-def test_the_vectorised_blit_agrees_with_the_loop_it_replaced(seed: int) -> None:
-    layer = layer_for(random.Random(seed))
-    extent = painted_extent(layer)
-    if extent is None:
-        pytest.skip("an all-zero layer contributes no extent")
-    height, width = extent[3] - extent[1], extent[2] - extent[0]
-    fast = np.zeros((height, width), dtype=np.uint8)
-    slow = bytearray(height * width)
-
-    _blit_coverage(layer, fast, extent)
-    reference_blit(layer, slow, extent)
-
-    assert fast.tobytes() == bytes(slow)
-
-
-def test_a_layer_whose_ink_starts_below_its_origin_is_not_dropped() -> None:
-    """The pinned regression: bearing puts the crop below/right of the bitmap origin, the offsets go
-    negative, and a negative slice start counts from the far end — so the window was empty and the
-    coverage vanished silently, on most real glyphs."""
-    layer = Layer(3, 3, bytes([0, 0, 0, 0, 0, 0, 0, 9, 0]), 0x01000000, 10, 10)
-    extent = painted_extent(layer)
-    assert extent is not None and (layer.dst_y - extent[1], layer.dst_x - extent[0]) == (-2, -1)
-    mask = np.zeros((extent[3] - extent[1], extent[2] - extent[0]), dtype=np.uint8)
-
-    _blit_coverage(layer, mask, extent)
-
-    assert mask.tobytes() == bytes([9])
 
 
 @pytest.mark.parametrize(

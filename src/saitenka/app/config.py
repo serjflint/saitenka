@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import tomllib
+import warnings
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Literal
@@ -353,9 +354,9 @@ class SubtitleGeometryOptions:
         default="auto", metadata={"help": "Geometry source: auto, shadow, or mpv (scan-only)."}
     )
     coloring: str = field(
-        default="legacy",
+        default="whole-cue-auto",
         metadata={
-            "help": "Native coloring: legacy, whole-cue-auto, whole-cue-osd, whole-cue-overpaint, boxes-only."
+            "help": "Native coloring: whole-cue-auto, whole-cue-osd, whole-cue-overpaint, boxes-only."
         },
     )
     native_visible: bool = field(
@@ -386,8 +387,14 @@ class SubtitleGeometryOptions:
     def __post_init__(self) -> None:
         if self.source not in {"shadow", "mpv", "auto"}:
             raise ValueError("subtitle geometry source must be shadow, mpv or auto")
+        if self.coloring == "legacy":
+            warnings.warn(
+                "subtitle_geometry.coloring='legacy' is deprecated; using 'whole-cue-auto'",
+                FutureWarning,
+                stacklevel=2,
+            )
+            object.__setattr__(self, "coloring", "whole-cue-auto")
         if self.coloring not in {
-            "legacy",
             "whole-cue-auto",
             "whole-cue-osd",
             "whole-cue-overpaint",

@@ -15,14 +15,12 @@ from saitenka_subtitles.ass import (
     allocate_token_colors,
     ass_soft_break,
     decode_ass_event,
-    has_karaoke_override,
     parse_ass_event_line,
     parse_ass_styles,
     qualify_prepared_paint,
     rewrite_ass_event,
     serialize_ass_event_line,
     source_primary_bgr_colors,
-    token_run_styles,
 )
 from saitenka_subtitles.document import (
     AnnotatedSubtitleEvent,
@@ -66,13 +64,6 @@ class PreparedAssFrame:
     semantic_text: str
     palette: tuple[GeometryPaletteEntry, ...]
     reserved_rgb: tuple[int, ...]
-    #: The document's script height, which is what libass scales its font sizes from. Carried so a
-    #: caller that knows the frame can turn a style's script-unit size into frame pixels; `0` when
-    #: the document declares none, which is the case where nothing may be drawn over the cue.
-    #: Required, not defaulted: a default is what let this field ship reading zero for every cue,
-    #: which silently switched the overprint off everywhere rather than failing anywhere.
-    play_res_y: int
-    requires_coverage: bool
     document_metadata: tuple[tuple[str, int], ...] = ()
     paint_qualification: PaintQualification = PaintQualification.MISSING
 
@@ -90,64 +81,8 @@ class _ParsedAssSource:
     metadata: tuple[tuple[str, int], ...]
 
 
-def _token_faces(
-    events: Sequence[AnnotatedSubtitleEvent], catalog: AssStyleCatalog
-) -> dict[SubtitleEventId, tuple[str, float]]:
-    """The face and script-unit size each active event's style lays its text out in.
-
-    Per event rather than per token because the style is an event's, and an override tag that
-    changed the face mid-event would make the event unpaintable rather than differently painted —
-    such a cue is refused upstream, so a per-event answer is the whole answer here.
-    """
-    by_name = {style.name: style for style in catalog.styles}
-    faces: dict[SubtitleEventId, tuple[str, float]] = {}
-    for event in events:
-        source = event.decoded.source
-        if has_karaoke_override(source):
-            faces[source.identity] = ("", 0.0)
-            continue
-        style = by_name.get(source.style)
-        faces[source.identity] = ("", 0.0) if style is None else (style.font_name, style.font_size)
-    return faces
-
-
-def _token_run_styles(
-    events: Sequence[AnnotatedSubtitleEvent], catalog: AssStyleCatalog
-) -> dict[tuple[SubtitleEventId, int], tuple[float, float, bool, bool]]:
-    r"""``(spacing, scale_x, bold, italic)`` per token, spacing in the document's script units.
-
-    Keyed by token and not by event, unlike the face: ``\fscx`` and ``\fsp`` are ordinary inline
-    tags, and a cue that alternates them between its words and its punctuation is normal typesetting
-    rather than a refusal.
-    """
-    resolved: dict[tuple[SubtitleEventId, int], tuple[float, float, bool, bool]] = {}
-    for event in events:
-        identity = event.decoded.source.identity
-        for token_index, run in token_run_styles(event, catalog).items():
-            resolved[identity, token_index] = run
-    return resolved
-
-
-def _palette_entry(
-    item: TokenColor,
-    face: tuple[str, float],
-    text: str,
-    run: tuple[float, float, bool, bool] | None,
-) -> GeometryPaletteEntry:
-    """One palette entry, with libass's own defaults for a token that resolved no run style."""
-    spacing, scale_x, bold, italic = (0.0, 100.0, False, False) if run is None else run
-    return GeometryPaletteEntry(
-        item.event_id,
-        item.token_index,
-        _bgr_to_rgb(item.bgr),
-        face[0],
-        face[1],
-        text,
-        spacing,
-        scale_x,
-        bold=bold,
-        italic=italic,
-    )
+def _palette_entry(item: TokenColor) -> GeometryPaletteEntry:
+    return GeometryPaletteEntry(item.event_id, item.token_index, _bgr_to_rgb(item.bgr))
 
 
 def _bgr_to_rgb(color: int) -> int:
@@ -498,25 +433,13 @@ def prepare_ass_hit_map_frame(
     frame_id = SubtitleFrameId(
         track_id, tuple(event.decoded.source.identity for event in annotated)
     )
-    faces = _token_faces(annotated, parsed.catalog)
-    runs = _token_run_styles(annotated, parsed.catalog)
     return PreparedAssFrame(
         encoded,
         frame_id,
         annotated,
         semantic_text,
-        tuple(
-            _palette_entry(
-                item,
-                faces.get(item.event_id, ("", 0.0)),
-                _token_surface(normalized, tokens, item.token_index),
-                runs.get((item.event_id, item.token_index)),
-            )
-            for item in colors
-        ),
+        tuple(_palette_entry(item) for item in colors),
         tuple(_bgr_to_rgb(color) for color in reserved_bgr),
-        parsed.play_res_y,
-        any(has_karaoke_override(event.decoded.source) for event in annotated),
         (*parsed.metadata, *_active_metadata(annotated)),
         next(
             (

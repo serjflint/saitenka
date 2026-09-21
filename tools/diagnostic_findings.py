@@ -141,7 +141,6 @@ def diagnose(envelope: dict) -> dict:
                 "runtime_mpv",
                 "surface_write",
                 "tooltip_quality_submission",
-                "subtitle_calibration",
                 "subtitle_device_upload",
             ):
                 counts = by_operation.get(operation)

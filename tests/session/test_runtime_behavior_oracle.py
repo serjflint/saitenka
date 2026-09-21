@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+from dataclasses import replace
 from typing import cast
 
 import pytest
 from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from saitenka_tokenize.japanese import Token
 from session_behavior_trace import SessionTrace, _visible_surfaces
+from subtitle_test_support import FakeSurfaces, Style, draw_request
 from util import FakeIPC, await_ready, bare_gateway
 
 from saitenka.app import subtitle_adapter
@@ -18,7 +20,7 @@ from saitenka.app.subtitle_render import NativeVisibleRenderer, NullRenderer
 from saitenka.app.subtitles import WordBox
 from saitenka.app.token_cache import TokenizedCue
 from saitenka.mpvio.ipc import IPCRequest
-from saitenka.runtime import events
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 
 def _token(surface: str) -> Token:
@@ -229,30 +231,6 @@ def _native_with_color_up(make_session):
     return reader, ipc, presentation, renderer
 
 
-def test_a_cue_change_whose_first_draw_has_nothing_to_show_does_not_remove_before_it_paints(
-    make_session,
-) -> None:
-    """Inside one cue change the first draw often has boxes and no styles yet, and the styled draw
-    follows in the same call. A removal between them was a second command for mpv, and a frame
-    composited in the gap showed the line white. The removal is owed only if nothing replaces it."""
-    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
-    target = presentation.target()
-    before = len(_focus_writes(ipc))
-
-    presentation.pipeline.cue_changed(target, nonempty=True)
-    renderer.use_native(target)
-    reader.graph.tooltip.retire_selection()
-    presentation.cue.replace_geometry(boxes=[])
-    presentation.pipeline.draw_current(target)  # nothing to show yet
-    presentation.cue.replace_geometry(boxes=[WordBox(0, 30, 10, 20, 20)])  # a new place
-    reader.graph.tooltip.select(0)
-    presentation.pipeline.draw_current(target)  # now there is
-    presentation.pipeline.flush_focus(target)
-
-    assert _focus_writes(ipc)[before:] == ["ass-events"]
-    reader.close()
-
-
 def test_a_cue_change_whose_payload_is_already_up_writes_nothing_and_keeps_it(make_session) -> None:
     """The same bytes again — a re-observation of one cue — must neither be rewritten nor
     removed: the deferred removal is cancelled by the match, not paid at the flush."""
@@ -271,24 +249,6 @@ def test_a_cue_change_whose_payload_is_already_up_writes_nothing_and_keeps_it(ma
     presentation.pipeline.flush_focus(target)
 
     assert _focus_writes(ipc)[before:] == []
-    reader.close()
-
-
-def test_a_cue_change_that_never_paints_still_takes_the_previous_color_down(make_session) -> None:
-    """The control: deferring the removal is only safe because the flush pays it."""
-    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
-    target = presentation.target()
-    before = len(_focus_writes(ipc))
-
-    reader.graph.playback.dispatch(events.CueTextReplaced("next"))  # another line, as production
-    presentation.pipeline.cue_changed(target, nonempty=True)
-    renderer.use_native(target)
-    reader.graph.tooltip.retire_selection()
-    presentation.cue.replace_geometry(boxes=[])
-    presentation.pipeline.draw_current(target)
-    presentation.pipeline.flush_focus(target)
-
-    assert _focus_writes(ipc)[before:] == ["none"]
     reader.close()
 
 
@@ -318,20 +278,50 @@ def test_a_cue_re_observed_in_halves_keeps_the_color_it_already_has(make_session
     reader.close()
 
 
-def test_a_removal_that_never_left_the_process_is_still_owed(make_session, monkeypatch) -> None:
-    """A focus write the runtime refuses synchronously (disconnected) has not changed the slot.
-    Believing it had left the previous cue's color painted until the next reconnect."""
-    reader, ipc, presentation, _renderer = _native_with_color_up(make_session)
+def test_a_removal_that_never_left_the_process_is_still_owed(make_session) -> None:
+    """A synchronously refused removal leaves the previous focus payload in mpv."""
+    reader, ipc, presentation, renderer = _native_with_color_up(make_session)
     target = presentation.target()
     before = len(_focus_writes(ipc))
-    submit = ipc.submit_runtime_mpv
-    monkeypatch.setattr(ipc, "submit_runtime_mpv", lambda **_kwargs: False)
-    presentation.pipeline.clear(target.surfaces, target.ipc)  # refused before it left
-    monkeypatch.setattr(ipc, "submit_runtime_mpv", submit)
+    renderer.draw(
+        replace(
+            draw_request(
+                styles=[Style((255, 255, 255, 255))],
+                boxes=[WordBox(0, 10, 10, 20, 20)],
+            ),
+            hover=0,
+        ),
+        target.surfaces,
+        target.ipc,
+    )
+    await_ready(
+        lambda: len(_focus_writes(ipc)) > before,
+        "native focus payload did not reach mpv",
+        pump=reader.pump,
+    )
+    attempts: list[tuple] = []
 
-    presentation.pipeline.clear(target.surfaces, target.ipc)
+    def submit(**kwargs) -> bool:
+        attempts.append(kwargs["command"])
+        if len(attempts) == 1:
+            return False
+        kwargs["on_finished"](
+            EffectFinished(
+                EffectId(len(attempts)),
+                Owner.SUBTITLE,
+                kwargs["identity"],
+                EffectOutcome.SUCCEEDED,
+            )
+        )
+        return True
 
-    assert _focus_writes(ipc)[before:] == ["none"]
+    controlled_ipc = type("ControlledIPC", (), {"submit_runtime_mpv": staticmethod(submit)})()
+    surfaces = FakeSurfaces()
+    renderer.clear(surfaces, controlled_ipc)
+    renderer.clear(surfaces, controlled_ipc)
+    renderer.clear(surfaces, controlled_ipc)
+
+    assert [command[3] for command in attempts] == ["", ""]
     reader.close()
 
 
@@ -381,11 +371,8 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
     trace.observe("geometry-ready", outcome="interaction-ready")
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[])
     renderer.degrade_geometry(reader.graph.subtitle_presentation.target())
-    await_ready(
-        lambda: not _visible_surfaces(ipc.commands),
-        "degraded subtitle surface did not settle",
-        pump=reader.pump,
-    )
+    assert reader.graph.subtitle_presentation.cue.current.boxes == []
+    assert renderer.ownership_state.owner.value == "native"
     trace.observe("geometry-miss", outcome="interaction-only-degraded")
     # Tokens alongside the boxes, because that is the only pairing production can produce: a box
     # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
@@ -421,7 +408,7 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
     assert [record["surfaces"] for record in trace.records()] == [
         "none",
         "present",
-        "none",
+        "present",
         "present",
     ]
     reader.close()

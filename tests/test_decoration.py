@@ -7,8 +7,6 @@ still carries its reading state, and that the mark is drawn without a font.
 
 from __future__ import annotations
 
-import dataclasses
-
 import pytest
 from saitenka_subtitles import decoration
 
@@ -67,23 +65,6 @@ def test_a_box_that_is_not_a_box_draws_nothing(rule: decoration.TokenRule) -> No
 
 def test_a_cue_with_nothing_to_mark_clears_the_slot() -> None:
     assert decoration.payload([]) == ""
-
-
-def test_a_whitespace_token_is_not_underlined() -> None:
-    """Device 3 draws from the box, not the text, so nothing in this module can tell a space from a
-    word — the ladder has to drop the token before it reaches this rung."""
-    from test_overprint import Style, draw_request
-
-    from saitenka.app.subtitle_render import color_ladder
-    from saitenka.app.subtitles import WordBox
-
-    request = draw_request(
-        styles=[Style((1, 2, 3, 255))] * 3,
-        boxes=[WordBox(1, 60, 0, 50, 40, "", 0.0)],
-    )
-    request.lines[0][1] = dataclasses.replace(request.lines[0][1], surface=" ")
-
-    assert color_ladder(request).rules == ()
 
 
 @pytest.mark.integration

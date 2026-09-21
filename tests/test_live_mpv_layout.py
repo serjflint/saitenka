@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
 
 import pytest
 from dirty_equals import IsPartialDict
 from live_harness import LayoutLiveOptions, live_reader, poll_until
 from util import record_spans
 
-from saitenka.app.subtitle_render import color_ladder
+from saitenka.app.subtitle_render import whole_cue_device
 
 pytestmark = [
     pytest.mark.live,
@@ -68,12 +67,9 @@ def test_auto_keeps_ordinary_shadow_paint_and_effects_scan_only(prefix, text, mo
         assert request.boxes[0].hit_regions
         if prefix:
             assert not request.paint_allowed
-            assert not color_ladder(request).devices
+            assert whole_cue_device(request)[0] == "none"
         else:
-            actual = color_ladder(request)
-            assert any(device != "none" for device in actual.devices)
-            baseline = replace(request, boxes=request.paint_boxes, paint_boxes=None)
-            assert actual == color_ladder(baseline)
+            assert whole_cue_device(request)[0] != "none"
 
 
 @pytest.mark.parametrize("prefix", ["", r"{\kf100}", r"{\alpha&H80&}"])
@@ -268,7 +264,7 @@ def test_blended_subtitles_keep_shadow_scanning_and_eligible_color(prefix, monke
         )
         box = request.boxes[0]
         assert session.graph.tooltip.hit(box.x + box.w // 2, box.y + box.h // 2) == box.index
-        assert bool(color_ladder(request).devices) is ("kf" not in prefix)
+        assert (whole_cue_device(request)[0] != "none") is ("kf" not in prefix)
         assert ipc.query("blend-subtitles") is True
 
 
@@ -376,7 +372,7 @@ def test_layout_revision_does_not_withdraw_unchanged_shadow_color(source_name):
         ),
     ) as (_, session, ipc):
         before = session.graph.cue.draw_request()
-        assert color_ladder(before).devices
+        assert whole_cue_device(before)[0] != "none"
 
         session.graph.playback.observe(
             "subtitle-layout-revision", (ipc.query("subtitle-layout-revision") or 0) + 1
@@ -384,7 +380,7 @@ def test_layout_revision_does_not_withdraw_unchanged_shadow_color(source_name):
 
         after = session.graph.cue.draw_request()
         assert [box.index for box in after.boxes] == [box.index for box in before.boxes]
-        assert color_ladder(after).devices == color_ladder(before).devices
+        assert whole_cue_device(after) == whole_cue_device(before)
 
 
 @pytest.mark.parametrize("source_name", ["auto", "shadow"])
@@ -412,7 +408,7 @@ def test_navigated_static_cue_keeps_color_after_layout_observations_settle(sourc
             session,
             lambda: (
                 session.graph.playback.cue.text == "犬を見る"
-                and bool(color_ladder(session.graph.cue.draw_request()).devices)
+                and whole_cue_device(session.graph.cue.draw_request())[0] != "none"
             ),
             "navigation never colored the target cue",
         )
@@ -422,7 +418,7 @@ def test_navigated_static_cue_keeps_color_after_layout_observations_settle(sourc
 
         request = session.graph.cue.draw_request()
         assert request.text == "犬を見る"
-        assert color_ladder(request).devices
+        assert whole_cue_device(request)[0] != "none"
         box = request.boxes[0]
         assert session.graph.tooltip.hit(box.x + box.w // 2, box.y + box.h // 2) == box.index
 
@@ -446,12 +442,12 @@ def test_static_speaker_colors_remain_colored_after_observations_settle(source_n
     ) as (_, session, _ipc):
         poll_until(
             session,
-            lambda: bool(color_ladder(session.graph.cue.draw_request()).devices),
+            lambda: whole_cue_device(session.graph.cue.draw_request())[0] != "none",
             "static color never painted",
         )
         for _ in range(20):
             session.pump()
-            assert color_ladder(session.graph.cue.draw_request()).devices
+            assert whole_cue_device(session.graph.cue.draw_request())[0] != "none"
             time.sleep(0.01)
         boxes = session.graph.cue.draw_request().boxes
         assert boxes

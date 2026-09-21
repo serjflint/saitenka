@@ -111,33 +111,6 @@ class TokenGeometry:
     token_index: int
     bounds: Rect
     regions: tuple[Rect, ...] = ()
-    #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
-    font_name: str = ""
-    font_size: float = 0.0
-    #: The token's own anti-aliased coverage, row-major over `bounds`, one byte per pixel — the
-    #: measuring render's output kept instead of thrown away once the extent was read off it.
-    #: This is what lets the color be painted as a raster when the text device cannot draw the
-    #: face; tinting a mask IS the raster, so the second device costs no second render. Empty when
-    #: the backend was not asked to keep it.
-    coverage: bytes = b""
-    #: How far this token's ink falls from the position an ``\an7\pos`` event is given, measured by
-    #: drawing it alone. ``bounds`` is ink and ``\an7`` anchors the line box, so a redraw that does
-    #: not subtract these lands an ascent-gap low. Zero when unprobed, which keeps today's placement.
-    anchor_dx: float = 0
-    anchor_dy: float = 0
-    #: Copied from the palette entry that produced this token — see `GeometryPaletteEntry`.
-    spacing: float = 0.0
-    scale_x: float = 100.0
-    bold: bool = False
-    italic: bool = False
-    #: Per-glyph offsets from this token's anchor, when the token has to be redrawn one event per
-    #: glyph — see `saitenka_subtitles.fragments`. Empty means one event for the whole token.
-    glyph_dx: tuple[float, ...] = ()
-    glyph_dy: tuple[float, ...] = ()
-    #: False when native coverage cannot be reproduced by the fractional redraw; use its mask.
-    overprint_safe: bool = True
-    overprint_verdict: str = "unvalidated"
-    coverage_evicted: bool = False
 
 
 class GeometryVariant(StrEnum):
@@ -151,24 +124,6 @@ class GeometryPaletteEntry:
     event_id: SubtitleEventId
     token_index: int
     rgb: int
-    #: The face and size this token is laid out in, in the FRAME's units rather than the document's
-    #: script units — so an overprint can draw the same glyph at the same size without redoing
-    #: libass's scaling. Empty when the document did not resolve one; the overprint then leaves that
-    #: token uncolored rather than drawing it at a guess.
-    font_name: str = ""
-    font_size: float = 0.0
-    #: The token's surface text. Carried for the same reason as the face: anything that redraws this
-    #: token needs to know where its ink lands when drawn alone, and that cannot be measured without
-    #: the characters. Empty leaves the token unprobed and its redraw where it was.
-    text: str = ""
-    #: Letter spacing (frame units, like `font_size`) and horizontal scale (percent) in force on this
-    #: token. The face and size alone do not place a glyph: these two move every glyph after the
-    #: first, so a redraw that drops them walks left across the token. `bold`/`italic` go further
-    #: and change which FACE libass resolves, so they are part of the same answer.
-    spacing: float = 0.0
-    scale_x: float = 100.0
-    bold: bool = False
-    italic: bool = False
 
     def __post_init__(self) -> None:
         if self.token_index < 0 or isinstance(self.rgb, bool) or not 0 < self.rgb <= 0xFFFFFF:
@@ -252,15 +207,12 @@ class GeometryRequest:
     font_setup: FontSetup = field(default_factory=FontSetup)
     renderer_state: RendererState = field(default_factory=RendererState)
     render_profile: tuple[tuple[str, str], ...] = ()
-    #: Keep each token's coverage mask, for the raster device. Asked for per frame rather than
-    #: always, because a cue whose color the text device can draw has no use for the bytes.
-    keep_coverage: bool = False
     #: Unmodified native track; the colored document supplies ownership hints only.
     native_ass: bytes = b""
     document_metadata: tuple[tuple[str, int], ...] = field(default=(), compare=False)
     source_kind: str = field(default="unknown", compare=False)
     paint_qualification: PaintQualification = PaintQualification.MISSING
-    coloring: str = "legacy"
+    coloring: str = "whole-cue-auto"
     whole_cue: WholeCue | None = None
     osd_font_setup: FontSetup | None = None
 
@@ -294,11 +246,6 @@ class GeometryRequest:
             repr(self.font_setup),
             repr(self.renderer_state),
             repr(self.render_profile),
-            # It changes what the snapshot CONTAINS, not just how it was made: a maskless hit
-            # served to a caller that asked for coverage drops the whole cue to the plainest
-            # color device, silently. Free while the only producer derives it from the palette
-            # hashed above — and this is what keeps that from being the thing holding it true.
-            repr(self.keep_coverage),
             self.paint_qualification.value,
             self.coloring,
             repr(self.whole_cue),
@@ -353,9 +300,7 @@ class GeometrySnapshot:
     def coverage_bytes(self) -> int:
         """Retained alpha, in bytes — the only part of a snapshot whose size is not bounded by the
         token count. A full-screen sign's masks are megabytes."""
-        return sum(len(token.coverage) for token in self.tokens) + (
-            self.whole_cue.byte_size if self.whole_cue is not None else 0
-        )
+        return self.whole_cue.byte_size if self.whole_cue is not None else 0
 
     def without_coverage(self) -> GeometrySnapshot:
         """The same hit boxes with the masks dropped.
@@ -367,14 +312,6 @@ class GeometrySnapshot:
         return replace(
             self,
             whole_cue=(replace(self.whole_cue, layers=()) if self.whole_cue is not None else None),
-            tokens=tuple(
-                replace(
-                    token,
-                    coverage=b"",
-                    coverage_evicted=token.coverage_evicted or bool(token.coverage),
-                )
-                for token in self.tokens
-            ),
         )
 
 

@@ -39,7 +39,6 @@ _SPAN_NAMES = frozenset(
         "mining_media_result",
         "jimaku_attempt",
         "subtitle.resync",
-        "subtitle_calibration",
     }
 )
 _FIELDS = frozenset(

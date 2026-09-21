@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from driver import Driver
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from PIL import Image
@@ -23,7 +24,7 @@ from saitenka.runtime import SurfaceStatus
 
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("refused", [False, True])
-def test_observed_cue_carries_revision_through_geometry_and_color_export(
+def test_observed_cue_carries_revision_through_geometry_and_focus_export(
     monkeypatch, tmp_path, refused
 ):
     from test_native_subtitles import Coloring, FakeIPC, KnownWords, Scorer, reader, settle_jobs
@@ -83,6 +84,7 @@ def test_observed_cue_carries_revision_through_geometry_and_color_export(
         session.graph.playback.observe("sub-text", "猫を見る")
         session.graph.cue.settle()
         settle_jobs(session, ipc)
+        Driver(session).move_to_word(0)
     finally:
         session.close()
         broker.close()
@@ -95,21 +97,21 @@ def test_observed_cue_carries_revision_through_geometry_and_color_export(
     cue = next(event for event in events if event.get("name") == "cue_reconcile")
     revision = cue["args"]["cue_revision"]
     geometry = [event for event in events if event.get("name") == "subtitle_geometry_render"]
-    colors = [
+    focus = [
         event
         for event in events
         if event.get("name") == "surface_write"
         and event["args"].get("slot") == "subtitle-native-focus"
         and event["args"].get("events")
     ]
-    assert geometry and colors
-    assert all(event["args"].get("cue_revision") == revision for event in [*geometry, *colors])
+    assert geometry and focus
+    assert all(event["args"].get("cue_revision") == revision for event in [*geometry, *focus])
     assert all(
         event["args"].get("outcome") == ("not-admitted" if refused else "succeeded")
-        for event in colors
+        for event in focus
     )
-    assert all(event["args"]["accepted"] is not refused for event in colors)
-    assert all(("effect_id" in event["args"]) is not refused for event in colors)
+    assert all(event["args"]["accepted"] is not refused for event in focus)
+    assert all(("effect_id" in event["args"]) is not refused for event in focus)
 
 
 def test_reader_reports_acknowledgment_wait_and_preserves_originating_cue(monkeypatch, tmp_path):

@@ -47,7 +47,7 @@ def assert_fault_contract(result, case):
 
 @pytest.mark.parametrize(
     "case",
-    fault_cases("mpv-failure") + fault_cases("renderer-fallback"),
+    fault_cases("mpv-failure"),
     ids=lambda case: case["id"],
 )
 def test_missing_evidence_cannot_satisfy_a_fault_contract(case):
@@ -88,47 +88,6 @@ def test_gateway_fault_is_diagnosable_from_default_zip_without_trace(case, monke
     with zipfile.ZipFile(bundle) as archive:
         assert not any("trace" in name for name in archive.namelist())
         assert b"PRIVATE-CUE" not in b"".join(archive.read(name) for name in archive.namelist())
-
-
-@pytest.mark.timeout(5)
-@pytest.mark.parametrize("case", fault_cases("renderer-fallback"), ids=lambda case: case["id"])
-def test_native_worker_fault_contract_survives_default_zip(monkeypatch, tmp_path, case):
-    from dataclasses import replace
-
-    from saitenka_subtitles.libass_backend import LibassGeometryBackend
-    from test_fractional_overprint import native_request
-    from test_subtitle_pipeline import FakeCurrentRenderer
-
-    from saitenka.app.subtitle_geometry_job import SubtitleGeometryWorker
-    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
-
-    _setup(monkeypatch, tmp_path)
-    if case["injection"] == "probe-error":
-        monkeypatch.setattr("saitenka_subtitles.geometry.MAX_FRAME_PIXELS", 600_000)
-    else:
-        monkeypatch.setattr("saitenka_subtitles.libass_backend.PHASE_BUILD_BUDGET", 0)
-    if case["injection"] == "eviction":
-        monkeypatch.setattr("saitenka.app.subtitle_geometry_job.COVERAGE_BUDGET_BYTES", 0)
-    pipeline = SubtitleModeCoordinator(FakeCurrentRenderer(), LibassGeometryBackend())
-    worker = SubtitleGeometryWorker(pipeline)
-    inputs = replace(native_request(), keep_coverage=True)
-    try:
-        assert worker.submit(inputs) and worker.wait_idle()
-        if case["injection"] == "eviction":
-            assert worker.submit(inputs) and worker.wait_idle()
-        elif case["injection"] == "stale":
-            pipeline.invalidate()
-        telemetry.save_operation_summary()
-        bundle = report.build_report_bundle(tmp_path / "reports", timestamp="native-fault")
-
-        result = diagnose(read_envelope(bundle))
-
-        assert_fault_contract(result, case)
-        assert result["status"] == (
-            "fault-observed" if case["expected_categories"] else "unidentified"
-        )
-    finally:
-        worker.close()
 
 
 def test_mailbox_saturation_is_diagnosed_without_claiming_render_failure(monkeypatch, tmp_path):

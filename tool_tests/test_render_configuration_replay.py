@@ -110,9 +110,9 @@ def test_synthetic_replay_executes_the_recorded_ultrawide_configuration():
     result = replay(recipe)
 
     assert len(result["rows"]) == 12
-    assert {row["verdict"] for row in result["rows"]} == {"passed"}
+    assert {row["verdict"] for row in result["rows"]} == {"inconclusive"}
     assert all(row["found_tokens"] > 0 for row in result["rows"])
-    assert all(row["different_pixels"] == 0 for row in result["rows"])
+    assert {row["reason"] for row in result["rows"]} == {"pixel-comparison-retired"}
     assert "independent mpv qualification not run" in result["qualification"]
 
 

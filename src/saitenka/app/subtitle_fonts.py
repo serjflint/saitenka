@@ -141,10 +141,8 @@ class FontEnvironment:
     ) -> OsdReach:
         """The families that reach mpv's subtitle renderer and never its **OSD** one.
 
-        Three inferred sources, all from `sub/osd_libass.c` and `sub/ass_mp.c`, plus `measured` — a
-        family `subtitle_calibration` caught the two renderers disagreeing about. That one is not
-        inferred from anything and so is not conditioned on anything: it is an observation of the
-        failure the other three predict.
+        Three inferred sources from `sub/osd_libass.c` and `sub/ass_mp.c`, plus any caller-supplied
+        families already known to be unreachable.
 
         * The OSD library is built from `osd_style` plus `mpv-osd-symbols` (`osd_libass.c:51-52`) and
           has no attachment path at all, so a container attachment or an in-file `[Fonts]` family is

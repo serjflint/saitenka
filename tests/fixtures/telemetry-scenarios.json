@@ -13,8 +13,6 @@
     {"scenario": "media-partial", "test": "tests/features/mining/test_mining.py::test_capture_media_reports_audio_subprocess_failure", "endpoint": "production-export-zip-reader"},
     {"scenario": "subtitle-fetch", "test": "tests/test_jimaku_client.py::test_get_transient_http_is_retried_then_raises_retryable", "endpoint": "production-export-zip-reader"},
     {"scenario": "resync", "test": "tests/test_resync.py::TestResyncTelemetry::test_failed_span_carries_the_aligner_error_and_reference_format", "endpoint": "production-export-zip-reader"},
-    {"scenario": "calibration", "test": "tests/test_calibration_telemetry.py::test_missing_bounds_are_retried_and_valid_reply_closes_the_signature", "endpoint": "production-export-zip-reader"},
-    {"scenario": "renderer-fallback", "test": "tests/test_diagnostic_findings.py::test_native_worker_fault_contract_survives_default_zip", "endpoint": "production-metadata-zip-diagnosis"},
     {"scenario": "cache-pressure", "test": "tests/test_render_cache.py::test_warm_nested_scroll_upgrades_to_crisp_with_no_interactive_raster", "endpoint": "production-export-zip-reader"},
     {"scenario": "shutdown", "test": "tests/test_progressive.py::test_reader_close_cancels_accepted_interaction_jobs", "endpoint": "production-export-zip-reader; accepted tooltip interaction, not all broker jobs"},
     {"scenario": "python-native-crash", "test": "tests/test_crashlog.py::test_isolated_native_fault_reaches_the_report_bundle", "endpoint": "isolated-process-fault-zip-diagnosis"},
@@ -297,56 +295,6 @@
       "configuration_status": "unqualified until a production-to-bundle test executes this cell"
     },
     {
-      "id": "calibration",
-      "diagnostic_contract": {"category": "calibration-evidence-incomplete", "severity": "warning", "uncertainty": "layout agreement unknown", "next_evidence": "current signature, bounds comparison and terminal"},
-      "owner": "subtitle",
-      "critical": true,
-      "trigger": "valid, missing, stale bounds replies",
-      "evidence": [
-        {
-          "name": "subtitle_calibration",
-          "fields": [
-            "signature",
-            "comparison",
-            "outcome"
-          ]
-        }
-      ],
-      "tests": [
-        "tests/test_subtitle_calibration.py",
-        "tests/test_calibration_telemetry.py"
-      ],
-      "reader": "tools/telemetry_coverage.py",
-      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
-    },
-    {
-      "id": "renderer-fallback",
-      "diagnostic_contract": {"category": "renderer-evidence-incomplete", "severity": "warning", "uncertainty": "selected renderer and pixel fidelity unknown", "next_evidence": "current geometry decision or retained publication validation"},
-      "fault_evidence": "geometry-history",
-      "fault_cases": [
-        {"id": "native-probe-budget", "injection": "budget", "expected_categories": ["geometry-probe-budget-exceeded"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "final device/upload outcome and independent pixel comparison"},
-        {"id": "native-probe-error", "injection": "probe-error", "expected_categories": ["geometry-probe-error"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "final device/upload outcome and independent pixel comparison"},
-        {"id": "native-mask-eviction", "injection": "eviction", "expected_categories": ["geometry-probe-budget-exceeded", "geometry-coverage-evicted"], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "final device/upload outcome and independent pixel comparison"},
-        {"id": "native-stale-result", "injection": "stale", "expected_categories": [], "severity": "warning", "uncertainty": "displayed-fidelity-unknown", "next_evidence": "current-generation publication"}
-      ],
-      "owner": "subtitle",
-      "critical": true,
-      "trigger": "native backend unavailable or geometry rejected",
-      "evidence": [
-        {
-          "name": "subtitle_geometry_decision",
-          "fields": [
-            "reason"
-          ]
-        }
-      ],
-      "tests": [
-        "tests/test_native_subtitles.py"
-      ],
-      "reader": "tools/telemetry_coverage.py",
-      "configuration_status": "unqualified until a production-to-bundle test executes this cell"
-    },
-    {
       "id": "cache-pressure",
       "diagnostic_contract": {"category": "cache-evidence-incomplete", "severity": "warning", "uncertainty": "cache pressure and viewport quality unknown", "next_evidence": "view kind, composition reason and cache budget counters"},
       "owner": "tooltip",
@@ -362,8 +310,7 @@
         }
       ],
       "tests": [
-        "tests/test_render_cache.py",
-        "tests/test_bench_render_devices.py"
+        "tests/test_render_cache.py"
       ],
       "reader": "tools/telemetry_coverage.py",
       "configuration_status": "unqualified until a production-to-bundle test executes this cell"
@@ -426,7 +373,6 @@
       "trigger": "episode corpus and single interior character fault",
       "evidence": [],
       "tests": [
-        "tests/test_live_subtitle_pixel_differential.py",
         "tool_tests/test_character_masks.py"
       ],
       "reader": "source-specific artifact assertions",

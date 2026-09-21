@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app.render_evidence import GeometryEvidence, validation_summary
+from saitenka.app.render_evidence import GeometryEvidence
 from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
@@ -372,7 +372,6 @@ class SubtitleModeCoordinator:
                 ticket.sequence,
                 libass_version=result.libass_version,
                 mask_source=result.mask_source,
-                validation=validation_summary(result) if self._evidence.enabled else None,
             )
         with otel_metrics.traced("subtitle_geometry_publish") as span:
             span.set("configuration_owner", self._evidence.owner)

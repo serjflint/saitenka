@@ -9,10 +9,8 @@ import math
 from dataclasses import replace
 from pathlib import Path
 
-import numpy as np
 from compare_cached_characters import geometry_request_for
 from diagnostic_findings import read_envelope
-from native_mask_benchmark import canvas
 from saitenka_subtitles.geometry import FontProvider, FontSetup, GeometryPaletteEntry, RendererState
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
 from synthetic_characters import ROOT, SPEC, documents
@@ -172,16 +170,11 @@ def replay(recipe: dict) -> dict:
                         }
                     )
                     continue
-                different = int(
-                    np.count_nonzero(
-                        canvas(actual, inputs.frame_size) != canvas(reference, inputs.frame_size)
-                    )
-                )
                 rows.append(
                     {
                         "case": case["id"],
-                        "verdict": "failed" if different else "passed",
-                        "different_pixels": different,
+                        "verdict": "inconclusive",
+                        "reason": "pixel-comparison-retired",
                         "libass_version": actual.libass_version,
                         "eligible_tokens": len(inputs.palette),
                         "found_tokens": len(actual.tokens),
@@ -199,7 +192,7 @@ def replay(recipe: dict) -> dict:
         "recipe": recipe,
         "font_sha256": spec["font"]["sha256"],
         "rows": rows,
-        "qualification": "same-renderer synthetic masks only; independent mpv qualification not run",
+        "qualification": "configuration replay only; independent mpv qualification not run",
     }
 
 

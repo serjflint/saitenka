@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -37,7 +37,6 @@ from saitenka_subtitles import (
     GeometryRequest,
     SubtitleTrackId,
     converted,
-    font_names,
     subrip,
 )
 from saitenka_subtitles.ass import decode_ass_event, parse_ass_event_line
@@ -47,12 +46,7 @@ from saitenka_tokenize.japanese import tokenize
 
 from saitenka.app import native_subtitles, subtitle_fonts
 from saitenka.app.session.routes import install_session_runtime
-from saitenka.app.subtitle_render import (
-    DrawRequest,
-    color_ladder,
-    overpaint_image,
-    overprint_payload,
-)
+from saitenka.app.subtitle_render import DrawRequest
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.discover import find_mpv
 from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
@@ -190,12 +184,6 @@ def geometry_request_for(
             is not None
         ],
     )
-    palette = native_subtitles._palette_in_frame_units(
-        prepared,
-        size[1],
-        1.0,
-        unreachable=fonts.osd_unreachable(font_names.in_document(source.encode())),
-    )
     return GeometryRequest(
         1,
         TRACK,
@@ -207,9 +195,8 @@ def geometry_request_for(
         native_ass=source.encode(),
         document_metadata=prepared.document_metadata,
         source_kind="authored-ass",
-        palette=palette,
+        palette=prepared.palette,
         reserved_rgb=prepared.reserved_rgb,
-        keep_coverage=True,
         font_setup=fonts.setup,
         attachments=fonts.attachments,
     ), tokens
@@ -289,7 +276,7 @@ class Captures:
         self,
         source: str,
         sample_ms: int,
-        request: DrawRequest | None = None,
+        request: DrawRequest | None = None,  # noqa: ARG002 -- retained capture API compatibility
         *,
         suffix: str = ".ass",
         reference_coverage: np.ndarray | None = None,
@@ -313,12 +300,6 @@ class Captures:
                 raise TimeoutError("seek did not settle")
             time.sleep(0.005)
         self._positioned = True
-        if request is not None:
-            payload = overprint_payload(request)
-            self.command("osd-overlay", 61, "ass-events", payload, *self.size, 1)
-            raster = overpaint_image(request)
-            if raster is not None:
-                self.overlay.show(Image.fromarray(raster.rgba), raster.x, raster.y, oid=62)
         if reference_coverage is not None:
             rgba = np.zeros((*reference_coverage.shape, 4), dtype=np.uint8)
             rgba[:, :, :3] = reference_color
@@ -457,12 +438,10 @@ def coordinate_devices(source: str, coordinate: dict, request: DrawRequest) -> d
         for index, token in enumerate(tokens)
         if token.start < selected[1] and selected[0] < token.end
     }
-    boxes = [box for box in request.boxes if box.index in owners]
     return {
-        "device_scope": "cluster-to-production-token",
+        "device_scope": "per-token-devices-retired",
         "token_indices": sorted(owners),
-        "devices": list(color_ladder(replace(request, boxes=boxes)).devices),
-        "font_families": sorted({box.font_name for box in boxes}),
+        "devices": [],
     }
 
 

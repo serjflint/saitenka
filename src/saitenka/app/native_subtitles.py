@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from saitenka_subtitles import (
     MAX_ASS_SOURCE_BYTES,
-    GeometryPaletteEntry,
     GeometryRequest,
     RendererState,
     SubtitleTrackId,
@@ -49,7 +48,6 @@ if TYPE_CHECKING:
     from typing import SupportsFloat
 
     from saitenka_subtitles import Cue, CueIndex
-    from saitenka_subtitles.ass_geometry import PreparedAssFrame
     from saitenka_subtitles.geometry import GeometrySnapshot
     from saitenka_tokenize.japanese import Token
 
@@ -309,59 +307,6 @@ def _frame_margins(osd: Mapping[str, object]) -> tuple[int, int, int, int]:
 def _requested_family(font_name: str) -> str:
     """The family an ASS `Fontname` asks for, as the unreachable set spells it."""
     return font_names.key(font_name)
-
-
-def connect_drift_sink(renderer: object, geometry: NativeSubtitleGeometry) -> None:
-    """Let a measured drift verdict reach the geometry side.
-
-    The renderer measures it and applies it where it draws, which is the only place a late answer
-    can still reach the cue on screen. This side needs to hear it so the next build keeps coverage
-    masks for those families. A renderer without the seam simply never reports one.
-    """
-    sink = getattr(renderer, "set_drift_sink", None)
-    if sink is not None:
-        sink(geometry.record_drifting_families)
-
-
-def _palette_in_frame_units(
-    prepared: PreparedAssFrame,
-    frame_height: int,
-    font_scale: float,
-    *,
-    unreachable: subtitle_fonts.OsdReach,
-) -> tuple[GeometryPaletteEntry, ...]:
-    """Restate each token's font size in the frame's pixels rather than the document's script units.
-
-    libass scales a style's `Fontsize` by `frame_height / PlayResY`, then by whatever
-    `ass_set_font_scale` holds. Doing that here — once, where both numbers are known — is what lets
-    an overprint draw the token at the size it was actually laid out at, instead of redoing libass's
-    arithmetic at the point of drawing where `PlayResY` is no longer in scope.
-
-    A document that declares no `PlayResY` yields a size of zero, which the overprint reads as "do
-    not draw this token" rather than as a size. So does a token whose family the OSD library cannot
-    reach: its box is still right, and only its color stands down.
-    """
-    if prepared.play_res_y <= 0:
-        return tuple(replace(entry, font_name="", font_size=0.0) for entry in prepared.palette)
-    scale = frame_height / prepared.play_res_y * font_scale
-    demoted = [
-        entry
-        for entry in prepared.palette
-        if unreachable.blocks(_requested_family(entry.font_name))
-    ]
-    if demoted and otel_metrics.subtitle_overprint_demotions is not None:
-        otel_metrics.subtitle_overprint_demotions.add(
-            len(demoted), {"reason": "font-not-on-osd-library"}
-        )
-    blanked = {(entry.event_id, entry.token_index) for entry in demoted}
-    return tuple(
-        replace(entry, font_name="", font_size=0.0)
-        if (entry.event_id, entry.token_index) in blanked
-        # `spacing` rides the same scale as the size — libass reads both in script units and applies
-        # `frame_height / PlayResY` to each. `scale_x` is a percentage and is already unit-free.
-        else replace(entry, font_size=entry.font_size * scale, spacing=entry.spacing * scale)
-        for entry in prepared.palette
-    )
 
 
 #: `--sub-hinting` to `ASS_Hinting`, in libass's declaration order (`ass.h`). mpv passes the ordinal
@@ -829,7 +774,7 @@ class NativeSubtitleGeometry:
         *,
         lookahead: int = 2,
         formats: NativeFormats = NativeFormats.AUTHORED_ASS,
-        coloring: str = "legacy",
+        coloring: str = "whole-cue-auto",
     ) -> None:
         if lookahead < 0:
             raise ValueError("subtitle geometry lookahead must be non-negative")
@@ -867,30 +812,9 @@ class NativeSubtitleGeometry:
         self._announced_reason: str | None = None
         self._fonts = subtitle_fonts.FontEnvironment()
         self._in_document_families: frozenset[str] = frozenset()
-        self._measured_unsafe: frozenset[str] = frozenset()
         #: A converted track's cue markup, by millisecond span — see `_adopt_converted`.
         self._converted_markup: dict[tuple[int, int], str] = {}
         self._track_codec = ""
-
-    def record_drifting_families(self, families: frozenset[str]) -> None:
-        """A measured verdict that mpv's OSD renderer does not lay these families out as we do.
-
-        The renderer has already stopped drawing them as text — it applies the verdict where it
-        draws, which is the only place a *late* answer can still reach the cue on screen. What is
-        left for this side is the consequence for the next build: those tokens now need coverage
-        masks, so the raster device can color them instead of the rule device marking them.
-        """
-        if families <= self._measured_unsafe:
-            return
-        self._measured_unsafe |= families
-        self.invalidate(cause=GeometryCacheReason.RENDER_INPUT_CHANGED)
-        # Both, and they do different work. `redraw` takes the drifting face off the cue on screen
-        # now; `reschedule` builds the request that will carry coverage masks for it, which is the
-        # only way the raster device can pick the color back up. Invalidating alone does neither —
-        # nothing re-observes a cue that has not changed, so the rebuild never happens and the
-        # family stays uncolored for as long as it is shown.
-        self._ports.reschedule()
-        self._ports.redraw()
 
     @property
     def paint_origin(self) -> tuple[int, int]:
@@ -915,7 +839,7 @@ class NativeSubtitleGeometry:
         verdict from the renderer at any time after either. Combining them on read means no arrival
         order leaves one out.
         """
-        return self._fonts.osd_unreachable(self._in_document_families, self._measured_unsafe)
+        return self._fonts.osd_unreachable(self._in_document_families, frozenset())
 
     def _skipped_tokens(self) -> int:
         return (
@@ -1612,9 +1536,7 @@ class NativeSubtitleGeometry:
             span.set("prepare_ms", prepare_ms)
             if otel_metrics.subtitle_geometry_prepare_ms is not None:
                 otel_metrics.subtitle_geometry_prepare_ms.record(prepare_ms)
-        palette = _palette_in_frame_units(
-            prepared, cue.frame_size[1], renderer_state.font_scale, unreachable=unreachable
-        )
+        palette = prepared.palette
         whole = None
         if self.coloring.startswith("whole-cue"):
             whole = whole_cue.WholeCue(osd_reason="configured-overpaint")
@@ -1659,7 +1581,6 @@ class NativeSubtitleGeometry:
             attachments=fonts.attachments,
             font_setup=fonts.setup,
             renderer_state=renderer_state,
-            keep_coverage=self.coloring == "legacy",
             coloring=self.coloring,
             whole_cue=whole,
             osd_font_setup=fonts.osd_setup,
@@ -2304,21 +2225,7 @@ class NativeSubtitleGeometry:
                 item.bounds.y + origin[1],
                 item.bounds.width,
                 item.bounds.height,
-                item.font_name,
-                item.font_size,
-                item.coverage,
-                item.anchor_dx,
-                item.anchor_dy,
-                item.spacing,
-                item.scale_x,
-                item.bold,
-                item.italic,
-                item.glyph_dx,
-                item.glyph_dy,
                 item.event_id,
-                item.overprint_safe,
-                item.overprint_verdict,
-                item.coverage_evicted,
             )
             for item in snapshot.tokens
         ]

@@ -47,34 +47,10 @@ class WordBox:
     y: int
     w: int
     h: int
-    #: How the native path drew this token — its face and its size in frame pixels. Empty from the
-    #: legacy renderer, which paints the color itself and has nothing to overprint.
-    font_name: str = ""
-    font_size: float = 0.0
-    #: The token's anti-aliased coverage over its own rect, one byte per pixel, kept only when the
-    #: face is one the text device cannot draw — see `TokenGeometry.coverage`.
-    coverage: bytes = b""
-    #: Where this token's ink falls relative to an ``\an7\pos`` anchor — see
-    #: `TokenGeometry.anchor_dx`. The overprint subtracts these; the raster device ignores them,
-    #: since it tints the coverage in place rather than redrawing anything.
-    anchor_dx: float = 0
-    anchor_dy: float = 0
-    #: The run metrics this token was laid out with — see `TokenGeometry.spacing`. Like the anchors,
-    #: only the overprint reads them: the raster device tints coverage in place and redraws nothing.
-    spacing: float = 0.0
-    scale_x: float = 100.0
-    bold: bool = False
-    italic: bool = False
-    #: See `TokenGeometry.glyph_dx` — the overprint draws a spaced token one event per glyph.
-    glyph_dx: tuple[float, ...] = ()
-    glyph_dy: tuple[float, ...] = ()
     #: Which authored event this token was measured in. Two speakers on screen are two events and
     #: one flat token list, so the index alone cannot say whose word was clicked. `None` from the
     #: legacy renderer, which lays the text out itself and has no document to attribute to.
     event_id: SubtitleEventId | None = None
-    overprint_safe: bool = True
-    overprint_verdict: str = "unvalidated"
-    coverage_evicted: bool = False
     #: Disjoint logical regions; the outer box remains the tooltip anchor.
     hit_regions: tuple[Rect, ...] | None = None
 
