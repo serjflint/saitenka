@@ -303,7 +303,8 @@ def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -
     cue_target = context > 0
     frame_missing = int((cue_target & ~visible).sum())
     frame_error = float(np.abs(ours.astype(float) - context.astype(float))[cue_target].max())
-    character = _opaque_geometry(reference, np.where(region, ours, 0))
+    character_scope = _dilate(target) & ~(permitted & ~target)
+    character = _opaque_geometry(reference, np.where(character_scope, ours, 0))
     cue = _opaque_geometry(context, ours)
     if character["inconclusive"] or cue["inconclusive"]:
         return {

@@ -219,6 +219,19 @@ def test_adjacent_extra_ink_cannot_pass_as_an_overprint_border():
     assert result["frame_spill_pixels"] == 1
 
 
+def test_character_check_excludes_neighboring_authored_ink():
+    oracle = module()
+    reference = np.zeros((9, 14), dtype=np.uint8)
+    reference[2:7, 3:6] = 255
+    context = reference.copy()
+    context[2:7, 6:9] = 255
+    context[7, 6] = 255
+
+    result = oracle.compare_mask(reference, context, context)
+
+    assert result["verdict"] == "passed"
+
+
 def test_faint_output_is_only_an_edge_when_adjacent_to_reference_ink():
     oracle = module()
     reference = np.zeros((9, 9), dtype=np.uint8)
