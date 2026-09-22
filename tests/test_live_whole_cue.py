@@ -349,7 +349,6 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
                 "--gpu-sw=yes",
-                "--gpu-api=opengl",
                 *(
                     (f"--osd-shaper={shaper}",)
                     if mode == "whole-cue-auto" or device == "overprint"
@@ -413,7 +412,6 @@ def test_osd_pixels_follow_qualified_shadow_with_secondary_translation(blur):
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
                 "--gpu-sw=yes",
-                "--gpu-api=opengl",
                 "--osd-shaper=complex",
                 f"--osd-blur={blur}",
             ),
@@ -534,7 +532,6 @@ def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kernin
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
                 "--gpu-sw=yes",
-                "--gpu-api=opengl",
                 "--osd-shaper=complex",
                 *extra,
             ),
@@ -635,7 +632,6 @@ def test_osd_lookahead_renders_hidden_and_survives_blank_gaps(tmp_path, monkeypa
                 "--hidpi-window-scale=no",
                 f"--vo={vo}",
                 "--gpu-sw=yes",
-                *(("--gpu-api=opengl",) if vo == "gpu" else ()),
                 "--osd-shaper=complex",
                 f"--log-file={log}",
                 "--msg-level=osd/libass=debug",
