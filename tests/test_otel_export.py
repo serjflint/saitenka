@@ -125,7 +125,7 @@ def test_summary_retains_only_ten_sessions(tmp_path):
     for index in range(12):
         path = tmp_path / f"session-old-{index}.json"
         path.write_text("{}")
-        os.utime(path, ns=(index, index))
+        os.utime(path, (index, index))
     current = tmp_path / "session-current.json"
     processor, _ = _on_gate(path=tmp_path / "trace.json", summary=SummaryOptions(current, {}))
 

@@ -125,12 +125,12 @@ jobs:
             runs-on: ubuntu-24.04
             expect: "0.37"
             appimage: ""
-          # `NATIVE_GEOMETRY_MPV_MIN`; 30 commits past the tag is the closest published build.
+          # Exact native-geometry floor; published AppImages omit the required GPU backends.
           - label: "0.40 floor"
             runs-on: ubuntu-24.04
             expect: "0.40"
-            appimage: https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.40.0-30-g5ba7ee513/mpv-v0.40.0-30-g5ba7ee513-anylinux-x86_64.AppImage
-            sha256: e7691d61e961507a282cbce56560168b99773647ab05189931abf24e71c4820e
+            appimage: ""
+            source: e48ac7ce08462f5e33af6ef9deeac6fa87eef01e # upstream v0.40.0
           # Deliberately floating: a pinned "latest" only detects drift when someone remembers to bump
           # the pin, which is the failure this leg exists to catch. Safe to float because `e2e` is
           # skipped on pull_request — an upstream release can never redden someone else's PR.
@@ -141,6 +141,8 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     env:
       UV_PYTHON: "3.13"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -152,12 +154,36 @@ jobs:
       # ffmpeg explicitly: the harness builds its clip by shelling out to it, and only the apt leg
       # would get it for free (as an mpv dependency). The AppImage is self-contained, so the legs
       # that use one had no system ffmpeg at all.
-      - name: Install CJK fonts, Xvfb and ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk ffmpeg
+      - name: Install CJK fonts, Xvfb, ffmpeg and software GPU drivers
+        run: >-
+          sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk ffmpeg
+          libvulkan1 mesa-vulkan-drivers
 
       - name: Install mpv from apt
-        if: matrix.appimage == ''
+        if: matrix.appimage == '' && matrix.source == ''
         run: sudo apt-get install -y mpv
+
+      - name: Build the pinned mpv floor with OpenGL and X11
+        if: matrix.source != ''
+        env:
+          MPV_REVISION: ${{ matrix.source }}
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y build-essential meson ninja-build pkg-config \
+            libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev \
+            libswresample-dev libswscale-dev libass-dev libplacebo-dev liblua5.2-dev \
+            libgl-dev libegl-dev libx11-dev libxss-dev libxext-dev libxpresent-dev libxrandr-dev
+          MPV_SOURCE="$RUNNER_TEMP/mpv-floor"
+          git init "$MPV_SOURCE"
+          git -C "$MPV_SOURCE" fetch --depth=1 https://github.com/mpv-player/mpv.git "$MPV_REVISION"
+          git -C "$MPV_SOURCE" checkout --detach FETCH_HEAD
+          test "$(git -C "$MPV_SOURCE" rev-parse HEAD)" = "$MPV_REVISION"
+          meson setup "$MPV_SOURCE/build" "$MPV_SOURCE" --prefix=/usr/local \
+            --buildtype=release --wrap-mode=nofallback -Dlibmpv=false \
+            -Dgl=enabled -Dgl-x11=enabled -Degl=enabled -Degl-x11=enabled \
+            -Dx11=enabled -Dlua=lua5.2
+          meson compile -C "$MPV_SOURCE/build"
+          sudo meson install -C "$MPV_SOURCE/build"
 
       # AppImage rather than apt, for the versions apt cannot supply. FUSE is absent on the runners,
       # so extract instead of mounting. `--appimage-extract` writes ./squashfs-root.
@@ -165,7 +191,6 @@ jobs:
         if: matrix.appimage != ''
         env:
           APPIMAGE: ${{ matrix.appimage }}
-          EXPECTED_SHA: ${{ matrix.sha256 }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # `gh release view`, for the floating leg
         run: |
           set -euo pipefail
@@ -175,9 +200,6 @@ jobs:
             echo "resolved latest to $APPIMAGE"
           fi
           curl -fsSL -o mpv.AppImage "$APPIMAGE"
-          if [[ -n "$EXPECTED_SHA" ]]; then
-            echo "$EXPECTED_SHA  mpv.AppImage" | sha256sum -c -
-          fi
           chmod +x mpv.AppImage
           ./mpv.AppImage --appimage-extract >/dev/null
           sudo ln -sf "$PWD/squashfs-root/AppRun" /usr/local/bin/mpv

@@ -40,10 +40,17 @@ def test_trace_reader_distinguishes_missing_empty_and_invalid_capture(tmp_path, 
 @pytest.mark.parametrize(
     "name", ["../trace.json", "/trace.json", "C:/trace.json", "dir\\trace.json"]
 )
-def test_unsafe_archive_names_are_rejected_before_trace_read(tmp_path, name):
+@pytest.mark.parametrize("separator", ["/", "\\"])
+def test_unsafe_archive_names_are_rejected_before_trace_read(
+    tmp_path, monkeypatch, name, separator
+):
     source = tmp_path / "report.zip"
     with zipfile.ZipFile(source, "w") as archive:
-        archive.writestr(name, "[]")
+        member = zipfile.ZipInfo()
+        member.filename = name
+        archive.writestr(member, "[]")
+    # ZipInfo normalizes Windows separators but preserves the raw name in orig_filename.
+    monkeypatch.setattr(zipfile.os, "sep", separator)
     with pytest.raises(ValueError, match="unsafe"):
         load_trace(source)
 

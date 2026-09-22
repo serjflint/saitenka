@@ -142,20 +142,26 @@ def _coloring():
 # The only test here that draws through native geometry, so the only one with that floor.
 @pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
 @pytest.mark.timeout(30)
-def test_the_color_latency_counter_measures_a_real_cue() -> None:
+def test_the_color_ack_counter_measures_a_real_cue() -> None:
     """Liveness for the instrument, not a ceiling on what it reads.
 
     Everything else that times this runs against FakeIPC, where a write is acknowledged in the same
-    turn it is sent — so the counter can be wired correctly there and record nothing once mpv is the
-    one acknowledging, which is the only case the number exists for. No threshold is asserted: this
-    produces the first real measurement of it, and a budget chosen before a baseline is a guess.
+    turn it is sent. This proves the occurrence instrument records a real mpv acknowledgement. No
+    threshold is asserted: this produces the first real measurement, before a budget exists.
     """
-    with _telemetry(), live_reader(native_visible=True, scorer=_coloring()) as (_tmp, reader, _ipc):
-        poll_until(
-            reader,
-            lambda: "saitenka.subtitle.color_latency_ms" in otel_metrics.snapshot(),
-            "a real cue colored and the color-latency timer recorded nothing",
-        )
-        latency = otel_metrics.snapshot()["saitenka.subtitle.color_latency_ms"]
+    with _telemetry():
+        with live_reader(native_visible=True, scorer=_coloring()) as (_tmp, reader, _ipc):
+            poll_until(
+                reader,
+                lambda: (
+                    reader.graph.subtitle_presentation.color_telemetry.current is not None
+                    and reader.graph.subtitle_presentation.color_telemetry.current.snapshot(
+                        0
+                    ).status
+                    == "complete"
+                ),
+                "a real cue never reached acknowledged color",
+            )
+        latency = otel_metrics.snapshot()["saitenka.subtitle.color_ack_ms"]
     assert latency["count"] >= 1
     assert latency["max"] > 0.0  # a zero would mean both ends read the same instant

@@ -73,7 +73,7 @@ def test_trace_selection_matches_log_session_not_newest_file(monkeypatch, tmp_pa
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     for number, session in enumerate(("wanted", "unrelated")):
         (directory / f"trace-{number}.json").write_text(
             json.dumps({"otherData": {"session": session}, "traceEvents": []})
@@ -92,7 +92,7 @@ def test_partial_trace_is_unavailable_not_empty_healthy(monkeypatch, tmp_path):
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     (directory / "trace-1.json").write_text('{"traceEvents":[')
 
     members = report._collect_telemetry("wanted")
@@ -108,7 +108,7 @@ def test_health_survives_missing_trace(monkeypatch, tmp_path):
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nexport_dir = "{directory.as_posix()}"\n')
     (directory / "trace-1.health.json").write_text(
         json.dumps({"session": "wanted", "lost_events": 9})
     )
@@ -123,7 +123,7 @@ def test_fallback_trace_cannot_borrow_newer_sessions_health(monkeypatch, tmp_pat
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nexport_dir = "{directory.as_posix()}"\n')
     (directory / "trace-2.json").write_text('{"traceEvents":[')
     (directory / "trace-2.health.json").write_text(json.dumps({"session": "new", "lost_events": 0}))
     (directory / "trace-1.json").write_text(
@@ -144,6 +144,18 @@ def test_redact_secrets_scrubs_keys_and_tokens():
     assert "abcdef123456" not in report._redact_secrets('key="abcdef123456"')
     # ordinary text with a short word is untouched
     assert report._redact_secrets("the cat sat") == "the cat sat"
+
+
+def test_scrub_home_redacts_json_encoded_windows_path(monkeypatch):
+    home = r"C:\Users\Jäne"
+    monkeypatch.setattr(Path, "home", lambda: Path(home))
+
+    for ensure_ascii in (True, False):
+        redacted = report._scrub_home(
+            json.dumps({"path": home + r"\dict"}, ensure_ascii=ensure_ascii)
+        )
+
+        assert json.loads(redacted) == {"path": r"<HOME>\dict"}
 
 
 def test_redact_config_blanks_key_lines_keeps_shape():
@@ -284,7 +296,7 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
     tel_dir.mkdir()
     home = str(Path.home())
     (tel_dir / "trace-20260101-000000.json").write_text(  # a rotated per-session trace
-        '{"traceEvents": [{"name": "op", "args": {"dict": "' + home + '/mydict"}}]}'
+        json.dumps({"traceEvents": [{"name": "op", "args": {"dict": home + "/mydict"}}]})
     )
     # .as_posix(): a Windows path's backslashes are TOML string escapes → the table would fail to parse.
     cfg.write_text(

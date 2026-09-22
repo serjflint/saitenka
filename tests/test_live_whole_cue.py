@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -22,6 +25,8 @@ from test_ass_geometry import ASS
 from test_whole_cue import prepared_source
 from util import record_spans
 
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
+
 pytestmark = [
     pytest.mark.live,
     pytest.mark.timeout(30),
@@ -31,8 +36,28 @@ pytestmark = [
 ]
 
 
+def _character_masks():
+    path = Path(__file__).resolve().parents[1] / "tools/character_masks.py"
+    spec = importlib.util.spec_from_file_location("character_masks", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.mark.parametrize("delay", [0.0, 1.25])
-def test_rapid_indexed_seeks_land_on_the_prepared_cue_with_subtitle_delay(monkeypatch, delay):
+@pytest.mark.parametrize(
+    "coloring",
+    [
+        pytest.param("whole-cue-auto", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)),
+        pytest.param("whole-cue-osd", marks=pytest.mark.mpv_min("0.41")),
+    ],
+)
+@pytest.mark.usefixtures("enabled_telemetry")
+def test_rapid_indexed_seeks_land_on_the_prepared_cue_with_subtitle_delay(
+    monkeypatch, delay, coloring
+):
     from test_cue_color_timeline import _coloring
 
     from saitenka.app.subtitle_intents import SeekCue
@@ -45,8 +70,13 @@ def test_rapid_indexed_seeks_land_on_the_prepared_cue_with_subtitle_delay(monkey
         layout=LayoutLiveOptions(
             "shadow",
             os.environ.get("SAITENKA_LAYOUT_MPV"),
-            ("--sub-ass-override=no", "--blend-subtitles=no", f"--sub-delay={delay}"),
-            coloring="whole-cue-osd",
+            (
+                "--sub-ass-override=no",
+                "--blend-subtitles=no",
+                f"--sub-delay={delay}",
+                *(("--osd-shaper=complex",) if coloring == "whole-cue-osd" else ()),
+            ),
+            coloring=coloring,
             start_seconds=0.5 + delay,
         ),
     ) as (_tmp, session, ipc):
@@ -71,8 +101,12 @@ def test_rapid_indexed_seeks_land_on_the_prepared_cue_with_subtitle_delay(monkey
         poll_until(
             session,
             lambda: (
-                session.graph.subtitle_presentation.color_telemetry.current.snapshot(0).status
+                session.graph.subtitle_presentation.color_telemetry.cue_start_ms == 6000
+                and session.graph.subtitle_presentation.color_telemetry.current is not None
+                and session.graph.subtitle_presentation.color_telemetry.current.snapshot(0).status
                 == "complete"
+                and session.graph.cue.draw_request().text == "鳥を見た"
+                and session.graph.cue.draw_request().boxes
             ),
             "destination color was not acknowledged",
         )
@@ -209,7 +243,7 @@ def test_qualified_osd_compiler_matches_authored_fill_at_two_sizes(frame):
     ("text", "boundary"), [("猫を見る", 2), ("office AVATAR", 6), ("a\u0308bc", 2)]
 )
 @pytest.mark.parametrize("selected", [(0,), (0, 1)])
-def test_marker_layers_equal_final_color_full_event(text, boundary, selected):
+def test_marker_layers_preserve_opaque_color_and_final_event_geometry(text, boundary, selected):
     libasslite = pytest.importorskip("libasslite")
 
     source = (
@@ -248,8 +282,9 @@ def test_marker_layers_equal_final_color_full_event(text, boundary, selected):
     assert snapshot.whole_cue is not None
     actual = compose(snapshot.whole_cue, tuple((index, 0x00FF00) for index in selected))
     assert actual is not None
+    assert np.all(actual.rgba[actual.rgba[..., 3] > 0, :3] == (0, 255, 0))
 
-    # Independent final-color document: no marker colors and one run when both tokens agree.
+    # Independent final-color document, without marker colors or token-derived bounds.
     raw = text if len(selected) == 2 else text[:boundary] + r"{\1a&HFF&}" + text[boundary:]
     direct = source.decode().replace(text, r"{\1c&H00FF00&\3a&HFF&\4a&HFF&}" + raw).encode()
     renderer = libasslite.AssRenderer(direct, default_family="sans-serif")
@@ -257,31 +292,40 @@ def test_marker_layers_equal_final_color_full_event(text, boundary, selected):
         reference = renderer.render(1500, (1280, 720), (1280, 720))
     finally:
         renderer.close()
-    expected = Image.new("RGBA", (1280, 720), (33, 71, 109, 255))
+    expected_alpha = np.zeros((720, 1280), dtype=np.uint8)
     for layer in reference.layers:
         if layer.image_type != 0 or layer.color & 255 == 255:
             continue
-        tile = Image.new(
-            "RGBA",
-            (layer.width, layer.height),
-            (layer.color >> 24, (layer.color >> 16) & 255, (layer.color >> 8) & 255, 0),
+        source_alpha = np.frombuffer(layer.bitmap, dtype=np.uint8).reshape(
+            layer.height, layer.width
         )
-        tile.putalpha(Image.frombytes("L", tile.size, layer.bitmap))
-        expected.alpha_composite(tile, (layer.dst_x, layer.dst_y))
-    observed = Image.new("RGBA", expected.size, (33, 71, 109, 255))
-    observed.alpha_composite(Image.fromarray(actual.rgba), (actual.x, actual.y))
-    assert np.array_equal(np.asarray(observed), np.asarray(expected))
+        region = expected_alpha[
+            layer.dst_y : layer.dst_y + layer.height,
+            layer.dst_x : layer.dst_x + layer.width,
+        ]
+        region[:] = source_alpha + region.astype(np.uint16) * (255 - source_alpha) // 255
+    observed_alpha = np.zeros_like(expected_alpha)
+    observed_alpha[
+        actual.y : actual.y + actual.rgba.shape[0],
+        actual.x : actual.x + actual.rgba.shape[1],
+    ] = actual.rgba[..., 3]
+    result = _character_masks().compare_mask(expected_alpha, observed_alpha, expected_alpha)
+    assert result["verdict"] == "passed"
 
 
 @pytest.mark.parametrize(
     ("mode", "device"),
     [
-        ("whole-cue-auto", "overprint"),
-        ("whole-cue-overpaint", "overpaint"),
-        ("whole-cue-osd", "overprint"),
-        ("boxes-only", "none"),
+        pytest.param("whole-cue-auto", "overprint", marks=pytest.mark.mpv_min("0.41")),
+        pytest.param("whole-cue-auto", "overpaint", marks=pytest.mark.mpv_min("0.41")),
+        pytest.param(
+            "whole-cue-overpaint", "overpaint", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
+        ),
+        pytest.param("whole-cue-osd", "overprint", marks=pytest.mark.mpv_min("0.41")),
+        pytest.param("boxes-only", "none", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)),
     ],
 )
+@pytest.mark.usefixtures("enabled_telemetry")
 def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch):
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
@@ -289,6 +333,7 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
     from saitenka.app.scoring import Coloring, Palette
 
     spans = record_spans(monkeypatch)
+    shaper = "complex" if device == "overprint" else "simple"
     with live_reader(
         native_visible=True,
         scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])), Palette()),
@@ -303,6 +348,12 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
                 "--geometry=1280x720",
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
+                "--gpu-sw=yes",
+                *(
+                    (f"--osd-shaper={shaper}",)
+                    if mode == "whole-cue-auto" or device == "overprint"
+                    else ()
+                ),
             ),
             coloring=mode,
         ),
@@ -342,13 +393,14 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
 
 
 @pytest.mark.parametrize("blur", [0, 2])
+@pytest.mark.mpv_min("0.41")
 def test_osd_pixels_follow_qualified_shadow_with_secondary_translation(blur):
     from test_cue_color_timeline import _coloring
 
     with live_reader(
         native_visible=True,
         scorer=_coloring(),
-        cues=((0.0, 8.0, "猫を見る"),),
+        cues=((0.0, 8.0, r"{\fs96\b1}猫を見る"),),
         layout=LayoutLiveOptions(
             "shadow",
             os.environ.get("SAITENKA_LAYOUT_MPV"),
@@ -359,6 +411,8 @@ def test_osd_pixels_follow_qualified_shadow_with_secondary_translation(blur):
                 "--geometry=1280x720",
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
+                "--gpu-sw=yes",
+                "--osd-shaper=complex",
                 f"--osd-blur={blur}",
             ),
             coloring="whole-cue-osd",
@@ -418,6 +472,7 @@ def test_osd_pixels_follow_qualified_shadow_with_secondary_translation(blur):
     ("osd_access", "kerning", "reason"),
     [(False, "yes", "font-access"), (True, "yes", "eligible"), (True, "no", "shape-mismatch")],
 )
+@pytest.mark.mpv_min("0.41")
 def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kerning, reason):
     import subprocess
 
@@ -476,6 +531,8 @@ def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kernin
                 "--geometry=1280x720",
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
+                "--gpu-sw=yes",
+                "--osd-shaper=complex",
                 *extra,
             ),
             media=attached,
@@ -502,6 +559,8 @@ def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kernin
         assert ipc.query("sub-visibility") is True
 
 
+@pytest.mark.usefixtures("enabled_telemetry")
+@pytest.mark.mpv_min("0.41")
 def test_first_cue_osd_is_qualified_during_initial_blank(monkeypatch):
     from test_cue_color_timeline import _coloring
 
@@ -519,6 +578,7 @@ def test_first_cue_osd_is_qualified_during_initial_blank(monkeypatch):
                 "--blend-subtitles=no",
                 "--geometry=1280x720",
                 "--hidpi-window-scale=no",
+                "--osd-shaper=complex",
             ),
         ),
     ) as (_tmp, session, ipc):
@@ -550,6 +610,8 @@ def test_first_cue_osd_is_qualified_during_initial_blank(monkeypatch):
 
 
 @pytest.mark.parametrize("vo", ["gpu", "gpu-next"])
+@pytest.mark.usefixtures("enabled_telemetry")
+@pytest.mark.mpv_min("0.41")
 def test_osd_lookahead_renders_hidden_and_survives_blank_gaps(tmp_path, monkeypatch, vo):
     from test_cue_color_timeline import _coloring
 
@@ -569,6 +631,8 @@ def test_osd_lookahead_renders_hidden_and_survives_blank_gaps(tmp_path, monkeypa
                 "--geometry=1280x720",
                 "--hidpi-window-scale=no",
                 f"--vo={vo}",
+                "--gpu-sw=yes",
+                "--osd-shaper=complex",
                 f"--log-file={log}",
                 "--msg-level=osd/libass=debug",
             ),

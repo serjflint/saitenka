@@ -204,7 +204,7 @@ def test_trace_capture_fault_survives_collection_zip_and_diagnosis(monkeypatch, 
     config = _runtime_setup(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir(exist_ok=True)
-    config.write_text(f'[telemetry]\nexport_dir = "{directory}"\n', encoding="utf-8")
+    config.write_text(f'[telemetry]\nexport_dir = "{directory.as_posix()}"\n', encoding="utf-8")
     events = [{"name": "cue_reconcile", "ph": "X", "ts": 0, "dur": 1}]
     if fault == "partial":
         events.append(None)

@@ -20,7 +20,7 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
     directory = tmp_path / "telemetry"
     directory.mkdir()
     config.write_text(
-        f'[telemetry]\nenabled = {str(tracing).lower()}\nexport_dir = "{directory}"\n'
+        f'[telemetry]\nenabled = {str(tracing).lower()}\nexport_dir = "{directory.as_posix()}"\n'
     )
     (tmp_path / "cache/overlay.log").write_text(json.dumps({"session": session_id()}) + "\n")
     from telemetry_helpers import enable_telemetry
@@ -28,7 +28,9 @@ def test_anki_failure_remains_diagnosable_without_payloads(monkeypatch, tmp_path
     telemetry.shutdown()
     if tracing:
         enable_telemetry(monkeypatch, tmp_path)
-        config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{tmp_path / "trace"}"\n')
+        config.write_text(
+            f'[telemetry]\nenabled = true\nexport_dir = "{(tmp_path / "trace").as_posix()}"\n'
+        )
     monkeypatch.setattr("ankiconnect_client.client.time.sleep", lambda _seconds: None)
 
     class Transport:

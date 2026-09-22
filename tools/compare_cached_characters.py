@@ -261,8 +261,8 @@ def request_for(
 class Captures:
     def __init__(self, directory: Path, ipc, size: tuple[int, int]):
         self.directory, self.ipc, self.size = directory, ipc, size
-        self._positioned = False
         self.command("get_property", "mpv-version")
+        self.position()
         self.overlay = Overlay(ipc)
         self.fonts = subtitle_fonts.resolve(
             expand=ipc.expand_path,
@@ -279,6 +279,19 @@ class Captures:
         if response.get("error") != "success":
             raise RuntimeError(f"mpv {args[0]}: {response.get('error', 'missing-reply')}")
         return response.get("data")
+
+    def position(self):
+        self.ipc.drain_events()
+        self.command("seek", 2, "absolute+exact")
+        deadline = time.monotonic() + 5
+        seeking = False
+        while time.monotonic() < deadline:
+            for event in self.ipc.drain_events(timeout=0.05):
+                if event.get("event") == "seek":
+                    seeking = True
+                elif seeking and event.get("event") == "playback-restart":
+                    return
+        raise TimeoutError("initial playback frame did not settle")
 
     def frame(
         self,
@@ -299,15 +312,6 @@ class Captures:
             self.command("sub-remove", old)
         self.command("sub-add", str(source_path), "select")
         self.command("set_property", "sub-delay", 2 - sample_ms / 1000)
-        if not self._positioned:
-            # Repeated same-PTS seeks can poison gpu-next's screenshot frame queue.
-            self.command("seek", 2, "absolute+exact")
-        deadline = time.monotonic() + 5
-        while self.command("get_property", "seeking"):
-            if time.monotonic() >= deadline:
-                raise TimeoutError("seek did not settle")
-            time.sleep(0.005)
-        self._positioned = True
         if reference_coverage is not None:
             rgba = np.zeros((*reference_coverage.shape, 4), dtype=np.uint8)
             rgba[:, :, :3] = reference_color

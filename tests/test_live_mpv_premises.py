@@ -85,9 +85,11 @@ def test_mpv_reports_every_option_the_geometry_gate_reads() -> None:
     a removed one always will. `sub-ass-vsfilter-aspect-compat` sat in the list after 0.41 deleted
     it, so the row it fed passed vacuously for everyone who could run it at all."""
     from saitenka.app.native_subtitles import GATE_OPTIONS
+    from saitenka.mpvio.launch import parse_mpv_version
 
     proc, ipc = _bare_mpv()
     try:
+        version = parse_mpv_version(ipc.command("get_property", "mpv-version")["data"])
         missing = [
             name
             for name in GATE_OPTIONS
@@ -98,7 +100,10 @@ def test_mpv_reports_every_option_the_geometry_gate_reads() -> None:
         ipc.close()
         proc.terminate()
 
-    assert missing == []
+    assert version is not None
+    # Before 0.41, OSD always used the best available shaper and had no selector.
+    optional = {"osd-shaper"} if version < (0, 41) else set()
+    assert set(missing) <= optional
 
 
 @pytest.mark.live

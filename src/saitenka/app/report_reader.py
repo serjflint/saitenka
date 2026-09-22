@@ -110,7 +110,8 @@ def _validate_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
     if len(names) != len(set(names)):
         raise ValueError("ambiguous duplicate diagnostic member")
     if any(
-        not _safe_name(item.filename) or stat.S_ISLNK(item.external_attr >> 16) for item in members
+        not _safe_name(item.orig_filename) or stat.S_ISLNK(item.external_attr >> 16)
+        for item in members
     ):
         raise ValueError("unsafe diagnostic member path")
     return members

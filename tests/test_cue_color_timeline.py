@@ -593,10 +593,27 @@ def test_a_second_blank_sends_no_reactive_clear(
 
 
 def test_auto_seek_blank_preserves_prepared_color(tmp_path, monkeypatch):
+    from util import PINNED_FAMILY, pinned_face
+
+    from saitenka.app.embedded_subs import resolve_track_fonts
+
     result, ipc, _backend, _spans = _session(
         tmp_path, monkeypatch, TIMELINE, scorer=_coloring(), geometry_source="auto"
     )
     try:
+        fonts = tmp_path / "fonts"
+        fonts.mkdir()
+        name, face = pinned_face()
+        (fonts / name).write_bytes(face)
+        for group in ("sub", "osd"):
+            ipc.set_prop(f"options/{group}-font-provider", "none")
+            ipc.set_prop(f"options/{group}-fonts-dir", str(fonts))
+            ipc.set_prop(f"options/{group}-font", PINNED_FAMILY)
+        native = result.graph.subtitle_presentation.native
+        resolve_track_fonts(ipc, ipc.query, native)
+        source = tmp_path / "timeline.ass"
+        source.write_bytes(_source(TIMELINE).replace(b"Arial", PINNED_FAMILY.encode()))
+        native.set_source(source)
         _show(result, ipc, TIMELINE[0])
         before_seek = len(_color_writes(ipc))
         assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
