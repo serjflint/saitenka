@@ -128,12 +128,8 @@ def test_inventory_is_nonempty_unique_and_points_to_existing_tests():
         "query-timeout",
         "query-disconnected",
         "query-unavailable",
-        "native-probe-budget",
-        "native-probe-error",
-        "native-mask-eviction",
-        "native-stale-result",
     }
-    assert len(cases) == 7
+    assert len(cases) == 3
     assert all(
         {"injection", "expected_categories", "severity", "uncertainty", "next_evidence"}
         <= case.keys()
@@ -141,7 +137,7 @@ def test_inventory_is_nonempty_unique_and_points_to_existing_tests():
     )
     bridges = inventory["bridge_cases"]
     assert {row["scenario"] for row in bridges} == set(ids) - {"character-masks"}
-    assert len(bridges) == 16
+    assert len(bridges) == 14
     for bridge in bridges:
         file, *symbols = bridge["test"].split("::")
         body = ast.parse((root / file).read_text(encoding="utf-8")).body

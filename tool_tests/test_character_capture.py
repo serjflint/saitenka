@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pysubs2
 import pytest
+from character_masks import FAULT_CONTROLS
 from compare_cached_characters import Captures, coordinate_result, request_for
 from PIL import Image
 
 from saitenka.app.subtitle_fonts import FontEnvironment
+from saitenka.app.subtitle_render import whole_cue_device
 
 
 def test_unresponsive_player_aborts_before_font_configuration(tmp_path):
@@ -63,6 +67,77 @@ def test_whitespace_does_not_require_ink_or_remove_neighboring_token_identity():
 
     assert [token.surface for line in request.lines for token in line] == ["猫", "　", "犬"]
     assert {box.index for box in request.boxes} == {0, 2}
+
+
+def test_capture_publishes_prepared_whole_cue_raster(tmp_path):
+    document = pysubs2.SSAFile()
+    document.info.update(PlayResX="640", PlayResY="360")
+    document.styles["Default"].fontname = "sans-serif"
+    document.styles["Default"].fontsize = 40
+    document.events.append(pysubs2.SSAEvent(start=1000, end=2000, text="猫"))
+    source = document.to_string("ass")
+    request = request_for(source, 1500, (640, 360), FontEnvironment())
+
+    class Player:
+        def __init__(self):
+            self.commands = []
+
+        def expand_path(self, path):
+            return path
+
+        def query(self, _name):
+            return None
+
+        def command(self, *args, **_kwargs):
+            self.commands.append(args)
+            if args[0] == "screenshot-to-file":
+                Image.new("RGB", (640, 360)).save(args[1])
+            return {"error": "success", "data": False}
+
+    ipc = Player()
+    capture = Captures(tmp_path, ipc, (640, 360))
+    try:
+        capture.frame(source, 1500, request)
+        writes = [command for command in ipc.commands if command[0] == "overlay-add"]
+        assert whole_cue_device(request)[0] == "overpaint"
+        assert len(writes) == 1
+        frame = Path(writes[0][4]).read_bytes()
+        assert any(frame[i : i + 4] == b"\x00\xff\x00\xff" for i in range(0, len(frame), 4))
+    finally:
+        capture.overlay.close()
+
+
+def test_karaoke_cue_keeps_scan_geometry_but_refuses_raster_capture(tmp_path):
+    document = pysubs2.SSAFile()
+    document.info.update(PlayResX="640", PlayResY="360")
+    document.styles["Default"].fontname = "sans-serif"
+    document.events.append(pysubs2.SSAEvent(start=1000, end=2000, text=r"{\k20}猫"))
+    source = document.to_string("ass")
+    request = request_for(source, 1500, (640, 360), FontEnvironment())
+
+    class Player:
+        def __init__(self):
+            self.commands = []
+
+        def expand_path(self, path):
+            return path
+
+        def query(self, _name):
+            return None
+
+        def command(self, *args, **_kwargs):
+            self.commands.append(args)
+            return {"error": "success", "data": False}
+
+    ipc = Player()
+    capture = Captures(tmp_path, ipc, (640, 360))
+    try:
+        with pytest.raises(ValueError, match="whole-cue raster unavailable: karaoke"):
+            capture.frame(source, 1500, request)
+        assert request.boxes
+        assert not any(command[0] == "overlay-add" for command in ipc.commands)
+    finally:
+        capture.overlay.close()
 
 
 @pytest.mark.parametrize("suffix", [".ass", ".srt"])
@@ -138,8 +213,4 @@ def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(
     assert np.array_equal(capture.references[0][2], images[0][:, :, 0])
     if not lose_mark and not ignore_controls:
         assert result["identity_probe_preserves_ink"] is not alter_hint
-        assert result["controls"] == {
-            "positive": "passed",
-            "displaced": "failed",
-            "wrong-color": "failed",
-        }
+        assert result["controls"] == FAULT_CONTROLS

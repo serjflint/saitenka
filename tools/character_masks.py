@@ -1,4 +1,4 @@
-"""Local character-mask census and strict pixel oracle. Inputs and images are never uploaded."""
+"""Local character-mask census and opaque-coloring oracle. Inputs and images stay local."""
 
 from __future__ import annotations
 
@@ -8,6 +8,19 @@ import unicodedata
 from dataclasses import asdict, dataclass
 
 import numpy as np
+
+ORACLE_CONTRACT = "opaque-coloring-v2"
+AA_SUPPORT_MAX = 32
+CENTROID_TOLERANCE = 0.25
+MAX_ORACLE_INK_PIXELS = 262_144
+MAX_ORACLE_COMPONENTS = 4_096
+FAULT_CONTROLS = {
+    "positive": "passed",
+    "displaced": "failed",
+    "missing-stroke": "failed",
+    "absent-output": "failed",
+    "wrong-color": "failed",
+}
 
 
 def digest(value: object) -> str:
@@ -81,13 +94,14 @@ def manifest(events: list[tuple[int, int, str]], provenance: dict) -> dict:
         for item in coordinates
     ]
     result = {
-        "schema": 1,
+        "schema": 2,
+        "oracle_contract": ORACLE_CONTRACT,
         "provenance": json.loads(json.dumps(provenance)),
         "events": len(events),
         "coordinates": rows,
         "census_sha256": digest([item.key for item in coordinates]),
         "sampling": "one interior midpoint per event; animation states not qualified",
-        "capture_estimate_upper_bound": len(coordinates) * 9,
+        "capture_estimate_upper_bound": len(coordinates) * 11,
     }
     return {**result, "manifest_sha256": digest(result)}
 
@@ -137,6 +151,136 @@ def isolation_preserves_ink(original: np.ndarray, isolated: np.ndarray) -> bool:
     return bool(np.array_equal(original[:, :, 0], coverage))
 
 
+def _components(mask: np.ndarray) -> list[np.ndarray] | None:
+    pending = {tuple(int(value) for value in point) for point in np.argwhere(mask)}
+    result = []
+    height, width = mask.shape
+    while pending:
+        start = pending.pop()
+        cells = [start]
+        stack = [start]
+        while stack:
+            y, x = stack.pop()
+            for yy in range(max(0, y - 1), min(height, y + 2)):
+                for xx in range(max(0, x - 1), min(width, x + 2)):
+                    neighbor = (yy, xx)
+                    if neighbor in pending:
+                        pending.remove(neighbor)
+                        cells.append(neighbor)
+                        stack.append(neighbor)
+        result.append(np.asarray(cells, dtype=np.int32))
+        if len(result) > MAX_ORACLE_COMPONENTS:
+            return None
+    return result
+
+
+def _dilate(mask: np.ndarray) -> np.ndarray:
+    padded = np.pad(mask, 1)
+    return np.logical_or.reduce(
+        [padded[y : y + mask.shape[0], x : x + mask.shape[1]] for y in range(3) for x in range(3)]
+    )
+
+
+def _erode(mask: np.ndarray) -> np.ndarray:
+    padded = np.pad(mask, 1)
+    return np.logical_and.reduce(
+        [padded[y : y + mask.shape[0], x : x + mask.shape[1]] for y in range(3) for x in range(3)]
+    )
+
+
+def _centroid(values: np.ndarray, selected: np.ndarray) -> tuple[float, float] | None:
+    weights = np.where(selected, values, 0).astype(float)
+    total = float(weights.sum())
+    if not total:
+        return None
+    ys, xs = np.indices(values.shape)
+    return float((xs * weights).sum() / total), float((ys * weights).sum() / total)
+
+
+def _opaque_geometry(reference: np.ndarray, actual: np.ndarray) -> dict:
+    occupied = (reference > 0) | (actual > 0)
+    occupied_count = int(occupied.sum())
+    if occupied_count > MAX_ORACLE_INK_PIXELS:
+        return {
+            "failed": True,
+            "inconclusive": True,
+            "support_policy_violation_pixels": occupied_count - MAX_ORACLE_INK_PIXELS,
+            "opaque_core_missing_pixels": 0,
+            "opaque_core_added_pixels": 0,
+            "component_failures": 1,
+            "component_centroid_error": 0.0,
+            "component_mean_alpha_error": 0.0,
+        }
+    if occupied.any():
+        ys, xs = np.where(occupied)
+        crop = np.s_[int(ys.min()) : int(ys.max()) + 1, int(xs.min()) : int(xs.max()) + 1]
+        reference, actual = reference[crop], actual[crop]
+    support = reference > 0
+    visible = actual > 0
+    lost = support & ~visible
+    added = visible & ~support
+    support_violations = int((lost & (reference > AA_SUPPORT_MAX)).sum()) + int(
+        (added & ((actual > AA_SUPPORT_MAX) | ~_dilate(support))).sum()
+    )
+    support_violations += int((lost & ~_dilate(visible)).sum())
+    opaque = reference == 255
+    actual_opaque = actual == 255
+    opaque_core = _erode(opaque)
+    actual_core = _erode(actual_opaque)
+    core_missing = int((opaque_core & ~actual_opaque).sum())
+    core_added = int((actual_core & ~opaque).sum())
+    component_failures = 0
+    centroid_error = 0.0
+    component_mean_error = 0.0
+    components = _components(support)
+    if components is None:
+        return {
+            "failed": True,
+            "inconclusive": True,
+            "support_policy_violation_pixels": 0,
+            "opaque_core_missing_pixels": 0,
+            "opaque_core_added_pixels": 0,
+            "component_failures": 1,
+            "component_centroid_error": 0.0,
+            "component_mean_alpha_error": 0.0,
+        }
+    for coordinates in components:
+        top, left = coordinates.min(axis=0)
+        bottom, right = coordinates.max(axis=0) + 1
+        top, left = max(0, int(top) - 1), max(0, int(left) - 1)
+        bottom = min(reference.shape[0], int(bottom) + 1)
+        right = min(reference.shape[1], int(right) + 1)
+        component = np.zeros((bottom - top, right - left), dtype=bool)
+        component[coordinates[:, 0] - top, coordinates[:, 1] - left] = True
+        neighborhood = _dilate(component)
+        reference_view = reference[top:bottom, left:right]
+        actual_view = actual[top:bottom, left:right]
+        candidate = (actual_view > 0) & neighborhood
+        source_centroid = _centroid(reference_view, component)
+        actual_centroid = _centroid(actual_view, candidate)
+        if source_centroid is None or actual_centroid is None:
+            component_failures += 1
+            continue
+        error = max(abs(a - b) for a, b in zip(source_centroid, actual_centroid, strict=True))
+        centroid_error = max(centroid_error, error)
+        comparison = component | candidate
+        mean_error = float(
+            np.abs(actual_view.astype(float) - reference_view.astype(float))[comparison].mean()
+        )
+        component_mean_error = max(component_mean_error, mean_error)
+        component_failures += int(error > CENTROID_TOLERANCE or mean_error > AA_SUPPORT_MAX)
+    return {
+        "failed": bool(support_violations or core_missing or core_added or component_failures),
+        "inconclusive": False,
+        "support_policy_violation_pixels": support_violations,
+        "opaque_core_missing_pixels": core_missing,
+        "opaque_core_added_pixels": core_added,
+        "component_failures": component_failures,
+        "component_centroid_error": centroid_error,
+        "component_mean_alpha_error": component_mean_error,
+    }
+
+
 def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -> dict:
     """Reference ownership is independent of our boxes; missing output never shrinks the mask."""
     if reference.shape != ours.shape or reference.shape != context.shape or reference.ndim != 2:
@@ -159,8 +303,19 @@ def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -
     cue_target = context > 0
     frame_missing = int((cue_target & ~visible).sum())
     frame_error = float(np.abs(ours.astype(float) - context.astype(float))[cue_target].max())
-    character_failed = missed > 0 or spill > 0 or alpha_error > 0
-    cue_failed = frame_missing > 0 or frame_spill > 0 or frame_error > 0
+    character_scope = _dilate(target) & ~(permitted & ~target)
+    character = _opaque_geometry(reference, np.where(character_scope, ours, 0))
+    cue = _opaque_geometry(context, ours)
+    if character["inconclusive"] or cue["inconclusive"]:
+        return {
+            "verdict": "inconclusive",
+            "reason": "oracle-ink-budget",
+            "oracle_contract": ORACLE_CONTRACT,
+        }
+    character_failed = character["failed"] or (
+        spill > 0 and bool(np.any(ours[region & visible & ~permitted] > AA_SUPPORT_MAX))
+    )
+    cue_failed = cue["failed"]
     return {
         "verdict": "failed" if character_failed or cue_failed else "passed",
         "reason": "pixel-disagreement" if character_failed or cue_failed else "",
@@ -172,6 +327,22 @@ def compare_mask(reference: np.ndarray, ours: np.ndarray, context: np.ndarray) -
         "frame_spill_pixels": frame_spill,
         "frame_missing_pixels": frame_missing,
         "frame_intensity_error": frame_error,
+        "exact_alpha": not bool(
+            missed or spill or frame_missing or frame_spill or alpha_error or frame_error
+        ),
+        "oracle_contract": ORACLE_CONTRACT,
+        "opaque_core_missing_pixels": character["opaque_core_missing_pixels"],
+        "opaque_core_added_pixels": character["opaque_core_added_pixels"],
+        "support_policy_violation_pixels": character["support_policy_violation_pixels"],
+        "component_failures": character["component_failures"],
+        "component_centroid_error": character["component_centroid_error"],
+        "component_mean_alpha_error": character["component_mean_alpha_error"],
+        "frame_opaque_core_missing_pixels": cue["opaque_core_missing_pixels"],
+        "frame_opaque_core_added_pixels": cue["opaque_core_added_pixels"],
+        "frame_support_policy_violation_pixels": cue["support_policy_violation_pixels"],
+        "frame_component_failures": cue["component_failures"],
+        "frame_component_centroid_error": cue["component_centroid_error"],
+        "frame_component_mean_alpha_error": cue["component_mean_alpha_error"],
         "coverage": (expected - missed) / expected,
         "intensity_error": alpha_error,
         "reference_centroid": [float(xs.mean()), float(ys.mean())],
@@ -188,6 +359,8 @@ def results_summary(frozen: dict, results: dict[str, dict]) -> dict:
     ]
     verdicts = ("passed", "failed", "unsupported", "inconclusive", "unattempted")
     return {
+        "schema": 2,
+        "oracle_contract": ORACLE_CONTRACT,
         "manifest_sha256": frozen["manifest_sha256"],
         "total": len(rows),
         "counts": {verdict: sum(row["verdict"] == verdict for row in rows) for verdict in verdicts},
@@ -204,10 +377,13 @@ def qualification_counts(frozen: dict, result: dict) -> dict:
     identity = frozen.get("manifest_sha256")
     if (
         type(frozen.get("schema")) is not int
-        or frozen["schema"] != 1
+        or frozen["schema"] != 2
+        or frozen.get("oracle_contract") != ORACLE_CONTRACT
         or identity
         != digest({key: value for key, value in frozen.items() if key != "manifest_sha256"})
         or result.get("manifest_sha256") != identity
+        or result.get("schema") != 2
+        or result.get("oracle_contract") != ORACLE_CONTRACT
     ):
         raise ValueError("qualification manifest mismatch")
     coordinates, rows = frozen.get("coordinates"), result.get("results")
@@ -232,15 +408,11 @@ def qualification_counts(frozen: dict, result: dict) -> dict:
         verdict = row.get("verdict")
         if verdict not in counts:
             raise ValueError("qualification verdict missing")
-        valid_controls = row.get("controls") == {
-            "positive": "passed",
-            "displaced": "failed",
-            "wrong-color": "failed",
-        }
+        valid_controls = row.get("controls") == FAULT_CONTROLS
         controlled += valid_controls
         if verdict in {"passed", "failed"} and not valid_controls:
             verdict = "inconclusive"
-        if verdict == "passed" and not _exact_result(row):
+        if verdict == "passed" and not _opaque_result(row):
             verdict = "inconclusive"
         counts[verdict] += 1
         excluded += (
@@ -256,27 +428,43 @@ def qualification_counts(frozen: dict, result: dict) -> dict:
             "without_valid_controls": len(keys) - controlled,
         },
         "fidelity": counts,
-        "fault_controls": {"displacement": controlled, "wrong_color": controlled},
+        "fault_controls": {
+            "displacement": controlled,
+            "missing_stroke": controlled,
+            "absent_output": controlled,
+            "wrong_color": controlled,
+        },
         "qualified": bool(keys)
         and counts["passed"] == len(keys) - len(non_ink)
         and excluded == len(non_ink),
     }
 
 
-def _exact_result(row: dict) -> bool:
+def _opaque_result(row: dict) -> bool:
     return (
-        row.get("character_verdict") == row.get("cue_verdict") == "passed"
+        row.get("oracle_contract") == ORACLE_CONTRACT
+        and row.get("character_verdict") == row.get("cue_verdict") == "passed"
         and type(row.get("reference_pixels")) is int
         and row["reference_pixels"] > 0
         and all(
             type(row.get(key)) in {int, float} and row[key] == 0
             for key in (
-                "missing_pixels",
-                "spill_pixels",
-                "frame_missing_pixels",
-                "frame_spill_pixels",
-                "intensity_error",
-                "frame_intensity_error",
+                "opaque_core_missing_pixels",
+                "opaque_core_added_pixels",
+                "frame_opaque_core_missing_pixels",
+                "frame_opaque_core_added_pixels",
+                "support_policy_violation_pixels",
+                "component_failures",
+                "frame_support_policy_violation_pixels",
+                "frame_component_failures",
             )
+        )
+        and all(
+            type(row.get(key)) in {int, float} and row[key] <= CENTROID_TOLERANCE
+            for key in ("component_centroid_error", "frame_component_centroid_error")
+        )
+        and all(
+            type(row.get(key)) in {int, float} and row[key] <= AA_SUPPORT_MAX
+            for key in ("component_mean_alpha_error", "frame_component_mean_alpha_error")
         )
     )

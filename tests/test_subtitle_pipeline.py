@@ -14,6 +14,7 @@ from saitenka_subtitles import (
     SubtitleTrackId,
     TokenGeometry,
 )
+from saitenka_subtitles.whole_cue import FillLayer, WholeCue
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -924,12 +925,8 @@ class HeavyCoverageBackend(FakeGeometryBackend):
             result.frame_id,
             result.timestamp_ms,
             result.variant,
-            tuple(
-                TokenGeometry(
-                    token.event_id, token.token_index, token.bounds, (), "", 0.0, self.MASK
-                )
-                for token in result.tokens
-            ),
+            result.tokens,
+            whole_cue=WholeCue(layers=(FillLayer(0, 0, 0, len(self.MASK), 1, self.MASK),)),
         )
 
 
@@ -975,7 +972,7 @@ def test_the_budget_drops_the_masks_and_keeps_the_boxes(monkeypatch) -> None:
     published = coordinator.current
     assert published is not None
     assert published.tokens[0].bounds.contains(25, 30), "the hit boxes did not survive the trim"
-    assert published.tokens[0].coverage == b""
+    assert published.whole_cue is not None and published.whole_cue.layers == ()
     worker.close()
 
 
@@ -997,8 +994,9 @@ def test_the_oldest_cue_gives_up_its_masks_first(monkeypatch) -> None:
     second = coordinator.current
 
     assert first is not None and second is not None
-    assert first.tokens[0].coverage == b""
-    assert second.tokens[0].coverage == HeavyCoverageBackend.MASK
+    assert first.whole_cue is not None and first.whole_cue.layers == ()
+    assert second.whole_cue is not None
+    assert second.whole_cue.layers[0].bitmap == HeavyCoverageBackend.MASK
     worker.close()
 
 
@@ -1032,8 +1030,9 @@ def test_the_trim_treats_a_cue_the_result_cache_evicted_as_the_oldest(monkeypatc
     evicted = coordinator.current
 
     assert evicted is not None and newer is not None
-    assert evicted.tokens[0].coverage == b"", "the oldest cue kept its masks"
-    assert newer.tokens[0].coverage == HeavyCoverageBackend.MASK
+    assert evicted.whole_cue is not None and evicted.whole_cue.layers == ()
+    assert newer.whole_cue is not None
+    assert newer.whole_cue.layers[0].bitmap == HeavyCoverageBackend.MASK
 
 
 def test_close_pays_the_settlements_no_terminal_will_ever_deliver() -> None:

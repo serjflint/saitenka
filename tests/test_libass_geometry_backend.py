@@ -43,7 +43,6 @@ def request(
     render_profile: tuple[tuple[str, str], ...] = (),
     font_setup: FontSetup | None = None,
     palette_size: int = 2,
-    keep_coverage: bool = False,
 ) -> GeometryRequest:
     track = SubtitleTrackId("track")
     event = SubtitleEventId(track, 1_000, 2_000, 0, 0)
@@ -65,23 +64,6 @@ def request(
         attachments=(("font.ttf", b"font"),),
         font_setup=font_setup or FontSetup(),
         render_profile=render_profile,
-        keep_coverage=keep_coverage,
-    )
-
-
-def probeable_request(**kwargs) -> GeometryRequest:
-    """A request whose palette carries what the anchor probe needs: text, face and size.
-
-    Separate from `request` rather than a flag on it, because "the overprint may redraw this token"
-    is what the three fields together mean — a request missing any of them is the ordinary case.
-    """
-    base = request(**kwargs)
-    return replace(
-        base,
-        palette=tuple(
-            replace(entry, font_name="Sans", font_size=40.0, text=text)
-            for entry, text in zip(base.palette, ("猫", "犬"), strict=False)
-        ),
     )
 
 
@@ -143,18 +125,6 @@ def test_extractor_fails_closed_on_unusable_layers(layers, message: str) -> None
         extract_token_geometry(Result(layers), request())
 
 
-def test_extractor_rejects_two_token_colors_on_the_same_pixel() -> None:
-    rendered = Result(
-        (
-            Layer(1, 1, b"\xff", 0x01020300, 10, 20),
-            Layer(1, 1, b"\xff", 0x04050600, 10, 20),
-        )
-    )
-
-    with pytest.raises(ValueError, match="overlap"):
-        extract_token_geometry(rendered, request())
-
-
 def test_extractor_rejects_character_pixels_outside_frame() -> None:
     rendered = Result(
         (
@@ -175,9 +145,6 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
     assert baseline.cache_key() != request(margins=(10, 20, 30, 40)).cache_key()
     assert baseline.cache_key() != request(use_margins=True).cache_key()
     assert baseline.cache_key() != request(render_profile=(("sub-scale", "1.2"),)).cache_key()
-    # Not a render input but a content one: a hit served maskless to a caller that wanted coverage
-    # drops the cue to the plainest color device with nothing saying why.
-    assert baseline.cache_key() != request(keep_coverage=True).cache_key()
 
 
 @pytest.mark.parametrize(
@@ -545,199 +512,7 @@ def test_backend_forwards_mpv_margin_contract() -> None:
     ]
 
 
-# --- anchor probe -------------------------------------------------------------------------------
-# The overprint redraws a token as its own `\an7\pos` event, which anchors the line box while the
-# measured rectangle is ink. The offset between them is measured by rendering that fragmented
-# layout; these cover the wiring, since the assertion that it lands on the glyphs is `live`-tier and
-# does not run in CI.
-
-
-def test_a_probeable_token_carries_the_offset_its_redraw_needs() -> None:
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-
-    snapshot = backend.render(probeable_request())
-    backend.close()
-
-    # The fake renders both tokens' ink at the same two places whatever document it is given, so the
-    # probe resolves a definite offset from its own anchors rather than a placeholder.
-    assert all(token.anchor_dx or token.anchor_dy for token in snapshot.tokens)
-
-
-def test_a_token_with_no_face_or_text_is_left_where_it_was() -> None:
-    """The palette carries neither for a token the overprint will not draw, and an unprobed token
-    must keep the origin it has rather than acquire someone else's offset."""
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-
-    snapshot = backend.render(request())
-    backend.close()
-
-    assert [(t.anchor_dx, t.anchor_dy) for t in snapshot.tokens] == [(0, 0), (0, 0)]
-
-
-def test_the_same_words_are_measured_once_however_often_the_cue_is_drawn() -> None:
-    """The probe is a second libass render; paying it per redraw would put it on the hot path."""
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-
-    backend.render(probeable_request())
-    first = len(created[-1].documents)
-    backend.render(probeable_request())
-    backend.render(probeable_request())
-    backend.close()
-
-    assert len(created[-1].documents) == first, "a repeated cue re-measured its anchors"
-
-
-def test_the_probe_never_points_the_cue_renderer_at_its_own_document() -> None:
-    """A probe that swapped the shared renderer's document would leave the next cue measured against
-    the probe — the silent wrong-boxes failure the document swap exists to prevent."""
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-
-    backend.render(probeable_request())
-    cue_renderer = created[0]
-    backend.close()
-
-    assert len(created) == 2, "the probe did not build a renderer of its own"
-    assert all(b"\\an7\\pos" not in document for document in cue_renderer.documents)
-
-
-def test_every_probe_renderer_is_closed_with_the_backend() -> None:
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-
-    backend.render(probeable_request())
-    backend.close()
-
-    assert all(renderer.closed for renderer in created)
-
-
-def test_measured_anchors_are_bounded_so_a_resize_cannot_grow_them_forever() -> None:
-    """The key holds the FRAME's font size, not the document's: `_palette_in_frame_units` scales by
-    `frame_height / play_res_y`, so dragging a window edge mints a distinct float per pixel of height
-    and every one of them misses. Unbounded, a resize would leave an entry per (word, transient size)
-    for the life of the session."""
-    from saitenka_subtitles.libass_backend import ANCHOR_CACHE_MAX, _Anchor
-
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-    stale = {
-        (f"word{index}", "Sans", float(index), 0.0, 100.0, False, False): _Anchor(1, 1)
-        for index in range(ANCHOR_CACHE_MAX)
-    }
-    backend._anchors.update(stale)
-
-    backend.render(probeable_request())  # two genuinely new words, over the bound
-    size = len(backend._anchors)
-    backend.close()
-
-    assert size == ANCHOR_CACHE_MAX
-
-
-def test_two_events_do_not_exchange_their_first_tokens_corrections() -> None:
-    """A frame holds several events and `_validate_palette` only requires the (event, index) PAIR to
-    be unique, so two events whose first tokens differ both answer to index 0. Keyed on the index
-    alone the last one measured wins, and the other word is redrawn by a correction taken from
-    different glyphs."""
-    track = SubtitleTrackId("track")
-    first = SubtitleEventId(track, 1_000, 2_000, 0, 0)
-    second = SubtitleEventId(track, 1_000, 2_000, 0, 1)
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-    from saitenka_subtitles.libass_backend import _Anchor
-
-    backend._anchors.update(
-        {
-            ("猫", "Sans", 40.0, 0.0, 100.0, False, False): _Anchor(6, 6),
-            ("犬", "Sans", 40.0, 0.0, 100.0, False, False): _Anchor(0, -14),
-        }
-    )
-    base = request()
-    shared = replace(
-        base,
-        frame_id=SubtitleFrameId(track, (first, second)),
-        palette=(
-            # BOTH at index 0 — that is the collision. `_validate_palette` requires only the
-            # (event, index) pair to be unique, and a frame with two events routinely has two
-            # first tokens.
-            GeometryPaletteEntry(first, 0, 0x010203, "Sans", 40.0, "猫"),
-            GeometryPaletteEntry(second, 0, 0x040506, "Sans", 40.0, "犬"),
-        ),
-    )
-
-    tokens = backend.render(shared).tokens
-    backend.close()
-
-    by_event = {token.event_id: (token.anchor_dx, token.anchor_dy) for token in tokens}
-    assert by_event[first] == (6, 6)
-    assert by_event[second] == (0, -14)
-
-
-def test_a_batch_the_probe_cannot_measure_is_not_re_rendered_every_frame() -> None:
-    """`extract_token_geometry` refuses a palette colour that drew nothing, so one inkless token —
-    text the overprint would refuse anyway — fails the whole batch. Nothing records the attempt, so
-    without a memo of failures the probe re-renders once per geometry render for the session."""
-    created: list[FakeRenderer] = []
-
-    def failing_factory(ass, **kwargs):
-        renderer = _recording_factory(created)(ass, **kwargs)
-        renderer.probe_result = Result(())  # the probe drew nothing at all
-        return renderer
-
-    backend = LibassGeometryBackend(renderer_factory=failing_factory)
-
-    for _ in range(3):
-        backend.render(probeable_request())
-    probes = sum(1 for renderer in created for doc in renderer.documents if b"\\an7\\pos" in doc)
-    backend.close()
-
-    assert probes == 1, f"a permanent probe failure re-rendered {probes} times"
-
-
-def test_novel_probe_failure_storm_evicts_bounded_history(monkeypatch) -> None:
-    monkeypatch.setattr("saitenka_subtitles.libass_backend.ANCHOR_CACHE_MAX", 2)
-    spans: list[dict[str, object]] = []
-    created: list[FakeRenderer] = []
-
-    class Telemetry:
-        @contextmanager
-        def span(self, name: str):
-            values: dict[str, object] = {"name": name}
-            spans.append(values)
-            yield SimpleNamespace(set=values.__setitem__)
-
-        def record(self, _metric: str, _milliseconds: float) -> None:
-            pass
-
-    def failing_factory(ass, **kwargs):
-        renderer = _recording_factory(created)(ass, **kwargs)
-        renderer.probe_result = Result(())
-        return renderer
-
-    backend = LibassGeometryBackend(renderer_factory=failing_factory, telemetry=Telemetry())
-    try:
-        for size in (40, 41, 42):
-            inputs = probeable_request(keep_coverage=True)
-            backend.render(
-                replace(inputs, palette=tuple(replace(p, font_size=size) for p in inputs.palette))
-            )
-
-        retained = [s for s in spans if s["name"] == "subtitle_geometry_fractional"]
-        assert [s["retained_probe_failures"] for s in retained] == [2, 2, 2]
-        assert [s["probe_failures_evicted"] for s in retained] == [0, 2, 4]
-        assert all(s["mask_fallbacks"] == 2 for s in retained)
-        assert all(s["sample_token_indices"] == (0, 1) for s in retained)
-        assert all(s["sample_event_orders"] == (0, 0) for s in retained)
-        assert all(len(s["sample_native_rectangles"]) == 8 for s in retained)
-        assert all(len(s["sample_anchor_offsets"]) == 4 for s in retained)
-        assert all(s["native_glyph_census"] == "unavailable" for s in retained)
-    finally:
-        backend.close()
-
-
-def test_the_extraction_reports_the_four_phases_it_spends_its_time_in() -> None:
+def test_the_extraction_reports_the_retained_phases_it_spends_its_time_in() -> None:
     """`extract_ms` is ~99% of a geometry render — libass's own render is ~0.1 ms against ~12 ms
     here — so one number for it said only "the slow part is ours", which nobody can act on.
 
@@ -747,7 +522,6 @@ def test_the_extraction_reports_the_four_phases_it_spends_its_time_in() -> None:
     """
     from saitenka_subtitles.telemetry import (
         EXTRACT_COLLECT_MS,
-        EXTRACT_COVERAGE_MS,
         EXTRACT_OWNERS_MS,
         EXTRACT_VALIDATE_MS,
     )
@@ -769,15 +543,12 @@ def test_the_extraction_reports_the_four_phases_it_spends_its_time_in() -> None:
     )
     collector = Collector()
 
-    extract_token_geometry(
-        rendered, request(keep_coverage=True), keep_coverage=True, telemetry=collector
-    )
+    extract_token_geometry(rendered, request(), telemetry=collector)
 
     assert set(collector.samples) == {
         EXTRACT_OWNERS_MS,
         EXTRACT_COLLECT_MS,
         EXTRACT_VALIDATE_MS,
-        EXTRACT_COVERAGE_MS,
     }
     assert all(value >= 0 for values in collector.samples.values() for value in values)
 

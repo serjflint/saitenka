@@ -1,4 +1,4 @@
-"""Opt-in local corpus runner: mpv reference masks versus production overprint/overpaint.
+"""Opt-in corpus runner: mpv reference masks versus prepared whole-cue raster paint.
 
 Run with --execute only in a desktop session. No subtitle extraction or downloading occurs.
 All document variants and pixel artifacts remain in the explicitly selected output directory.
@@ -15,7 +15,7 @@ import shutil
 import subprocess
 import time
 from contextlib import contextmanager
-from dataclasses import fields, replace
+from dataclasses import fields
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -37,22 +37,18 @@ from saitenka_subtitles import (
     GeometryRequest,
     SubtitleTrackId,
     converted,
-    font_names,
     subrip,
+    whole_cue,
 )
 from saitenka_subtitles.ass import decode_ass_event, parse_ass_event_line
 from saitenka_subtitles.ass_geometry import authored_ass_rows_at, prepare_ass_hit_map_frame
+from saitenka_subtitles.geometry import PaintQualification
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
 from saitenka_tokenize.japanese import tokenize
 
 from saitenka.app import native_subtitles, subtitle_fonts
 from saitenka.app.session.routes import install_session_runtime
-from saitenka.app.subtitle_render import (
-    DrawRequest,
-    color_ladder,
-    overpaint_image,
-    overprint_payload,
-)
+from saitenka.app.subtitle_render import DrawRequest, whole_cue_colors, whole_cue_device
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.discover import find_mpv
 from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
@@ -190,12 +186,6 @@ def geometry_request_for(
             is not None
         ],
     )
-    palette = native_subtitles._palette_in_frame_units(
-        prepared,
-        size[1],
-        1.0,
-        unreachable=fonts.osd_unreachable(font_names.in_document(source.encode())),
-    )
     return GeometryRequest(
         1,
         TRACK,
@@ -206,12 +196,13 @@ def geometry_request_for(
         prepared.ass,
         native_ass=source.encode(),
         document_metadata=prepared.document_metadata,
+        paint_qualification=prepared.paint_qualification,
         source_kind="authored-ass",
-        palette=palette,
+        palette=prepared.palette,
         reserved_rgb=prepared.reserved_rgb,
-        keep_coverage=True,
         font_setup=fonts.setup,
         attachments=fonts.attachments,
+        whole_cue=whole_cue.WholeCue(osd_reason="configured-overpaint"),
     ), tokens
 
 
@@ -260,6 +251,10 @@ def request_for(
         hover_span=None,
         boxes=boxes,
         styles=[SimpleNamespace(color=(0, 255, 0, 255), underline=None) for _ in tokens],
+        whole_cue=snapshot.whole_cue,
+        coloring="whole-cue-overpaint",
+        paint_allowed=snapshot.paint_qualification is PaintQualification.STATIC,
+        paint_reason=snapshot.paint_qualification.value,
     )
 
 
@@ -313,17 +308,21 @@ class Captures:
                 raise TimeoutError("seek did not settle")
             time.sleep(0.005)
         self._positioned = True
-        if request is not None:
-            payload = overprint_payload(request)
-            self.command("osd-overlay", 61, "ass-events", payload, *self.size, 1)
-            raster = overpaint_image(request)
-            if raster is not None:
-                self.overlay.show(Image.fromarray(raster.rgba), raster.x, raster.y, oid=62)
         if reference_coverage is not None:
             rgba = np.zeros((*reference_coverage.shape, 4), dtype=np.uint8)
             rgba[:, :, :3] = reference_color
             rgba[:, :, 3] = reference_coverage
             self.overlay.show(Image.fromarray(rgba), 0, 0, oid=62)
+        elif request is not None:
+            device, reason = whole_cue_device(request)
+            if device != "overpaint" or request.whole_cue is None:
+                raise ValueError(f"whole-cue raster unavailable: {reason}")
+            image = whole_cue.compose(request.whole_cue, whole_cue_colors(request))
+            if image is None:
+                raise ValueError("whole-cue raster is empty")
+            response = self.overlay.show(Image.fromarray(image.rgba), image.x, image.y, oid=62)
+            if response.get("error") != "success":
+                raise RuntimeError("whole-cue raster upload refused")
         target = self.directory / "capture.png"
         target.unlink(missing_ok=True)
         response = self.ipc.command("screenshot-to-file", str(target), "window")
@@ -457,12 +456,10 @@ def coordinate_devices(source: str, coordinate: dict, request: DrawRequest) -> d
         for index, token in enumerate(tokens)
         if token.start < selected[1] and selected[0] < token.end
     }
-    boxes = [box for box in request.boxes if box.index in owners]
     return {
-        "device_scope": "cluster-to-production-token",
+        "device_scope": "per-token-devices-retired",
         "token_indices": sorted(owners),
-        "devices": list(color_ladder(replace(request, boxes=boxes)).devices),
-        "font_families": sorted({box.font_name for box in boxes}),
+        "devices": [],
     }
 
 
@@ -506,8 +503,14 @@ def coordinate_result(
         }, (original, ours, mask)
     reference = np.where(mask > 0, context, 0)
     controls = {"positive": compare_mask(reference, context, context)["verdict"]}
+    missing_stroke = original[:, :, 0].copy()
+    target_pixels = np.argwhere(mask > 0)
+    strongest = max(target_pixels, key=lambda point: int(mask[tuple(point)]))
+    missing_stroke[tuple(strongest)] = 0
     for name, coverage, color in (
         ("displaced", np.roll(original[:, :, 0], 4, axis=1), (0, 255, 0)),
+        ("missing-stroke", missing_stroke, (0, 255, 0)),
+        ("absent-output", np.zeros_like(original[:, :, 0]), (0, 255, 0)),
         ("wrong-color", original[:, :, 0], (255, 0, 0)),
     ):
         corrupted = capture.frame(
@@ -518,7 +521,13 @@ def coordinate_result(
             reference_color=color,
         )
         controls[name] = compare_mask(reference, green_coverage(corrupted), context)["verdict"]
-    if controls != {"positive": "passed", "displaced": "failed", "wrong-color": "failed"}:
+    if controls != {
+        "positive": "passed",
+        "displaced": "failed",
+        "missing-stroke": "failed",
+        "absent-output": "failed",
+        "wrong-color": "failed",
+    }:
         return {
             "verdict": "inconclusive",
             "reason": "capture-controls-not-discriminating",
@@ -604,6 +613,7 @@ def main() -> int:
             "saitenka": overlay_version(),
             "surface": args.size,
             "profile": list(PROFILE),
+            "coloring": "whole-cue-overpaint",
             "runner_sha256": fingerprint(Path(__file__)),
             "implementation_sha256": implementation_digest(),
             "fonts": synthetic_fonts() if args.synthetic else font_inventory(),

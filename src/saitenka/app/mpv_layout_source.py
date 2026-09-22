@@ -139,7 +139,6 @@ def layout_boxes(layout: LayoutSnapshot, seen: GeometryObservation) -> list[Word
                 top,
                 right - left,
                 bottom - top,
-                overprint_safe=False,
                 hit_regions=rects,
             )
         )

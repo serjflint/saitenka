@@ -27,7 +27,7 @@ pytestmark = pytest.mark.usefixtures("enabled_telemetry")
 
 
 @pytest.mark.parametrize(
-    "mode", ["legacy", "whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"]
+    "mode", ["whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"]
 )
 def test_session_evidence_preserves_coloring_mode(mode, monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)

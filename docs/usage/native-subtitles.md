@@ -6,8 +6,7 @@ Set `coloring` under `[subtitle_geometry]` alongside `native_visible = true`:
 
 | Coloring | Behavior |
 |---|---|
-| `legacy` (default) | Existing per-token overprint/overpaint selection. |
-| `whole-cue-auto` | Whole-event ASS OSD when qualified; otherwise whole-cue raster; otherwise scan boxes only. |
+| `whole-cue-auto` (default) | Whole-event ASS OSD when qualified; otherwise whole-cue raster; otherwise scan boxes only. |
 | `whole-cue-osd` | Qualified whole-event ASS OSD, otherwise scan boxes only. |
 | `whole-cue-overpaint` | Whole-cue raster, otherwise scan boxes only. |
 | `boxes-only` | Scanning without coloring or level underlines. |
@@ -65,7 +64,8 @@ reasons, cue text hash plus numeric timestamp, occurrence/generation, and shadow
 Reason counts and eviction counts remain after individual rows age out. `saitenka subtitle-report PATH`
 formats these decisions; diagnostic traces additionally include bounded per-unit shadow geometry.
 Actual displayed geometry remains unknown unless separately measured. Upload acknowledgment does not
-measure physical display latency. These options are experimental; the default remains `legacy`.
+measure physical display latency. The retired `legacy` coloring value is accepted for one release and
+selects `whole-cue-auto` with a deprecation warning.
 
 ## Geometry source
 
@@ -126,52 +126,9 @@ Karaoke and unqualified alpha effects stay scan-only when automatic selection fa
 
 ## Shadow measurement and coloring
 
-The experimental native-visible mode lets mpv keep rendering the original ASS track while Saitenka
-adds word scanning, dictionary tooltips, and mining. Use it when preserving the subtitle's typesetting
-matters: the per-word colors come too, painted over mpv's own glyphs.
-
-```text
-the same cue
-├─ mpv renders the original track (not Saitenka's rewritten copy)
-└─ Saitenka derives token geometry from it
-   ├─ each token colored in its reading state: redrawn, or tinted
-   ├─ its JLPT level, if it has one: an underline in the level's color
-   ├─ hover ──> focus outline
-   └─ click/scan ──> the usual tooltip and mining features
-```
-
-The color is an overprint: mpv's glyphs stay, and each token is drawn again on top in the same
-face, at the same size and place, so the authored outline and shadow keep framing it.
-
-Some faces mpv's OSD renderer can never load — a font that came from the container's attachments or
-from a `[Fonts]` section inside the `.ass`, which reach only its subtitle renderer. Those tokens are
-colored a second way instead: the geometry measurement already drew them with the *right* font set,
-so its own anti-aliased pixels are tinted and uploaded as an image. No second font lookup happens
-anywhere, which is what keeps the color on the same glyph shapes mpv drew. The choice is per token,
-so a release whose dialogue is a system font and whose signs are attachment-only gets both in the
-same frame. A token the measurement resolved neither a face nor pixels for is left **uncolored** —
-it keeps its hit box, its tooltip and its mining, and simply carries no reading state. Nothing is
-ever drawn at a guess: a substitute face would put the wrong glyph shapes over the right word, which
-is the one failure you could not see.
-
-The JLPT level underline is drawn separately and is additive — a word can be both due for review and
-N3, exactly as under the standard renderer. It is a vector rule under the hit box, so unlike the
-color it needs no font and never stands down. This is also why nothing else uses an underline here:
-one mark, one meaning.
-
-Which faces mpv's OSD renderer can reach is worked out from how mpv builds it. That reasoning is
-about a mechanism, but the answer is about your machine — which fonts are installed, and what your
-font provider substitutes — so it can be right in general and wrong here. Saitenka therefore asks
-mpv to lay the color out and report where it landed, once per set of faces per window size, and
-compares that with its own measurement. A disagreement demotes those families for the rest of the
-session, and the color falls back to the tinted raster rather than sitting on substitute glyph
-shapes.
-
-The check costs mpv a full render on its core thread, so it is spent where a stall does not show:
-once at each track load, and afterwards only while playback is paused — which the first hover
-supplies, since opening a tooltip pauses by default. Note what this protects and what it does not:
-the hit boxes come from mpv's *subtitle* renderer and are unaffected, so an undetected disagreement
-misplaces the color, never the clicks.
+The native-visible mode keeps mpv's authored subtitle pixels while Saitenka derives scan regions.
+Coloring uses the whole-cue OSD or raster paths described above. Token mapping still selects reading
+colors and underlines, and hover, tooltips, and mining continue to use the measured regions.
 
 Saitenka does not draw a second subtitle over mpv's after native pixel ownership is established.
 Geometry readiness is independent: a cache miss or unsupported/failed geometry keeps the same mpv

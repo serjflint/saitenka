@@ -170,18 +170,10 @@ It does not certify fault detection from the presence of an event. A failed requ
 returns nonzero; an empty requirement list stays unobserved. Test references locate evidence,
 not executed configuration cells. Preserve untested cells rather than extrapolating from macOS.
 
-`tools/native_mask_benchmark.py` measures matched synthetic worker requests, including full-track
-document swaps. It reports native-pixel disagreement alongside phase cost, token census and font/runtime
-provenance; faster incorrect masks are not a performance improvement. This is an offline same-renderer
-comparison, not an mpv qualification or a machine-independent timing gate.
 Use separate serial runs with and without `--trace-output NEW_TRACE` to compare the production span
 path with its exporter enabled. Output records exporter drops and bytes; worker thread-CPU does not
 include the writer thread's CPU. Compare identical case/geometry/cycle rows, not only maxima.
 
-Fractional probes have explicit build, pixel and cooperative CPU quotas in `libass_backend.py`.
-Exhaustion retains native masks and cannot poison later probe eligibility. An in-progress native call
-is not preempted. Stale source work is canceled at worker preparation boundaries; publication fences
-still reject results retired during rendering. Failure histories and phase caches are bounded.
 Device eligibility reasons are separate from `subtitle_device_upload` terminal outcomes: an accepted
 upload is not proof of physical presentation. A failed upload permits retry of identical pixels.
 The integration benchmark retains per-occurrence phase counter deltas and bounded generation/reason
@@ -192,8 +184,8 @@ records. Its strict cue census is unchanged; an extra redraw is not silently ded
 `uv run python tools/replay_render_configuration.py REPORT --output NEW_JSON` selects a retained current geometry
 publication and emits a recipe. Use `--owner` when several owners are retained; `--historical` explicitly
 selects the last publication. Missing or stale configuration is refused. `--execute` runs the original
-synthetic ASS corpus with the captured geometry and renderer settings, using the pinned licensed font
-and an exact same-renderer alpha comparison. Empty native output is inconclusive. Original subtitle
+synthetic ASS corpus with the captured geometry and renderer settings, using the pinned licensed font.
+Replay confirms the configuration is executable but does not qualify pixels. Original subtitle
 text, resolved fonts, mpv composition and display color processing are not reconstructed or qualified.
 
 `uv run python tools/minimize_subtitle_repro.py SOURCE --output NEW_DIRECTORY --checker COMMAND {input}` reduces a
@@ -296,6 +288,17 @@ product of fonts, effects, displays and text.
 The `Character corpus` CI workflow runs these four cells under Xvfb with pinned mpv and the
 bundled licensed font. It uploads the generated inputs, exact manifests, results and bounded
 failure images even when qualification fails. Private media is never an input to this workflow.
+The candidate uses the production whole-cue raster preparation and composition path; this corpus
+does not qualify the whole-cue OSD or automatic device-selection modes. Its versioned
+`opaque-coloring-v2` oracle requires every ink component, stable opaque interiors, placement, the
+requested color, and an actual published frame. Exact source-alpha differences remain recorded as
+diagnostics: libass can change faint edge antialiasing when color boundaries split bitmap runs even
+though the opaque overpaint contract remains satisfied. The oracle's bounded edge and component
+error limits are explicit qualification policy and are guarded by displaced, missing-stroke,
+absent-output, and wrong-color controls; they are not a general libass error bound.
+A single faint boundary pixel is intentionally indistinguishable from antialias phase variation;
+detached marks and longer faint strokes remain required. Excess ink or component counts make the
+coordinate inconclusive before component analysis allocates unbounded state.
 The capture profile forces rendering when the diagnostic window is obscured; an unresponsive
 player fails startup rather than supplying unknown font settings. On macOS the profile uses the
 system render timer, avoiding dependence on a paused diagnostic window's display-link callback.
@@ -379,14 +382,13 @@ cue bounds, missing color, translucent intensity errors and distant extra output
 ## Independent bounds oracle: issue 468
 
 The [issue](https://github.com/serjflint/saitenka/issues/468) remained open on 2026-09-13.
-Runtime union-bounds calibration and `tests/test_live_subtitle_pixel_differential.py` already
-provide independent mpv evidence, so its original “all tests share the reproduction” premise
-is no longer exhaustive. Its acceptance is not automatically complete:
+Whole-cue and hit-map qualification provide runtime evidence, but its acceptance is not automatically
+complete:
 
 | Acceptance | Current evidence |
 |---|---|
 | Like quantities | Union ink bounds and pixel support; not pen advances |
-| Plain ASS and converted SRT bounds test | Partial: live ASS pixels and calibration; no complete paired bounds matrix |
+| Plain ASS and converted SRT bounds test | Partial: no complete paired bounds matrix |
 | Perturbed style negative control | Existing live layout-mismatch control; character controls are additional, not equivalent |
 | Explicit unsupported layouts | Bounds probes cannot qualify collision-dependent layouts; character captures decline unqualified shaping/animation |
 

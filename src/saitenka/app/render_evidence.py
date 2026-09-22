@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from saitenka.app import timed_osd_evidence, whole_cue_evidence
 
 if TYPE_CHECKING:
-    from saitenka_subtitles.geometry import GeometryRequest, GeometrySnapshot
+    from saitenka_subtitles.geometry import GeometryRequest
 
 _OWNERS = 4
 _CONFIGURATIONS = 4
@@ -80,46 +80,9 @@ def _source_history(raw: object) -> dict:
     }
 
 
-VALIDATION_VERDICTS = (
-    "mask-exact",
-    "probe-error",
-    "probe-budget-exceeded",
-    "unsupported-text",
-    "exact-mask-mismatch",
-    "unvalidated",
-)
-
-
-def validation_summary(snapshot: GeometrySnapshot) -> dict:
-    return {
-        "tokens": len(snapshot.tokens),
-        "retained_mask_tokens": sum(bool(token.coverage) for token in snapshot.tokens),
-        "evicted_mask_tokens": sum(token.coverage_evicted for token in snapshot.tokens),
-        "verdicts": {
-            verdict: sum(token.overprint_verdict == verdict for token in snapshot.tokens)
-            for verdict in VALIDATION_VERDICTS
-        },
-    }
-
-
-def _validation(raw: object) -> dict:
-    raw = raw if isinstance(raw, dict) else {}
-    verdicts = raw.get("verdicts")
-    verdicts = verdicts if isinstance(verdicts, dict) else {}
-    return {
-        "scope": "same-renderer eligibility and retained masks; not uploaded pixels",
-        **{
-            key: _count(raw.get(key))
-            for key in ("tokens", "retained_mask_tokens", "evicted_mask_tokens")
-        },
-        "verdicts": {key: _count(verdicts.get(key)) for key in VALIDATION_VERDICTS},
-    }
-
-
 _BOOL_FIELDS = frozenset(
     {
         "use_margins",
-        "keep_coverage",
         "extract_fonts",
         "fonts_dir_configured",
         "default_font_configured",
@@ -221,7 +184,6 @@ def configuration_fields(request: GeometryRequest) -> dict:
             )
         ),
         "use_margins": request.use_margins,
-        "keep_coverage": request.keep_coverage,
         "font_scale": state.font_scale,
         "blur": state.blur,
         "justify": state.justify,
@@ -289,8 +251,6 @@ def _reference(raw: object, revisions: set[int], *, generation: int | None = Non
         "unknown",
     }:
         runtime["mask_source"] = mask_source
-    if "validation" in raw:
-        runtime["validation"] = _validation(raw["validation"])
     return {
         **values,
         **runtime,
@@ -522,7 +482,6 @@ class GeometryEvidence:
         *,
         libass_version: int | None = None,
         mask_source: str = "unknown",
-        validation: dict | None = None,
     ) -> None:
         if not self._registry.enabled:
             return
@@ -535,8 +494,6 @@ class GeometryEvidence:
             row["libass_version"] = libass_version
         if mask_source != "unknown":
             row["mask_source"] = mask_source
-        if validation is not None:
-            row["validation"] = _validation(validation)
         self._record("published", row)
 
     def clear_published(self) -> None:

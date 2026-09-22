@@ -8,9 +8,6 @@ import os
 from importlib import import_module
 from pathlib import Path
 
-from saitenka_subtitles.fragments import probe_document
-from saitenka_subtitles.overprint import TokenPaint, event_lines
-
 import libasslite  # noqa: TID251 -- native capability qualification boundary
 
 
@@ -25,10 +22,16 @@ def preflight(provider: str) -> dict[str, str | int]:
         else None
     )
     frame = (320, 180)
-    paint = TokenPaint("だ漢", 32, 32, "Noto Sans JP Thin", 36, 0xFFFFFF)
-    document = probe_document((), (), frame).document + "\n".join(
-        f"Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,{line}" for line in event_lines(paint)
-    )
+    document = """[Script Info]
+PlayResX: 320
+PlayResY: 180
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: P,Noto Sans JP Thin,36,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:02.00,P,,0,0,0,,{\\pos(32,32)}だ漢
+"""
     font = Path(__file__).resolve().parents[1] / "src/saitenka/assets/fonts/NotoSansJP.ttf"
     renderer = libasslite.AssRenderer(
         document.encode(), [(font.name, font.read_bytes())], font_provider=0

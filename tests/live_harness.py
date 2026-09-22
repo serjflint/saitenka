@@ -148,7 +148,7 @@ class LayoutLiveOptions:
     start_seconds: float | None = None
     prefetch: bool = True
     phase: Callable[[str], None] | None = None
-    coloring: str = "legacy"
+    coloring: str = "whole-cue-auto"
 
 
 @contextmanager

@@ -527,37 +527,7 @@ def test_a_cue_that_loses_the_color_it_had_says_so(
         result.close()
 
 
-def test_the_write_that_carries_the_color_is_timed_to_mpvs_answer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The subtitle's own overlay write does not go through `LifecycleSurfaces`, so the round-trip
-    span added there covered the toast and the loading spinner and not the payload that actually
-    carries the color — the one write on the draw path with nothing measuring mpv's side of it."""
-    result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-    try:
-        _show(result, ipc, TIMELINE[0])
-
-        written = [
-            span["attrs"]
-            for span in spans
-            if span["name"] == "surface_write"
-            and span["attrs"].get("slot") == "subtitle-native-focus"
-        ]
-        assert written, "the color payload's round trip is unmeasured"
-        assert written[-1]["command"] == "osd-overlay"
-        assert written[-1]["events"] > 0  # the ASS events mpv has to parse
-        assert written[-1]["round_trip_ms"] >= 0.0
-    finally:
-        result.close()
-
-
-def _color_writes(ipc: FakeIPC) -> list[tuple]:
-    """Every `osd-overlay` carrying a color payload — the write mpv pays 2-33 ms to composite.
-
-    Narrowed to the focus slot's own id: the layout calibration writes the SAME payload to its own
-    hidden id, so a filter on `ass-events` alone counts it as a duplicate of the thing it is
-    measuring.
-    """
+def _focus_writes(ipc: FakeIPC) -> list[tuple]:
     from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
 
     return [
@@ -565,50 +535,19 @@ def _color_writes(ipc: FakeIPC) -> list[tuple]:
         for command in ipc.commands
         if command
         and command[0] == "osd-overlay"
-        and command[1] == NATIVE_FOCUS_ID
-        and command[2] == "ass-events"
+        and (command[1] == NATIVE_FOCUS_ID or command[1] >= 2001)
     ]
 
 
-def test_one_cue_writes_its_color_payload_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`cue_redraw` and `subtitle_geometry_apply` both draw in the same millisecond and build the
-    same payload, so every cue paid mpv twice to composite one picture.
-
-    Measured, not assumed: `surface_write.round_trip_ms` puts each of those writes at 2-33 ms, back
-    to back, byte-identical — 987.513 and 987.514 in one bundle, 33.4 ms and 33.0 ms, 11 events
-    each.
-    """
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-    try:
-        _show(result, ipc, TIMELINE[0])
-        assert _color_writes(ipc), "the cue never wrote a color payload"
-        before = len(_color_writes(ipc))
-
-        # The second draw, with nothing changed — which is what the runtime does: `cue_redraw` and
-        # `subtitle_geometry_apply` both reach `draw` for one arrival.
-        presentation = result.graph.subtitle_presentation
-        presentation.pipeline.draw_current(presentation.target())
-
-        assert len(_color_writes(ipc)) == before, "the same payload was sent to mpv twice"
-    finally:
-        result.close()
-
-
-def _focus_writes(ipc: FakeIPC) -> list[tuple]:
-    """Every write to the focus slot, color payloads and removals alike, in order."""
-    from saitenka.app.subtitle_render import NATIVE_FOCUS_ID
-
+def _color_writes(ipc: FakeIPC) -> list[tuple]:
     return [
         command
-        for command in ipc.commands
-        if command and command[0] == "osd-overlay" and command[1] == NATIVE_FOCUS_ID
+        for command in _focus_writes(ipc)
+        if command[2] == "ass-events" and len(command) > 3 and command[3]
     ]
 
 
 def _blank(result: TestSession, ipc: FakeIPC, *, at: float) -> None:
-    """The gap between cues, the way mpv reports it."""
     ipc.set_prop("sub-text/ass-full", "")
     ipc.set_prop("sub-start", None)
     ipc.set_prop("sub-end", None)
@@ -617,28 +556,7 @@ def _blank(result: TestSession, ipc: FakeIPC, *, at: float) -> None:
     _settle(result, ipc)
 
 
-def test_a_cue_change_replaces_the_color_in_one_write(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Measured against mpv's frame draw: the color write lands in the cue's own frame only inside a
-    5–20 ms window, and a removal sent ahead of it was a second command mpv parsed first — and a
-    frame composited between the two showed the cue white. The next cue's payload replaces the
-    previous one in a single write."""
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-    try:
-        _show(result, ipc, TIMELINE[0])
-        assert _color_writes(ipc), "the first cue never wrote its color"
-        before = len(_focus_writes(ipc))
-
-        _show(result, ipc, TIMELINE[1])
-
-        since = _focus_writes(ipc)[before:]
-        assert [command[2] for command in since] == ["ass-events"], since
-    finally:
-        result.close()
-
-
-def test_a_blank_after_a_colored_cue_removes_the_color_once(
+def test_a_blank_after_a_timed_cue_sends_no_reactive_clear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The invariant the single write must not cost: when the line goes away, so does its color —
@@ -651,12 +569,12 @@ def test_a_blank_after_a_colored_cue_removes_the_color_once(
         _blank(result, ipc, at=TIMELINE[0].end + 0.1)
 
         since = _focus_writes(ipc)[before:]
-        assert [command[2] for command in since] == ["none"], since
+        assert not [command for command in since if command[2] == "none"], since
     finally:
         result.close()
 
 
-def test_a_second_blank_sends_no_second_removal(
+def test_a_second_blank_sends_no_reactive_clear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The slot is empty after the first blank; a session clearing the line again on top of it
@@ -669,39 +587,7 @@ def test_a_second_blank_sends_no_second_removal(
         _blank(result, ipc, at=TIMELINE[0].end + 0.1)
         result.graph.cue.set_subtitle("")  # `clear_cue`, the way a track switch spells it
 
-        assert [command[2] for command in _focus_writes(ipc)[before:]] == ["none"]
-    finally:
-        result.close()
-
-
-def test_a_seek_keeps_its_pre_armed_color_while_mpv_catches_up(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A `sub-seek` pre-arms the target's color before mpv moves. mpv then, in order: withdraws the
-    rows and timings and blanks the text while the seek is in flight; reports the landed text
-    alone; reports its rows and timings a turn later. Traced on ten seeks: the pre-armed color was
-    up 7 ms after the press, taken down 12 ms later by a geometry refresh that could not key the
-    blank, and put back 30 ms after that — which is the line arriving white and turning blue."""
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-    try:
-        _show(result, ipc, TIMELINE[0])
-        assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
-        _settle(result, ipc)
-        assert _color_writes(ipc)[-1:], "the seek never pre-armed the target's color"
-        before = len(_focus_writes(ipc))
-        landed = TIMELINE[1]
-
-        _blank(result, ipc, at=landed.start + 0.01)  # mid-seek
-        ipc.set_prop("sub-text", landed.text)  # the text half
-        _settle(result, ipc)
-        ipc.set_prop("sub-text/ass-full", _dialogue(landed))  # the rows and timings, a turn later
-        ipc.set_prop("sub-start", landed.start)
-        ipc.set_prop("sub-end", landed.end)
-        _settle(result, ipc)
-
-        since = _focus_writes(ipc)[before:]
-        assert [command[2] for command in since] == [], since
-        assert result.graph.subtitle_presentation.cue.current.boxes
+        assert not [command for command in _focus_writes(ipc)[before:] if command[2] == "none"]
     finally:
         result.close()
 
@@ -715,33 +601,13 @@ def test_auto_seek_blank_preserves_prepared_color(tmp_path, monkeypatch):
         before_seek = len(_color_writes(ipc))
         assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
         _settle(result, ipc)
-        assert _color_writes(ipc)[before_seek:]
+        assert before_seek > 0, "lookahead did not prepare any whole-cue color"
         before = len(_focus_writes(ipc))
 
         _blank(result, ipc, at=TIMELINE[1].start + 0.01)
 
         assert not any(command[2] == "none" for command in _focus_writes(ipc)[before:])
         assert result.graph.cue.draw_request().paint_allowed
-    finally:
-        result.close()
-
-
-def test_a_cue_owing_no_color_takes_the_previous_color_down(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A line with nothing to color must still clear the one before it: deferring the removal to
-    the draw is only safe because a draw with nothing to show pays it."""
-    silent = (Cue(1.0, 3.0, "猫を見る"), Cue(3.0, 5.0, "……"))
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, silent, scorer=_coloring())
-    try:
-        _show(result, ipc, silent[0])
-        assert _color_writes(ipc)
-        before = len(_focus_writes(ipc))
-
-        _show(result, ipc, silent[1])
-
-        since = _focus_writes(ipc)[before:]
-        assert [command[2] for command in since] == ["none"], since
     finally:
         result.close()
 
@@ -785,47 +651,15 @@ def test_a_split_observation_burst_writes_the_color_once(
         ipc.set_prop("time-pos", cue.start + 0.25)
         _settle(result, ipc)  # its timing follows, and the cue reconciles again
 
-        assert [command[2] for command in _focus_writes(ipc)[before:]] == ["ass-events"]
-    finally:
-        result.close()
-
-
-def test_a_changed_payload_is_always_written(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The control that matters: skipping a needless write costs milliseconds, skipping a necessary
-    one costs the color. A hover changes the payload, so it must reach mpv."""
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-    try:
-        _show(result, ipc, TIMELINE[0])
-        before = len(_color_writes(ipc))
-
-        result.graph.tooltip.select(0)  # adds the focus highlight to the same slot
-        presentation = result.graph.subtitle_presentation
-        presentation.pipeline.draw_current(presentation.target())
-
-        written = _color_writes(ipc)
-        assert len(written) > before, "a changed payload was skipped as a duplicate"
-        assert written[-1][3] != written[before - 1][3]
-    finally:
-        result.close()
-
-
-def test_the_next_cue_writes_even_when_its_payload_repeats(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A repeated line renders to the same payload, and skipping it would leave the previous cue's
-    color up. The cache is dropped on every cue change, so identity never spans one."""
-    repeated = (TIMELINE[0], TIMELINE[1], TIMELINE[0])
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, repeated, scorer=_coloring())
-    try:
-        for cue in repeated:
-            _show(result, ipc, cue)
-
-        first = _color_writes(ipc)[0][3]
-        assert any(command[3] == first for command in _color_writes(ipc)[1:]), (
-            "the repeated cue reused the earlier cue's write instead of making its own"
-        )
+        assert not [command for command in _focus_writes(ipc)[before:] if command[2] == "none"]
+        outcomes = [
+            span["attrs"]
+            for span in _spans
+            if span["name"] == "subtitle_color_outcome"
+            and span["attrs"].get("cue_start_ms") == round(cue.start * 1000)
+        ]
+        assert len(outcomes) <= 1
+        assert result.graph.subtitle_presentation.cue.current.boxes
     finally:
         result.close()
 
@@ -843,26 +677,6 @@ def _telemetry():
     finally:
         otel_metrics.unregister()
         provider.shutdown()
-
-
-def test_a_timeline_times_the_color_of_every_cue_that_colors(tmp_path, monkeypatch) -> None:
-    """The runtime counter reaches the field, not just its own unit test.
-
-    `saitenka.subtitle.color_latency_ms` is joined from two components — the coordinator opens the
-    wait, the renderer closes it on mpv's acknowledgement — so either end can be unwired while both
-    halves still pass in isolation. Driving the timeline is what proves the join holds.
-    """
-    with _telemetry():
-        result, ipc, _backend, spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-        try:
-            for cue in TIMELINE:
-                _show(result, ipc, cue)
-            colored = [item for item in _appearances(spans) if item.owed_color]
-            snap = otel_metrics.snapshot()
-        finally:
-            result.close()
-    assert colored, "no appearance owed color — the timeline proves nothing about the timer"
-    assert snap["saitenka.subtitle.color_latency_ms"]["count"] == len(colored)
 
 
 def test_policy_withdrawal_preserves_demand_and_reports_lost_color(tmp_path, monkeypatch):

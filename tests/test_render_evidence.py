@@ -212,7 +212,6 @@ def test_backend_request_parameters_survive_metadata_export(monkeypatch, tmp_pat
         15,
     ]
     assert {key: owner["published"][key] for key in owner["requested"]} == owner["requested"]
-    assert owner["published"]["validation"]["tokens"] == 1
     assert payload["configuration"]["fields"]["tip_scale"]["value"] == 9.0
     assert payload["pixel_fidelity"]["status"] == "unknown"
 

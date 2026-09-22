@@ -65,6 +65,8 @@ def violations() -> list[tuple[str, int, str]]:
     basenames = {Path(path).name for path in tracked}
     found: list[tuple[str, int, str]] = []
     for name in sorted(path for path in tracked if path.endswith(".py")):
+        if not (ROOT / name).is_file():
+            continue
         try:
             tree = ast.parse((ROOT / name).read_text(encoding="utf-8"), filename=name)
         except SyntaxError:

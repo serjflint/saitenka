@@ -12,19 +12,37 @@ def qualified_artifact():
     frozen = manifest([(1000, 2000, "猫")], {})
     alpha = np.full((2, 2), 255, dtype=np.uint8)
     row = compare_mask(alpha, alpha, alpha)
-    row["controls"] = {"positive": "passed", "displaced": "failed", "wrong-color": "failed"}
+    row["controls"] = {
+        "positive": "passed",
+        "displaced": "failed",
+        "missing-stroke": "failed",
+        "absent-output": "failed",
+        "wrong-color": "failed",
+    }
     return frozen, results_summary(frozen, {frozen["coordinates"][0]["key"]: row})
 
 
-def test_antialiased_fringe_loss_and_spill_cannot_qualify_as_exact():
+def test_antialiased_fringe_variation_is_diagnostic_but_can_qualify_opaque_ink():
     reference = np.array([[0, 16, 255, 16, 0]], dtype=np.uint8)
     actual = np.array([[16, 0, 255, 0, 16]], dtype=np.uint8)
 
     result = compare_mask(reference, actual, reference)
 
-    assert result["verdict"] == "failed"
+    assert result["verdict"] == "passed"
+    assert result["exact_alpha"] is False
     assert result["missing_pixels"] == result["frame_spill_pixels"] == 2
     assert result["intensity_error"] == 16
+
+    frozen = manifest([(1000, 2000, "猫")], {})
+    result["controls"] = {
+        "positive": "passed",
+        "displaced": "failed",
+        "missing-stroke": "failed",
+        "absent-output": "failed",
+        "wrong-color": "failed",
+    }
+    report = results_summary(frozen, {frozen["coordinates"][0]["key"]: result})
+    assert qualification_counts(frozen, report)["qualified"] is True
 
 
 @pytest.mark.parametrize(
@@ -44,21 +62,24 @@ def test_execution_controls_and_pixel_numbers_are_separate_qualification_axes(fa
     evidence = qualification_counts(frozen, result)
 
     assert evidence["denominator"] == 1
-    assert evidence["qualified"] == (fault == "none")
+    assert evidence["qualified"] == (fault in {"none", "numeric-disagreement"})
     assert evidence["oracle_execution"]["valid_controls"] == int(
         fault in {"none", "numeric-disagreement"}
     )
 
 
-@pytest.mark.parametrize("fault", ["missing", "duplicate", "other-manifest"])
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "other-manifest", "old-contract"])
 def test_qualification_rejects_shrunk_duplicated_or_mismatched_census(fault):
     frozen, result = qualified_artifact()
     if fault == "missing":
         result["results"] = []
     elif fault == "duplicate":
         result["results"] *= 2
-    else:
+    elif fault == "other-manifest":
         result["manifest_sha256"] = "other"
+    else:
+        result["schema"] = 1
+        result.pop("oracle_contract")
 
     with pytest.raises(ValueError, match="qualification"):
         qualification_counts(frozen, result)
@@ -117,6 +138,62 @@ def test_translucent_intensity_disagreement_fails():
     )
 
 
+@pytest.mark.parametrize("intensity", [224, 128])
+def test_dimmed_opaque_interior_fails_even_when_support_and_centroid_match(intensity):
+    oracle = module()
+    reference = np.full((7, 7), 255, dtype=np.uint8)
+
+    result = oracle.compare_mask(reference, np.full_like(reference, intensity), reference)
+
+    assert result["verdict"] == "failed"
+    assert result["opaque_core_missing_pixels"] > 0
+
+
+def test_faint_disconnected_mark_cannot_disappear_or_move():
+    oracle = module()
+    reference = np.zeros((9, 9), dtype=np.uint8)
+    reference[6:8, 3:6] = 180
+    reference[2, 4] = 24
+    assert oracle.compare_mask(reference, reference, reference)["verdict"] == "passed"
+
+    missing = reference.copy()
+    missing[2, 4] = 0
+    shifted = reference.copy()
+    shifted[2, 4] = 0
+    shifted[2, 5] = 24
+
+    assert oracle.compare_mask(reference, missing, reference)["verdict"] == "failed"
+    assert oracle.compare_mask(reference, shifted, shifted)["verdict"] == "failed"
+
+
+def test_faint_connected_stroke_cannot_disappear_as_an_antialias_edge():
+    oracle = module()
+    reference = np.zeros((9, 12), dtype=np.uint8)
+    reference[3:7, 3:7] = 255
+    reference[4, 7:10] = 24
+    missing = reference.copy()
+    missing[4, 7:10] = 0
+
+    result = oracle.compare_mask(reference, missing, reference)
+
+    assert result["verdict"] == "failed"
+    assert result["support_policy_violation_pixels"] > 0
+
+
+def test_oracle_refuses_unbounded_ink_before_component_materialization(monkeypatch):
+    oracle = module()
+    monkeypatch.setattr(oracle, "MAX_ORACLE_INK_PIXELS", 8)
+    reference = np.full((3, 3), 255, dtype=np.uint8)
+
+    result = oracle.compare_mask(reference, reference, reference)
+
+    assert result == {
+        "verdict": "inconclusive",
+        "reason": "oracle-ink-budget",
+        "oracle_contract": "opaque-coloring-v2",
+    }
+
+
 def test_stray_output_outside_every_character_fails_frame_coverage():
     oracle = module()
     reference = np.zeros((20, 20), dtype=np.uint8)
@@ -140,6 +217,45 @@ def test_adjacent_extra_ink_cannot_pass_as_an_overprint_border():
     assert result["verdict"] == "failed"
     assert result["spill_pixels"] == 1
     assert result["frame_spill_pixels"] == 1
+
+
+def test_character_check_excludes_neighboring_authored_ink():
+    oracle = module()
+    reference = np.zeros((9, 14), dtype=np.uint8)
+    reference[2:7, 3:6] = 255
+    context = reference.copy()
+    context[2:7, 6:9] = 255
+    context[7, 6] = 255
+
+    result = oracle.compare_mask(reference, context, context)
+
+    assert result["verdict"] == "passed"
+
+
+def test_faint_output_is_only_an_edge_when_adjacent_to_reference_ink():
+    oracle = module()
+    reference = np.zeros((9, 9), dtype=np.uint8)
+    reference[3:6, 3:6] = 255
+    actual = reference.copy()
+    actual[0, 0] = 16
+
+    assert oracle.compare_mask(reference, actual, reference)["verdict"] == "failed"
+
+
+@pytest.mark.parametrize("fault", ["displaced", "missing-stroke", "absent-output"])
+def test_opaque_fault_controls_discriminate(fault):
+    oracle = module()
+    reference = np.zeros((9, 12), dtype=np.uint8)
+    reference[2:7, 3:8] = 255
+    actual = reference.copy()
+    if fault == "displaced":
+        actual = np.roll(actual, 1, axis=1)
+    elif fault == "missing-stroke":
+        actual[4, 5] = 0
+    else:
+        actual[:] = 0
+
+    assert oracle.compare_mask(reference, actual, reference)["verdict"] == "failed"
 
 
 def test_checkpoint_keeps_the_full_denominator_on_interruption():

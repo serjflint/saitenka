@@ -103,9 +103,7 @@ def native_boxes(
                 OSD,
                 measured_ass,
                 palette=tuple(
-                    GeometryPaletteEntry(
-                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
-                    )
+                    GeometryPaletteEntry(entry.event_id, entry.token_index, entry.rgb)
                     for entry in prepared.palette
                 ),
                 reserved_rgb=prepared.reserved_rgb,

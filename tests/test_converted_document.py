@@ -278,9 +278,7 @@ def _render_cue(backend: object, style: converted.SubStyle | None = None) -> lis
             frame,
             prepared.ass,
             palette=tuple(
-                GeometryPaletteEntry(
-                    entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
-                )
+                GeometryPaletteEntry(entry.event_id, entry.token_index, entry.rgb)
                 for entry in prepared.palette
             ),
             reserved_rgb=prepared.reserved_rgb,
@@ -411,9 +409,7 @@ def test_a_reused_renderer_measures_each_cue_against_its_own_document() -> None:
                 frame,
                 prepared.ass,
                 palette=tuple(
-                    GeometryPaletteEntry(
-                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
-                    )
+                    GeometryPaletteEntry(entry.event_id, entry.token_index, entry.rgb)
                     for entry in prepared.palette
                 ),
                 reserved_rgb=prepared.reserved_rgb,
@@ -488,9 +484,7 @@ def test_justify_reaches_libass_even_though_a_style_row_cannot_state_it() -> Non
                 frame,
                 prepared.ass,
                 palette=tuple(
-                    GeometryPaletteEntry(
-                        entry.event_id, entry.token_index, entry.rgb, entry.font_name, 44.0
-                    )
+                    GeometryPaletteEntry(entry.event_id, entry.token_index, entry.rgb)
                     for entry in prepared.palette
                 ),
                 reserved_rgb=prepared.reserved_rgb,
