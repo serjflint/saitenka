@@ -7,69 +7,48 @@ logs.
 
 ## [Unreleased]
 
-### Added
-
-- Automatic subtitle geometry preserves qualified shadow scanning when native geometry cannot
-  represent the render mode or subtitle frame. Overlay warnings explain incompatibilities, and
-  metadata-only reports retain bounded geometry-source history.
-
-- Subtitle reports distinguish selected geometry sources, usable scan regions, shadow coloring
-  eligibility and patched-mpv acquisition outcomes when telemetry is enabled.
-
-- Reports retain option origins, profile changes, renderer selection and bounded redraw-validation
-  outcomes without tracing. Diagnostic coverage tools distinguish missing causal boundaries,
-  known-fault expectations and independently qualified character results.
-- Reports accept explicitly selected local attachments. Bounded archive readers and a
-  redistributable synthetic character corpus support offline diagnosis without requiring an
-  episode download.
-- Local tools replay retained renderer settings on synthetic text and reduce ASS/SRT reproducers
-  against an explicit failure checker. Reports retain per-operation health without tracing and
-  distinguish missing, malformed and empty trace evidence.
-
-- Rendering-property ingress evidence distinguishes wire notifications, reconnect readbacks and
-  rejected mailbox admission without retaining property values.
-
-- Reports distinguish rendering-property subscription failures, query errors and successful empty
-  replies during startup/reconnect; pending and superseded work retains bounded trace attribution.
-- Reports retain privacy-bounded player options consumed by native geometry decisions, including
-  rejected configurations, with trace references and explicit unavailable/invalid values.
-- Reports retain native geometry request configurations and distinguish current from historical
-  publication. Render/prefetch/publication spans identify the consumed configuration revision;
-  uncaptured player settings and pixel fidelity remain explicitly unknown.
-- Reports default to allowlisted metadata with separate producer/collector build identities and
-  explicit unknown runtime/pixel evidence. Sensitive detail requires `report --diagnostic-detail`;
-  report publication no longer overwrites an existing timestamped bundle.
-- Local diagnostic reports retain trace-write losses, unfinished operations and native fault logs;
-  bounded operation outcomes remain available without the tracing extra.
-- Tooltip quality timelines distinguish soft/crisp submission from mpv acknowledgment, independently
-  for main and nested views.
+## [4.5.0] - 2026-09-23
 
 ### Changed
 
-- Native subtitle coloring now defaults to whole-cue coloring. The retired `legacy` coloring value
-  maps to `whole-cue-auto` with a migration warning; the full Pillow renderer remains available.
+- Native subtitle coloring now uses whole-cue rendering by default. Existing `legacy` settings
+  migrate to `whole-cue-auto` with a warning; the full Pillow renderer remains available.
+- Automatic geometry selection uses player capabilities and falls back to qualified shadow geometry
+  when native geometry cannot represent a subtitle. Warnings explain incompatible configurations.
+- Diagnostic reports default to allowlisted metadata. Sensitive details require
+  `report --diagnostic-detail`, and creating a report no longer overwrites an existing bundle.
+
+### Added
+
+- Prepared whole-cue rendering caches final color and underline payloads ahead of playback.
+  Experimental timed OSD support is available with a compatible patched mpv.
+- Reports retain renderer and profile choices, geometry decisions, player-query failures, operation
+  outcomes, and trace losses. Missing evidence remains explicitly unknown, including without tracing.
+- Reports can include explicitly selected local attachments. Offline tools replay renderer settings
+  on synthetic text and reduce ASS/SRT reproducers against a supplied failure checker.
+- Presentation diagnostics distinguish overlay submission, player acknowledgment, and independently
+  qualified character results; synthetic character corpora support diagnosis without an episode download.
 
 ### Fixed
 
-- Indexed subtitle navigation seeks to the cue it prepares, including rapid repeated steps and
-  subtitle delay. Whole-cue OSD lookahead caches final color/underline payloads and publishes the
-  current cue before replenishing lookahead.
+- Indexed subtitle navigation lands on the prepared cue, including rapid repeated steps and subtitle
+  delay. The current cue is published before lookahead is replenished.
+- Automatic coloring preserves authored static speaker colors and retains unchanged shadow geometry
+  across patched-mpv layout revisions.
+- Converted subtitle hit boxes follow mpv's integer margin and display-aspect arithmetic, avoiding
+  shifted interaction regions and color overlays.
+- Failed subtitle uploads can retry identical pixels. Pending or rejected replies no longer count as
+  acknowledged coloring in diagnostics.
+- Decomposed Japanese voicing marks retain dictionary matching and inflection merging while keeping
+  original subtitle offsets.
+- Tooltip rendering avoids repeated resizing near the crisp-render threshold on smaller displays.
+- Enabling tracing no longer disables the trace pipeline. Background work and delayed replies retain
+  their initiating context, and reports distinguish missing, malformed, and empty traces.
 
-- Automatic subtitle coloring uses the prepared event policy, preserving static speaker colors
-  across cached geometry. Suppressed color demand and policy-driven withdrawal remain visible in traces.
+### Development
 
-- Patched-mpv layout revisions no longer clear unchanged shadow geometry and coloring during
-  automatic fallback.
-- Failed subtitle raster uploads can retry identical pixels; pending overprints no longer count as
-  acknowledged color. Late surface replies retain their rejected status in diagnostic reports.
-- Decomposed Japanese voicing marks retain dictionary matching and inflection merging while
-  preserving original subtitle offsets.
-
-- Converted subtitles use mpv's integer margin and display-aspect arithmetic, avoiding shifted
-  hit boxes and color overlays caused by rounding before mpv does.
-- Background jobs and delayed surface replies preserve their initiating trace context instead of
-  inheriting startup context. Report readers separate composition counts, callback time and
-  acknowledgment latency, and keep missing color evidence out of success-only percentiles.
+- The release smoke suite now selects the retained whole-cue live tests after retirement of the
+  native per-token renderer.
 
 ## [4.4.0] - 2026-09-12
 
