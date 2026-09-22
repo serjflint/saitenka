@@ -28,6 +28,11 @@ def test_captures_reuse_one_paused_frame_and_reject_a_stale_screenshot(tmp_path)
             self.commands = []
             self.write_screenshot = True
 
+        def drain_events(self, **_kwargs):
+            if any(command[0] == "seek" for command in self.commands):
+                return [{"event": "seek"}, {"event": "playback-restart"}]
+            return []
+
         def expand_path(self, path):
             return path
 
@@ -52,6 +57,40 @@ def test_captures_reuse_one_paused_frame_and_reject_a_stale_screenshot(tmp_path)
         ipc.write_screenshot = False
         with pytest.raises(FileNotFoundError):
             capture.frame("", 3000)
+    finally:
+        capture.overlay.close()
+
+
+def test_first_capture_waits_for_its_seek_to_restart_playback(tmp_path):
+    class Player:
+        def __init__(self):
+            self.events = iter(("playback-restart", "playback-restart", "seek", "playback-restart"))
+            self.sought = False
+            self.restarted = False
+
+        def drain_events(self, **_kwargs):
+            event = next(self.events)
+            if event == "seek":
+                self.sought = True
+            elif self.sought and event == "playback-restart":
+                self.restarted = True
+            return [{"event": event}]
+
+        def expand_path(self, path):
+            return path
+
+        def query(self, _name):
+            return None
+
+        def command(self, *args, **_kwargs):
+            if args[0] == "screenshot-to-file":
+                Image.new("RGB", (8, 8), "white" if self.restarted else "black").save(args[1])
+            return {"error": "success", "data": False}
+
+    capture = Captures(tmp_path, Player(), (8, 8))
+    try:
+        frame = capture.frame("", 1500)
+        assert np.all(frame == 255)
     finally:
         capture.overlay.close()
 
@@ -81,6 +120,11 @@ def test_capture_publishes_prepared_whole_cue_raster(tmp_path):
     class Player:
         def __init__(self):
             self.commands = []
+
+        def drain_events(self, **_kwargs):
+            if any(command[0] == "seek" for command in self.commands):
+                return [{"event": "seek"}, {"event": "playback-restart"}]
+            return []
 
         def expand_path(self, path):
             return path
@@ -118,6 +162,11 @@ def test_karaoke_cue_keeps_scan_geometry_but_refuses_raster_capture(tmp_path):
     class Player:
         def __init__(self):
             self.commands = []
+
+        def drain_events(self, **_kwargs):
+            if any(command[0] == "seek" for command in self.commands):
+                return [{"event": "seek"}, {"event": "playback-restart"}]
+            return []
 
         def expand_path(self, path):
             return path

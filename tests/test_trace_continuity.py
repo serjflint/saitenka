@@ -147,7 +147,7 @@ def test_failed_crisp_submission_does_not_claim_an_acknowledged_upgrade(monkeypa
     directory = tmp_path / "telemetry"
     directory.mkdir()
     config.write_text(
-        f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n', encoding="utf-8"
+        f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n', encoding="utf-8"
     )
     gate = ActiveGate()
     gate.set(value=True)
@@ -226,7 +226,7 @@ def test_mixed_view_quality_survives_production_export_and_bundle(monkeypatch, t
     config = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     gate = ActiveGate()
     gate.set(value=True)
     provider = TracerProvider()

@@ -73,7 +73,7 @@ def test_trace_selection_matches_log_session_not_newest_file(monkeypatch, tmp_pa
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     for number, session in enumerate(("wanted", "unrelated")):
         (directory / f"trace-{number}.json").write_text(
             json.dumps({"otherData": {"session": session}, "traceEvents": []})
@@ -92,7 +92,7 @@ def test_partial_trace_is_unavailable_not_empty_healthy(monkeypatch, tmp_path):
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     (directory / "trace-1.json").write_text('{"traceEvents":[')
 
     members = report._collect_telemetry("wanted")
@@ -108,7 +108,7 @@ def test_health_survives_missing_trace(monkeypatch, tmp_path):
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nexport_dir = "{directory.as_posix()}"\n')
     (directory / "trace-1.health.json").write_text(
         json.dumps({"session": "wanted", "lost_events": 9})
     )
@@ -123,7 +123,7 @@ def test_fallback_trace_cannot_borrow_newer_sessions_health(monkeypatch, tmp_pat
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    cfg.write_text(f'[telemetry]\nexport_dir = "{directory}"\n')
+    cfg.write_text(f'[telemetry]\nexport_dir = "{directory.as_posix()}"\n')
     (directory / "trace-2.json").write_text('{"traceEvents":[')
     (directory / "trace-2.health.json").write_text(json.dumps({"session": "new", "lost_events": 0}))
     (directory / "trace-1.json").write_text(
@@ -284,7 +284,7 @@ def test_collect_bundles_telemetry_trace_when_enabled_and_present(monkeypatch, t
     tel_dir.mkdir()
     home = str(Path.home())
     (tel_dir / "trace-20260101-000000.json").write_text(  # a rotated per-session trace
-        '{"traceEvents": [{"name": "op", "args": {"dict": "' + home + '/mydict"}}]}'
+        json.dumps({"traceEvents": [{"name": "op", "args": {"dict": home + "/mydict"}}]})
     )
     # .as_posix(): a Windows path's backslashes are TOML string escapes → the table would fail to parse.
     cfg.write_text(

@@ -186,12 +186,15 @@ def live_reader(
     from saitenka.app.session.routes import install_session_runtime
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
+    from saitenka.mpvio.launch import mpv_version_output, parse_mpv_version
 
     layout = layout or LayoutLiveOptions()
     phase = layout.phase
     mpv = find_mpv(layout.mpv_path)
     if not mpv:
         pytest.skip("mpv not found")
+    version = parse_mpv_version(mpv_version_output(mpv))
+    focus = "--focus-on=never" if version and version >= (0, 38) else "--focus-on-open=no"
 
     tmp = Path(tempfile.mkdtemp(prefix="saitenka-live-"))
     if (layout.media is None) != (layout.subtitles is None):
@@ -214,7 +217,8 @@ def live_reader(
             f"--input-ipc-server={sock}",
             "--force-window=yes",
             "--keep-open=yes",
-            "--focus-on=never",
+            focus,
+            "--mute=yes",
             "--sub-visibility=no",
             "--osd-level=1",
             "--pause" if paused else "--loop-file=inf",

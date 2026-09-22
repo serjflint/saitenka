@@ -253,6 +253,8 @@ class FakeIPC(util.FakeIPC):
         return True
 
     def command(self, *args):
+        if args[:1] == ("expand-path",):
+            return super().command(*args)
         self.commands.append(args)
         if args and args[0] == "get_property":
             if self.get_property_error is not None:

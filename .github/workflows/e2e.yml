@@ -141,6 +141,8 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     env:
       UV_PYTHON: "3.13"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.json
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -152,8 +154,10 @@ jobs:
       # ffmpeg explicitly: the harness builds its clip by shelling out to it, and only the apt leg
       # would get it for free (as an mpv dependency). The AppImage is self-contained, so the legs
       # that use one had no system ffmpeg at all.
-      - name: Install CJK fonts, Xvfb and ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk ffmpeg
+      - name: Install CJK fonts, Xvfb, ffmpeg and software GPU drivers
+        run: >-
+          sudo apt-get update && sudo apt-get install -y xvfb fonts-noto-cjk ffmpeg
+          libvulkan1 mesa-vulkan-drivers
 
       - name: Install mpv from apt
         if: matrix.appimage == ''

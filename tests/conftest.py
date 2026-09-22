@@ -238,7 +238,7 @@ def diagnostic_trace(monkeypatch, tmp_path):
     config = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "bridge-telemetry"
     directory.mkdir()
-    config.write_text(f'[telemetry]\nexport_dir = "{directory}"\n', encoding="utf-8")
+    config.write_text(f'[telemetry]\nexport_dir = "{directory.as_posix()}"\n', encoding="utf-8")
     gate = ActiveGate()
     gate.set(value=True)
     provider = TracerProvider()

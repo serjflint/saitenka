@@ -68,7 +68,7 @@ def test_frame_health_does_not_promote_partial_evidence(raw, expected):
 def test_frame_bundle_requires_matching_session(tmp_path, session):
     (tmp_path / f"mpv-frame-{session}.json").write_text(json.dumps({"session": "current"}))
     trace = "row\n# health recorded=1 attempted=1 overflow=0\n"
-    (tmp_path / "mpv-frame-current.tsv").write_text(trace)
+    (tmp_path / "mpv-frame-current.tsv").write_bytes(trace.encode())
     result = collect(tmp_path, session)
     if session == "current":
         assert result["diagnostics/mpv-frame.tsv"] == trace

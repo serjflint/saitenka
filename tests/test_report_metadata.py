@@ -93,7 +93,7 @@ def test_source_identity_compares_code_fingerprint_not_capture_time(other_hash):
 def test_default_zip_excludes_private_payloads_in_every_member(monkeypatch, tmp_path):
     config = _environment(monkeypatch, tmp_path)
     private = "PRIVATE-SENTENCE-秘密-93847"
-    config.write_text(f'prefetch = true\nmpv_path = "{private}"\n')
+    config.write_text(f'prefetch = true\nmpv_path = "{private}"\n', encoding="utf-8")
     _summary(
         tmp_path,
         producer={"overlay_build": private, "path": private},
@@ -102,11 +102,11 @@ def test_default_zip_excludes_private_payloads_in_every_member(monkeypatch, tmp_
     )
     with (tmp_path / "overlay.log").open("a") as stream:
         stream.write(json.dumps({"session": "private-session", "message": private}) + "\n")
-    (tmp_path / "mpv.log").write_text(private)
+    (tmp_path / "mpv.log").write_text(private, encoding="utf-8")
     (tmp_path / "crashes").mkdir()
-    (tmp_path / "crashes" / "faulthandler.log").write_text(private)
+    (tmp_path / "crashes" / "faulthandler.log").write_text(private, encoding="utf-8")
     (tmp_path / "telemetry").mkdir()
-    (tmp_path / "telemetry" / "trace.json").write_text(private)
+    (tmp_path / "telemetry" / "trace.json").write_text(private, encoding="utf-8")
 
     archive = report.build_report_bundle(tmp_path / "reports", timestamp="privacy")
 
@@ -205,7 +205,9 @@ def test_unrelated_or_unsupported_summary_cannot_claim_health(
 
 
 @pytest.mark.parametrize(
-    "body", ['{"pending":', "[" * 2000, " " * (report.DIAGNOSTIC_JSON_LIMIT + 1)]
+    "body",
+    ['{"pending":', "[" * 2000, " " * (report.DIAGNOSTIC_JSON_LIMIT + 1)],
+    ids=["truncated", "deeply-nested", "too-large"],
 )
 def test_unreadable_summary_is_not_an_empty_success(monkeypatch, tmp_path, body):
     _environment(monkeypatch, tmp_path)
@@ -223,6 +225,7 @@ def test_unreadable_summary_is_not_an_empty_success(monkeypatch, tmp_path, body)
         ("prefetch =", "invalid"),
         ("x" * (128 * 1024 + 1), "too-large"),
     ],
+    ids=["invalid", "too-large"],
 )
 def test_invalid_config_reports_no_effective_values(monkeypatch, tmp_path, body, status):
     config = _environment(monkeypatch, tmp_path)

@@ -62,7 +62,7 @@ def test_observed_cue_carries_revision_through_geometry_and_focus_export(
     config = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     gate = ActiveGate()
     gate.set(value=True)
     provider = TracerProvider()
@@ -118,7 +118,7 @@ def test_reader_reports_acknowledgment_wait_and_preserves_originating_cue(monkey
     config = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
     directory.mkdir()
-    config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n')
+    config.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
     gate = ActiveGate()
     gate.set(value=True)
     provider = TracerProvider()
@@ -159,7 +159,7 @@ def test_retired_surface_late_ack_is_exported_as_rejected(monkeypatch, tmp_path,
     directory = tmp_path / "telemetry"
     directory.mkdir()
     config.write_text(
-        f'[telemetry]\nenabled = true\nexport_dir = "{directory}"\n', encoding="utf-8"
+        f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n', encoding="utf-8"
     )
     gate = ActiveGate()
     gate.set(value=True)

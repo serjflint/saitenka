@@ -44,11 +44,13 @@ logs.
 - Tooltip rendering avoids repeated resizing near the crisp-render threshold on smaller displays.
 - Enabling tracing no longer disables the trace pipeline. Background work and delayed replies retain
   their initiating context, and reports distinguish missing, malformed, and empty traces.
+- Diagnostic archives reject unsafe member names before platform-specific path normalization.
 
 ### Development
 
 - The release smoke suite now selects the retained whole-cue live tests after retirement of the
-  native per-token renderer.
+  native per-token renderer. Capture timing, software GPU setup, and portable test fixtures keep
+  release qualification consistent across supported platforms.
 
 ## [4.4.0] - 2026-09-12
 
