@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790115922762,
+  "lastUpdate": 1790115967853,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17829,6 +17829,54 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 47.214283,
             "range": "3 replicas; min 40.6499; max 55.8748; MAD 6.56438",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c2cf78a26a16371da98e14f39820e5791030ffc2",
+          "message": "Merge pull request #535 from serjflint/release/4.5.0\n\nchore: release 4.5.0",
+          "timestamp": "2026-09-23T01:20:08+03:00",
+          "tree_id": "afd68a21dae441fe3e59dbb99cba464812b8f51e",
+          "url": "https://github.com/serjflint/saitenka/commit/c2cf78a26a16371da98e14f39820e5791030ffc2"
+        },
+        "date": 1790115966162,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 1; MAD 0; worst 1",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 354.098502,
+            "range": "3 replicas; min 272.615; max 361.567; MAD 7.46834",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 64.593192,
+            "range": "3 replicas; min 54.7156; max 76.2757; MAD 9.8776",
             "unit": "ms"
           }
         ]
