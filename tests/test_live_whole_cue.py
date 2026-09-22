@@ -101,8 +101,12 @@ def test_rapid_indexed_seeks_land_on_the_prepared_cue_with_subtitle_delay(
         poll_until(
             session,
             lambda: (
-                session.graph.subtitle_presentation.color_telemetry.current.snapshot(0).status
+                session.graph.subtitle_presentation.color_telemetry.cue_start_ms == 6000
+                and session.graph.subtitle_presentation.color_telemetry.current is not None
+                and session.graph.subtitle_presentation.color_telemetry.current.snapshot(0).status
                 == "complete"
+                and session.graph.cue.draw_request().text == "鳥を見た"
+                and session.graph.cue.draw_request().boxes
             ),
             "destination color was not acknowledged",
         )
@@ -313,9 +317,7 @@ def test_marker_layers_preserve_opaque_color_and_final_event_geometry(text, boun
     ("mode", "device"),
     [
         pytest.param("whole-cue-auto", "overprint", marks=pytest.mark.mpv_min("0.41")),
-        pytest.param(
-            "whole-cue-auto", "overpaint", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
-        ),
+        pytest.param("whole-cue-auto", "overpaint", marks=pytest.mark.mpv_min("0.41")),
         pytest.param(
             "whole-cue-overpaint", "overpaint", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
         ),
@@ -331,6 +333,7 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
     from saitenka.app.scoring import Coloring, Palette
 
     spans = record_spans(monkeypatch)
+    shaper = "complex" if device == "overprint" else "simple"
     with live_reader(
         native_visible=True,
         scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])), Palette()),
@@ -346,7 +349,12 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
                 "--gpu-sw=yes",
-                *(("--osd-shaper=complex",) if device == "overprint" else ()),
+                "--gpu-api=opengl",
+                *(
+                    (f"--osd-shaper={shaper}",)
+                    if mode == "whole-cue-auto" or device == "overprint"
+                    else ()
+                ),
             ),
             coloring=mode,
         ),
@@ -393,7 +401,7 @@ def test_osd_pixels_follow_qualified_shadow_with_secondary_translation(blur):
     with live_reader(
         native_visible=True,
         scorer=_coloring(),
-        cues=((0.0, 8.0, "猫を見る"),),
+        cues=((0.0, 8.0, r"{\fs96\b1}猫を見る"),),
         layout=LayoutLiveOptions(
             "shadow",
             os.environ.get("SAITENKA_LAYOUT_MPV"),
@@ -405,6 +413,7 @@ def test_osd_pixels_follow_qualified_shadow_with_secondary_translation(blur):
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
                 "--gpu-sw=yes",
+                "--gpu-api=opengl",
                 "--osd-shaper=complex",
                 f"--osd-blur={blur}",
             ),
@@ -525,6 +534,7 @@ def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kernin
                 "--hidpi-window-scale=no",
                 "--vo=gpu",
                 "--gpu-sw=yes",
+                "--gpu-api=opengl",
                 "--osd-shaper=complex",
                 *extra,
             ),
@@ -625,6 +635,7 @@ def test_osd_lookahead_renders_hidden_and_survives_blank_gaps(tmp_path, monkeypa
                 "--hidpi-window-scale=no",
                 f"--vo={vo}",
                 "--gpu-sw=yes",
+                *(("--gpu-api=opengl",) if vo == "gpu" else ()),
                 "--osd-shaper=complex",
                 f"--log-file={log}",
                 "--msg-level=osd/libass=debug",

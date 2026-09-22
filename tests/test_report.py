@@ -146,6 +146,18 @@ def test_redact_secrets_scrubs_keys_and_tokens():
     assert report._redact_secrets("the cat sat") == "the cat sat"
 
 
+def test_scrub_home_redacts_json_encoded_windows_path(monkeypatch):
+    home = r"C:\Users\Jäne"
+    monkeypatch.setattr(Path, "home", lambda: Path(home))
+
+    for ensure_ascii in (True, False):
+        redacted = report._scrub_home(
+            json.dumps({"path": home + r"\dict"}, ensure_ascii=ensure_ascii)
+        )
+
+        assert json.loads(redacted) == {"path": r"<HOME>\dict"}
+
+
 def test_redact_config_blanks_key_lines_keeps_shape():
     cfg = 'enabled = true\nkey = "sekritvalue123"\nresync = true\n'
     red = report._redact_config(cfg)

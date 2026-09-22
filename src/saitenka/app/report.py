@@ -45,7 +45,15 @@ def _scrub_home(text: str) -> str:
     doesn't leak the username embedded in every path (`C:\\Users\\Jane\\…` → `<HOME>\\…`)."""
     import getpass
 
-    out = text.replace(str(Path.home()), "<HOME>")
+    home = str(Path.home())
+    encoded_homes = {
+        home,
+        json.dumps(home)[1:-1],
+        json.dumps(home, ensure_ascii=False)[1:-1],
+    }
+    out = text
+    for encoded_home in encoded_homes:
+        out = out.replace(encoded_home, "<HOME>")
     try:
         user = getpass.getuser()
     except OSError:  # pragma: no cover — getuser can raise if no login name is resolvable

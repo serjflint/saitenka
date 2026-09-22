@@ -45,6 +45,7 @@ logs.
 - Enabling tracing no longer disables the trace pipeline. Background work and delayed replies retain
   their initiating context, and reports distinguish missing, malformed, and empty traces.
 - Diagnostic archives reject unsafe member names before platform-specific path normalization.
+- Diagnostic reports redact home-directory paths inside JSON on Windows.
 
 ### Development
 
