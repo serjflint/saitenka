@@ -288,6 +288,8 @@ product of fonts, effects, displays and text.
 The `Character corpus` CI workflow runs these four cells under Xvfb with pinned mpv and the
 bundled licensed font. It uploads the generated inputs, exact manifests, results and bounded
 failure images even when qualification fails. Private media is never an input to this workflow.
+The candidate uses the production whole-cue raster preparation and composition path; this corpus
+does not qualify the whole-cue OSD or automatic device-selection modes.
 The capture profile forces rendering when the diagnostic window is obscured; an unresponsive
 player fails startup rather than supplying unknown font settings. On macOS the profile uses the
 system render timer, avoiding dependence on a paused diagnostic window's display-link callback.

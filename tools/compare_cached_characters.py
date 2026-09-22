@@ -1,4 +1,4 @@
-"""Opt-in local corpus runner: mpv reference masks versus production overprint/overpaint.
+"""Opt-in corpus runner: mpv reference masks versus prepared whole-cue raster paint.
 
 Run with --execute only in a desktop session. No subtitle extraction or downloading occurs.
 All document variants and pixel artifacts remain in the explicitly selected output directory.
@@ -38,15 +38,17 @@ from saitenka_subtitles import (
     SubtitleTrackId,
     converted,
     subrip,
+    whole_cue,
 )
 from saitenka_subtitles.ass import decode_ass_event, parse_ass_event_line
 from saitenka_subtitles.ass_geometry import authored_ass_rows_at, prepare_ass_hit_map_frame
+from saitenka_subtitles.geometry import PaintQualification
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
 from saitenka_tokenize.japanese import tokenize
 
 from saitenka.app import native_subtitles, subtitle_fonts
 from saitenka.app.session.routes import install_session_runtime
-from saitenka.app.subtitle_render import DrawRequest
+from saitenka.app.subtitle_render import DrawRequest, whole_cue_colors, whole_cue_device
 from saitenka.app.subtitles import WordBox
 from saitenka.mpvio.discover import find_mpv
 from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
@@ -194,11 +196,13 @@ def geometry_request_for(
         prepared.ass,
         native_ass=source.encode(),
         document_metadata=prepared.document_metadata,
+        paint_qualification=prepared.paint_qualification,
         source_kind="authored-ass",
         palette=prepared.palette,
         reserved_rgb=prepared.reserved_rgb,
         font_setup=fonts.setup,
         attachments=fonts.attachments,
+        whole_cue=whole_cue.WholeCue(osd_reason="configured-overpaint"),
     ), tokens
 
 
@@ -247,6 +251,10 @@ def request_for(
         hover_span=None,
         boxes=boxes,
         styles=[SimpleNamespace(color=(0, 255, 0, 255), underline=None) for _ in tokens],
+        whole_cue=snapshot.whole_cue,
+        coloring="whole-cue-overpaint",
+        paint_allowed=snapshot.paint_qualification is PaintQualification.STATIC,
+        paint_reason=snapshot.paint_qualification.value,
     )
 
 
@@ -276,7 +284,7 @@ class Captures:
         self,
         source: str,
         sample_ms: int,
-        request: DrawRequest | None = None,  # noqa: ARG002 -- retained capture API compatibility
+        request: DrawRequest | None = None,
         *,
         suffix: str = ".ass",
         reference_coverage: np.ndarray | None = None,
@@ -305,6 +313,16 @@ class Captures:
             rgba[:, :, :3] = reference_color
             rgba[:, :, 3] = reference_coverage
             self.overlay.show(Image.fromarray(rgba), 0, 0, oid=62)
+        elif request is not None:
+            device, reason = whole_cue_device(request)
+            if device != "overpaint" or request.whole_cue is None:
+                raise ValueError(f"whole-cue raster unavailable: {reason}")
+            image = whole_cue.compose(request.whole_cue, whole_cue_colors(request))
+            if image is None:
+                raise ValueError("whole-cue raster is empty")
+            response = self.overlay.show(Image.fromarray(image.rgba), image.x, image.y, oid=62)
+            if response.get("error") != "success":
+                raise RuntimeError("whole-cue raster upload refused")
         target = self.directory / "capture.png"
         target.unlink(missing_ok=True)
         response = self.ipc.command("screenshot-to-file", str(target), "window")
@@ -583,6 +601,7 @@ def main() -> int:
             "saitenka": overlay_version(),
             "surface": args.size,
             "profile": list(PROFILE),
+            "coloring": "whole-cue-overpaint",
             "runner_sha256": fingerprint(Path(__file__)),
             "implementation_sha256": implementation_digest(),
             "fonts": synthetic_fonts() if args.synthetic else font_inventory(),
