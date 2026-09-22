@@ -503,8 +503,14 @@ def coordinate_result(
         }, (original, ours, mask)
     reference = np.where(mask > 0, context, 0)
     controls = {"positive": compare_mask(reference, context, context)["verdict"]}
+    missing_stroke = original[:, :, 0].copy()
+    target_pixels = np.argwhere(mask > 0)
+    strongest = max(target_pixels, key=lambda point: int(mask[tuple(point)]))
+    missing_stroke[tuple(strongest)] = 0
     for name, coverage, color in (
         ("displaced", np.roll(original[:, :, 0], 4, axis=1), (0, 255, 0)),
+        ("missing-stroke", missing_stroke, (0, 255, 0)),
+        ("absent-output", np.zeros_like(original[:, :, 0]), (0, 255, 0)),
         ("wrong-color", original[:, :, 0], (255, 0, 0)),
     ):
         corrupted = capture.frame(
@@ -515,7 +521,13 @@ def coordinate_result(
             reference_color=color,
         )
         controls[name] = compare_mask(reference, green_coverage(corrupted), context)["verdict"]
-    if controls != {"positive": "passed", "displaced": "failed", "wrong-color": "failed"}:
+    if controls != {
+        "positive": "passed",
+        "displaced": "failed",
+        "missing-stroke": "failed",
+        "absent-output": "failed",
+        "wrong-color": "failed",
+    }:
         return {
             "verdict": "inconclusive",
             "reason": "capture-controls-not-discriminating",

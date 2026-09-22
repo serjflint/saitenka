@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pysubs2
 import pytest
+from character_masks import FAULT_CONTROLS
 from compare_cached_characters import Captures, coordinate_result, request_for
 from PIL import Image
 
@@ -212,8 +213,4 @@ def test_comparison_paints_over_native_source_and_calibrates_from_native_ink(
     assert np.array_equal(capture.references[0][2], images[0][:, :, 0])
     if not lose_mark and not ignore_controls:
         assert result["identity_probe_preserves_ink"] is not alter_hint
-        assert result["controls"] == {
-            "positive": "passed",
-            "displaced": "failed",
-            "wrong-color": "failed",
-        }
+        assert result["controls"] == FAULT_CONTROLS

@@ -289,7 +289,16 @@ The `Character corpus` CI workflow runs these four cells under Xvfb with pinned 
 bundled licensed font. It uploads the generated inputs, exact manifests, results and bounded
 failure images even when qualification fails. Private media is never an input to this workflow.
 The candidate uses the production whole-cue raster preparation and composition path; this corpus
-does not qualify the whole-cue OSD or automatic device-selection modes.
+does not qualify the whole-cue OSD or automatic device-selection modes. Its versioned
+`opaque-coloring-v2` oracle requires every ink component, stable opaque interiors, placement, the
+requested color, and an actual published frame. Exact source-alpha differences remain recorded as
+diagnostics: libass can change faint edge antialiasing when color boundaries split bitmap runs even
+though the opaque overpaint contract remains satisfied. The oracle's bounded edge and component
+error limits are explicit qualification policy and are guarded by displaced, missing-stroke,
+absent-output, and wrong-color controls; they are not a general libass error bound.
+A single faint boundary pixel is intentionally indistinguishable from antialias phase variation;
+detached marks and longer faint strokes remain required. Excess ink or component counts make the
+coordinate inconclusive before component analysis allocates unbounded state.
 The capture profile forces rendering when the diagnostic window is obscured; an unresponsive
 player fails startup rather than supplying unknown font settings. On macOS the profile uses the
 system render timer, avoiding dependence on a paused diagnostic window's display-link callback.
