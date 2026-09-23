@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790115967853,
+  "lastUpdate": 1790195347166,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -16973,6 +16973,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.44966,
             "range": "3 replicas; min 1.42806; max 1.85518; MAD 0.021604; worst 1.85518",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f75afbc67be05ded5e576275b24b273fb6684768",
+          "message": "Merge pull request #536 from serjflint/fix/bundle-dictionary\n\nfix(packaging): bundle the dictionary engine with Saitenka",
+          "timestamp": "2026-09-23T23:26:58+03:00",
+          "tree_id": "29d83eb50c264692e196cd3a231303369755d316",
+          "url": "https://github.com/serjflint/saitenka/commit/f75afbc67be05ded5e576275b24b273fb6684768"
+        },
+        "date": 1790195345715,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.40459,
+            "range": "3 replicas; min 4.9892; max 6.58575; MAD 0.181156",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.306695,
+            "range": "3 replicas; min 7.9254; max 9.69492; MAD 0.388225; worst 9.69492",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.737317,
+            "range": "3 replicas; min 14.7346; max 21.2501; MAD 2.5128",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.94533,
+            "range": "3 replicas; min 14.9185; max 21.4848; MAD 2.53943; worst 21.4848",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.531942,
+            "range": "3 replicas; min 12.1496; max 15.4252; MAD 0.382325",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.090386,
+            "range": "3 replicas; min 0.070004; max 0.124223; MAD 0.020382; worst 0.124223",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 38.738418,
+            "range": "3 replicas; min 32.1285; max 45.359; MAD 6.60994; worst 45.359",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.908855,
+            "range": "3 replicas; min 2.52643; max 11.9712; MAD 0.382421; worst 11.9712",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.738812,
+            "range": "3 replicas; min 1.10623; max 4.6168; MAD 0.632586; worst 4.6168",
             "unit": "ms"
           }
         ]
