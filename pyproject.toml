@@ -7,8 +7,7 @@ license = "Apache-2.0"  # SPDX expression (PEP 639); the GPL deinflect add-on is
 requires-python = ">=3.13"
 dependencies = [
     "ankiconnect-client>=0.1.0",
-    "saitenka-dict>=0.1.1",
-    # `saitenka_card`/`_subtitles`/`_tokenize`/`_wordstate` are packages of THIS distribution, not
+    # `saitenka_card`/`_dict`/`_subtitles`/`_tokenize`/`_wordstate` are packages of THIS distribution, not
     # dependencies — see `[tool.hatch.build.targets.wheel]`. Their own third-party requirements are
     # therefore ours: fugashi/unidic-lite for the tokenizer, pysubs2 for the subtitle document.
     "fugashi>=1.5.2",
@@ -124,7 +123,6 @@ saitenka = "saitenka.app.cli:main"
 # and `images` depends on third-party resvg-py — both extras resolve published wheels from PyPI, #282/#308.)
 saitenka-deinflect = { path = "deinflect", editable = true }
 ankiconnect-client = { path = "ankiconnect-client", editable = true }
-saitenka-dict = { path = "saitenka-dict", editable = true }
 libasslite = { path = "libasslite", editable = true }
 libasslite-bundle = { path = "libasslite-bundle", editable = true }
 
@@ -208,10 +206,14 @@ build-backend = "hatchling.build"
 packages = [
     "src/saitenka",
     "saitenka-card/src/saitenka_card",
+    "saitenka-dict/src/saitenka_dict",
     "saitenka-subtitles/src/saitenka_subtitles",
     "saitenka-tokenize/src/saitenka_tokenize",
     "saitenka-wordstate/src/saitenka_wordstate",
 ]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/saitenka-dict/oracle"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -681,7 +683,7 @@ cue-stages = { shell = "SAITENKA_LIVE=1 uv run --extra full python examples/cue_
 # needs no dev env. CI-only (the e2e install-smoke leg runs it across all 3 OSes) — NOT in `all`.
 install-smoke = { cmd = "uv run --no-project python tools/install_smoke.py" }
 # Put THIS tree on PATH as `saitenka`, which is what the mpv plugin spawns — live testing runs the
-# checkout, not a release. `[tool.uv.sources]` already maps deinflect / saitenka-dict /
+# checkout, not a release. `[tool.uv.sources]` already maps deinflect /
 # ankiconnect-client / libasslite to editable local paths, so the extras pull the working tree too.
 # `subtitle-geometry-bundle` is deliberately absent: its wheel needs a staged native payload only CI
 # produces. A running mpv holds the modules it imported at launch, so an edit is not live until mpv
@@ -919,7 +921,7 @@ pages = { cmd = "bash install/publish-pages.sh" }
 # Scans every package this wheel ships, not just `src`: the bundled `saitenka_*` trees are where
 # fugashi/unidic-lite/pysubs2 are imported, so scanning `src` alone reports them unused and the
 # bundled packages themselves as transitive.
-deps = { shell = "uv run --extra full deptry src saitenka-card/src saitenka-subtitles/src saitenka-tokenize/src saitenka-wordstate/src" }
+deps = { shell = "uv run --extra full deptry src saitenka-card/src saitenka-dict/src saitenka-subtitles/src saitenka-tokenize/src saitenka-wordstate/src" }
 # ADVISORY — cross-module dead code (ruff `F` only catches unused imports/locals). vulture with a
 # whitelist for interface-mandated params (structlog processors, OTel exporter overrides, signal
 # handlers) that are "unused" by signature but required. Tune with --min-confidence.

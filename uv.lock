@@ -2274,7 +2274,6 @@ dependencies = [
     { name = "pysubs2" },
     { name = "questionary" },
     { name = "rich" },
-    { name = "saitenka-dict" },
     { name = "stamina" },
     { name = "structlog" },
     { name = "tomlkit" },
@@ -2407,7 +2406,6 @@ requires-dist = [
     { name = "saitenka", extras = ["subtitle-geometry"], marker = "extra == 'subtitle-geometry-bundle'" },
     { name = "saitenka", extras = ["telemetry"], marker = "extra == 'full'" },
     { name = "saitenka-deinflect", marker = "extra == 'deinflect'", editable = "deinflect" },
-    { name = "saitenka-dict", editable = "saitenka-dict" },
     { name = "stamina", specifier = ">=26.1.0" },
     { name = "structlog", specifier = ">=26.1.0" },
     { name = "taffylite", marker = "extra == 'layout-engine'", specifier = ">=0.2.0" },
@@ -2469,19 +2467,6 @@ source = { editable = "deinflect" }
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8.0" }]
-
-[[package]]
-name = "saitenka-dict"
-version = "0.1.1"
-source = { editable = "saitenka-dict" }
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-timeout", specifier = ">=2.4" },
-]
 
 [[package]]
 name = "secretstorage"

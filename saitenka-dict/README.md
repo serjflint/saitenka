@@ -10,6 +10,9 @@ This is an unofficial compatibility implementation. It is not affiliated with or
 Yomitan itself remains the differential oracle. Its GPL implementation and fixtures are not
 vendored into this Apache-2.0 package.
 
+The `saitenka_dict` Python package ships inside the Saitenka distribution; it no longer has a
+separate PyPI release. Its local project remains available for independent development and tests.
+
 The public seam is deliberately small:
 
 - `LookupSource.lookup_terms(TermQuery) -> TermResult`

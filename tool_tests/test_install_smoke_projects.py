@@ -34,7 +34,6 @@ def test_extras_expand_to_the_first_party_packages_the_install_resolves():
     required = _required_names(subtitle_geometry=True)
     assert {
         "ankiconnect-client",
-        "saitenka-dict",
         "saitenka-deinflect",  # reached only through `full` -> `deinflect`
         "libasslite",  # reached only through `full` -> `subtitle-geometry`
     } <= required
@@ -98,7 +97,6 @@ _OWN_DISTRIBUTION = {
     "libasslite-bundle",
     "resvglite",
     "saitenka-deinflect",
-    "saitenka-dict",
     "taffylite",
 }
 

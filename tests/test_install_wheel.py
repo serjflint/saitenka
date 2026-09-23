@@ -1,4 +1,4 @@
-"""Stage 17a install-test: the built wheel must carry its assets and run when installed standalone.
+"""Install-test: the built wheel must carry its assets and run when installed standalone.
 
 Builds a wheel with ``uv build``, installs it into a throwaway ``uv venv`` (isolated from the source
 tree), and checks (a) ``saitenka --help`` works and (b) the bundled assets load via
@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import zipfile
+from email.parser import Parser
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -41,6 +42,8 @@ def _assert_oracle_absent(members: list[str]) -> None:
     assert leaked == []
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(300)
 def test_wheel_installs_and_assets_load():
     if _free_bytes(PROJECT) < 2 * 1024**3:  # need headroom for the venv + deps
         pytest.skip("insufficient free disk for the install test")
@@ -48,14 +51,12 @@ def test_wheel_installs_and_assets_load():
     try:
         # 1. build the wheel into an isolated dir
         dist = work / "dist"
-        dictionary_project = PROJECT / "saitenka-dict"
         for project in (
-            dictionary_project,
             PROJECT / "ankiconnect-client",
             PROJECT / "libasslite",
             PROJECT,
         ):
-            build_kind = [] if project == dictionary_project else ["--wheel"]
+            build_kind = [] if project == PROJECT else ["--wheel"]
             subprocess.run(
                 ["uv", "build", *build_kind, "--out-dir", str(dist)],
                 cwd=project,
@@ -63,13 +64,6 @@ def test_wheel_installs_and_assets_load():
                 capture_output=True,
                 text=True,
             )
-        dictionary_wheel = next(dist.glob("saitenka_dict-*.whl"))
-        dictionary_sdist = next(dist.glob("saitenka_dict-*.tar.gz"))
-        with zipfile.ZipFile(dictionary_wheel) as archive:
-            _assert_oracle_absent(archive.namelist())
-            assert "saitenka_dict/py.typed" in archive.namelist()
-        with tarfile.open(dictionary_sdist, "r:gz") as archive:
-            _assert_oracle_absent(archive.getnames())
         anki_wheel = next(dist.glob("ankiconnect_client-*.whl"))
         with zipfile.ZipFile(anki_wheel) as archive:
             assert "ankiconnect_client/py.typed" in archive.namelist()
@@ -77,11 +71,25 @@ def test_wheel_installs_and_assets_load():
         assert wheels, "uv build produced no wheel"
         wheel = wheels[0]
         with zipfile.ZipFile(wheel) as archive:
+            _assert_oracle_absent(archive.namelist())
             assert "saitenka/py.typed" in archive.namelist()
+            assert "saitenka_dict/py.typed" in archive.namelist()
+            assert "saitenka_dict/schema.py" in archive.namelist()
+            metadata = next(n for n in archive.namelist() if n.endswith(".dist-info/METADATA"))
+            requires = (
+                Parser().parsestr(archive.read(metadata).decode()).get_all("Requires-Dist", [])
+            )
+            assert not any(r.startswith("saitenka-dict") for r in requires)
             assert not any(
                 name.casefold().endswith((".dll", ".dylib", ".so")) or ".so." in name.casefold()
                 for name in archive.namelist()
             ), "the Apache-2.0 Saitenka wheel must not absorb the native bundle"
+
+        with tarfile.open(next(dist.glob("saitenka-*.tar.gz")), "r:gz") as archive:
+            _assert_oracle_absent(archive.getnames())
+            assert any(
+                n.endswith("/saitenka-dict/src/saitenka_dict/schema.py") for n in archive.getnames()
+            )
 
         # 2. install into a throwaway venv (isolated from the source checkout)
         venv = work / "venv"
@@ -114,6 +122,12 @@ def test_wheel_installs_and_assets_load():
         # 4. assets load from the INSTALLED package (importlib.resources), not the source tree
         smoke = (
             "import importlib.util;"
+            "from importlib.metadata import packages_distributions;"
+            "from pathlib import Path;"
+            "from saitenka_dict.schema import ensure_schema;"
+            "from saitenka.app.dictdb import DictionaryDb;"
+            "assert packages_distributions()['saitenka_dict'] == ['saitenka'];"
+            "assert DictionaryDb(Path('absent.sqlite')).stats().exists is False;"
             "from importlib.resources import files;"
             "from saitenka.resources import asset;"
             "assert asset('fonts','NotoSansJP.ttf').exists();"

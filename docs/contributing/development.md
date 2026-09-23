@@ -27,8 +27,8 @@ session runs a release build unless you put the checkout there:
 uv run poe install-editable    # this tree becomes `saitenka` on PATH
 ```
 
-Every local package (`deinflect/`, `saitenka-dict/`, `ankiconnect-client/`, `libasslite/`) is wired
-as an editable path in `[tool.uv.sources]`, so the extras follow the working tree rather than PyPI.
+Bundled `saitenka_*` packages follow the editable Saitenka install. Separately distributed local
+dependencies use editable paths in `[tool.uv.sources]`.
 
 Then **fully quit and relaunch mpv**: the attach process is spawned once per session and holds the
 modules it imported, so an edit is not live until it restarts. `saitenka doctor` names the mismatch

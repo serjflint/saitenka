@@ -220,8 +220,8 @@ protocol-shaped class from being mistaken for production swappability.
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
 `render/` and `panel/` are internal package boundaries in the Saitenka distribution, as are
-`saitenka_subtitles`, `saitenka_tokenize`, `saitenka_wordstate` and `saitenka_card` — separate
-packages with their own contracts and tests, shipped inside the Saitenka wheel. `saitenka-dict`,
+`saitenka_subtitles`, `saitenka_tokenize`, `saitenka_wordstate`, `saitenka_card` and `saitenka_dict` —
+separate packages with their own contracts and tests, shipped inside the Saitenka wheel.
 `ankiconnect-client` and the experimental native add-ons are independently published.
 
 ## Interactive startup and cue annotation

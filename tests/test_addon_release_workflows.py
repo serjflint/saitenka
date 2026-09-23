@@ -68,12 +68,6 @@ def test_libasslite_release_versions_stay_coherent() -> None:
     ("workflow_name", "project", "tag_prefix", "artifact"),
     [
         (
-            "saitenka-dict-release.yml",
-            "saitenka-dict",
-            "saitenka-dict-v",
-            "saitenka-dict-dist",
-        ),
-        (
             "ankiconnect-client-release.yml",
             "ankiconnect-client",
             "ankiconnect-client-v",

@@ -7,6 +7,11 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Bundle the dictionary engine with Saitenka so fresh installs include the schema required by setup,
+  doctor, and dictionary access, without depending on a separately published dictionary package.
+
 ## [4.5.0] - 2026-09-23
 
 ### Changed
