@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.5.1] - 2026-09-23
+
 ### Fixed
 
 - Bundle the dictionary engine with Saitenka so fresh installs include the schema required by setup,
