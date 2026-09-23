@@ -2,11 +2,20 @@
 root_packages =
     saitenka
     saitenka_card
+    saitenka_dict
     saitenka_subtitles
     saitenka_tokenize
     saitenka_wordstate
 include_external_packages = True
 exclude_type_checking_imports = True
+
+[importlinter:contract:dictionary-package-is-independent]
+name = The dictionary package never imports the application
+type = forbidden
+source_modules =
+    saitenka_dict
+forbidden_modules =
+    saitenka
 
 [importlinter:contract:subtitle-package-is-independent]
 name = The subtitle package never imports the application it was extracted from

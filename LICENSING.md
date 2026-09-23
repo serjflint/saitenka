@@ -5,7 +5,7 @@ This repository is **mixed-license**. Read this before redistributing.
 | Path | License | Notes |
 |---|---|---|
 | `src/saitenka/` (`saitenka`) | **Apache-2.0** | The core: renderer, reader, mining, CLI, installers. |
-| `saitenka-dict/` (`saitenka-dict`) | **Apache-2.0** | Independent dictionary import/lookup contracts. Optional repository-only test tooling loads the GPL Yomitan oracle from an external checkout. |
+| `saitenka-dict/` (`saitenka_dict`, bundled in Saitenka) | **Apache-2.0** | Independent dictionary import/lookup contracts. Optional repository-only test tooling loads the GPL Yomitan oracle from an external checkout. |
 | `ankiconnect-client/` (`ankiconnect-client`) | **Apache-2.0** | Independent stdlib-only AnkiConnect client. |
 | `tools/`, `install/` | **Apache-2.0** | Anki/FSRS engine + installers. |
 | `deinflect/` (`saitenka-deinflect`) | **GPL-3.0-or-later** | Derived from [Yomitan](https://github.com/yomidevs/yomitan) — see `deinflect/NOTICE`. |
