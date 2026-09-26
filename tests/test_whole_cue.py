@@ -520,3 +520,16 @@ def test_a_refused_family_is_named_only_when_installing_it_would_help(*, install
 )
 def test_placement_ignores_outline_but_not_position_size_or_owner(other, *, same):
     assert same_placement((FillLayer(0, 10, 20, 2, 1, b"\xff\x00"),), (other,)) is same
+
+
+def test_no_family_is_named_where_every_family_is_refused():
+    """Two font providers make every family unsafe; installing one would change nothing."""
+    source, prepared = prepared_source()
+    cue = osd_template(
+        source,
+        prepared,
+        fonts_blocked=True,
+        blocked_families=frozenset({"arial"}),
+        installable_families=frozenset({"arial"}),
+    )
+    assert (cue.osd_reason, cue.missing_fonts) == ("font-access", ())

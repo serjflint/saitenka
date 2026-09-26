@@ -687,7 +687,7 @@ def test_the_osd_counts_an_installed_family_only_when_it_draws_like_the_attachme
         )
 
     answers = faces_drawn_as_own(
-        [(attached, probe) for probe in font_names.probes(attached)],
+        font_names.probes(attached),
         FontSetup(fonts_dir=str(tmp_path), font_provider=FontProvider.NONE),
     )
 

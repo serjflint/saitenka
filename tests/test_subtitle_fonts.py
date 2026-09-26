@@ -556,3 +556,92 @@ def test_a_family_counts_as_installed_only_when_every_attached_face_does(tmp_pat
 
     assert reach.blocks("signs")
     assert "signs" in reach.installable
+
+
+def _collection(*faces: bytes) -> bytes:
+    from io import BytesIO
+
+    from fontTools.ttLib import TTCollection, TTFont
+
+    collection = TTCollection()
+    collection.fonts = [TTFont(BytesIO(face)) for face in faces]
+    buffer = BytesIO()
+    collection.save(buffer)
+    return buffer.getvalue()
+
+
+def _italic(face: bytes) -> bytes:
+    """`fsSelection` italic with `macStyle` upright: libass reads the first, real fonts disagree."""
+    from io import BytesIO
+
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(BytesIO(face))
+    font["OS/2"].fsSelection |= 1
+    font["head"].macStyle &= ~2
+    buffer = BytesIO()
+    font.save(buffer)
+    return buffer.getvalue()
+
+
+def test_each_face_of_a_collection_is_judged_alone(tmp_path, monkeypatch):
+    """Handed the whole collection, the reference renderer answers an italic request with the
+    upright sibling, and an italic nobody installed passes on the upright's outlines."""
+    util.requires_libass()
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "regular.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv 0123!"))
+    attached = _collection(
+        util.drawable_font("Signs"), _italic(util.drawable_font("Signs", design="NotoSansJP.ttf"))
+    )
+    monkeypatch.setattr(
+        subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttc", attached),)
+    )
+    monkeypatch.setattr(subtitle_fonts, "_PROBED", {})
+
+    reach = subtitle_fonts.resolve(
+        expand=expander(None),
+        settings={
+            "embeddedfonts": True,
+            "osd-fonts-dir": str(fonts),
+            "osd-font-provider": "none",
+            "sub-font-provider": "none",
+        },
+        video=tmp_path / "episode.mkv",
+        cache_dir=tmp_path,
+    ).osd_unreachable()
+
+    assert reach.blocks("signs")
+
+
+def test_a_cached_answer_reads_no_font_again(tmp_path, monkeypatch):
+    """Probing parses every face's cmap. A track switch in a release that attaches a dozen CJK faces
+    would pay that again for an answer it already has."""
+    util.requires_libass()
+    attached = util.drawable_font("Signs")
+    monkeypatch.setattr(
+        subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttf", attached),)
+    )
+    monkeypatch.setattr(subtitle_fonts, "_PROBED", {})
+    parsed = []
+    real = subtitle_fonts.font_names.probes
+    monkeypatch.setattr(
+        subtitle_fonts.font_names, "probes", lambda data: parsed.append(data) or real(data)
+    )
+
+    def load() -> None:
+        subtitle_fonts.resolve(
+            expand=expander(None),
+            settings={
+                "embeddedfonts": True,
+                "osd-font-provider": "none",
+                "sub-font-provider": "none",
+            },
+            video=tmp_path / "episode.mkv",
+            cache_dir=tmp_path,
+        )
+
+    load()
+    load()
+
+    assert len(parsed) == 1

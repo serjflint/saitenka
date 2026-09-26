@@ -266,7 +266,8 @@ def osd_template(
     doc = _document(source)
     used = _cue_fonts(doc, prepared)
     blocked = _named(used, blocked_families)
-    missing = _named(used, blocked_families & installable_families)
+    # With every family refused, installing one would change nothing.
+    missing = () if fonts_blocked else _named(used, blocked_families & installable_families)
     blockers = ["font-access"] if fonts_blocked or blocked else []
     if frame is None and doc.info.get("Kerning", "no").casefold() != "yes":
         blockers.append("kerning")

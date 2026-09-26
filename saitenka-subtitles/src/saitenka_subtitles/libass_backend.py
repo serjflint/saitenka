@@ -172,13 +172,12 @@ def _renderer_for(
 def _drawn_as_own(
     factory: RendererFactory,
     osd: NativeRenderer,
-    data: bytes,
     probe: font_names.FaceProbe,
     library_path: Path | None,
 ) -> bool:
     document = _probe_document(probe)
     reference = _renderer_for(
-        factory, document, fonts=[("face", data)], setup=None, library_path=library_path
+        factory, document, fonts=[("face", probe.face)], setup=None, library_path=library_path
     )
     try:
         own = _ink(reference)
@@ -189,36 +188,39 @@ def _drawn_as_own(
 
 
 def faces_drawn_as_own(
-    faces: Sequence[tuple[bytes, font_names.FaceProbe]],
+    probes: Sequence[font_names.FaceProbe],
     setup: FontSetup,
     *,
     library_path: Path | None = None,
     renderer_factory: RendererFactory | None = None,
 ) -> tuple[bool, ...]:
-    """Whether `setup`'s provider, asked by family name, draws each attachment face as its own.
+    """Whether `setup`'s provider, asked by family name, draws each attached face as its own.
 
-    Asked with no attachments loaded, as mpv's OSD library is, and compared by ink against the
-    attachment alone. Asking by name finds what the OSD will actually use for that name: another
-    build of the face passes, while a metric-compatible clone a provider substitutes for the name,
-    or its generic fallback, does not. Any failure answers "no" for that face, which keeps it
-    refused. One OSD renderer serves every face, so the provider is initialized once.
+    Asked with no attachments loaded, as mpv's OSD library is, and compared by ink against the face
+    alone. Asking by name finds what the OSD will actually use for that name: another build of the
+    face passes, while a metric-compatible clone a provider substitutes for the name, or its
+    generic fallback, does not. A face that cannot be asked about, or any failure, answers "no",
+    which keeps it refused. One OSD renderer serves every face, so the provider starts once.
     """
-    answers = [False] * len(faces)
-    if not faces:
-        return ()
+    answers = [False] * len(probes)
+    askable = [
+        index
+        for index, probe in enumerate(probes)
+        if probe.family and probe.sample and probe.face and "," not in probe.family
+    ]
+    if not askable:
+        return tuple(answers)
     osd: NativeRenderer | None = None
     try:
         factory = renderer_factory or cast(
             "RendererFactory", importlib.import_module("libasslite").AssRenderer
         )
-        osd = _renderer_for(
-            factory, _probe_document(faces[0][1]), fonts=[], setup=setup, library_path=library_path
-        )
-        for index, (data, probe) in enumerate(faces):
-            if "," in probe.family:
-                continue
+        first = _probe_document(probes[askable[0]])
+        osd = _renderer_for(factory, first, fonts=[], setup=setup, library_path=library_path)
+        for index in askable:
+            probe = probes[index]
             try:
-                answers[index] = _drawn_as_own(factory, osd, data, probe, library_path)
+                answers[index] = _drawn_as_own(factory, osd, probe, library_path)
             except (OSError, RuntimeError, ValueError, TypeError) as error:
                 log.debug("could not probe the installed face of %s: %s", probe.family, error)
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as error:

@@ -80,13 +80,19 @@ _PROBE_GLYPHS = 24
 
 @dataclass(frozen=True, slots=True)
 class FaceProbe:
-    """How to ask a font provider for one face by name, and text only that face would draw."""
+    """How to ask a font provider for one face by name, and text only that face would draw.
+
+    `face` is that face alone: a collection's other faces would let a renderer answer with a
+    sibling. An empty `family` or `sample` marks a face that cannot be asked about; its `names`
+    still count, so a sibling that passes cannot vouch for them.
+    """
 
     family: str
     names: frozenset[str]
     bold: bool
     italic: bool
     sample: str
+    face: bytes = b""
 
 
 def _sample(font: TTFont) -> str:
@@ -104,35 +110,55 @@ def _sample(font: TTFont) -> str:
     return "".join(drawable[::step][:_PROBE_GLYPHS])
 
 
-def _probe(font: TTFont) -> FaceProbe | None:
-    try:
-        table = font["name"]
-        # The Windows record first: it is the one libass indexes, and a Mac record can differ
-        # ("Hiragino Sans" against "Hiragino Sans W3") and name a family libass never finds.
-        record = table.getName(1, 3, 1, 0x409) or table.getName(1, 3, 1)
-        family = record.toUnicode() if record is not None else table.getDebugName(1)
-        # fontTools builds table attributes at decompile time, so the stubs cannot name them.
-        weight = getattr(font["OS/2"], "usWeightClass", 400) if "OS/2" in font else 400
+def _style(font: TTFont) -> tuple[bool, bool]:
+    """Bold and italic as libass reads them: from OS/2, which a face's `macStyle` can contradict."""
+    # fontTools builds table attributes at decompile time, so the stubs cannot name them.
+    if "OS/2" in font:
+        os2 = font["OS/2"]
+        weight = getattr(os2, "usWeightClass", 400)
+        italic = bool(getattr(os2, "fsSelection", 0) & 1)
+    else:
+        weight = 400
         italic = bool(getattr(font["head"], "macStyle", 0) & 2)
+    return weight >= 600, italic
+
+
+def _family(font: TTFont) -> str:
+    table = font["name"]
+    # The Windows record first: it is the one libass indexes, and a Mac record can differ
+    # ("Hiragino Sans" against "Hiragino Sans W3") and name a family libass never finds.
+    record = table.getName(1, 3, 1, 0x409) or table.getName(1, 3, 1)
+    return (record.toUnicode() if record is not None else table.getDebugName(1) or "").strip()
+
+
+def _alone(font: TTFont) -> bytes:
+    buffer = BytesIO()
+    font.save(buffer)
+    return buffer.getvalue()
+
+
+def _probe(font: TTFont, face: bytes) -> FaceProbe | None:
+    names = frozenset(_names(font))
+    if not names:
+        return None
+    try:
+        family = _family(font)
+        bold, italic = _style(font)
     except (TTLibError, KeyError, AssertionError, struct.error):
-        return None
-    sample = _sample(font)
-    if not family or not sample:
-        return None
-    return FaceProbe(family.strip(), frozenset(_names(font)), weight >= 600, italic, sample)
+        return FaceProbe("", names, bold=False, italic=False, sample="")
+    return FaceProbe(family, names, bold, italic, _sample(font), face)
 
 
 def probes(data: bytes) -> tuple[FaceProbe, ...]:
-    """One probe per face in the bytes; a face without a family name or a drawable glyph has none."""
+    """One probe per named face in the bytes, each carrying that face alone."""
     if not data or len(data) > _MAX_FONT_BYTES:
         return ()
     try:
-        fonts = (
-            TTCollection(BytesIO(data), lazy=True).fonts
-            if data[:4] == b"ttcf"
-            else [TTFont(BytesIO(data), lazy=True, fontNumber=0)]
-        )
-        return tuple(probe for font in fonts if (probe := _probe(font)) is not None)
+        if data[:4] != b"ttcf":
+            probe = _probe(TTFont(BytesIO(data), lazy=True, fontNumber=0), data)
+            return () if probe is None else (probe,)
+        faces = TTCollection(BytesIO(data), lazy=True).fonts
+        return tuple(probe for font in faces if (probe := _probe(font, _alone(font))) is not None)
     except (TTLibError, OSError, ValueError, KeyError, IndexError, struct.error) as error:
         log.debug("could not read a font for probing: %s", error)
         return ()

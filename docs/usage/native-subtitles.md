@@ -52,8 +52,8 @@ between two shadow renders, not a measurement of mpv's displayed pixels. Libass/
 between installations still require live qualification.
 
 mpv's OSD cannot load a font the video carries as an attachment, only fonts installed on the
-system or placed in `osd-fonts-dir`. At each track load Saitenka asks for every attached face by
-family name, the way the OSD asks, and compares a sample of its glyphs with the attachment's own.
+system or placed in `osd-fonts-dir`. When a track loads, Saitenka asks for every attached face by
+family name, the way the OSD asks, and compares a sample of its glyphs with that face alone.
 A family counts as installed only when every attached face of it draws the same; a
 metric-compatible substitute or a generic fallback does not. For such a family, each cue must
 still lay out like the attachment's, with every token's box within a pixel of its place. When the
