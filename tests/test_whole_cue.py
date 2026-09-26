@@ -492,10 +492,19 @@ def test_an_installed_substitute_is_left_to_qualification_not_refused():
     assert (cue.osd_reason, cue.substituted, cue.missing_fonts) == ("eligible", True, ())
 
 
-def test_a_family_the_osd_cannot_load_is_named_as_the_document_spells_it():
+@pytest.mark.parametrize(("installable", "named"), [(True, ("Arial",)), (False, ())])
+def test_a_refused_family_is_named_only_when_installing_it_would_help(*, installable, named):
+    """A document's own `[Fonts]` family is refused whether or not it is installed, so asking the
+    user to install it would send them to do something that changes nothing."""
     source, prepared = prepared_source()
-    cue = osd_template(source, prepared, fonts_blocked=False, blocked_families=frozenset({"arial"}))
-    assert (cue.osd_reason, cue.missing_fonts) == ("font-access", ("Arial",))
+    cue = osd_template(
+        source,
+        prepared,
+        fonts_blocked=False,
+        blocked_families=frozenset({"arial"}),
+        installable_families=frozenset({"arial"}) if installable else frozenset(),
+    )
+    assert (cue.osd_reason, cue.missing_fonts) == ("font-access", named)
 
 
 @pytest.mark.parametrize(

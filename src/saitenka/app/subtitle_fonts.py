@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -108,6 +109,9 @@ class OsdReach:
     #: Families the video carries that the OSD finds installed under the same name. Not refused:
     #: the per-cue qualification compares what they draw against the attachment.
     substituted: frozenset[str] = frozenset()
+    #: Refused families that installing would make reachable: the video's attachments, not a
+    #: document's own `[Fonts]` or a `--sub-fonts-dir` the OSD does not read.
+    installable: frozenset[str] = frozenset()
 
     def blocks(self, family: str) -> bool:
         return self.all_unsafe or family in self.families
@@ -176,6 +180,7 @@ class FontEnvironment:
             | measured,
             all_unsafe=not self.osd_shares_provider,
             substituted=attached & self.osd_installed_families,
+            installable=attached - self.osd_installed_families,
         )
 
     @property
@@ -271,42 +276,75 @@ def _osd_attachment_families(
     return frozenset(available)
 
 
-#: Faces the OSD was found to draw as their own, by (face digest, OSD font setup). Only the "yes"
-#: answers are kept: the notice asks the user to install a font, and the next track load has to
-#: see it without a restart.
-_INSTALLED: dict[tuple[bytes, FontSetup], frozenset[str]] = {}
-_INSTALLED_MAX = 256
+#: Per attachment (digest, OSD font setup): whether the OSD draws each of its faces as its own, and
+#: when that was asked. An all-yes answer is kept for the session. Any "no" expires, because the
+#: notice asks the user to install the font and a later track load has to see it without a restart —
+#: but not per track load, which would pay a provider build for every switch in a font-heavy release.
+_PROBED: dict[tuple[bytes, FontSetup], tuple[tuple[bool, ...], float]] = {}
+_PROBED_MAX = 256
+NEGATIVE_TTL_S = 120.0
+
+
+def _is_current(digest: bytes, setup: FontSetup, now: float) -> bool:
+    known = _PROBED.get((digest, setup))
+    return known is not None and (all(known[0]) or now - known[1] <= NEGATIVE_TTL_S)
+
+
+def _probe_attachments(
+    stale: list[tuple[bytes, bytes]],
+    probes: dict[bytes, tuple[font_names.FaceProbe, ...]],
+    setup: FontSetup,
+    now: float,
+) -> None:
+    try:
+        from saitenka_subtitles.libass_backend import faces_drawn_as_own
+    except ImportError:
+        return
+    faces = [(data, probe) for digest, data in stale for probe in probes[digest]]
+    answers = iter(faces_drawn_as_own(faces, setup))
+    if len(_PROBED) >= _PROBED_MAX:
+        _PROBED.clear()
+    for digest, _data in stale:
+        _PROBED[digest, setup] = (tuple(next(answers) for _ in probes[digest]), now)
+
+
+def _face_answers(
+    attachments: list[tuple[bytes, bytes]], setup: FontSetup
+) -> dict[bytes, tuple[tuple[font_names.FaceProbe, bool], ...]]:
+    """Each attachment's faces paired with whether the OSD draws them as their own."""
+    now = time.monotonic()
+    probes = {digest: font_names.probes(data) for digest, data in attachments}
+    stale = [(d, data) for d, data in attachments if not _is_current(d, setup, now)]
+    if stale:
+        _probe_attachments(stale, probes, setup, now)
+    answered = {digest: _PROBED.get((digest, setup)) for digest, _data in attachments}
+    return {
+        digest: tuple(zip(probes[digest], known[0], strict=False))
+        for digest, known in answered.items()
+        if known is not None
+    }
 
 
 def _osd_installed_families(
     attachments: tuple[tuple[str, bytes], ...], covered: frozenset[str], setup: FontSetup
 ) -> frozenset[str]:
-    """Which attachment families the OSD's provider draws as the attachment does, asked by name."""
-    found: set[str] = set()
-    unknown: list[tuple[bytes, bytes]] = []
-    for _name, data in attachments:
-        if font_names.families(data) <= covered:
-            continue
-        digest = hashlib.sha256(data).digest()
-        if (known := _INSTALLED.get((digest, setup))) is not None:
-            found |= known
-        else:
-            unknown.append((digest, data))
-    if not unknown:
-        return frozenset(found)
-    try:
-        from saitenka_subtitles.libass_backend import installed_families
-    except ImportError:
-        return frozenset(found)
-    for digest, data in unknown:
-        if installed := installed_families(
-            ((data, probe) for probe in font_names.probes(data)), setup
-        ):
-            if len(_INSTALLED) >= _INSTALLED_MAX:
-                _INSTALLED.clear()
-            _INSTALLED[digest, setup] = installed
-            found |= installed
-    return frozenset(found)
+    """The attachment families whose every attached face the OSD draws as its own, asked by name.
+
+    Per family, not per face: a style asks for a family and a weight, and a family with one face
+    installed and another missing would otherwise pass on the face nobody asked for.
+    """
+    wanted = [
+        (hashlib.sha256(data).digest(), data)
+        for _name, data in attachments
+        if not font_names.families(data) <= covered
+    ]
+    passed: set[str] = set()
+    failed: set[str] = set()
+    for pairs in _face_answers(wanted, setup).values():
+        for probe, drawn in pairs:
+            names = probe.names | {font_names.key(probe.family)}
+            (passed if drawn else failed).update(names)
+    return frozenset(passed - failed)
 
 
 def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:
@@ -462,7 +500,10 @@ def resolve(
         == setup.font_provider,
         osd_attachment_families=osd_attachment_families,
         osd_setup=osd_setup,
+        # Two providers make every family unsafe whatever is installed: nothing to ask.
         osd_installed_families=_osd_installed_families(
             attachments, osd_attachment_families, osd_setup
-        ),
+        )
+        if osd_setup.font_provider == setup.font_provider
+        else frozenset(),
     )

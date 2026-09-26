@@ -31,7 +31,7 @@ from saitenka_subtitles.telemetry import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Sequence
     from pathlib import Path
 
     from saitenka_subtitles.document import SubtitleEventId
@@ -169,53 +169,64 @@ def _renderer_for(
     )
 
 
-def installed_families(
-    faces: Iterable[tuple[bytes, font_names.FaceProbe]],
+def _drawn_as_own(
+    factory: RendererFactory,
+    osd: NativeRenderer,
+    data: bytes,
+    probe: font_names.FaceProbe,
+    library_path: Path | None,
+) -> bool:
+    document = _probe_document(probe)
+    reference = _renderer_for(
+        factory, document, fonts=[("face", data)], setup=None, library_path=library_path
+    )
+    try:
+        own = _ink(reference)
+    finally:
+        reference.close()
+    osd.set_document(document, [])
+    return bool(own.any()) and _overlap(_ink(osd), own) >= SAME_DESIGN_OVERLAP
+
+
+def faces_drawn_as_own(
+    faces: Sequence[tuple[bytes, font_names.FaceProbe]],
     setup: FontSetup,
     *,
     library_path: Path | None = None,
     renderer_factory: RendererFactory | None = None,
-) -> frozenset[str]:
-    """The names of attachment faces that `setup`'s provider draws, by family name, as their own.
+) -> tuple[bool, ...]:
+    """Whether `setup`'s provider, asked by family name, draws each attachment face as its own.
 
     Asked with no attachments loaded, as mpv's OSD library is, and compared by ink against the
     attachment alone. Asking by name finds what the OSD will actually use for that name: another
-    version of the face passes, while a metric-compatible clone a provider substitutes for the name,
-    or its generic fallback, does not. Any failure answers "none", which keeps the family refused.
+    build of the face passes, while a metric-compatible clone a provider substitutes for the name,
+    or its generic fallback, does not. Any failure answers "no" for that face, which keeps it
+    refused. One OSD renderer serves every face, so the provider is initialized once.
     """
-    wanted = [(data, probe) for data, probe in faces if "," not in probe.family]
-    if not wanted:
-        return frozenset()
+    answers = [False] * len(faces)
+    if not faces:
+        return ()
     osd: NativeRenderer | None = None
-    found: set[str] = set()
     try:
         factory = renderer_factory or cast(
             "RendererFactory", importlib.import_module("libasslite").AssRenderer
         )
-        for data, probe in wanted:
-            document = _probe_document(probe)
-            reference = _renderer_for(
-                factory, document, fonts=[("face", data)], setup=None, library_path=library_path
-            )
+        osd = _renderer_for(
+            factory, _probe_document(faces[0][1]), fonts=[], setup=setup, library_path=library_path
+        )
+        for index, (data, probe) in enumerate(faces):
+            if "," in probe.family:
+                continue
             try:
-                own = _ink(reference)
-            finally:
-                reference.close()
-            if osd is None:
-                osd = _renderer_for(
-                    factory, document, fonts=[], setup=setup, library_path=library_path
-                )
-            else:
-                osd.set_document(document, [])
-            if own.any() and _overlap(_ink(osd), own) >= SAME_DESIGN_OVERLAP:
-                found |= probe.names | {font_names.key(probe.family)}
+                answers[index] = _drawn_as_own(factory, osd, data, probe, library_path)
+            except (OSError, RuntimeError, ValueError, TypeError) as error:
+                log.debug("could not probe the installed face of %s: %s", probe.family, error)
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as error:
         log.debug("could not ask the font provider for installed families: %s", error)
-        return frozenset()
     finally:
         if osd is not None:
             osd.close()
-    return frozenset(found)
+    return tuple(answers)
 
 
 @dataclass(frozen=True, slots=True)

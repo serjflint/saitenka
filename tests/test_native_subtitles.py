@@ -4276,8 +4276,8 @@ def test_a_missing_font_is_not_toasted_where_the_raster_still_colors(
 def test_a_new_font_environment_asks_again(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Once per font environment, not once per session: the next episode that carries the same
-    uninstalled font is a new chance to act on it."""
+    """Once per font environment, not once per session: a track that brings a different set of
+    fonts is asked about again, even for a family already named."""
     import util
 
     from saitenka.app import subtitle_fonts

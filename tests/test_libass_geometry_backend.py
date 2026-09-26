@@ -676,7 +676,7 @@ def test_the_osd_counts_an_installed_family_only_when_it_draws_like_the_attachme
     against the attachment alone: a provider that answers the name with another design is not the
     video's font, whatever it is called."""
     from saitenka_subtitles import font_names
-    from saitenka_subtitles.libass_backend import installed_families
+    from saitenka_subtitles.libass_backend import faces_drawn_as_own
     from util import drawable_font, requires_libass
 
     requires_libass()
@@ -686,9 +686,9 @@ def test_the_osd_counts_an_installed_family_only_when_it_draws_like_the_attachme
             drawable_font("Saitenka Probe Sans", "Hamburgefonstiv 0123!", design=installed)
         )
 
-    result = installed_families(
-        ((attached, probe) for probe in font_names.probes(attached)),
+    answers = faces_drawn_as_own(
+        [(attached, probe) for probe in font_names.probes(attached)],
         FontSetup(fonts_dir=str(tmp_path), font_provider=FontProvider.NONE),
     )
 
-    assert ("saitenka probe sans" in result) is found
+    assert answers == (found,)

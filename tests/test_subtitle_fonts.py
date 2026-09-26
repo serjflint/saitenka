@@ -469,6 +469,7 @@ def test_an_attachment_installed_under_its_name_is_substituted_not_refused(
 ):
     """The OSD cannot load the video's copy of a family, but it can load an installed one of the
     same name — another version, other bytes. That family goes to the per-cue qualification."""
+    util.requires_libass()
     fonts = tmp_path / "fonts"
     fonts.mkdir()
     if installed:
@@ -477,7 +478,7 @@ def test_an_attachment_installed_under_its_name_is_substituted_not_refused(
     monkeypatch.setattr(
         subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttf", attached),)
     )
-    monkeypatch.setattr(subtitle_fonts, "_INSTALLED", {})
+    monkeypatch.setattr(subtitle_fonts, "_PROBED", {})
 
     reach = subtitle_fonts.resolve(
         expand=expander(None),
@@ -495,15 +496,17 @@ def test_an_attachment_installed_under_its_name_is_substituted_not_refused(
 
 
 def test_a_font_installed_after_the_notice_is_found_on_the_next_track_load(tmp_path, monkeypatch):
-    """The notice asks the user to install the font. A cached "not installed" would keep refusing
-    it until Saitenka restarted, so only the finds are remembered."""
+    """The notice asks the user to install the font. A "not installed" kept for the session would
+    keep refusing it until Saitenka restarted, so that answer expires."""
+    util.requires_libass()
+    monkeypatch.setattr(subtitle_fonts, "NEGATIVE_TTL_S", 0.0)
     fonts = tmp_path / "fonts"
     fonts.mkdir()
     attached = util.drawable_font("Signs")
     monkeypatch.setattr(
         subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttf", attached),)
     )
-    monkeypatch.setattr(subtitle_fonts, "_INSTALLED", {})
+    monkeypatch.setattr(subtitle_fonts, "_PROBED", {})
 
     def reach():
         return subtitle_fonts.resolve(
@@ -521,3 +524,35 @@ def test_a_font_installed_after_the_notice_is_found_on_the_next_track_load(tmp_p
     assert reach().blocks("signs")
     (fonts / "installed.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv 0123!"))
     assert not reach().blocks("signs")
+
+
+def test_a_family_counts_as_installed_only_when_every_attached_face_does(tmp_path, monkeypatch):
+    """A style asks for a family and a weight. With the regular face installed and the bold one
+    not, a bold cue would be painted in a face the OSD synthesizes from the regular one."""
+    util.requires_libass()
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "regular.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv 0123!"))
+    regular = util.drawable_font("Signs")
+    bold = util.drawable_font("Signs", design="NotoSansJP.ttf")
+    monkeypatch.setattr(
+        subtitle_fonts,
+        "container_fonts",
+        lambda *_args, **_kw: (("regular.ttf", regular), ("bold.ttf", bold)),
+    )
+    monkeypatch.setattr(subtitle_fonts, "_PROBED", {})
+
+    reach = subtitle_fonts.resolve(
+        expand=expander(None),
+        settings={
+            "embeddedfonts": True,
+            "osd-fonts-dir": str(fonts),
+            "osd-font-provider": "none",
+            "sub-font-provider": "none",
+        },
+        video=tmp_path / "episode.mkv",
+        cache_dir=tmp_path,
+    ).osd_unreachable()
+
+    assert reach.blocks("signs")
+    assert "signs" in reach.installable

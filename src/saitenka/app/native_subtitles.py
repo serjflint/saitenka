@@ -1585,6 +1585,7 @@ class NativeSubtitleGeometry:
                         fonts_blocked=unreachable.all_unsafe,
                         blocked_families=unreachable.families,
                         substituted_families=unreachable.substituted,
+                        installable_families=unreachable.installable,
                         frame=cue.frame_size,
                         margins=cue.margins,
                     )

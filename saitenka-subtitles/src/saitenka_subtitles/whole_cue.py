@@ -52,8 +52,8 @@ class WholeCue:
     #: Styles name a family the video carries and the OSD holds only as an installed face — the
     #: qualification then compares placement, since another version of a face differs in outline.
     substituted: bool = False
-    #: Families, as the document spells them, that refused this cue because the OSD cannot load
-    #: them at all.
+    #: Families, as the document spells them, that refused this cue and that installing would
+    #: make available to the OSD.
     missing_fonts: tuple[str, ...] = ()
 
     @property
@@ -260,12 +260,14 @@ def osd_template(
     margins: tuple[int, int, int, int] = (0, 0, 0, 0),
     blocked_families: frozenset[str] = frozenset(),
     substituted_families: frozenset[str] = frozenset(),
+    installable_families: frozenset[str] = frozenset(),
 ) -> WholeCue:
     """Lower static events; the worker qualifies final whole-cue glyph geometry."""
     doc = _document(source)
     used = _cue_fonts(doc, prepared)
-    missing = _named(used, blocked_families)
-    blockers = ["font-access"] if fonts_blocked or missing else []
+    blocked = _named(used, blocked_families)
+    missing = _named(used, blocked_families & installable_families)
+    blockers = ["font-access"] if fonts_blocked or blocked else []
     if frame is None and doc.info.get("Kerning", "no").casefold() != "yes":
         blockers.append("kerning")
     if frame is None and doc.info.get("WrapStyle", "0") != "2":

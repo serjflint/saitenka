@@ -106,7 +106,11 @@ def _sample(font: TTFont) -> str:
 
 def _probe(font: TTFont) -> FaceProbe | None:
     try:
-        family = font["name"].getDebugName(1)
+        table = font["name"]
+        # The Windows record first: it is the one libass indexes, and a Mac record can differ
+        # ("Hiragino Sans" against "Hiragino Sans W3") and name a family libass never finds.
+        record = table.getName(1, 3, 1, 0x409) or table.getName(1, 3, 1)
+        family = record.toUnicode() if record is not None else table.getDebugName(1)
         # fontTools builds table attributes at decompile time, so the stubs cannot name them.
         weight = getattr(font["OS/2"], "usWeightClass", 400) if "OS/2" in font else 400
         italic = bool(getattr(font["head"], "macStyle", 0) & 2)
