@@ -143,6 +143,8 @@ class EffectCorrelator:
             owner,
             on_finished,
             connection_epoch=str(self.connection_epoch),
+            # A label names what the write was for; a structured identity is a fence, not a name.
+            **({"identity": identity} if isinstance(identity, str) else {}),
         )
         deadline = now + timeout_s
         target = SendMpvCommand(
