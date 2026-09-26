@@ -463,7 +463,11 @@ def _mpv_conf_entry(line: str) -> tuple[str, str] | None:
         return (name.removeprefix("no-"), "no") if name.startswith("no-") else (name, "yes")
     name, _separator, raw = line.partition("=")
     name = name.strip().removeprefix("--")
-    return _ALIASES.get(name, name), _mpv_conf_value(raw)
+    for suffix in ("", "-append", "-clr"):
+        base = name.removesuffix(suffix) if suffix else name
+        if (suffix == "" or name.endswith(suffix)) and base in _ALIASES:
+            return _ALIASES[base] + suffix, _mpv_conf_value(raw)
+    return name, _mpv_conf_value(raw)
 
 
 def _mpv_conf_top_level(path: Path) -> list[tuple[str, str]]:
@@ -474,7 +478,8 @@ def _mpv_conf_top_level(path: Path) -> list[tuple[str, str]]:
         stripped = line.strip()
         if stripped.startswith("["):
             # `[]` names the default profile too (`m_config_add_profile`).
-            active = stripped[1:].partition("]")[0].strip() in {"", "default"}
+            # Not stripped: mpv reads `[ default ]` as a profile named " default ".
+            active = stripped[1:].partition("]")[0] in {"", "default"}
         elif active and (entry := _mpv_conf_entry(line)) is not None:
             entries.append(entry)
     return entries

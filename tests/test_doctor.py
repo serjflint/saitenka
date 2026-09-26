@@ -1188,6 +1188,7 @@ def test_a_refused_mpv_conf_subtitle_setting_is_named(tmp_path, monkeypatch, lin
         ("sub-ass-justify  # re-justify, sub-scale=2\n", "sub-ass-justify=yes"),
         ("[]\nsub-ass-override=force\n", "sub-ass-override=force"),
         ("sub-ass-force-style=PrimaryColour=&H0000FFFF\n", "the colored track"),
+        ("sub-ass-force-style-append=PrimaryColour=&H0000FFFF\n", "the colored track"),
         ("sub-ass-styles=~~/styles.ass\n", "sub-ass-styles=~~/styles.ass"),
         ("sub-ass-override='force'\n", "hover and the colored track"),
         (
@@ -1216,6 +1217,8 @@ def test_the_subtitle_option_check_reads_mpv_conf_as_mpv_does(tmp_path, monkeypa
         "sub-ass-style-overrides=PrimaryColour=&H0000FFFF\nsub-ass-style-overrides-clr\n",
         # Loaded only once the override is on.
         "sub-ass-override=no\nsub-ass-styles=~~/styles.ass\n",
+        # A profile named " default ", which mpv does not apply.
+        "[ default ]\nsub-ass-override=force\n",
     ],
 )
 def test_a_setting_mpv_does_not_apply_to_authored_tracks_is_not_named(tmp_path, monkeypatch, conf):
