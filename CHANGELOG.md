@@ -7,6 +7,13 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- A subtitle font the video carries as an attachment no longer turns off whole-cue OSD coloring
+  when the same font is installed, including another version of it. Each cue still has to lay out
+  like the attachment's. When the font is not installed, `whole-cue-osd` asks once to install it
+  before falling back.
+
 ## [4.7.0] - 2026-09-26
 
 ### Added

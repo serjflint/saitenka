@@ -617,3 +617,78 @@ def test_whole_cue_telemetry_encloses_build_and_osd_render(monkeypatch):
     assert phases["subtitle_geometry_libass"]["render_cpu_ms"] == 20.0
     assert phases["subtitle_geometry_libass"]["extract_cpu_ms"] == 0.0
     assert dict(snapshot.whole_cue.evidence)["qualification_cpu_ms"] == 30.0
+
+
+@pytest.mark.parametrize(
+    ("substituted", "shift", "reason"),
+    [
+        (True, 1, "eligible"),
+        # The negative controls: a substitute that moves a glyph, and an exact-only cue.
+        (True, 2, "shape-mismatch"),
+        (False, 1, "shape-mismatch"),
+    ],
+)
+def test_an_installed_substitute_qualifies_on_placement_not_on_outline(
+    *, substituted: bool, shift: int, reason: str
+) -> None:
+    """Another version of a family redraws an outline, which moves an ink edge by a pixel and leaves
+    the glyph where it was. Only a cue whose family was substituted is judged on that."""
+    from saitenka_subtitles.whole_cue import OsdEvent, WholeCue
+
+    subtitle = Result((Layer(2, 1, b"\xff\x00", 0x01020300, 10, 20),))
+    osd = Result((Layer(2, 1, b"\x7f\x00", 0x01020300, 10 + shift, 20),))
+
+    def factory(ass, **_kwargs):
+        return FakeRenderer(subtitle if ass == b"ass" else osd, ass)
+
+    backend = LibassGeometryBackend(renderer_factory=factory)
+    cue = WholeCue(
+        events=(OsdEvent("猫", "", ((0, 0, 1),)),),
+        resolution=(1280, 720),
+        osd_reason="eligible",
+        qualify=True,
+        substituted=substituted,
+    )
+    try:
+        snapshot = backend.render(
+            replace(request(palette_size=1), coloring="whole-cue-osd", whole_cue=cue)
+        )
+    finally:
+        backend.close()
+
+    assert snapshot.whole_cue.osd_reason == reason
+
+
+@pytest.mark.parametrize(
+    ("installed", "found"),
+    [
+        (None, False),
+        # Other bytes, same outlines: another build of the same face.
+        ("NotoSans.ttf", True),
+        # Same family name, other outlines: what a metric-compatible clone looks like.
+        ("NotoSansJP.ttf", False),
+    ],
+)
+def test_the_osd_counts_an_installed_family_only_when_it_draws_like_the_attachment(
+    tmp_path, installed: str | None, *, found: bool
+) -> None:
+    """Asked by name with no attachment loaded, as mpv's OSD library asks, then compared by ink
+    against the attachment alone: a provider that answers the name with another design is not the
+    video's font, whatever it is called."""
+    from saitenka_subtitles import font_names
+    from saitenka_subtitles.libass_backend import faces_drawn_as_own
+    from util import drawable_font, requires_libass
+
+    requires_libass()
+    attached = drawable_font("Saitenka Probe Sans")
+    if installed is not None:
+        (tmp_path / "installed.ttf").write_bytes(
+            drawable_font("Saitenka Probe Sans", "Hamburgefonstiv 0123!", design=installed)
+        )
+
+    answers = faces_drawn_as_own(
+        font_names.probes(attached),
+        FontSetup(fonts_dir=str(tmp_path), font_provider=FontProvider.NONE),
+    )
+
+    assert answers == (found,)

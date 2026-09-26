@@ -13,9 +13,11 @@ artifact resolution (`embedded_subs`), never on the interaction loop.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -104,6 +106,12 @@ class OsdReach:
 
     families: frozenset[str] = frozenset()
     all_unsafe: bool = False
+    #: Families the video carries that the OSD finds installed under the same name. Not refused:
+    #: the per-cue qualification compares what they draw against the attachment.
+    substituted: frozenset[str] = frozenset()
+    #: Refused families that installing would make reachable: the video's attachments, not a
+    #: document's own `[Fonts]` or a `--sub-fonts-dir` the OSD does not read.
+    installable: frozenset[str] = frozenset()
 
     def blocks(self, family: str) -> bool:
         return self.all_unsafe or family in self.families
@@ -133,6 +141,8 @@ class FontEnvironment:
     osd_shares_provider: bool = True
     osd_setup: FontSetup | None = None
     osd_attachment_families: frozenset[str] = frozenset()
+    #: Attachment families the OSD's provider finds installed by name.
+    osd_installed_families: frozenset[str] = frozenset()
 
     def osd_unreachable(
         self,
@@ -158,13 +168,25 @@ class FontEnvironment:
 
         Per family rather than per track, because a release whose dialogue is a system font and whose
         signs are attachment-only should lose the color on its signs, not on the whole episode.
+
+        An attachment family installed under the same name is the exception: the OSD holds a face of
+        that family, so it is handed to the per-cue qualification instead of refused.
         """
+        attached = self.attachment_families - self.osd_attachment_families
         return OsdReach(
-            (self.attachment_families - self.osd_attachment_families)
+            (attached - self.osd_installed_families)
             | (in_document if self.setup.extract_fonts else frozenset())
             | (frozenset() if self.osd_shares_fonts_dir else self.fonts_dir_families)
             | measured,
             all_unsafe=not self.osd_shares_provider,
+            substituted=attached & self.osd_installed_families,
+            # Installing cannot help where every family is refused, or for a family the document
+            # also carries in its own `[Fonts]`.
+            installable=frozenset()
+            if not self.osd_shares_provider
+            else attached
+            - self.osd_installed_families
+            - (in_document if self.setup.extract_fonts else frozenset()),
         )
 
     @property
@@ -258,6 +280,75 @@ def _osd_attachment_families(
         except OSError:
             continue
     return frozenset(available)
+
+
+#: Per attachment (digest, OSD font setup): each face's names and whether the OSD draws it as its
+#: own, and when that was asked. An all-yes answer is kept for the session. Any "no" expires,
+#: because the notice asks the user to install the font and a later track load has to see it
+#: without a restart — but not per track load, which would pay a provider build and a cmap parse
+#: per attachment on every switch in a font-heavy release.
+_PROBED: dict[tuple[bytes, FontSetup], tuple[tuple[tuple[frozenset[str], bool], ...], float]] = {}
+_PROBED_MAX = 256
+NEGATIVE_TTL_S = 120.0
+
+
+def _is_current(digest: bytes, setup: FontSetup, now: float) -> bool:
+    known = _PROBED.get((digest, setup))
+    return known is not None and (
+        all(drawn for _names, drawn in known[0]) or now - known[1] <= NEGATIVE_TTL_S
+    )
+
+
+def _probe_attachments(
+    stale: list[tuple[bytes, bytes]], setup: FontSetup, now: float
+) -> dict[bytes, tuple[tuple[frozenset[str], bool], ...]]:
+    """Ask about `stale` and remember the answers; returned too, so a cache clear cannot lose them."""
+    try:
+        from saitenka_subtitles.libass_backend import faces_drawn_as_own
+    except ImportError:
+        return {}
+    probes = {digest: font_names.probes(data) for digest, data in stale}
+    flat = [probe for digest, _data in stale for probe in probes[digest]]
+    answers = iter(faces_drawn_as_own(flat, setup))
+    fresh = {
+        digest: tuple(
+            (probe.names | {font_names.key(probe.family)} - {""}, next(answers))
+            for probe in probes[digest]
+        )
+        # A file whose faces could not be read at all still names its families: they count as
+        # "no", or a sibling that passed would vouch for them.
+        or ((font_names.families(data), False),)
+        for digest, data in stale
+    }
+    if len(_PROBED) + len(fresh) > _PROBED_MAX:
+        _PROBED.clear()
+    _PROBED.update({(digest, setup): (faces, now) for digest, faces in fresh.items()})
+    return fresh
+
+
+def _osd_installed_families(
+    attachments: tuple[tuple[str, bytes], ...], covered: frozenset[str], setup: FontSetup
+) -> frozenset[str]:
+    """The attachment families whose every attached face the OSD draws as its own, asked by name.
+
+    Per family, not per face: a style asks for a family and a weight, and a family with one face
+    installed and another missing would otherwise pass on the face nobody asked for.
+    """
+    now = time.monotonic()
+    wanted = [
+        (hashlib.sha256(data).digest(), data)
+        for _name, data in attachments
+        if not font_names.families(data) <= covered
+    ]
+    known = {d: entry[0] for d, _data in wanted if (entry := _PROBED.get((d, setup))) is not None}
+    if stale := [(d, data) for d, data in wanted if not _is_current(d, setup, now)]:
+        known |= _probe_attachments(stale, setup, now)
+    passed: set[str] = set()
+    failed: set[str] = set()
+    for digest, data in wanted:
+        for names, drawn in known.get(digest, ((font_names.families(data), False),)):
+            (passed if drawn else failed).update(names)
+    return frozenset(passed - failed)
 
 
 def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:
@@ -390,6 +481,14 @@ def resolve(
     attachments = container_fonts(video, cache_dir=cache_dir) if embedded and video else ()
     osd_fonts_dir = _fonts_dir(expand, settings.get("osd-fonts-dir"))
     shares_dir = osd_fonts_dir == setup.fonts_dir
+    osd_setup = FontSetup(
+        fonts_dir=osd_fonts_dir,
+        default_font=setup.default_font,
+        default_family=str(settings.get("osd-font") or "sans-serif"),
+        fontconfig_config=setup.fontconfig_config,
+        font_provider=_font_provider(settings.get("osd-font-provider")),
+    )
+    osd_attachment_families = _osd_attachment_families(attachments, osd_fonts_dir)
     return FontEnvironment(
         setup,
         attachments,
@@ -403,12 +502,12 @@ def resolve(
         osd_shares_fonts_dir=shares_dir,
         osd_shares_provider=_font_provider(settings.get("osd-font-provider"))
         == setup.font_provider,
-        osd_attachment_families=_osd_attachment_families(attachments, osd_fonts_dir),
-        osd_setup=FontSetup(
-            fonts_dir=osd_fonts_dir,
-            default_font=setup.default_font,
-            default_family=str(settings.get("osd-font") or "sans-serif"),
-            fontconfig_config=setup.fontconfig_config,
-            font_provider=_font_provider(settings.get("osd-font-provider")),
-        ),
+        osd_attachment_families=osd_attachment_families,
+        osd_setup=osd_setup,
+        # Two providers make every family unsafe whatever is installed: nothing to ask.
+        osd_installed_families=_osd_installed_families(
+            attachments, osd_attachment_families, osd_setup
+        )
+        if osd_setup.font_provider == setup.font_provider
+        else frozenset(),
     )

@@ -12,7 +12,14 @@ from saitenka_subtitles import (
 )
 from saitenka_subtitles.geometry import PaintQualification
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
-from saitenka_subtitles.whole_cue import FillLayer, WholeCue, compose, osd_payload, osd_template
+from saitenka_subtitles.whole_cue import (
+    FillLayer,
+    WholeCue,
+    compose,
+    osd_payload,
+    osd_template,
+    same_placement,
+)
 from subtitle_test_support import Style, draw_request
 from test_ass_geometry import ASS
 from test_libass_geometry_backend import _recording_factory
@@ -475,3 +482,54 @@ def test_a_cue_of_the_colored_copy_gets_no_overlay_paint(tmp_path):
         assert not any("\\1c" in str(command) for command in painted_overlays(ipc))
     finally:
         result.close()
+
+
+def test_an_installed_substitute_is_left_to_qualification_not_refused():
+    source, prepared = prepared_source()
+    cue = osd_template(
+        source, prepared, fonts_blocked=False, substituted_families=frozenset({"arial"})
+    )
+    assert (cue.osd_reason, cue.substituted, cue.missing_fonts) == ("eligible", True, ())
+
+
+@pytest.mark.parametrize(("installable", "named"), [(True, ("Arial",)), (False, ())])
+def test_a_refused_family_is_named_only_when_installing_it_would_help(*, installable, named):
+    """A document's own `[Fonts]` family is refused whether or not it is installed, so asking the
+    user to install it would send them to do something that changes nothing."""
+    source, prepared = prepared_source()
+    cue = osd_template(
+        source,
+        prepared,
+        fonts_blocked=False,
+        blocked_families=frozenset({"arial"}),
+        installable_families=frozenset({"arial"}) if installable else frozenset(),
+    )
+    assert (cue.osd_reason, cue.missing_fonts) == ("font-access", named)
+
+
+@pytest.mark.parametrize(
+    ("other", "same"),
+    [
+        (FillLayer(0, 11, 20, 2, 1, b"\x7f\x00"), True),
+        (FillLayer(0, 12, 20, 2, 1, b"\xff\x00"), False),
+        # One pixel each on the left edge and the width is two on the right edge.
+        (FillLayer(0, 11, 20, 3, 1, b"\xff\x00\xff"), False),
+        (FillLayer(0, 10, 20, 4, 1, b"\xff\x00\xff\x00"), False),
+        (FillLayer(1, 10, 20, 2, 1, b"\xff\x00"), False),
+    ],
+)
+def test_placement_ignores_outline_but_not_position_size_or_owner(other, *, same):
+    assert same_placement((FillLayer(0, 10, 20, 2, 1, b"\xff\x00"),), (other,)) is same
+
+
+def test_no_family_is_named_where_every_family_is_refused():
+    """Two font providers make every family unsafe; installing one would change nothing."""
+    source, prepared = prepared_source()
+    cue = osd_template(
+        source,
+        prepared,
+        fonts_blocked=True,
+        blocked_families=frozenset({"arial"}),
+        installable_families=frozenset({"arial"}),
+    )
+    assert (cue.osd_reason, cue.missing_fonts) == ("font-access", ())
