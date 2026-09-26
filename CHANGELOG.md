@@ -7,6 +7,14 @@ logs.
 
 ## [Unreleased]
 
+### Changed
+
+- `saitenka report` includes the latest session's own log and trace again, alongside the metadata
+  envelope, version and doctor output. Video, subtitle and release names are written to the log and
+  trace as digests, and home paths are redacted; the rest follows the new diagnostics privacy policy.
+  Sessions logged by an earlier version, and doctor's recent-error excerpts, are left out.
+  `--diagnostic-detail` still adds configuration, the mpv log, crash reports and every session.
+
 ### Fixed
 
 - Hiding Saitenka with `Alt+o` now keeps mpv's own subtitles on screen in their original style. The
@@ -16,6 +24,7 @@ logs.
   legacy handoff cut off by hiding no longer leaves neither renderer drawing after the show.
 - The log records when the overlay is hidden or shown, and traces name which subtitle visibility
   write each mpv command was.
+- `doctor.json` in a report no longer contains the home directory or username.
 
 ## [4.5.1] - 2026-09-23
 

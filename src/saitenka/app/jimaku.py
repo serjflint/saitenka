@@ -22,6 +22,8 @@ from pathlib import Path
 
 import stamina
 
+from saitenka.app import log_privacy
+
 log = logging.getLogger(__name__)
 
 BASE = "https://jimaku.cc/api"
@@ -348,6 +350,7 @@ class JimakuClient:
         entry = entries[0]
         files = self.files(entry["id"], episode)
         if not files:
+            log_privacy.register_title(str(entry.get("name") or ""))
             raise JimakuError(f"no files for entry {entry.get('name')} ep {episode}")
         return sorted(files, key=lambda f: _candidate_score(f, episode, video), reverse=True)
 
@@ -366,7 +369,7 @@ class JimakuClient:
         match = _resolution_match(video, best.name)
         log.info(
             "jimaku: picked %s (candidates=%d, resolution_match=%s)",
-            best.name,
+            log_privacy.media_label(best.name),
             len(candidates),
             match,
         )
@@ -379,7 +382,7 @@ class JimakuClient:
             span.set("candidates", len(candidates))
             span.set("resolution_match", match)
             span.set("ext", best.ext or "")
-            span.set("picked", best.name)
+            span.set("picked", log_privacy.media_label(best.name))
             return self.download(best, dest_dir)
 
 
@@ -404,6 +407,8 @@ def verify_key(key: str, query: str = PROBE_QUERY) -> tuple[str, str]:
         return "unknown", f"couldn't verify (network/transient): {e}"
     except JimakuError as e:  # 401/400 — a client error is the key/request itself
         return "bad", str(e)
+    if entries:
+        log_privacy.register_title(str(entries[0].get("name") or ""))
     head = f" — first: {entries[0].get('name')!r}" if entries else ""
     return "ok", f"{len(entries)} entrie(s){head}"
 

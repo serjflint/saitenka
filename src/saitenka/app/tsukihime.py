@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from saitenka import __version__
+from saitenka.app import log_privacy
 from saitenka.app.jimaku import _ssl_context, parse_filename
 from saitenka.app.subtitle_selection import matches_target_language
 
@@ -330,6 +331,8 @@ class TsukiHimeClient:
             raise TsukiHimeError(
                 f"search is truncated at {self.result_cap} results; cannot prove a unique release"
             )
+        for release in releases:
+            log_privacy.register_media(release.name)
         if len(releases) != 1:
             candidates = ", ".join(release.name for release in releases) or "none"
             raise TsukiHimeError(

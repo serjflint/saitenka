@@ -68,6 +68,8 @@ scripts declare deps via PEP 723 inline metadata.
   never parametric facts (readings/pitch stay from dictionaries).
 - **Tokenizer:** SudachiPy / MeCab+UniDic; mind the de-inflection matching trap. Goldens in `tests/`
   encode `unidic-lite`'s tokenization — bumping it legitimately moves goldens; re-bless deliberately.
+- **Diagnostics privacy:** `docs/contributing/diagnostics-privacy.md` is the policy — a closed list of
+  what reports remove. Do not add scrubbing beyond it.
 - **Visual config stays visual.** Config that's purely look-and-feel (a display toggle) must never gate
   behavior or identity (what gets looked up/cached, how a build is labeled) — thread real intent through
   an explicit param/flag instead of inferring it from a display toggle.

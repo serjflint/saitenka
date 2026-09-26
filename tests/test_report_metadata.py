@@ -112,11 +112,17 @@ def test_default_zip_excludes_private_payloads_in_every_member(monkeypatch, tmp_
 
     with zipfile.ZipFile(archive) as bundle:
         members = {name: bundle.read(name).decode() for name in bundle.namelist()}
-    assert set(members) == {"MANIFEST.txt", "diagnostics/envelope.json"}
+    # The log predates the sanitized format, so neither it nor the trace ships.
+    assert set(members) == {
+        "MANIFEST.txt",
+        "diagnostics/envelope.json",
+        "doctor.json",
+        "logs/collection.json",
+        "versions.txt",
+    }
+    assert json.loads(members["logs/collection.json"])["status"] == "predates-sanitised-format"
     serialized = json.dumps(members, ensure_ascii=False)
     assert private not in serialized
-    assert "private-session" not in serialized
-    assert str(tmp_path) not in serialized
     payload = json.loads(members["diagnostics/envelope.json"])
     assert payload["operation_health"]["pending_total"] == 2
     assert payload["operation_health"]["terminal_totals"]["other"] == 3

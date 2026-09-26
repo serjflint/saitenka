@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import msgspec
 import structlog
 
+from saitenka.app import log_privacy
 from saitenka.app.report import redact
 
 if TYPE_CHECKING:
@@ -57,6 +58,18 @@ def _add_session(_logger: WrappedLogger, _method_name: str, event_dict: EventDic
     from saitenka.session import session_id
 
     event_dict.setdefault("session", session_id())
+    return event_dict
+
+
+def _scrub_file_record(
+    _logger: WrappedLogger, _method_name: str, event_dict: EventDict
+) -> EventDict:
+    """File sink only: replace registered media identities, and stamp the format a report checks
+    before shipping the record (see `log_privacy.LOG_FORMAT`)."""
+    for k, v in event_dict.items():
+        if isinstance(v, str):
+            event_dict[k] = log_privacy.scrub(v)
+    event_dict["log_format"] = log_privacy.LOG_FORMAT
     return event_dict
 
 
@@ -111,6 +124,7 @@ def configure_logging(log_path: Path) -> None:
         foreign_pre_chain=shared_processors,
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _scrub_file_record,
             structlog.processors.JSONRenderer(serializer=_json_dumps),
         ],
     )
