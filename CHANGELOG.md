@@ -12,6 +12,9 @@ logs.
 - `saitenka run` exits with a message instead of crashing when mpv can't be found, can't be
   reached, or is too old for native subtitle geometry. An `mpv_path` that points at a binary which
   cannot run is now reported as such, rather than as an mpv older than 0.40.
+- Quitting mpv while Saitenka is still starting no longer ends with "close incomplete:
+  session-runtime". Effect completions that arrived together with the close request were dropped,
+  so the session could not account for them when it closed.
 
 ## [4.6.0] - 2026-09-26
 

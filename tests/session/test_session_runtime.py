@@ -943,3 +943,47 @@ def test_installing_a_session_runtime_keeps_the_reactor_reachable() -> None:
         assert isinstance(gateway.session_reactor, SessionReactor)
     finally:
         gateway.close()
+
+
+class _NoCommands:
+    connection_epoch = 0
+
+    def dispatch(self, _effect) -> bool:
+        return False
+
+    def expire(self, _control) -> None:
+        return None
+
+
+def test_a_close_request_does_not_drop_completions_popped_in_the_same_batch() -> None:
+    """The close latch is popped ahead of every lane, so a batch that holds it can carry
+    completions behind it. mpv quitting during startup produces exactly that: every startup query
+    completes "disconnected", then the close arrives, before the loop runs a single turn."""
+    from saitenka.runtime.correlator import EffectCorrelator
+    from saitenka.runtime.loop import SessionLoop
+
+    mailbox = SessionMailbox()
+    reactor = SessionReactor(State(), reduce_state, mailbox, lambda _effect: True)
+    loop = SessionLoop(mailbox, EffectCorrelator(mailbox, _NoCommands()))
+    loop.observe(reactor)
+    mailbox.publish(RawMpvEvent("start"), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL)
+    loop.receive(0.0, lambda _payload: None)
+    reactor.complete(
+        EffectFinished(
+            EffectId(1),
+            Owner.SUBTITLE,
+            "cue:1",
+            EffectOutcome.FAILED,
+            error=EffectError.UNAVAILABLE,
+        ),
+        origin=EventOrigin.WORKER,
+    )
+    mailbox.publish(
+        CloseRequested("mpv quit"), origin=EventOrigin.LIFECYCLE, traffic=TrafficClass.LIFECYCLE
+    )
+    with pytest.raises(OSError, match="mpv quit"):
+        loop.receive(0.0, lambda _payload: None)
+
+    reactor.close()
+
+    assert reactor.snapshot.state.outcomes == ((1, EffectOutcome.FAILED, EffectError.UNAVAILABLE),)
