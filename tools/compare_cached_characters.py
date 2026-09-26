@@ -377,6 +377,8 @@ def captures(
             "--pause",
             "--keep-open=yes",
             "--force-window=yes",
+            "--focus-on=never",
+            "--mute=yes",
             "--osd-level=0",
             "--sub-visibility=yes",
             f"--log-file={directory / 'mpv.log'}",
