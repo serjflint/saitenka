@@ -318,7 +318,7 @@ def report(
         bool,
         cyclopts.Parameter(
             negative=(),
-            help="include sensitive config, traces, crash reports and logs; review before sharing",
+            help="also include config, mpv config and log, crash reports and every session; review before sharing",
         ),
     ] = False,
     out: Annotated[
@@ -338,11 +338,11 @@ def report(
         bool,
         cyclopts.Parameter(
             negative=(),
-            help="omit logs from --diagnostic-detail (other detail may still contain private text)",
+            help="omit the overlay and mpv logs (other detail may still contain private text)",
         ),
     ] = False,
 ) -> int:  # pragma: no cover — thin CLI wrapper; collect/redact/bundle are unit-tested
-    """Bundle allowlisted diagnostic metadata. Raw detail is opt-in; nothing is uploaded."""
+    """Bundle the latest session's sanitized log and trace. Raw detail is opt-in; nothing is uploaded."""
     from pathlib import Path
 
     from saitenka.app.report import build_report_bundle
@@ -360,7 +360,8 @@ def report(
     print(f"wrote {dest}")
     if not diagnostic_detail:
         print(
-            "Diagnostic metadata; runtime settings and pixel fidelity may be unknown. Review before sharing."
+            "Latest session's log and trace without file names, cue text or home paths. Review before"
+            " sharing."
         )
         return 0
     print(

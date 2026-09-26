@@ -7,8 +7,14 @@ a claim that every listed platform, renderer, failure, or integration has been e
 
 ## Reading a report
 
-`saitenka report` creates a metadata-only ZIP with a versioned `diagnostics/envelope.json`.
-It separates the collector build from the producer recorded in the latest log session's summary.
+`saitenka report` creates a ZIP with a versioned `diagnostics/envelope.json`, `versions.txt`, a
+redacted `doctor.json`, and the latest session's own `overlay.log` lines and trace. The file log never
+records video or subtitle file names, the titles parsed from them, cue text or looked-up words: media
+identities are replaced with `<media:…>` / `<title:…>` digests where they are written, content with
+`<text:… len=N>`, and home paths with `<HOME>` / `<USER>`. Cue timings and content digests remain. A
+session whose lines predate that format (`log_format` in each record) ships neither its log nor its
+trace; `logs/collection.json` says `predates-sanitised-format`.
+The envelope separates the collector build from the producer recorded in the latest log session's summary.
 Missing, malformed, mismatched-session and unsupported-schema summaries cannot establish healthy
 operation counts. Matching identity fields do not prove identical loaded code: editable source can
 change while a process is running. The config subset is attributed to the collector's file, not the
@@ -113,9 +119,10 @@ source rejected before ZIP inclusion remains incomplete capture evidence, not an
 The producer-summary reader accepts at most 128 KiB; an oversized summary yields
 `unreadable-or-too-large`, not healthy or zero activity. Combined-history tests guard this budget.
 
-For the trace-based tools below, collect with `saitenka report --diagnostic-detail`.
-That opt-in includes redacted raw configuration, logs, traces and crash reports, which can still contain
-private paths and text. `--no-log` excludes logs and frame diagnostics; it does not sanitize the remaining detail.
+The trace-based tools below read the default report's trace. `saitenka report --diagnostic-detail`
+adds redacted raw configuration, mpv config and log, frame diagnostics, crash reports and every
+logged session, which can still contain private paths and text. `--no-log` excludes logs and frame
+diagnostics; it does not sanitize the remaining detail.
 Review the ZIP's manifest and contents before sharing. Nothing uploads automatically and exported
 ZIPs do not expire automatically. Publication fails rather than overwriting a timestamp collision;
 retry with a different timestamp or destination after preserving the earlier report.
@@ -163,7 +170,7 @@ The detail tier includes the same metadata envelope as the default report, selec
 log session as its trace. Allowlisted per-operation health counts identify failing boundaries without
 sharing detailed traces; recording must be enabled. Pending work is not proof of a crash and a failed
 boundary is not its root cause.
-It also diagnoses recorded player query/admission failures from metadata-only reports. Retained
+It also diagnoses recorded player query/admission failures from the envelope alone. Retained
 mailbox-to-reducer joins have their own denominator; missing terminals can mean in-flight work or
 lost evidence. Neither those joins nor a successful query qualify pixels or benchmark cost.
 It does not certify fault detection from the presence of an event. A failed required scenario

@@ -51,7 +51,7 @@ Saitenka in-mpv overlay: JP subs with FSRS coloring, hover → multi-dict toolti
 * [`prewarm`](#saitenka-prewarm): Prebuild the persistent tooltip render cache (#149) so even a FIRST-session cold hover on a pathological word is instant (copy+upload), not a 40–170 ms build+raster.
 * [`profile`](#saitenka-profile): Manage reading profiles (the [profile] default and named [profiles.<name>] overlays).
 * [`reinstall`](#saitenka-reinstall): Reinstall to CHANGE your extras or source, preserving what's installed. A bare ``uv tool install --reinstall`` *replaces* the extras set (silently dropping deinflect/telemetry); this detects what's installed and keeps it. From PyPI, falling back to GitHub (which also carries the GPL deinflect add-on). The GitHub attempt targets the latest RELEASE tag by default — not bleeding-edge main; pass ``--ref main`` for that, or ``--ref vX.Y.Z`` to pin a release. For a plain "get the latest" with no extras change, prefer ``update``.
-* [`report`](#saitenka-report): Bundle allowlisted diagnostic metadata. Raw detail is opt-in; nothing is uploaded.
+* [`report`](#saitenka-report): Bundle the latest session's sanitized log and trace. Raw detail is opt-in; nothing is uploaded.
 * [`run`](#saitenka-run): Play a video with Japanese subs; hover a word → Yomitan-like dictionary tooltip in mpv.
 * [`set-jimaku-key`](#saitenka-set-jimaku-key): Store your jimaku.cc API key where a plugin-mode (GUI-launched) mpv can read it.
 * [`setup`](#saitenka-setup): One-command setup (alias: ``install``): inventory → install mpv+ffmpeg → doctor → init → import → plugin. Re-run any time to reconfigure — it's resumable and confirm-first.
@@ -390,13 +390,13 @@ Show local immersion-session history.
 saitenka report [OPTIONS]
 ```
 
-Bundle allowlisted diagnostic metadata. Raw detail is opt-in; nothing is uploaded.
+Bundle the latest session's sanitized log and trace. Raw detail is opt-in; nothing is uploaded.
 
 **Parameters**:
 
-* `--diagnostic-detail`: include sensitive config, traces, crash reports and logs; review before sharing  *[default: False]*
+* `--diagnostic-detail`: also include config, mpv config and log, crash reports and every session; review before sharing  *[default: False]*
 * `--out`: directory to write the zip into (default: the data dir's reports/)
-* `--no-log`: omit logs from --diagnostic-detail (other detail may still contain private text)  *[default: False]*
+* `--no-log`: omit the overlay and mpv logs (other detail may still contain private text)  *[default: False]*
 
 ## saitenka subtitle-report
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from saitenka_dict.schema import SCHEMA_VERSION
 
 from saitenka.app import report
+from saitenka.app.log_privacy import LOG_FORMAT
 
 
 def test_detailed_report_bundles_only_its_frame_session(monkeypatch, tmp_path):
@@ -434,3 +435,42 @@ def test_redact_secrets_scrubs_json_quoted_keys():
     out = report._redact_secrets('{"api_key":"zzzzzzzz", "token": "abcdef123456"}')
     assert "zzzzzzzz" not in out and "abcdef123456" not in out
     assert out.count("<redacted>") == 2
+
+
+def _record(session: str, event: str, *, log_format: int = LOG_FORMAT) -> str:
+    return json.dumps({"session": session, "event": event, "log_format": log_format})
+
+
+def test_default_report_ships_only_the_reported_sessions_lines(monkeypatch, tmp_path):
+    _hermetic(monkeypatch, tmp_path)
+    cache = tmp_path / "cache"
+    (cache / "overlay.log.1").write_text(
+        "\n".join([_record("earlier", "other run"), _record("latest", "first half")]) + "\n"
+    )
+    (cache / "overlay.log").write_text(
+        "\n".join([_record("latest", "second half"), "not json", _record("latest", "end")]) + "\n"
+    )
+
+    members = report.collect()
+
+    events = [json.loads(line)["event"] for line in members["overlay.log"].splitlines()]
+    assert events == ["first half", "second half", "end"]
+
+
+def test_session_logged_in_an_older_format_ships_no_log_or_trace(monkeypatch, tmp_path):
+    cfg = _hermetic(monkeypatch, tmp_path)
+    directory = tmp_path / "telemetry"
+    directory.mkdir()
+    cfg.write_text(f'[telemetry]\nenabled = true\nexport_dir = "{directory.as_posix()}"\n')
+    (directory / "trace-1.json").write_text(
+        json.dumps({"otherData": {"session": "old"}, "traceEvents": []})
+    )
+    (tmp_path / "cache" / "overlay.log").write_text(
+        _record("old", "sub index: 3 cues from Show - 01.ass", log_format=LOG_FORMAT - 1) + "\n"
+    )
+
+    members = report.collect()
+
+    assert "overlay.log" not in members
+    assert "telemetry/trace.json" not in members
+    assert json.loads(members["logs/collection.json"])["status"] == "predates-sanitised-format"

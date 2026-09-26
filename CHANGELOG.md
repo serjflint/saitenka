@@ -7,6 +7,18 @@ logs.
 
 ## [Unreleased]
 
+### Changed
+
+- `saitenka report` includes the latest session's own log and trace again, alongside the metadata
+  envelope, version and doctor output. The log is written without video or subtitle file names,
+  their titles, cue text, looked-up words or home paths; those appear as digests. Sessions logged by
+  an earlier version are left out. `--diagnostic-detail` still adds configuration, the mpv log,
+  crash reports and every session.
+
+### Fixed
+
+- `doctor.json` in a report no longer contains the home directory or username.
+
 ## [4.5.1] - 2026-09-23
 
 ### Fixed

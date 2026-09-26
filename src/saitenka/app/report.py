@@ -130,7 +130,7 @@ def _collect_doctor() -> dict[str, str]:
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     doctor_json, output = _capture_process_output(collect_json)
-    members = {"doctor.json": doctor_json}
+    members = {"doctor.json": redact(doctor_json)}
     if output.strip():
         members["doctor-output.txt"] = redact(output)
     return members
@@ -482,13 +482,108 @@ def _collect_logs(log_path: Path, *, include: bool) -> tuple[str | None, dict[st
     return session, members
 
 
+def _session_records(log_path: Path, session: str | None) -> tuple[list[str], list[dict]]:
+    """The reported session's lines from the active log and its rotated segments, oldest first."""
+    segments = sorted(
+        log_path.parent.glob("overlay.log.*"),
+        key=lambda p: int(p.suffix[1:]) if p.suffix[1:].isdigit() else 0,
+        reverse=True,
+    )[:5]
+    lines: list[str] = []
+    sources: list[dict] = []
+    for path in (*segments, log_path):
+        text, info = _read_log_snapshot(path)
+        matched = 0
+        for line in text.splitlines():
+            try:
+                record = json.loads(line)
+            except (ValueError, RecursionError):
+                continue
+            if (
+                session is not None
+                and isinstance(record, dict)
+                and record.get("session") == session
+            ):
+                lines.append(line)
+                matched += 1
+        info["session_lines"] = matched
+        sources.append(info)
+    return lines, sources
+
+
+def _current_format(lines: list[str]) -> bool:
+    """Whether every line was written by a build that scrubs what `log_privacy` scrubs."""
+    from saitenka.app.log_privacy import LOG_FORMAT
+
+    return bool(lines) and all(json.loads(line).get("log_format") == LOG_FORMAT for line in lines)
+
+
+def _collect_default(log_path: Path, *, include_log: bool) -> dict[str, str]:
+    """Saitenka's own diagnostics for the latest session, from logs written without private data.
+
+    A session logged by an older build ships neither its log nor its trace: those lines still carry
+    the media names and cue text the current format keeps out.
+    """
+    text, _ = _read_log_snapshot(log_path)
+    session = _latest_session(text)
+    lines, sources = _session_records(log_path, session)
+    current = _current_format(lines)
+    if session is None:
+        status = "no-session"
+    elif not current:
+        status = "predates-sanitised-format"
+    elif not include_log:
+        status = "opted-out"
+    else:
+        status = "collected"
+
+    members: dict[str, str] = {}
+    members.update(_collect_versions())
+    doctor = _collect_doctor()
+    members["doctor.json"] = doctor["doctor.json"]
+    # Not `session.json`: the producer writes it unfiltered; the envelope is its allowlisted projection.
+    members.update(_collect_metadata(session))
+    if status == "collected":
+        members["overlay.log"] = redact("\n".join(lines) + "\n")
+    if current:
+        members.update(_collect_telemetry(session))
+    members["logs/collection.json"] = json.dumps(
+        {
+            "session": session,
+            "status": status,
+            "sources": sources,
+            "scope": "the reported session's lines only",
+        }
+    )
+    members["MANIFEST.txt"] = _default_manifest(members, session=session, status=status)
+    return members
+
+
+def _default_manifest(members: dict[str, str], *, session: str | None, status: str) -> str:
+    lines = [
+        f"saitenka {_overlay_version()} diagnostics bundle",
+        f"generated: {time.strftime('%Y-%m-%d %H:%M:%S %z')}",
+        f"latest session: {session or 'n/a'}",
+        "",
+        "Created locally and NEVER uploaded by saitenka. Review before sharing.",
+        "Saitenka's own log and trace for the latest session, written without video or subtitle",
+        "file names, cue text, looked-up words or home paths. Cue timings and content digests remain.",
+        "No configuration, mpv config or log, or crash text: those need `report --diagnostic-detail`.",
+        "",
+        f"log: {status}",
+        "",
+        "contents:",
+    ]
+    lines += [f"  - {name}" for name in members if name != "MANIFEST.txt"]
+    return "\n".join(lines) + "\n"
+
+
 def collect(*, include_log: bool = True, diagnostic_detail: bool = False) -> dict[str, str]:
-    """Build allowlisted metadata, or explicitly requested sensitive diagnostic detail."""
+    """Build the session's sanitized diagnostics, or explicitly requested sensitive detail."""
     from saitenka.app.paths import cache_dir
 
     if not diagnostic_detail:
-        text, _ = _read_log_snapshot(cache_dir() / "overlay.log")
-        return _collect_metadata(_latest_session(text))
+        return _collect_default(cache_dir() / "overlay.log", include_log=include_log)
 
     log_path = cache_dir() / "overlay.log"  # resolve dynamically (respects $SAITENKA_CACHE_DIR)
 
