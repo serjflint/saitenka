@@ -440,6 +440,7 @@ def test_a_cue_of_the_colored_copy_gets_no_overlay_paint(tmp_path):
     from test_native_subtitles import ASS as NATIVE_ASS
     from test_native_subtitles import painted_overlays, presented_overpaints, reader, settle_jobs
 
+    from saitenka.app.colored_subs import write_copy
     from saitenka.app.scoring import Coloring
 
     result, ipc, backend = reader(
@@ -452,8 +453,10 @@ def test_a_cue_of_the_colored_copy_gets_no_overlay_paint(tmp_path):
         "external:/x.ass",
         lambda _text: (spans, {0: 0x2080C0, 1: 0x2080C1, 2: 0x2080C2}),
     )
-    path = tmp_path / "colored.ass"
-    path.write_text(copy.text, encoding="utf-8")
+    path = write_copy("episode", copy.text)
+    ipc.props["track-list"] = [
+        {"id": 2, "type": "sub", "external": True, "external-filename": str(path), "selected": True}
+    ]
     ipc.props["sub-text/ass-full"] = next(
         line for line in copy.text.splitlines() if line.startswith("Dialogue:")
     )

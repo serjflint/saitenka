@@ -65,8 +65,8 @@ original. mpv renders the colors with the subtitle, so they are on the first fra
 including after a seek, on stock mpv. Nothing else about the track changes: stripping the colors
 restores the original byte for byte, and the cue text, timing, styles and fonts are the ones you
 chose. The copy is generated once the dictionaries have loaded and again when the reading profile
-changes; it is swapped in during a gap between cues or while paused. It lives under
-`colored-subs/` in the cache directory.
+changes; it is swapped in during a gap between cues, so a line you paused on keeps its tooltip.
+It lives under `colored-subs/` in the cache directory, one file per track.
 
 The copy stands in for the original everywhere Saitenka chooses a track — the Japanese role,
 Alt+t, the translation slot. Re-timing (Ctrl+Shift+T) re-times the original and colors the result;

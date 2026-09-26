@@ -40,7 +40,8 @@ class ColoredTrackPorts:
     value: Callable[[str], object]
     cue_text: Callable[[], str]
     annotation_inputs: Callable[[], AnnotationInputs]
-    event_annotation: Callable[[str, AnnotationInputs], TokenizedCue]
+    event_annotation: Callable[..., TokenizedCue]
+    token_generation: Callable[[], int]
     dependency_generation: Callable[[], int]
     track_ports: Callable[[], subtitle_modes.TrackPorts]
 
@@ -85,6 +86,7 @@ class ColoredTrackController:
         self._pending: tuple[str, str, int] | None = None
         self._ready: _Copy | None = None
         self._live: _Copy | None = None
+        self._failed: tuple[str, str, int] | None = None
 
     @property
     def enabled(self) -> bool:
@@ -106,7 +108,9 @@ class ColoredTrackController:
         live = self._live
         if live is not None and live.key == key and self._is_live(selected):
             return
-        if self._pending == key or (self._ready is not None and self._ready.key == key):
+        if key in {self._pending, self._failed} or (
+            self._ready is not None and self._ready.key == key
+        ):
             return
         refusal = colored_subs.refusing_options(
             {name: self._ports.query(f"options/{name}") for name in colored_subs.REFUSING_OPTIONS}
@@ -122,10 +126,15 @@ class ColoredTrackController:
         identity = self._sequence
         self._pending = key
         self._ready = None
-        colors = colored_subs.event_colors(
-            lambda text: self._ports.event_annotation(text, inputs),
-            inputs.tokenizer.is_skippable,
-        )
+        generation = self._ports.token_generation()
+
+        def annotate(text: str) -> TokenizedCue:
+            # A newer request supersedes this one; stop rather than tokenize for a discarded copy.
+            if identity != self._sequence:
+                raise colored_subs.Superseded
+            return self._ports.event_annotation(text, inputs, generation=generation)
+
+        colors = colored_subs.event_colors(annotate, inputs.tokenizer.is_skippable)
         request = colored_subs.ColorRequest(
             source.path, source.origin, f"{key[0]}\0{key[1]}", colors
         )
@@ -162,9 +171,13 @@ class ColoredTrackController:
             self.try_swap()
 
     def try_swap(self) -> None:
-        """Put a ready copy on screen, but only where swapping costs nothing visible."""
+        """Put a ready copy on screen in a gap between cues.
+
+        Not while paused on a line: the swap re-selects the track, which retires the cue and with it
+        the tooltip the user paused to read.
+        """
         ready = self._ready
-        if ready is None or (self._ports.cue_text().strip() and not self._ports.value("pause")):
+        if ready is None or self._ports.cue_text().strip():
             return
         self._ready = None
         loaded = self._loaded()
@@ -173,24 +186,30 @@ class ColoredTrackController:
         if selected is None or current is None or current.origin != ready.source.origin:
             _record("superseded")
             return
-        if colored_subs.is_copy(selected) and selected.get("external-filename") == str(ready.path):
-            self._live = ready
-            _record("adopted")
-            return
-        with otel_metrics.traced("colored_track_swap") as span:
-            sid = subtitle_modes.select_colored_copy(
-                self._ports.track_ports(),
-                ready.path,
-                title=ready.source.title,
-                lang=ready.source.lang,
-                previous=selected.get("id") if colored_subs.is_copy(selected) else None,
-            )
-            span.set("sid", str(sid))
+        # Before the swap: it rebuilds the index, which asks for a copy again.
         self._live = ready
-        log.info("colored track selected: sid=%s", sid)
+        if not self._is_live(selected):
+            with otel_metrics.traced("colored_track_swap") as span:
+                sid = subtitle_modes.select_colored_copy(
+                    self._ports.track_ports(),
+                    ready.path,
+                    title=ready.source.title,
+                    lang=ready.source.lang,
+                    previous=selected.get("id") if colored_subs.is_copy(selected) else None,
+                )
+                span.set("sid", str(sid))
+            now = _selected(self._loaded())
+            if now is None or not self._is_live(now):
+                self._live = None
+                self._failed = ready.key
+                _record("swap-failed")
+                return
+            log.info("colored track selected: sid=%s", sid)
+        colored_subs.evict_siblings(ready.path)
 
     def retire_episode(self) -> None:
         self._sequence += 1
+        self._failed = None
         self._pending = None
         self._ready = None
         self._live = None

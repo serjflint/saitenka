@@ -586,6 +586,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             cue_text=lambda: playback_observation.cue.text,
             annotation_inputs=lambda: cue_ref.get().annotation_inputs(),
             event_annotation=annotation_controller.event_annotation,
+            token_generation=lambda: annotation_controller.token_generation,
             dependency_generation=lambda: annotation_controller.view.dependency_generation,
             track_ports=track_commands.ports,
         ),
@@ -870,8 +871,6 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
 
     def pause_changed(*, paused: bool) -> None:
         log.debug("mpv pause -> %s", paused)
-        if paused:
-            colored_track.try_swap()
         session_stats.accrue(
             history.recorder,
             paused=bool(playback_observation.value("pause")),
@@ -885,7 +884,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     # The sidebar follows the active line on the events that move it — a settled cue and a
     # render-space change (its geometry key) — not on every turn ahead of the cue settle.
     cue_coordinator.on_settled(sidebar_controller.follow)
-    # A copy waits for a cue gap or a pause: swapping under a visible line retires it once.
+    # A copy waits for a cue gap: swapping under a visible line retires it once.
     cue_coordinator.on_settled(colored_track.try_swap)
 
     def render_space_changed() -> None:

@@ -32,6 +32,8 @@ if TYPE_CHECKING:
     from saitenka_subtitles.document import TokenAnnotation
 
 GENERATOR_VERSION = 1
+#: How much of a copy a reader looks at to find its header; generation refuses to place it later.
+HEAD_BYTES = 8192
 HEADER = "; saitenka-colored: "
 #: Exactly what `rewrite_ass_event` inserts, and nothing an author is refused for writing: a document
 #: that already contains one cannot be stripped back to itself, so it is not colored at all.
@@ -59,17 +61,23 @@ class ColoredDocument:
     verbatim: Mapping[Verbatim, int]
 
 
+def _lines(text: str) -> list[str]:
+    # Not `splitlines`: libass breaks rows on `\n` only, and a form feed or U+2028 inside an event
+    # would otherwise split it and leave its tail uncolored.
+    return re.findall(r"[^\n]*\n|[^\n]+$", text)
+
+
 def strip_colors(text: str) -> str:
     """The authored document a copy was generated from, byte for byte."""
-    lines = text.splitlines(keepends=True)
-    kept = (line for line in lines if not line.startswith(HEADER))
+    kept = (line for line in _lines(text) if not line.startswith(HEADER))
     return INJECTED.sub("", "".join(kept))
 
 
 def colored_origin(text: str) -> str | None:
     """The origin a copy records in its header, or `None` for a document that is not a copy."""
-    for line in text.splitlines()[:64]:
+    for line in _lines(text)[:64]:
         if line.startswith(HEADER):
+            line = line.rstrip("\r\n")
             version, _, origin = line.removeprefix(HEADER).partition(" ")
             return origin if version == str(GENERATOR_VERSION) and origin else None
     return None
@@ -149,7 +157,7 @@ def color_document(source: str, origin: str, colors: EventColors) -> ColoredDocu
     out: list[str] = []
     in_events = False
     header_written = False
-    for raw_line in source.splitlines(keepends=True):
+    for raw_line in _lines(source):
         line = raw_line.rstrip("\r\n")
         ending = raw_line[len(line) :]
         stripped = line.strip().lstrip("\ufeff")
@@ -169,4 +177,7 @@ def color_document(source: str, origin: str, colors: EventColors) -> ColoredDocu
     text = "".join(out)
     if strip_colors(text) != source:
         raise UnsupportedAssEvent("the colored copy does not strip back to its origin")
+    head = text.encode("utf-8")[:HEAD_BYTES].decode("utf-8", errors="replace")
+    if colored_origin(head) != origin:
+        raise UnsupportedAssEvent("the origin header is too far in to be found")
     return ColoredDocument(text, events.colored, dict(events.reasons))

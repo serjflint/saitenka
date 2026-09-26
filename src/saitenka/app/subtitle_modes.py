@@ -657,6 +657,19 @@ def _mpv_language_tag(language: str) -> str:
     return "jpn" if language == MAIN_LANG else language
 
 
+def _retired_with(loaded: list[dict], replaced_sid: object) -> list[dict]:
+    """The external tracks a replacement drops: the replaced one, and its colored copy or origin."""
+    replaced = next((track for track in loaded if track.get("id") == replaced_sid), None)
+    if replaced is None:
+        return []
+    ref = colored_subs.origin_ref(replaced)
+    related = [
+        colored_subs.origin_track(loaded, replaced),
+        *(track for track in loaded if ref and colored_subs.copy_origin(track) == ref),
+    ]
+    return [t for t in (replaced, *related) if t is not None and t.get("external")]
+
+
 def _replace_target_track(
     ports: TrackPorts,
     path,
@@ -672,13 +685,8 @@ def _replace_target_track(
     + selects the fresh one and rebuilds the lookahead index, so the corrected timing shows immediately."""
     state = ports.tracks()
     replaced_sid = state.jp_sid if target_role == MAIN_LANG else state.en_sid
-    loaded = loaded_sub_tracks(ports.ipc)
-    replaced = next((track for track in loaded if track.get("id") == replaced_sid), None)
-    # A colored copy is replaced together with the external file it was made from.
-    origin = None if replaced is None else colored_subs.origin_track(loaded, replaced)
-    for track in (replaced, origin):
-        if track is not None and track.get("external"):
-            _send(ports.ipc, "remove-external", "sub-remove", track["id"])
+    for track in _retired_with(loaded_sub_tracks(ports.ipc), replaced_sid):
+        _send(ports.ipc, "remove-external", "sub-remove", track["id"])
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
     _send(

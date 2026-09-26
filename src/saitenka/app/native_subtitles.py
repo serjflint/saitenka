@@ -334,7 +334,7 @@ def token_annotations(
 
 def _track_colors(source: bytes, prepared: PreparedAssFrame) -> bool:
     """Whether the document is a colored copy that colors every event of this frame itself."""
-    head = source[:8192].decode("utf-8", errors="replace")
+    head = source[: colored_track.HEAD_BYTES].decode("utf-8", errors="replace")
     return colored_track.colored_origin(head) is not None and all(
         colored_track.INJECTED.search(event.decoded.source.raw_text) for event in prepared.events
     )

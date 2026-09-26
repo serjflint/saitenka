@@ -69,7 +69,12 @@ def test_every_placeable_frame_is_painted_by_the_copy_as_live_paints_it() -> Non
     copy = color_document(
         source,
         "external:/x.ass",
-        event_colors(lambda text: annotation.event_annotation(text, inputs), skippable),
+        event_colors(
+            lambda text: annotation.event_annotation(
+                text, inputs, generation=annotation.token_generation
+            ),
+            skippable,
+        ),
     )
     painted = [
         [(text, _bgr_to_rgb(bgr)) for bgr, text in _PAINTED.findall(line)]

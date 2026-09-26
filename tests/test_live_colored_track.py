@@ -48,6 +48,17 @@ def _colored_pixels(path, boxes, rgb) -> int:
     return count
 
 
+def _swap_in_a_gap(reader, ipc) -> None:
+    """The copy is swapped in between cues, never under a paused line."""
+    ipc.command("seek", "3.5", "absolute+exact")
+    poll_until(
+        reader,
+        lambda: colored_subs.is_copy(_selected(ipc)),
+        "the colored copy was never selected",
+    )
+    ipc.command("seek", "0.6", "absolute+exact")
+
+
 def _capture(ipc, tmp, name: str) -> object:
     path = tmp / f"{name}.png"
     reply = ipc.command("screenshot-to-file", str(path), "subtitles")
@@ -70,11 +81,7 @@ def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render() -> None:
             prefetch=False,
         ),
     ) as (tmp, reader, ipc):
-        poll_until(
-            reader,
-            lambda: colored_subs.is_copy(_selected(ipc)),
-            "the colored copy was never selected",
-        )
+        _swap_in_a_gap(reader, ipc)
         poll_until(
             reader,
             lambda: bool(reader.graph.subtitle_presentation.cue.current.boxes),
@@ -120,11 +127,7 @@ def test_the_next_cue_is_colored_on_the_frame_a_sub_seek_lands_on() -> None:
             prefetch=False,
         ),
     ) as (tmp, reader, ipc):
-        poll_until(
-            reader,
-            lambda: colored_subs.is_copy(_selected(ipc)),
-            "the colored copy was never selected",
-        )
+        _swap_in_a_gap(reader, ipc)
         ipc.command("sub-seek", "1")
         # No pump: whatever Saitenka would do in reaction to the new cue has not run yet.
         time.sleep(0.2)

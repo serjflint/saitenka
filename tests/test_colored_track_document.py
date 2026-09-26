@@ -138,6 +138,25 @@ def test_a_document_already_holding_the_injected_form_is_refused() -> None:
         color_document(source, "external:/x.ass", _per_character)
 
 
+def test_a_header_placed_beyond_where_readers_look_is_refused() -> None:
+    source = (
+        "; " + "x" * 9000 + "\n" + _document("Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫")
+    )
+
+    with pytest.raises(UnsupportedAssEvent, match="too far"):
+        color_document(source, "external:/x.ass", _per_character)
+
+
+@pytest.mark.parametrize("separator", ["\x0c", "\u2028", "\x85"])
+def test_a_row_is_one_row_to_libass_whatever_unicode_calls_a_line_break(separator: str) -> None:
+    source = _document(f"Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫{separator}犬")
+
+    copy = color_document(source, "external:/x.ass", _per_character)
+
+    assert r"{\1c&H322010&\2c&H322010&}犬" in copy.text
+    assert strip_colors(copy.text) == source
+
+
 def test_a_document_without_script_info_has_nowhere_to_record_its_origin() -> None:
     source = _document("Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫").replace(
         "[Script Info]", "[Info]"

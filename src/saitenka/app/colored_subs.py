@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_subtitles import MAX_ASS_SOURCE_BYTES, UnsupportedAssEvent
 from saitenka_subtitles.colored_track import (
+    HEAD_BYTES,
     INJECTED,
     color_document,
     colored_origin,
@@ -35,7 +36,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_HEAD_BYTES = 8192
 REFUSING_OPTIONS = ("sub-ass-override", "sub-filter-sdh", "sub-ass-style-overrides")
 _COLOR_STYLE_KEYS = ("primarycolour", "secondarycolour", "outlinecolour", "backcolour")
 
@@ -61,7 +61,7 @@ def _recorded_origin(path: str) -> str | None:
     # Copies are content-addressed, so a path never changes what it holds.
     try:
         with Path(path).open("rb") as copy:
-            head = copy.read(_HEAD_BYTES)
+            head = copy.read(HEAD_BYTES)
     except OSError:
         return None
     return colored_origin(head.decode("utf-8", errors="replace"))
@@ -125,11 +125,27 @@ def frame_colored(rows: object) -> bool:
 def track_paints(value: Callable[[str], object]) -> bool:
     """Whether mpv is drawing the current frame's colors itself, from a colored copy.
 
-    Read off the active rows rather than the selection: rows carrying the injected blocks can only
-    come from a copy, so an attached session recognizes one it did not load.
+    The selected track has to be a copy: an authored track can carry the injected form itself. The
+    copy is recognized by its header, so an attached session recognizes one it did not load.
     """
+    if not frame_colored(value("sub-text/ass-full")):
+        return False
+    tracks = value("track-list")
+    sid = value("sid")
+    selected = next(
+        (
+            track
+            for track in (tracks if isinstance(tracks, list) else ())
+            if isinstance(track, dict) and track.get("type") == "sub" and track.get("id") == sid
+        ),
+        None,
+    )
     options = {name: value(f"options/{name}") for name in REFUSING_OPTIONS}
-    return frame_colored(value("sub-text/ass-full")) and refusing_options(options) is None
+    return (
+        selected is not None
+        and copy_origin(selected) is not None
+        and refusing_options(options) is None
+    )
 
 
 def event_colors(
@@ -159,7 +175,7 @@ def _digest(value: str) -> str:
 
 
 def write_copy(origin_key: str, text: str) -> Path:
-    """Publish `text` under a content-addressed name and evict this origin's older copies."""
+    """Publish `text` under a content-addressed name. Older copies stay until the swap retires them."""
     directory = colored_subs_dir()
     directory.mkdir(parents=True, exist_ok=True)
     prefix = _digest(origin_key)
@@ -173,10 +189,15 @@ def write_copy(origin_key: str, text: str) -> Path:
         except OSError:
             Path(temporary).unlink(missing_ok=True)
             raise
-    for sibling in directory.glob(f"{prefix}-*.ass"):
+    return path
+
+
+def evict_siblings(path: Path) -> None:
+    """Delete the other copies of `path`'s origin, once mpv no longer has one selected."""
+    prefix = path.name.partition("-")[0]
+    for sibling in path.parent.glob(f"{prefix}-*.ass"):
         if sibling != path:
             sibling.unlink(missing_ok=True)
-    return path
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +218,7 @@ class ColorResult:
     verbatim: tuple[tuple[str, int], ...] = ()
 
 
-class _Cancelled(Exception):
+class Superseded(Exception):  # a control-flow signal, not an error
     pass
 
 
@@ -217,13 +238,13 @@ def generate(request: object, cancelled: threading.Event) -> object:
 
     def colors(text: str):
         if cancelled.is_set():
-            raise _Cancelled
+            raise Superseded
         return request.colors(text)
 
     try:
         document = color_document(_read_origin(request.source), request.origin, colors)
-    except _Cancelled:
-        return ColorResult(None, "cancelled")
+    except Superseded:
+        return ColorResult(None, "superseded")
     except (OSError, UnicodeDecodeError):
         log.debug("colored track: origin unreadable", exc_info=True)
         return ColorResult(None, "origin-unreadable")
