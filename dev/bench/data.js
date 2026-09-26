@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790197003890,
+  "lastUpdate": 1790424950114,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17129,6 +17129,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 3.441992,
             "range": "3 replicas; min 1.1664; max 34.6362; MAD 2.2756; worst 34.6362",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "204b08894d544873e496ef3577fbfc065a2873c4",
+          "message": "Merge pull request #538 from serjflint/fix/alt-o-legacy-suspend\n\nfix(subtitles): keep mpv's subtitles on screen while the overlay is hidden",
+          "timestamp": "2026-09-26T15:11:53+03:00",
+          "tree_id": "9cb1658610f5f20d0e662f4370ac26afc66e1778",
+          "url": "https://github.com/serjflint/saitenka/commit/204b08894d544873e496ef3577fbfc065a2873c4"
+        },
+        "date": 1790424949026,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.970282,
+            "range": "3 replicas; min 6.71772; max 6.97291; MAD 0.002629",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.82258,
+            "range": "3 replicas; min 9.56681; max 10.4521; MAD 0.255768; worst 10.4521",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.989172,
+            "range": "3 replicas; min 21.6832; max 22.0235; MAD 0.034309",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.375837,
+            "range": "3 replicas; min 21.97; max 22.47; MAD 0.094147; worst 22.47",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.834774,
+            "range": "3 replicas; min 14.2376; max 15.548; MAD 0.597156",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.125286,
+            "range": "3 replicas; min 0.12222; max 0.127507; MAD 0.002221; worst 0.127507",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.23821,
+            "range": "3 replicas; min 44.0876; max 46.7518; MAD 0.150632; worst 46.7518",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.158598,
+            "range": "3 replicas; min 3.07884; max 3.42032; MAD 0.079757; worst 3.42032",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.190933,
+            "range": "3 replicas; min 1.18398; max 1.36069; MAD 0.006954; worst 1.36069",
             "unit": "ms"
           }
         ]
