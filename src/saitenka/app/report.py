@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+from saitenka.app.log_privacy import scrub_home as _scrub_home
 from saitenka.version import overlay_version as _overlay_version
 
 log = logging.getLogger(__name__)
@@ -38,29 +39,6 @@ _SECRET_RE = re.compile(
 
 def _redact_secrets(text: str) -> str:
     return _SECRET_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}<redacted>", text)
-
-
-def _scrub_home(text: str) -> str:
-    """Replace the home dir path and OS username with placeholders so a shared report/crash log
-    doesn't leak the username embedded in every path (`C:\\Users\\Jane\\…` → `<HOME>\\…`)."""
-    import getpass
-
-    home = str(Path.home())
-    encoded_homes = {
-        home,
-        json.dumps(home)[1:-1],
-        json.dumps(home, ensure_ascii=False)[1:-1],
-    }
-    out = text
-    for encoded_home in encoded_homes:
-        out = out.replace(encoded_home, "<HOME>")
-    try:
-        user = getpass.getuser()
-    except OSError:  # pragma: no cover — getuser can raise if no login name is resolvable
-        user = ""
-    if user:
-        out = re.sub(rf"(?<!\w){re.escape(user)}(?!\w)", "<USER>", out)
-    return out
 
 
 def redact(text: str) -> str:

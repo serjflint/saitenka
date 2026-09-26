@@ -83,13 +83,34 @@ def _title_tokens(title: str) -> dict[str, str]:
     return dict.fromkeys((title, repr(title)[1:-1], quote(title), quote_plus(title)), label)
 
 
-def _register(tokens: dict[str, str]) -> None:
-    from saitenka.app.report import _scrub_home
+def scrub_home(text: str) -> str:
+    """Replace the home dir path and OS username with placeholders so a shared report/crash log
+    doesn't leak the username embedded in every path (`C:\\Users\\Jane\\…` → `<HOME>\\…`)."""
+    import getpass
 
+    home = str(Path.home())
+    encoded_homes = {
+        home,
+        json.dumps(home)[1:-1],
+        json.dumps(home, ensure_ascii=False)[1:-1],
+    }
+    out = text
+    for encoded_home in encoded_homes:
+        out = out.replace(encoded_home, "<HOME>")
+    try:
+        user = getpass.getuser()
+    except OSError:  # pragma: no cover — getuser can raise if no login name is resolvable
+        user = ""
+    if user:
+        out = re.sub(rf"(?<!\w){re.escape(user)}(?!\w)", "<USER>", out)
+    return out
+
+
+def _register(tokens: dict[str, str]) -> None:
     global _snapshot
     # The file sink redacts the home directory before this scrub runs, so a path under it has to be
     # matched in its redacted spelling as well.
-    tokens = {**{_scrub_home(t): label for t, label in tokens.items()}, **tokens}
+    tokens = {**{scrub_home(t): label for t, label in tokens.items()}, **tokens}
     with _lock:
         for token, label in tokens.items():
             if len(token) < _MIN_TOKEN or token.isdigit():
