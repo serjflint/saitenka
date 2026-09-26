@@ -42,8 +42,8 @@ class FakeIPC(RuntimeFakeIPC):
         if args[:2] == ("set_property", "secondary-sid"):
             self.props["secondary-sid"] = args[2]
         if args[0] == "sub-add":
-            # mpv numbers a new track past every existing one.
-            added = max([9, *(track["id"] + 1 for track in self.tracks)])
+            # mpv numbers each new track past every earlier one and never reuses an id.
+            added = self.next_id = max(getattr(self, "next_id", 8) + 1, 9)
             self.tracks.append(
                 {
                     "id": added,

@@ -730,11 +730,17 @@ def select_colored_copy(
     ``sub-remove``.
     """
     state = ports.tracks()
-    # Add before removing: a refused `sub-add` must leave the previous copy on screen, not nothing.
     _send(ports.ipc, "add-colored", "sub-add", str(path), "select", title, lang)
+    selected = ports.get("sid")
+    added = any(
+        track.get("id") == selected and track.get("external-filename") == str(path)
+        for track in loaded_sub_tracks(ports.ipc)
+    )
+    if not added:
+        # A refused `sub-add` leaves the previous track selected; removing it would leave nothing.
+        return None
     if previous is not None:
         _send(ports.ipc, "remove-colored", "sub-remove", previous)
-    selected = ports.get("sid")
     found = discover_tracks(ports.ipc, state.slang, state.second_slang)
     sid = selected if isinstance(selected, int) else found.jp_sid
     ports.declare(SubtitleTracksDiscovered(sid, found.en_sid))

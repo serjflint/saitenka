@@ -103,12 +103,17 @@ class ColoredTrackController:
         self._pending = None
         self._ready = None
         self._failed = None
+        self._stand_down = self._deferred = False
         self._stale = self._live is not None
         self.request()
 
     def request(self) -> None:
         """Generate a copy for the selected Japanese track unless the current one is still right."""
-        if self.enabled and not self._request() and self._stale:
+        if not self.enabled:
+            return
+        if self._request():
+            self._stand_down = False
+        elif self._stale:
             self._stand_down = True
             self.try_swap()
 
@@ -188,7 +193,7 @@ class ColoredTrackController:
         if isinstance(result, colored_subs.ColorResult) and result.path is not None:
             self._ready = _Copy(source, key, result.path)
         else:
-            # Not retried on every warm signal; a new index or new dependencies try again.
+            # Not retried on every warm signal; new dependencies or another origin try again.
             self._failed = key
             self._stand_down = self._stale
         self.try_swap()
@@ -237,6 +242,8 @@ class ColoredTrackController:
                 self._live = None
                 self._failed = ready.key
                 _record("swap-failed")
+                if self._stale:
+                    self._retire_copy()
                 return
             log.info("colored track selected: sid=%s", sid)
         self._stale = self._stand_down = False
@@ -246,8 +253,13 @@ class ColoredTrackController:
         self._stand_down = False
         loaded = self._loaded()
         selected = _selected(loaded)
-        origin = None if selected is None else colored_subs.origin_track(loaded, selected)
-        if selected is None or not colored_subs.is_copy(selected) or origin is None:
+        if selected is None or not colored_subs.is_copy(selected):
+            # The user already moved off the copy; there is nothing on screen to take down.
+            self._live = None
+            self._stale = False
+            return
+        origin = colored_subs.origin_track(loaded, selected)
+        if origin is None:
             _record("stand-down-impossible")
             return
         self._live = None

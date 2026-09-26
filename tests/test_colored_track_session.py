@@ -424,3 +424,44 @@ def test_a_row_with_a_unicode_line_separator_is_still_one_colored_row() -> None:
     row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\1c&H010203&\\2c&H010203&}猫\u2028犬"
 
     assert colored_subs.frame_colored(row)
+
+
+def test_a_refused_replacement_brings_the_origin_back_not_a_blank(tmp_path, monkeypatch) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+    install_profile_dependencies(reader, scorer=_scorer("私", "本", "読む"), dictionaries=object())
+    command = ipc.command
+
+    def refuse_second_copy(*args):
+        if args[0] == "sub-add":
+            return {"error": "error running command"}
+        return command(*args)
+
+    monkeypatch.setattr(ipc, "command", refuse_second_copy)
+
+    jobs.finish()
+
+    assert ipc.props["sid"] == 2
+    assert any(track.get("selected") for track in ipc.tracks)
+
+
+def test_a_profile_switch_mid_line_swaps_once_instead_of_standing_down(
+    tmp_path, monkeypatch
+) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+    ipc.set_prop("sub-text", "私は本を読む")
+    reader.pump()
+    install_profile_dependencies(reader, scorer=None, dictionaries=object())
+    install_profile_dependencies(reader, scorer=_scorer("私", "本", "読む"), dictionaries=object())
+    ipc.commands.clear()
+
+    ipc.set_prop("sub-text", "")
+    reader.pump()
+    assert ("set_property", "sid", 2) not in ipc.commands  # the new copy is on its way
+
+    jobs.finish()
+    assert _added(ipc) and ("sub-remove", 9) in ipc.commands
+    assert ("set_property", "sid", 2) not in ipc.commands
