@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from saitenka_tokenize.languages import MAIN_LANG
 
 from saitenka import otel_metrics
-from saitenka.app import paths
+from saitenka.app import colored_subs, paths
 from saitenka.app.jimaku import parse_filename
 from saitenka.sqlite_pool import close_when_collected, open_owner_connection
 
@@ -48,7 +48,9 @@ def _path_text(path: str | Path) -> str:
 
 def _track_metadata(tracks: list[object], sid: int | None) -> dict[str, object]:
     raw = next((item for item in tracks if isinstance(item, dict) and item.get("id") == sid), {})
-    track = cast("dict[str, object]", raw)
+    # A colored copy is a cache file; the bookmark names the authored track it stands in for.
+    subs = [item for item in tracks if isinstance(item, dict)]
+    track = cast("dict[str, object]", colored_subs.origin_track(subs, raw) or raw)
     keys = ("id", "lang", "title", "codec", "external-filename")
     return {key: track[key] for key in keys if key in track}
 

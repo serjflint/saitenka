@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING
@@ -277,6 +277,17 @@ class CueAnnotationController:
             self._work_inputs(norm, inputs),
             priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
         )
+
+    def event_annotation(self, text: str, inputs: AnnotationInputs) -> TokenizedCue:
+        """One subtitle event scored alone, the way a frame of co-timed events scores each one.
+
+        Safe off the owner thread, like the episode warm whose entries it reuses.
+        """
+        norm = cue_key(text)
+        cached = self._token_cache.get(norm, ())
+        if cached is not None:
+            return cached
+        return self._tokenize(norm, replace(inputs, sub_index=None))
 
     def dependencies_changed(
         self,

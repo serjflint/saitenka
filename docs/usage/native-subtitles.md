@@ -6,13 +6,13 @@ Set `coloring` under `[subtitle_geometry]` alongside `native_visible = true`:
 
 | Coloring | Behavior |
 |---|---|
-| `whole-cue-auto` (default) | Whole-event ASS OSD when qualified; otherwise whole-cue raster; otherwise scan boxes only. |
+| `whole-cue-auto` (default) | A [colored copy](#colored-track) of an authored ASS track; for the events it cannot color, whole-event ASS OSD when qualified, otherwise whole-cue raster, otherwise scan boxes only. |
 | `whole-cue-osd` | Qualified whole-event ASS OSD, otherwise scan boxes only. |
 | `whole-cue-overpaint` | Whole-cue raster, otherwise scan boxes only. |
 | `boxes-only` | Scanning without coloring or level underlines. |
 
 Use geometry source `auto` or `shadow` for coloring; explicit `mpv` remains scan-only.
-The new modes retain the original subtitle track and the secondary translation slot. Raster coloring
+The OSD and raster modes retain the original subtitle track and the secondary translation slot. Raster coloring
 renders complete authored events through libass and keeps its positioned fill layers, without glyph
 matching or fractional probes. Changes to reading-state colors reuse those layers. Level underlines
 use the existing vector decoration path.
@@ -56,6 +56,28 @@ through mpv's `osd-fonts-dir` lets the qualifier use them; Saitenka does not ins
 that option automatically. Missing access reports `font-access`. Raster uses the existing subtitle
 font environment. Karaoke, alpha, dynamic effects, clipping and unproven occlusion remain independently
 restricted for coloring. Underlines use the existing vector decoration path.
+
+### Colored track
+
+With `whole-cue-auto`, Saitenka writes a copy of an authored ASS track (external, or embedded and
+extracted) with each word's color written into the subtitle itself, and selects it in place of the
+original. mpv renders the colors with the subtitle, so they are on the first frame of every cue,
+including after a seek, on stock mpv. Nothing else about the track changes: stripping the colors
+restores the original byte for byte, and the cue text, timing, styles and fonts are the ones you
+chose. The copy is generated once the dictionaries have loaded and again when the reading profile
+changes; it is swapped in during a gap between cues or while paused. It lives under
+`colored-subs/` in the cache directory.
+
+The copy stands in for the original everywhere Saitenka chooses a track — the Japanese role,
+Alt+t, the translation slot. Re-timing (Ctrl+Shift+T) re-times the original and colors the result;
+bookmarks record the original. Selecting the original in mpv stands the copy down for that track.
+Hiding Saitenka (Alt+O) keeps the copy selected, so its colors stay on screen.
+
+An event is copied without colors when coloring it could change how it looks: fades, moves,
+transforms, karaoke, clipping, alpha, drawings, or effects. Those events keep the OSD and raster
+paths above. So do tracks under `sub-ass-override=strip` or `force`, `sub-filter-sdh`, or a
+`sub-ass-style-overrides` that sets a color, where mpv would not show the copy's colors as written.
+SubRip and other converted tracks are not copied.
 
 With telemetry enabled, reports retain a bounded history of whole-cue decisions, submissions,
 acknowledgments and terminal outcomes. Enable telemetry before reproducing a problem; disabled

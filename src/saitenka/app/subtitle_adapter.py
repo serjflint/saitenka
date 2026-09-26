@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
-from saitenka.app import subnav, subnav_settle, subtitle_intents, subtitle_modes, subtitle_selection
+from saitenka.app import (
+    colored_subs,
+    subnav,
+    subnav_settle,
+    subtitle_intents,
+    subtitle_modes,
+    subtitle_selection,
+)
 from saitenka.app.intents import Announce
 from saitenka.app.media import copy_clipboard
 from saitenka.app.mpv_egress import send_correlated
@@ -263,14 +270,16 @@ class SubtitleCommandCoordinator:
         )
         path = read.observed_property("path")
         return subtitle_intents.SubtitleInputs(
-            tracks=subtitle_selection.discover(subs, track.slang, track.second_slang),
+            tracks=subtitle_selection.discover(
+                colored_subs.hide_origins(subs), track.slang, track.second_slang
+            ),
             active_sid=read.observed_property("sid"),
             language=track.language,
             annotation_mode=read.annotation.view.mode,
             has_cue=bool(cue_facts.text.strip()),
             retry_in_flight=self._apply.acquisition.retry_in_flight,
             media_path=path if isinstance(path, str) else None,
-            has_external_sub=bool(selected.get("external-filename")),
+            has_external_sub=subtitle_modes.authored_external(selected or None) is not None,
             has_cue_lines=bool(cue.lines),
             cue_starts=tuple(cue.start for cue in index.cues) if index is not None else (),
             playhead=None if playhead is None else float(playhead),  # type: ignore[arg-type]

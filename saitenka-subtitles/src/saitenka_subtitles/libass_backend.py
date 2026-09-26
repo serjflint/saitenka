@@ -364,8 +364,8 @@ class LibassGeometryBackend:
         self, request: GeometryRequest, layers: Sequence[ImageLayer]
     ) -> whole_cue.WholeCue | None:
         cue = request.whole_cue
-        if cue is None:
-            return None
+        if cue is None or cue.osd_reason == "track":
+            return cue
         palette = {entry.rgb: entry.token_index for entry in request.palette}
         cue = replace(cue, layers=whole_cue.retain_layers(layers, palette))
         cue = replace(

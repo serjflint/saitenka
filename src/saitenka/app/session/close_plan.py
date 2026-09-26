@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.features.mining.mining_operation import LANE as MINING_OPERATION_LANE
+from saitenka.app.features.subtitle.colored_track_controller import LANE as COLORED_TRACK_LANE
 from saitenka.app.features.tooltip.preparation import TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS
 from saitenka.app.session.close_ledger import CloseStep
 from saitenka.app.subtitle_geometry_job import GEOMETRY_LANE
@@ -34,6 +35,7 @@ WORKER_LANE_PARTICIPANTS = (
     "lanes:stop-workers",
     "lanes:subtitle-fetch",
     "lanes:subtitle-picker",
+    "lanes:colored-track",
     "lanes:geometry",
     "lanes:annotation",
     "lanes:cue-annotation",
@@ -95,6 +97,7 @@ def assemble_close_participants(contributions: CloseContributions) -> dict[str, 
         "lanes:stop-workers": contributions.start_lane_budget,
         "lanes:subtitle-fetch": lane("subtitle-fetch"),
         "lanes:subtitle-picker": lane("subtitle-picker"),
+        "lanes:colored-track": lane(COLORED_TRACK_LANE),
         "lanes:geometry": lane(GEOMETRY_LANE),
         "lanes:annotation": contributions.close_annotation,
         "lanes:cue-annotation": lane("cue-annotation"),

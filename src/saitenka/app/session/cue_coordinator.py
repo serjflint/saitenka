@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING
 from saitenka_tokenize.languages import SECOND_LANG
 
 from saitenka import otel_metrics
-from saitenka.app import native_subtitles, subnav_settle, subtitle_modes, subtitle_raster
+from saitenka.app import (
+    colored_subs,
+    native_subtitles,
+    subnav_settle,
+    subtitle_modes,
+    subtitle_raster,
+)
 from saitenka.app.cue_transition_diagnostics import transition_probe
 from saitenka.app.features.annotation.annotation_controller import AnnotationInputs
 from saitenka.app.overlay_ids import OverlayId
@@ -35,6 +41,7 @@ if TYPE_CHECKING:
     from saitenka.app.features.preview.preview_endpoint import PreviewCommandEndpoint
     from saitenka.app.features.profiles.profile_session import ProfileSession
     from saitenka.app.features.subtitle import SubtitleAcquisitionController
+    from saitenka.app.features.subtitle.colored_track_controller import ColoredTrackController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.features.translation import TranslationController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -75,6 +82,7 @@ class CueOwners:
     picker: PickerController
     acquisition: SubtitleAcquisitionController
     translation: TranslationController
+    colored_track: ColoredTrackController
 
 
 class CueCoordinator:
@@ -404,6 +412,7 @@ class CueCoordinator:
             paint_allowed=o.presentation.paint_allowed,
             paint_boxes=o.presentation.paint_boxes,
             coloring=o.presentation.coloring,
+            track_colored=colored_subs.track_paints(o.playback.value),
             record_whole_cue=o.presentation.pipeline.record_whole_cue,
             whole_cue_identity=(
                 hashlib.blake2s(o.playback.cue.text.encode(), digest_size=16).hexdigest(),
@@ -538,6 +547,7 @@ class CueCoordinator:
         o.presentation.color_telemetry.retire("episode-changed")
         o.picker.close()
         o.acquisition.retire_episode()
+        o.colored_track.retire_episode()
         o.annotation.retire_episode_warm()
         o.translation.retire_episode()
         o.playback.retire_episode()

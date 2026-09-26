@@ -246,6 +246,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch, make_sessi
 _LANES_BEFORE_ARTIFACTS = [
     "subtitle-fetch",
     "subtitle-picker",
+    "colored-track",
     "subtitle-geometry",
     "cue-annotation",
     "tooltip-render-ahead",

@@ -156,6 +156,8 @@ class DrawRequest:
     osd_shaper: str = "unknown"
     record_whole_cue: Callable[[dict], None] | None = None
     whole_cue_identity: tuple[str, float | None, int] | None = None
+    #: mpv is drawing this frame from the colored copy, every event colored — nothing to paint.
+    track_colored: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,18 +255,23 @@ def whole_cue_colors(request: DrawRequest) -> tuple[tuple[int, int], ...]:
     )
 
 
+def _awaiting_geometry(request: DrawRequest) -> bool:
+    return (
+        request.coloring != "boxes-only"
+        and request.whole_cue is None
+        and request.paint_reason in {"missing", "missing-coherent-evidence", "no-scan-regions"}
+    )
+
+
+def _track_paints(request: DrawRequest) -> bool:
+    return request.track_colored and request.coloring != "boxes-only"
+
+
 def whole_cue_device(request: DrawRequest) -> tuple[str, str]:
     cue = request.whole_cue
-    if (
-        request.coloring != "boxes-only"
-        and cue is None
-        and request.paint_reason
-        in {
-            "missing",
-            "missing-coherent-evidence",
-            "no-scan-regions",
-        }
-    ):
+    if _track_paints(request):
+        return "track", "track"
+    if _awaiting_geometry(request):
         return "none", "pending-whole-cue"
     if request.coloring == "boxes-only" or not request.paint_allowed:
         return "none", "boxes-only" if request.coloring == "boxes-only" else request.paint_reason
@@ -1441,6 +1448,9 @@ class NativeVisibleRenderer:
                 )
             else:
                 self._hide_overpaint(surfaces)
+            if device == "track" and colors:
+                # mpv drew these colors with the frame itself; there is no write to wait for.
+                _color_settled(_color_submission(request, "track"), accepted=True)
         return self._whole_osd(request, device, colors)
 
     def _refuse_paint(self, surfaces, ipc) -> None:
@@ -1466,7 +1476,7 @@ class NativeVisibleRenderer:
                         _color_settled(submission, accepted=True)
                     _color_is_up(cue_digest(request.text), landed=acknowledged)
                 overprint = ""
-        elif self.timed is not None and whole_cue_device(request)[0] == "overpaint":
+        elif self.timed is not None and whole_cue_device(request)[0] in {"overpaint", "track"}:
             self.timed.retire(request.whole_cue_identity)
         return overprint
 

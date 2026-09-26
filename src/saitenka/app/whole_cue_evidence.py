@@ -9,6 +9,7 @@ LIMIT = 64
 REASONS = frozenset(
     {
         "eligible",
+        "track",
         "unknown",
         "pending-whole-cue",
         "boxes-only",
@@ -53,7 +54,7 @@ REASONS = frozenset(
 )
 _ENUMS = {
     "requested": {"legacy", "whole-cue-auto", "whole-cue-osd", "whole-cue-overpaint", "boxes-only"},
-    "device": {"none", "overprint", "overpaint"},
+    "device": {"none", "overprint", "overpaint", "track"},
     "event": {
         "subtitle_osd_warmup",
         "decision",
