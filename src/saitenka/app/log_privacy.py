@@ -26,6 +26,9 @@ LOG_FORMAT = 2
 
 #: Shorter tokens would scrub ordinary words out of unrelated records.
 _MIN_TOKEN = 4
+#: A bare stem is often a word the log uses itself (`English.ass`); only a distinctive one is
+#: registered. The full name and path always are.
+_MIN_STEM = 8
 #: Episodes change within one long session; the oldest identities are the least likely to recur.
 _CAPACITY = 256
 
@@ -52,7 +55,12 @@ def register_media(path: str | Path, *, title: str | None = None) -> None:
     """Scrub this file's path, name and stem — and the title parsed from it — from the file log."""
     raw = str(path)
     label = media_label(raw)
-    forms = {raw, json.dumps(raw)[1:-1], Path(raw).name, Path(raw).stem}
+    # `repr` is how an OSError quotes its filename: doubled backslashes, non-ASCII kept — which the
+    # JSON form escapes instead. mpv may report a Windows path with forward slashes.
+    forms = {raw, repr(raw)[1:-1], json.dumps(raw)[1:-1], raw.replace("\\", "/"), Path(raw).name}
+    stem = Path(raw).stem
+    if len(stem) >= _MIN_STEM:
+        forms.add(stem)
     tokens = dict.fromkeys(forms, label)
     if title:
         title_label = f"<title:{cue_digest(title)}>"
