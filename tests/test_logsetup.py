@@ -98,15 +98,13 @@ def test_a_user_facing_line_reaches_the_terminal_and_the_file(tmp_path, capsys):
     assert record["level"] == "info"
 
 
-def test_a_registered_video_is_named_on_the_terminal_and_labeled_in_the_file(
-    tmp_path, capsys, monkeypatch
-):
-    monkeypatch.setattr(log_privacy, "_labels", {})
-    monkeypatch.setattr(log_privacy, "_snapshot", None)
+def test_a_registered_video_is_named_on_the_terminal_and_labeled_in_the_file(tmp_path, capsys):
+    log_privacy.reset()
     log_path = _configure(tmp_path)
     log_privacy.register_media(tmp_path / "Show - 01.mkv", title="Show")
 
     user_facing_logger().info("now playing %s", "Show - 01.mkv")
+    log_privacy.reset()
 
     assert capsys.readouterr().err.strip() == "[saitenka] now playing Show - 01.mkv"
     (record,) = [d for d in _lines(log_path) if d["event"].startswith("now playing")]
