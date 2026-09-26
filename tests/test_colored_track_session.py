@@ -542,3 +542,18 @@ def test_a_document_the_style_parser_rejects_is_refused_not_raised(tmp_path) -> 
     result = colored_subs.generate(request, threading.Event())
 
     assert result.reason == "document-refused"
+
+
+def test_a_copy_finishing_after_the_user_picked_the_origin_is_not_forced_on(
+    tmp_path, monkeypatch
+) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+    install_profile_dependencies(reader, scorer=_scorer("私", "本", "読む"), dictionaries=object())
+
+    ipc.command("set_property", "sid", 2)  # mpv has it; the observation is not processed yet
+    jobs.finish()
+
+    assert ipc.props["sid"] == 2
+    assert not any(colored_subs.is_copy(track) for track in ipc.tracks)

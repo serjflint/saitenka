@@ -234,6 +234,8 @@ class ColoredTrackController:
                 _record("waiting-for-gap")
             return
         self._deferred = False
+        # The user may have picked the origin since this copy was requested.
+        self._release_declined()
         if self._ready is not None:
             self._swap(self._ready)
         else:

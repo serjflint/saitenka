@@ -71,7 +71,8 @@ kept until you clear the cache.
 
 The copy stands in for the original everywhere Saitenka chooses a track — the Japanese role,
 Alt+t, the translation slot. Re-timing (Ctrl+Shift+T) re-times the original and colors the result;
-bookmarks record the original. Selecting the original in mpv removes the copy for the rest of the episode.
+bookmarks record the original. Selecting the original in mpv removes the copy; that track is not colored again this episode
+(a re-timed file is a new track and is).
 Hiding Saitenka (Alt+O) keeps the copy selected, so its colors stay on screen, and so does
 detaching from an `attach`ed mpv. When the reading profile changes, the line on screen keeps the
 previous colors until the next gap, where the new copy — or, if none can be made, the original —
