@@ -125,8 +125,9 @@ def frame_colored(rows: object) -> bool:
 def track_paints(value: Callable[[str], object]) -> bool:
     """Whether mpv is drawing the current frame's colors itself, from a colored copy.
 
-    The selected track has to be a copy: an authored track can carry the injected form itself. The
-    copy is recognized by its header, so an attached session recognizes one it did not load.
+    The selected track has to be a copy: an authored track can carry the injected form itself. A
+    copy is one under this cache's `colored-subs/` with a header, so an attached session recognizes
+    one it did not load, but not one written under another cache directory.
     """
     if not frame_colored(value("sub-text/ass-full")):
         return False
@@ -248,7 +249,7 @@ def generate(request: object, cancelled: threading.Event) -> object:
     except (OSError, UnicodeDecodeError):
         log.debug("colored track: origin unreadable", exc_info=True)
         return ColorResult(None, "origin-unreadable")
-    except UnsupportedAssEvent as error:
+    except ValueError as error:  # `UnsupportedAssEvent` included
         log.info("colored track refused: %s", error)
         return ColorResult(None, "document-refused")
     verbatim = tuple(sorted((reason.value, count) for reason, count in document.verbatim.items()))

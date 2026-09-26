@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import dicthelp
 import pytest
 from saitenka_subtitles.colored_track import INJECTED, strip_colors
+from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 from saitenka_wordstate import KnownWords, Scorer
 from session_builder import build_session, install_profile_dependencies
 from test_subtitle_modes import EN, FakeIPC
@@ -234,15 +235,22 @@ def test_new_dependencies_regenerate_and_replace_the_copy(tmp_path, monkeypatch)
     assert not Path(first).exists()
 
 
-def test_choosing_the_origin_stands_the_copy_down(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+def test_choosing_the_origin_removes_the_copy_for_the_episode(tmp_path, monkeypatch) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch, real_index=True)
     _ready(reader)
     jobs.finish()
 
     ipc.command("set_property", "sid", 2)
-    _colored_track(reader).request()
+    ipc.set_prop("sid", 2)
+    reader.pump()
 
-    assert len(jobs.accepted) == 1
+    assert ("sub-remove", 9) in ipc.commands
+    assert subtitle_modes.discover_tracks(ipc).jp_sid == 2
+    assert len(jobs.accepted) == 1  # not colored again behind the user's back
+    ports = reader.graph.track_commands.ports()
+    subtitle_modes.select_track(ports, 1, SECOND_LANG)
+    subtitle_modes.select_track(ports, reader.graph.track_commands.current().jp_sid, MAIN_LANG)
+    assert ipc.props["sid"] == 2  # Alt+t back lands on the track the user chose
 
 
 def test_only_whole_cue_auto_makes_a_copy(tmp_path, monkeypatch) -> None:
@@ -522,3 +530,15 @@ def test_a_copy_mpv_loaded_without_selecting_is_not_left_behind(tmp_path, monkey
 
     assert not any(colored_subs.is_copy(track) for track in ipc.tracks)
     assert ipc.props["sid"] == 2
+
+
+def test_a_document_the_style_parser_rejects_is_refused_not_raised(tmp_path) -> None:
+    path = tmp_path / "dup.ass"
+    style = next(line for line in ASS.splitlines() if line.startswith("Style:"))
+    duplicated = ASS.replace(style, f"{style}\n{style}", 1)
+    path.write_text(duplicated, encoding="utf-8")
+    request = colored_subs.ColorRequest(path, "external:x", "k", lambda _text: None)
+
+    result = colored_subs.generate(request, threading.Event())
+
+    assert result.reason == "document-refused"

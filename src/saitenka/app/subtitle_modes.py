@@ -756,6 +756,15 @@ def select_colored_copy(
     return sid
 
 
+def remove_colored_copies(ports: TrackPorts, sids: list[int]) -> None:
+    """Drop unselected colored copies, and re-read the roles their origins take back."""
+    state = ports.tracks()
+    for sid in sids:
+        _send(ports.ipc, "remove-colored", "sub-remove", sid)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
+    ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
+
+
 def stand_down_colored_copy(ports: TrackPorts, copy_sid: int, origin_sid: int) -> None:
     """Put the authored track back on screen and drop its colored copy, as quietly as the swap."""
     state = ports.tracks()

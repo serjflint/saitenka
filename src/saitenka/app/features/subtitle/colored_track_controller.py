@@ -92,6 +92,8 @@ class ColoredTrackController:
         self._stale = False
         self._stand_down = False
         self._deferred = False
+        #: Origins the user chose over their copy this episode.
+        self._declined: set[str] = set()
 
     @property
     def enabled(self) -> bool:
@@ -110,11 +112,32 @@ class ColoredTrackController:
         """Generate a copy for the selected Japanese track unless the current one is still right."""
         if not self.enabled:
             return
+        self._release_declined()
         if self._request():
             self._stand_down = False
         elif self._stale:
             self._stand_down = True
             self.try_swap()
+
+    def _release_declined(self) -> None:
+        """Take down the copies of an origin the user selected over them, for this episode.
+
+        Left loaded, a copy keeps its origin out of discovery, so a later Alt+t would land on the
+        copy the user just left.
+        """
+        loaded = self._loaded()
+        selected = _selected(loaded)
+        ref = None if selected is None else colored_subs.origin_ref(selected)
+        if ref is None or colored_subs.is_copy(selected or {}):
+            return
+        copies = [track["id"] for track in loaded if colored_subs.copy_origin(track) == ref]
+        if not copies:
+            return
+        self._declined.add(ref)
+        self._live = self._ready = None
+        self._stale = self._stand_down = False
+        subtitle_modes.remove_colored_copies(self._ports.track_ports(), copies)
+        _record("declined")
 
     def _request(self) -> bool:
         """Whether the selected track has, or will have, a current copy."""
@@ -270,6 +293,7 @@ class ColoredTrackController:
 
     def retire_episode(self) -> None:
         self._sequence += 1
+        self._declined.clear()
         self._failed = None
         self._stale = self._stand_down = self._deferred = False
         self._pending = None
@@ -300,8 +324,7 @@ class ColoredTrackController:
                 else _describe(origin, Path(str(path)), described)
             )
         origin = colored_subs.origin_ref(selected)
-        if origin is None or any(colored_subs.copy_origin(track) == origin for track in loaded):
-            # The user chose the origin over its loaded copy; the copy stands down.
+        if origin is None or origin in self._declined:
             return None
         path = self._authored_path(selected)
         return None if path is None else _describe(origin, path, selected)

@@ -229,3 +229,19 @@ def test_every_copy_strips_back_to_its_source(texts: list[str], *, crlf: bool) -
 
     assert strip_colors(copy.text) == source
     assert parse_cues(copy.text, "x.ass") == parse_cues(source, "x.ass")
+
+
+def test_an_event_its_scorer_cannot_place_is_copied_verbatim() -> None:
+    source = _document(
+        "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫",
+        "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,犬",
+    )
+
+    def colors(text: str):
+        if text == "犬":
+            raise ValueError("token lines exceed subtitle semantic text")
+        return _per_character(text)
+
+    copy = color_document(source, "external:/x.ass", colors)
+
+    assert (copy.colored, copy.verbatim) == (1, {Verbatim.REFUSED: 1})

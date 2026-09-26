@@ -132,8 +132,26 @@ def test_the_next_cue_is_colored_on_the_frame_a_sub_seek_lands_on() -> None:
         # No pump: whatever Saitenka would do in reaction to the new cue has not run yet.
         time.sleep(0.2)
         landed = _capture(ipc, tmp, "landed")
-        image = np.asarray(Image.open(landed).convert("RGB")).astype(int)
-        ink = image[image.max(axis=-1) > 96]
-        assert len(ink), "the landed cue rendered no subtitle ink"
-        spread = np.abs(ink - ink.mean(axis=0)).max()
-        assert spread > 60, "every glyph has one color: the landed cue was drawn uncolored"
+
+        poll_until(
+            reader,
+            lambda: bool(reader.graph.subtitle_presentation.cue.current.boxes),
+            "the landed cue never got hit boxes",
+        )
+        cue = reader.graph.subtitle_presentation.cue.current
+        boxes = [box for box in cue.boxes if tuple(cue.styles[box.index].color[:3]) != (255,) * 3]
+        rgb = cue.styles[boxes[0].index].color[:3]
+        origin = next(
+            track
+            for track in ipc.command("get_property", "track-list")["data"]
+            if track.get("type") == "sub" and not colored_subs.is_copy(track)
+        )
+        ipc.command("set_property", "sid", origin["id"])
+        ipc.command("seek", "0.6", "absolute+exact")
+        time.sleep(0.2)
+        ipc.command("sub-seek", "1")
+        time.sleep(0.2)
+        plain = _capture(ipc, tmp, "landed-plain")
+
+        painted, authored = _colored_pixels(landed, boxes, rgb), _colored_pixels(plain, boxes, rgb)
+        assert painted > 10 * max(authored, 5), (painted, authored)

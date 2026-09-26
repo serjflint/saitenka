@@ -118,7 +118,10 @@ class _Events:
         if gate is not PaintQualification.STATIC:
             return self._verbatim(line, Verbatim.PAINT_GATE)
         decoded = decode_ass_event(event)
-        found = self._colors(decoded.text)
+        try:
+            found = self._colors(decoded.text)
+        except ValueError:
+            return self._verbatim(line, Verbatim.REFUSED)
         if not found or not found[0]:
             return self._verbatim(line, Verbatim.NO_TOKENS)
         annotations, rgb = found

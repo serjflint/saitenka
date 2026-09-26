@@ -66,14 +66,16 @@ including after a seek, on stock mpv. Nothing else about the track changes: stri
 restores the original byte for byte, and the cue text, timing, styles and fonts are the ones you
 chose. The copy is generated once the dictionaries have loaded and again when the reading profile
 changes; it is swapped in during a gap between cues, so a line you paused on keeps its tooltip.
-It lives under `colored-subs/` in the cache directory, one file per track.
+It lives under `colored-subs/` in the cache directory: one file per track you have watched,
+kept until you clear the cache.
 
 The copy stands in for the original everywhere Saitenka chooses a track — the Japanese role,
 Alt+t, the translation slot. Re-timing (Ctrl+Shift+T) re-times the original and colors the result;
-bookmarks record the original. Selecting the original in mpv stands the copy down for that track.
+bookmarks record the original. Selecting the original in mpv removes the copy for the rest of the episode.
 Hiding Saitenka (Alt+O) keeps the copy selected, so its colors stay on screen, and so does
-detaching from an `attach`ed mpv. When the reading profile changes and no new copy can be made,
-the original comes back at the next gap. A track that is never blank — a persistent watermark or
+detaching from an `attach`ed mpv. When the reading profile changes, the line on screen keeps the
+previous colors until the next gap, where the new copy — or, if none can be made, the original —
+takes over. A track that is never blank — a persistent watermark or
 note — has no gap, so it keeps the overlay path.
 
 An event is copied without colors when coloring it could change how it looks: fades, moves,
