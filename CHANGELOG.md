@@ -10,7 +10,7 @@ logs.
 ### Changed
 
 - With `native_visible`, `saitenka run` no longer overrides mpv's subtitle settings. The profile it
-  forced (`sub-ass-override=no` and eight others) is no longer needed — mpv's defaults, including
+  forced (`sub-ass-override=no` and seven others) is no longer needed — mpv's defaults, including
   `sub-ass-override=scale`, are supported — and it overrode the user's own `mpv.conf`. `run` and
   `attach` now behave the same, and `saitenka doctor` names an `mpv.conf` setting the mode refuses
   and what it costs. Whole-cue OSD coloring now also qualifies under `scale`, where an inert

@@ -314,19 +314,26 @@ def test_marker_layers_preserve_opaque_color_and_final_event_geometry(text, boun
 
 
 @pytest.mark.parametrize(
-    ("mode", "device"),
+    ("mode", "device", "override"),
     [
-        pytest.param("whole-cue-auto", "overprint", marks=pytest.mark.mpv_min("0.41")),
-        pytest.param("whole-cue-auto", "overpaint", marks=pytest.mark.mpv_min("0.41")),
+        pytest.param("whole-cue-auto", "overprint", "no", marks=pytest.mark.mpv_min("0.41")),
+        pytest.param("whole-cue-auto", "overpaint", "no", marks=pytest.mark.mpv_min("0.41")),
         pytest.param(
-            "whole-cue-overpaint", "overpaint", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
+            "whole-cue-overpaint",
+            "overpaint",
+            "no",
+            marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN),
         ),
-        pytest.param("whole-cue-osd", "overprint", marks=pytest.mark.mpv_min("0.41")),
-        pytest.param("boxes-only", "none", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)),
+        pytest.param("whole-cue-osd", "overprint", "no", marks=pytest.mark.mpv_min("0.41")),
+        # mpv's own default, which `run` no longer overrides.
+        pytest.param("whole-cue-osd", "overprint", "scale", marks=pytest.mark.mpv_min("0.41")),
+        pytest.param(
+            "boxes-only", "none", "no", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
+        ),
     ],
 )
 @pytest.mark.usefixtures("enabled_telemetry")
-def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch):
+def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, override, monkeypatch):
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
 
@@ -342,7 +349,7 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, monkeypatch)
             "shadow",
             os.environ.get("SAITENKA_LAYOUT_MPV"),
             (
-                "--sub-ass-override=no",
+                f"--sub-ass-override={override}",
                 "--blend-subtitles=no",
                 "--osd-level=0",
                 "--geometry=1280x720",

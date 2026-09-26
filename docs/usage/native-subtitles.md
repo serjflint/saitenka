@@ -264,7 +264,8 @@ need no configuration. `saitenka doctor` names any setting the mode refuses. The
 | `sub-filter-sdh` | `yes` | hover, and the colored track |
 | `sub-ass-scale-with-window` | `yes` | hover |
 | `sub-ass-justify` | `yes`, with `sub-ass-override=scale` | hover |
-| `sub-use-margins` | `no` | hover |
+| `sub-ass-styles` | a file, with the override on (`scale` is on) | hover |
+| `sub-use-margins` | `no` | hover on SubRip tracks, under `native_formats = "all"` |
 | `sub-ass-video-aspect-override` | anything but `0` | hover |
 | `sub-ass-use-video-data` | anything but `all` | hover |
 | `blend-subtitles` | `video` | hover |
@@ -278,11 +279,14 @@ than refusals. `--sub-scale-signs` travels with them: mpv turns it into libass's
 `ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE`, which confines the scale to events that look like dialogue
 and leaves positioned signs alone.
 
-`--sub-ass-override=force` (and `yes`, its alias) stays refused. That branch substitutes mpv's own
+`--sub-ass-override=force` stays refused. That branch substitutes mpv's own
 style into every event — font name, size fields, colors, border — which makes every `--sub-*` style
 option an authored-track layout input rather than a renderer setting, a far wider surface than this
-measures. `--sub-ass-style-overrides` is refused under both `no` and `scale`, because mpv applies it
-to the track itself whenever the override is anything but `no`.
+measures. `yes` is refused too, though it does not substitute styles: this does not reproduce its
+renderer state. `--sub-ass-style-overrides` is refused under both `no` and `scale`, because mpv
+applies it to the track itself whenever the override is anything but `no`. A `--sub-ass-styles` file
+is loaded after the track's own styles under the same condition, and a same-named style there
+replaces the script's.
 
 `--blend-subtitles=yes` is reproduced. mpv draws the subtitle into the video texture instead of the
 OSD surface, so the cue is laid out on the video's on-screen rectangle with no letterbox margins;

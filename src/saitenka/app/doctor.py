@@ -436,6 +436,8 @@ def check_sub_auto() -> Check:
 
 
 _LIST_OPTIONS = frozenset({"sub-ass-style-overrides"})
+#: Old spellings mpv still accepts for an option the gate reads.
+_ALIASES = {"sub-ass-force-style": "sub-ass-style-overrides"}
 
 
 def _mpv_conf_value(raw: str) -> str:
@@ -456,12 +458,12 @@ def _mpv_conf_entry(line: str) -> tuple[str, str] | None:
     line = line.strip()
     if not line or line.startswith("#"):
         return None
-    name, separator, raw = line.partition("=")
+    if "=" not in line.partition("#")[0]:
+        name = line.partition("#")[0].strip().removeprefix("--")
+        return (name.removeprefix("no-"), "no") if name.startswith("no-") else (name, "yes")
+    name, _separator, raw = line.partition("=")
     name = name.strip().removeprefix("--")
-    if separator:
-        return name, _mpv_conf_value(raw)
-    name = name.partition("#")[0].strip()
-    return (name.removeprefix("no-"), "no") if name.startswith("no-") else (name, "yes")
+    return _ALIASES.get(name, name), _mpv_conf_value(raw)
 
 
 def _mpv_conf_top_level(path: Path) -> list[tuple[str, str]]:
@@ -471,7 +473,8 @@ def _mpv_conf_top_level(path: Path) -> list[tuple[str, str]]:
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         stripped = line.strip()
         if stripped.startswith("["):
-            active = stripped[1:].partition("]")[0].strip() == "default"
+            # `[]` names the default profile too (`m_config_add_profile`).
+            active = stripped[1:].partition("]")[0].strip() in {"", "default"}
         elif active and (entry := _mpv_conf_entry(line)) is not None:
             entries.append(entry)
     return entries
@@ -482,8 +485,11 @@ def _mpv_conf_options(path: Path, names: Iterable[str]) -> dict[str, str | list[
     wanted = set(names)
     options: dict[str, str | list[str]] = {}
     for name, value in _mpv_conf_top_level(path):
-        base = name.removesuffix("-append")
+        base = name.removesuffix("-append").removesuffix("-clr")
         if base not in wanted:
+            continue
+        if name.endswith("-clr"):
+            options.pop(base, None)
             continue
         if base not in _LIST_OPTIONS:
             options[base] = value

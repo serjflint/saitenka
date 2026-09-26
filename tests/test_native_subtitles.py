@@ -3820,7 +3820,6 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
     [
         ("sub-scale", 1.5),  # scales the text away from the geometry we computed
         ("sub-pos", 50.0),  # moves it up the frame
-        ("sub-use-margins", False),
         ("sub-ass-override", "force"),
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
@@ -3836,6 +3835,33 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+def test_sub_use_margins_is_read_only_where_mpv_reads_it() -> None:
+    """mpv hands `sub-use-margins` to libass on the converted and `force` branches only; an authored
+    track under `no` or `scale` uses `sub-ass-force-margins`. Refusing it there cost hover for a
+    setting that moves nothing."""
+    from saitenka.app.native_subtitles import unsupported_render_settings
+
+    off = {"sub-use-margins": False}
+
+    assert (
+        unsupported_render_settings(off),
+        unsupported_render_settings(off, authored=False),
+    ) == ((), ("sub-use-margins",))
+
+
+@pytest.mark.parametrize(("override", "refused"), [("scale", True), ("no", False)])
+def test_a_style_file_is_refused_once_mpv_loads_it(override: str, *, refused: bool) -> None:
+    """`sub-ass-styles` is loaded after the track's own styles whenever the override is not `no`,
+    and a same-named style in it replaces the script's — every box measured against the wrong one."""
+    from saitenka.app.native_subtitles import unsupported_render_settings
+
+    result = unsupported_render_settings(
+        {"sub-ass-override": override, "sub-ass-styles": "~~/styles.ass"}
+    )
+
+    assert ("sub-ass-styles" in result) is refused
 
 
 def _scaled(**settings):

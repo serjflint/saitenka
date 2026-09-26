@@ -208,6 +208,7 @@ GATE_OPTIONS = (
     "sub-ass-video-aspect-override",
     "sub-ass-use-video-data",
     "sub-ass-style-overrides",
+    "sub-ass-styles",
     "sub-scale-with-window",
     "sub-scale-by-window",
     "blend-subtitles",
@@ -440,6 +441,7 @@ MPV_DEFAULT_RENDER_SETTINGS: Mapping[str, object] = MappingProxyType(
         "sub-ass-video-aspect-override": 0.0,
         "sub-ass-use-video-data": "all",
         "sub-ass-style-overrides": [],
+        "sub-ass-styles": "",
         "sub-scale-with-window": True,
         "sub-scale-by-window": True,
         "blend-subtitles": False,
@@ -473,9 +475,9 @@ def _unsupported_render_inputs(
     """
     scaled = _scales_authored_styles(settings, authored=authored)
     supported = {
-        # `yes`/`force` substitute mpv's own style into every event (`sd_ass.c:572-581`), making
-        # every `converted.STYLE_OPTIONS` entry an authored-track layout input. `scale` only sets
-        # renderer state, which `_renderer_state` reproduces.
+        # `force` substitutes mpv's own style into every event (`sd_ass.c:572-581`), making every
+        # `converted.STYLE_OPTIONS` entry an authored-track layout input. `yes` and `scale` only set
+        # renderer state; `_renderer_state` reproduces `scale`.
         "sub-ass-override": settings["sub-ass-override"] in {False, "no", "scale"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
         # Read only on the branches `scale` and `force` take (`sd_ass.c:552-558`); under `no` mpv
@@ -483,9 +485,13 @@ def _unsupported_render_inputs(
         # when they would move the text AND we are not reproducing the branch that moves it.
         "sub-scale": scaled or settings["sub-scale"] == 1.0,
         "sub-pos": scaled or settings["sub-pos"] == 100.0,
-        # Only the converted branch reads this (`sd_ass.c:545`); the authored one reads
-        # `sub-ass-force-margins` below, gated separately and accepted at either value.
-        "sub-use-margins": settings["sub-use-margins"] is True,
+        # Only the converted and `force` branches read this (`sd_ass.c:545`); an authored track
+        # reads `sub-ass-force-margins` below, gated separately and accepted at either value.
+        "sub-use-margins": authored or settings["sub-use-margins"] is True,
+        # Loaded after the track's own styles whenever the override is not `no`
+        # (`sd_ass.c:120-124`, `277-279`), and a same-named style there replaces the script's.
+        "sub-ass-styles": not settings.get("sub-ass-styles")
+        or settings["sub-ass-override"] in {False, "no"},
         # Reachable on an authored track only once the override is on (`sd_ass.c:589-591`), and not
         # reproduced: it decides where every line of a wrapped cue starts, which is a box position.
         "sub-ass-justify": not scaled or settings["sub-ass-justify"] in {False, "no", None},

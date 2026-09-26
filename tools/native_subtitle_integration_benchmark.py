@@ -521,6 +521,7 @@ class _IPC:
             "options/sub-ass-video-aspect-override": 0.0,
             "options/sub-ass-use-video-data": "all",
             "options/sub-ass-style-overrides": [],
+            "options/sub-ass-styles": "",
             "options/sub-scale-with-window": True,
             "options/sub-scale-by-window": True,
             "options/blend-subtitles": False,

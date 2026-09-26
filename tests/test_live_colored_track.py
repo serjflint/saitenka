@@ -66,7 +66,8 @@ def _capture(ipc, tmp, name: str) -> object:
     return path
 
 
-def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render() -> None:
+@pytest.mark.parametrize("override", ["no", "scale"])
+def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render(override: str) -> None:
     from test_cue_color_timeline import _coloring
 
     with live_reader(
@@ -76,7 +77,7 @@ def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render() -> None:
         layout=LayoutLiveOptions(
             "shadow",
             os.environ.get("SAITENKA_LAYOUT_MPV"),
-            ("--sub-ass-override=no", "--blend-subtitles=no"),
+            (f"--sub-ass-override={override}", "--blend-subtitles=no"),
             start_seconds=0.6,
             prefetch=False,
         ),
