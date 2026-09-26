@@ -49,9 +49,12 @@ class ColorJobs:
         self.accepted.append(kwargs)
         return True
 
-    def finish(self, index: int = -1) -> colored_subs.ColorResult:
+    def finish(
+        self, index: int = -1, *, result: colored_subs.ColorResult | None = None
+    ) -> colored_subs.ColorResult:
         accepted = self.accepted[index]
-        result = colored_subs.generate(accepted["request"], threading.Event())
+        if result is None:
+            result = colored_subs.generate(accepted["request"], threading.Event())
         accepted["on_finished"](
             EffectFinished(
                 EffectId(1),
@@ -389,3 +392,35 @@ def test_replacing_the_origin_also_retires_its_copy(tmp_path, monkeypatch) -> No
 
 def _scorer(*known: str) -> Coloring:
     return Coloring(Scorer(known=KnownWords.from_set(list(known)), jlpt=dicthelp.load_jlpt()))
+
+
+def test_a_copy_that_cannot_be_remade_is_stood_down(tmp_path, monkeypatch) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+    install_profile_dependencies(reader, scorer=_scorer("私", "本", "読む"), dictionaries=object())
+
+    jobs.finish(result=colored_subs.ColorResult(None, "nothing-colored"))
+
+    # The old copy's colors are no longer the reader's; the authored track comes back.
+    assert ipc.props["sid"] == 2
+    assert ("sub-remove", 9) in ipc.commands
+    reader.graph.profile_integration.warm_episode()
+    assert len(jobs.accepted) == 2  # a refused key is not retried on every warm signal
+
+
+def test_retiring_the_scorer_stands_the_copy_down(tmp_path, monkeypatch) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+
+    install_profile_dependencies(reader, scorer=None, dictionaries=object())
+
+    assert ipc.props["sid"] == 2
+    assert subtitle_modes.discover_tracks(ipc).jp_sid == 2
+
+
+def test_a_row_with_a_unicode_line_separator_is_still_one_colored_row() -> None:
+    row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\1c&H010203&\\2c&H010203&}猫\u2028犬"
+
+    assert colored_subs.frame_colored(row)

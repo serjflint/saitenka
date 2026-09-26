@@ -730,9 +730,10 @@ def select_colored_copy(
     ``sub-remove``.
     """
     state = ports.tracks()
+    # Add before removing: a refused `sub-add` must leave the previous copy on screen, not nothing.
+    _send(ports.ipc, "add-colored", "sub-add", str(path), "select", title, lang)
     if previous is not None:
         _send(ports.ipc, "remove-colored", "sub-remove", previous)
-    _send(ports.ipc, "add-colored", "sub-add", str(path), "select", title, lang)
     selected = ports.get("sid")
     found = discover_tracks(ports.ipc, state.slang, state.second_slang)
     sid = selected if isinstance(selected, int) else found.jp_sid
@@ -743,6 +744,20 @@ def select_colored_copy(
         setup_secondary(ports)
     ports.rebuild_index()
     return sid
+
+
+def stand_down_colored_copy(ports: TrackPorts, copy_sid: int, origin_sid: int) -> None:
+    """Put the authored track back on screen and drop its colored copy, as quietly as the swap."""
+    state = ports.tracks()
+    _send(ports.ipc, "select-origin", "set_property", "sid", origin_sid)
+    _send(ports.ipc, "remove-colored", "sub-remove", copy_sid)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
+    ports.declare(SubtitleTracksDiscovered(origin_sid, found.en_sid))
+    ports.declare(SubtitleTrackAnnounced(origin_sid))
+    ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
+    ports.rebuild_index()
 
 
 def _add_background_target(ports: TrackPorts, result: SubtitleFetchResult) -> None:

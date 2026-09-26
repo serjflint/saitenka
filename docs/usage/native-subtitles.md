@@ -71,7 +71,10 @@ It lives under `colored-subs/` in the cache directory, one file per track.
 The copy stands in for the original everywhere Saitenka chooses a track — the Japanese role,
 Alt+t, the translation slot. Re-timing (Ctrl+Shift+T) re-times the original and colors the result;
 bookmarks record the original. Selecting the original in mpv stands the copy down for that track.
-Hiding Saitenka (Alt+O) keeps the copy selected, so its colors stay on screen.
+Hiding Saitenka (Alt+O) keeps the copy selected, so its colors stay on screen, and so does
+detaching from an `attach`ed mpv. When the reading profile changes and no new copy can be made,
+the original comes back at the next gap. A track that is never blank — a persistent watermark or
+note — has no gap, so it keeps the overlay path.
 
 An event is copied without colors when coloring it could change how it looks: fades, moves,
 transforms, karaoke, clipping, alpha, drawings, or effects. Those events keep the OSD and raster

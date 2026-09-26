@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 LANE = "colored-track"
+_SUFFIX = " (colored)"
 
 
 def configure_runtime_job(ipc: MpvIPC) -> JobSubmitter | None:
@@ -87,38 +88,56 @@ class ColoredTrackController:
         self._ready: _Copy | None = None
         self._live: _Copy | None = None
         self._failed: tuple[str, str, int] | None = None
+        #: The live copy was made under dependencies that have since changed.
+        self._stale = False
+        self._stand_down = False
+        self._deferred = False
 
     @property
     def enabled(self) -> bool:
         return self._enabled and self._submit is not None
 
+    def dependencies_changed(self) -> None:
+        """The live copy's colors are now stale: replace it, or stand it down if nothing can."""
+        self._sequence += 1
+        self._pending = None
+        self._ready = None
+        self._failed = None
+        self._stale = self._live is not None
+        self.request()
+
     def request(self) -> None:
         """Generate a copy for the selected Japanese track unless the current one is still right."""
-        if not self.enabled:
-            return
+        if self.enabled and not self._request() and self._stale:
+            self._stand_down = True
+            self.try_swap()
+
+    def _request(self) -> bool:
+        """Whether the selected track has, or will have, a current copy."""
         inputs = self._ports.annotation_inputs()
         if inputs.scorer is None or not inputs.dependencies_ready or not inputs.annotate:
-            return
+            return False
         loaded = self._loaded()
         selected = _selected(loaded)
         source = None if selected is None else self._source(loaded, selected)
         if selected is None or source is None:
-            return
+            return False
         key = (str(self._ports.query("path")), source.origin, self._ports.dependency_generation())
         live = self._live
         if live is not None and live.key == key and self._is_live(selected):
-            return
-        if key in {self._pending, self._failed} or (
-            self._ready is not None and self._ready.key == key
-        ):
-            return
+            return True
+        if key == self._failed:
+            return False
+        if key == self._pending or (self._ready is not None and self._ready.key == key):
+            return True
         refusal = colored_subs.refusing_options(
             {name: self._ports.query(f"options/{name}") for name in colored_subs.REFUSING_OPTIONS}
         )
         if refusal is not None:
             _record("refused", reason=refusal)
-            return
+            return False
         self._start(source, key, inputs)
+        return True
 
     def _start(self, source: _Source, key: tuple[str, str, int], inputs: AnnotationInputs) -> None:
         assert self._submit is not None
@@ -162,23 +181,38 @@ class ColoredTrackController:
             return
         self._pending = None
         result = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
-        if not isinstance(result, colored_subs.ColorResult):
+        if isinstance(result, colored_subs.ColorResult):
+            _record(result.reason, colored=result.colored, verbatim=result.verbatim)
+        else:
             _record("failed")
-            return
-        _record(result.reason, colored=result.colored, verbatim=result.verbatim)
-        if result.path is not None:
+        if isinstance(result, colored_subs.ColorResult) and result.path is not None:
             self._ready = _Copy(source, key, result.path)
-            self.try_swap()
+        else:
+            # Not retried on every warm signal; a new index or new dependencies try again.
+            self._failed = key
+            self._stand_down = self._stale
+        self.try_swap()
 
     def try_swap(self) -> None:
-        """Put a ready copy on screen in a gap between cues.
+        """Put a ready copy on screen, or take a stale one down, in a gap between cues.
 
-        Not while paused on a line: the swap re-selects the track, which retires the cue and with it
-        the tooltip the user paused to read.
+        Not while paused on a line: re-selecting the track retires the cue and with it the tooltip
+        the user paused to read.
         """
-        ready = self._ready
-        if ready is None or self._ports.cue_text().strip():
+        if self._ready is None and not self._stand_down:
             return
+        if self._ports.cue_text().strip():
+            if not self._deferred:
+                self._deferred = True
+                _record("waiting-for-gap")
+            return
+        self._deferred = False
+        if self._ready is not None:
+            self._swap(self._ready)
+        else:
+            self._retire_copy()
+
+    def _swap(self, ready: _Copy) -> None:
         self._ready = None
         loaded = self._loaded()
         selected = _selected(loaded)
@@ -205,11 +239,28 @@ class ColoredTrackController:
                 _record("swap-failed")
                 return
             log.info("colored track selected: sid=%s", sid)
+        self._stale = self._stand_down = False
         colored_subs.evict_siblings(ready.path)
+
+    def _retire_copy(self) -> None:
+        self._stand_down = False
+        loaded = self._loaded()
+        selected = _selected(loaded)
+        origin = None if selected is None else colored_subs.origin_track(loaded, selected)
+        if selected is None or not colored_subs.is_copy(selected) or origin is None:
+            _record("stand-down-impossible")
+            return
+        self._live = None
+        self._stale = False
+        subtitle_modes.stand_down_colored_copy(
+            self._ports.track_ports(), selected["id"], origin["id"]
+        )
+        _record("stood-down")
 
     def retire_episode(self) -> None:
         self._sequence += 1
         self._failed = None
+        self._stale = self._stand_down = self._deferred = False
         self._pending = None
         self._ready = None
         self._live = None
@@ -262,8 +313,8 @@ class ColoredTrackController:
 
 
 def _describe(origin: str, path: Path, track: dict) -> _Source:
-    title = str(track.get("title") or track.get("lang") or "subtitles")
-    return _Source(origin, path, f"{title} (colored)", str(track.get("lang") or "jpn"))
+    title = str(track.get("title") or track.get("lang") or "subtitles").removesuffix(_SUFFIX)
+    return _Source(origin, path, f"{title}{_SUFFIX}", str(track.get("lang") or "jpn"))
 
 
 def _record(outcome: str, **attributes: object) -> None:

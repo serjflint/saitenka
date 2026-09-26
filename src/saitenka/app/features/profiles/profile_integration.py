@@ -63,6 +63,8 @@ class ProfileIntegration:
             self.cue_text(),
             self.annotation_inputs(),
         )
+        # After the annotation owner: the copy is keyed on the generation it just moved to.
+        self.colored_track.dependencies_changed()
         if transition is None:
             return
         self.teardown_tooltip()
@@ -81,6 +83,7 @@ class ProfileIntegration:
     def invalidate_tokenizer(self) -> None:
         self.presentation.invalidate_geometry()
         self.annotation.invalidate_tokenizer()
+        self.colored_track.dependencies_changed()
 
     def invalidate_dictionary(self) -> None:
         self.preparation.invalidate_dependencies(self.tooltip)

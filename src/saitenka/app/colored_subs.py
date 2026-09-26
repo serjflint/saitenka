@@ -118,7 +118,7 @@ def frame_colored(rows: object) -> bool:
     """Whether every active event of a copy's frame was colored — the track paints all of it."""
     if not isinstance(rows, str):
         return False
-    events = [row for row in rows.splitlines() if row]
+    events = [row for row in rows.split("\n") if row.strip()]
     return bool(events) and all(INJECTED.search(row) for row in events)
 
 
