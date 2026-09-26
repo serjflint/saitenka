@@ -15,6 +15,12 @@ logs.
 - Quitting mpv while Saitenka is still starting no longer ends with "close incomplete:
   session-runtime". Effect completions that arrived together with the close request were dropped,
   so the session could not account for them when it closed.
+- N+1 is counted per subtitle event. Co-timed events — a sign over a dialogue line, two speakers —
+  were scored as one sentence whenever the first lacked end punctuation, so a line with one unknown
+  word lost its N+1 highlight to the unknown in the other — and a short line could borrow the other
+  line's words to reach the minimum sentence length. A sentence wrapped with `\N` inside one event
+  is still one sentence. The split comes from the track's own cue index; a frame it cannot place
+  unambiguously is scored as before.
 
 ## [4.6.0] - 2026-09-26
 

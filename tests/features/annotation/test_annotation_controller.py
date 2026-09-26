@@ -3,9 +3,14 @@ from __future__ import annotations
 import threading
 from dataclasses import FrozenInstanceError
 
+import dicthelp
 import pytest
 from saitenka_subtitles import CueIndex, parse_srt
+from saitenka_subtitles.model import Cue
 from saitenka_tokenize.japanese import Token
+from saitenka_tokenize.registry import get_tokenizer
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 from util import FakeIPC
 
 from saitenka.app.features.annotation.annotation_controller import (
@@ -13,6 +18,7 @@ from saitenka.app.features.annotation.annotation_controller import (
     AnnotationOutcome,
     CueAnnotationController,
 )
+from saitenka.app.scoring import Coloring
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 
@@ -285,3 +291,91 @@ def test_public_view_is_an_immutable_snapshot() -> None:
 def test_unknown_mode_is_rejected_by_the_feature_owner() -> None:
     with pytest.raises(ValueError, match="unknown annotation mode"):
         CueAnnotationController(FakeIPC(), mode="invalid", cache_max=4)  # type: ignore[arg-type]
+
+
+# One unknown content word each (読む / 書く), no end punctuation: joined, they are one N+2 sentence.
+SIGN = "私は本を読む"
+LINE = "私は本を書く"
+FRAME = f"{SIGN}\n{LINE}"
+CO_TIMED = (Cue(0.0, 5.0, SIGN), Cue(0.0, 5.0, LINE))
+
+
+@pytest.fixture
+def scorer() -> Coloring:
+    return Coloring(
+        Scorer(
+            known=KnownWords.from_set(["私", "本"]), jlpt=dicthelp.load_jlpt(), enable_freq=False
+        )
+    )
+
+
+def _scored_inputs(scorer: Coloring, *cues: Cue, attested: bool = False) -> AnnotationInputs:
+    return AnnotationInputs(
+        source_epoch=1,
+        track_identity=2,
+        subtitle_role="primary",
+        observed_start=0.0,
+        observed_end=5.0,
+        source_order=None,
+        tokenizer=get_tokenizer(),
+        # A dictionary makes the result complete, which is what lets the token cache keep it.
+        terms_exist=(lambda _forms: set()) if attested else None,
+        scorer=scorer,
+        selected_dictionaries=0,
+        dependencies_ready=True,
+        annotate=True,
+        sub_index=CueIndex(list(cues)),
+    )
+
+
+def _n_plus_one(cue) -> set[str]:
+    assert cue is not None and cue.styles is not None
+    return {
+        token.surface
+        for token, style in zip(cue.tokens, cue.styles, strict=True)
+        if style.tag.startswith("n+1")
+    }
+
+
+def test_co_timed_events_count_n_plus_one_separately(scorer) -> None:
+    owner = CueAnnotationController(FakeIPC(), mode="full", cache_max=4)
+
+    transition = owner.replace(FRAME, _scored_inputs(scorer, *CO_TIMED))
+
+    assert _n_plus_one(transition.cue) == {"読む", "書く"}
+
+
+def test_a_wrapped_event_stays_one_sentence(scorer) -> None:
+    owner = CueAnnotationController(FakeIPC(), mode="full", cache_max=4)
+
+    transition = owner.replace(FRAME, _scored_inputs(scorer, Cue(0.0, 5.0, FRAME)))
+
+    assert _n_plus_one(transition.cue) == set()
+
+
+def test_the_token_cache_keeps_event_splits_apart(scorer) -> None:
+    owner = CueAnnotationController(FakeIPC(), mode="full", cache_max=4)
+    wrapped = owner.replace(FRAME, _scored_inputs(scorer, Cue(0.0, 5.0, FRAME), attested=True))
+    assert (
+        owner.replace(FRAME, _scored_inputs(scorer, Cue(0.0, 5.0, FRAME), attested=True)).cue
+        is wrapped.cue
+    )
+
+    transition = owner.replace(FRAME, _scored_inputs(scorer, *CO_TIMED, attested=True))
+
+    assert _n_plus_one(transition.cue) == {"読む", "書く"}
+
+
+def test_async_lane_counts_n_plus_one_per_event(scorer) -> None:
+    ipc = _CapturingIPC()
+    owner = CueAnnotationController(ipc, mode="full", cache_max=4)
+    owner.enable_async()
+    owner.dependencies_changed(FRAME, _scored_inputs(scorer, Cue(0.0, 5.0, FRAME), attested=True))
+    ipc.finish_next()
+    owner.settle()
+
+    owner.replace(FRAME, _scored_inputs(scorer, *CO_TIMED, attested=True))
+    ipc.finish_next()
+    (publication,) = owner.settle()
+
+    assert _n_plus_one(publication.cue) == {"読む", "書く"}

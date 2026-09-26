@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from saitenka_subtitles import CueIndex
     from saitenka_tokenize.japanese import Token
 
     from saitenka.app.scoring import TokenStyle
@@ -36,6 +37,27 @@ def cue_key(text: str) -> str:
     return text.replace("\\N", "\n").replace("\r", "")
 
 
+def event_lines(norm: str, index: CueIndex | None) -> tuple[int, ...]:
+    """Lines per co-timed event in a ``cue_key`` text; ``()`` for one event or an unknown split.
+
+    N+1 is counted per event, and ``sub-text`` cannot tell an event boundary from a ``\\N``.
+    """
+    if index is None or "\n" not in norm:
+        return ()
+    events = index.frame_events(norm)
+    if events is None or len(events) < 2:
+        return ()
+    lines = norm.split("\n")
+    counts: list[int] = []
+    for event in events:
+        own = cue_key(event).split("\n")
+        start = sum(counts)
+        if lines[start : start + len(own)] != own:
+            return ()
+        counts.append(len(own))
+    return tuple(counts) if sum(counts) == len(lines) else ()
+
+
 @dataclass(frozen=True, slots=True)
 class TokenizedCue:
     """One cue's fully-resolved render inputs: the per-source-line token lists (row-major), the flat
@@ -47,11 +69,11 @@ class TokenizedCue:
 
 
 class TokenCache:
-    """Thread-safe LRU of ``source text → TokenizedCue``. Shared by the main thread (cue redraw) and
+    """Thread-safe LRU of ``(source text, event_lines) → TokenizedCue``. Shared by the main thread (cue redraw) and
     the prefetch workers, so every mutation holds the lock (``OrderedDict`` get/move_to_end/setitem/popitem aren't atomic no-GIL)."""
 
     def __init__(self, maxsize: int = 512) -> None:
-        self._data: OrderedDict[str, TokenizedCue] = OrderedDict()
+        self._data: OrderedDict[tuple[str, tuple[int, ...]], TokenizedCue] = OrderedDict()
         self._max = max(1, maxsize)
         self._lock = threading.Lock()
         # Bumped on every clear() so a background worker that captured the generation before a profile
@@ -66,15 +88,21 @@ class TokenCache:
         with self._lock:
             return self._gen
 
-    def get(self, text: str) -> TokenizedCue | None:
+    def get(self, text: str, events: tuple[int, ...]) -> TokenizedCue | None:
         with self._lock:
-            cue = self._data.get(text)
+            cue = self._data.get((text, events))
             if cue is not None:
-                self._data.move_to_end(text)
+                self._data.move_to_end((text, events))
             return cue
 
     def put(
-        self, text: str, cue: TokenizedCue, *, complete: bool = True, generation: int | None = None
+        self,
+        text: str,
+        events: tuple[int, ...],
+        cue: TokenizedCue,
+        *,
+        complete: bool = True,
+        generation: int | None = None,
     ) -> None:
         # Never store an empty or incomplete tokenization — a later identical line must get
         # another shot at annotations (empty = a miss re-tries; incomplete = re-tries once deps load).
@@ -83,8 +111,8 @@ class TokenCache:
         with self._lock:
             if generation is not None and generation != self._gen:
                 return  # a profile swap cleared+bumped the cache after this cue was tokenized → drop it
-            self._data[text] = cue
-            self._data.move_to_end(text)
+            self._data[text, events] = cue
+            self._data.move_to_end((text, events))
             while len(self._data) > self._max:
                 self._data.popitem(last=False)
 

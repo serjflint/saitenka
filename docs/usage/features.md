@@ -24,7 +24,10 @@ state, so a word you learned but recently forgot resurfaces as *not* known.
   distinct **learning**, **young**, **mature-known**, and **forgotten** bands. Saitenka
   never opens the live Anki database.
 - **N+1 targeting:** a sentence with exactly one unknown content word — the ideal thing to
-  mine — is highlighted, and remaining words fall back to a frequency-band color.
+  mine — is highlighted, and remaining words fall back to a frequency-band color. When the
+  track's cue index shows which events share the screen, each counts on its own: a sign shown
+  with a dialogue line is not read as part of its sentence, while a sentence wrapped over two
+  lines inside one event stays one sentence.
 - **JLPT underline:** words carry a level underline; frequency comes from a user-supplied
   Yomitan frequency dictionary, JLPT from the vendored wordlist.
 

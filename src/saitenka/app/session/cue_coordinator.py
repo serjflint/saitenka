@@ -308,6 +308,7 @@ class CueCoordinator:
             selected_dictionaries=len(getattr(dictionaries, "dicts", ())),
             dependencies_ready=dictionaries is not None,
             annotate=o.tracks.current.language != SECOND_LANG,
+            sub_index=navigation.sub_index,
         )
 
     def apply_annotation_transition(self, transition: AnnotationTransition, *, draw: bool) -> None:
