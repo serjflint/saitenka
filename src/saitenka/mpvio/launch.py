@@ -17,22 +17,33 @@ if TYPE_CHECKING:
 NATIVE_GEOMETRY_MPV_MIN = (0, 40)
 
 
-def mpv_version_output(mpv_bin: str | os.PathLike[str]) -> str:
-    """`mpv --version` stdout, or "" if it cannot be asked. The full text, since that is what
-    :func:`supports_native_geometry_profile` parses."""
+class MpvLaunchError(RuntimeError):
+    """mpv could not be started or reached. The message is the user-facing reason."""
+
+
+def _probe_version(mpv_bin: str | os.PathLike[str]) -> tuple[str, str]:
+    """`(stdout, why it printed nothing)` of `mpv --version`."""
     import subprocess
 
     try:
-        return subprocess.run(
+        done = subprocess.run(
             [str(mpv_bin), "--version"],
             check=False,
             capture_output=True,
             encoding="utf-8",
             errors="replace",
             timeout=5,
-        ).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return "", str(e)
+    lines = done.stderr.strip().splitlines()
+    return done.stdout, lines[0] if lines else f"exit status {done.returncode}"
+
+
+def mpv_version_output(mpv_bin: str | os.PathLike[str]) -> str:
+    """`mpv --version` stdout, or "" if it cannot be asked. The full text, since that is what
+    :func:`supports_native_geometry_profile` parses."""
+    return _probe_version(mpv_bin)[0]
 
 
 def parse_mpv_version(version_output: str) -> tuple[int, int] | None:
@@ -44,6 +55,26 @@ def parse_mpv_version(version_output: str) -> tuple[int, int] | None:
 def supports_native_geometry_profile(version_output: str) -> bool:
     version = parse_mpv_version(version_output)
     return version is not None and version >= NATIVE_GEOMETRY_MPV_MIN
+
+
+def require_native_geometry_mpv(mpv_bin: str | os.PathLike[str]) -> None:
+    """Raise :class:`MpvLaunchError` unless ``mpv_bin`` runs and is new enough for native geometry.
+
+    A binary that cannot run is reported as such: calling it too old sends the user to upgrade an
+    mpv that is already current."""
+    output, why = _probe_version(mpv_bin)
+    version = parse_mpv_version(output)
+    if version is None:
+        raise MpvLaunchError(
+            f"could not run `{mpv_bin} --version` ({why}); fix `mpv_path` in overlay.toml"
+        )
+    if version < NATIVE_GEOMETRY_MPV_MIN:
+        floor = ".".join(str(part) for part in NATIVE_GEOMETRY_MPV_MIN)
+        found = ".".join(str(part) for part in version)
+        raise MpvLaunchError(
+            f"native subtitle geometry needs mpv ≥ {floor}, found {found}; disable "
+            "subtitle_geometry.native_visible or upgrade mpv"
+        )
 
 
 @dataclass(frozen=True)

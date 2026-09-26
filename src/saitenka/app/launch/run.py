@@ -33,13 +33,14 @@ from saitenka.app.session.factory import (
 )
 from saitenka.app.session.runtime import SessionEntry, SessionRuntime, choose_demo_token
 from saitenka.app.subtitle_providers import enabled_providers_for
-from saitenka.mpvio.launch import MpvLaunchOptions
+from saitenka.mpvio.launch import MpvLaunchError, MpvLaunchOptions
 from saitenka.runtime import Owner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from saitenka.app.episode_reslot import ReslotPorts, WatchPorts
+    from saitenka.mpvio.ipc import MpvIPC
 
 log = logging.getLogger(__name__)
 
@@ -440,35 +441,22 @@ def _launch_mpv_and_connect(
     *,
     sub_path,
     en_sub_path,
-) -> tuple:
-    """Find + launch mpv and connect its IPC socket. Returns ``(None, None, None)`` (having already
-    printed the reason) when mpv can't be found or its IPC never comes up."""
+) -> tuple[subprocess.Popen, MpvIPC]:
+    """Find + launch mpv and connect its IPC socket. Raises :class:`MpvLaunchError` when mpv can't
+    be found, can't serve the requested geometry, or its IPC never comes up."""
     from saitenka.mpvio.discover import find_mpv
     from saitenka.mpvio.ipc import MpvIPC, default_ipc_path
 
     mpv_bin = find_mpv(cfg.get("mpv_path"))
     if not mpv_bin:
-        print(
+        raise MpvLaunchError(
             "mpv not found — install it (Windows: `winget install shinchiro.mpv`; macOS: "
-            "`brew install mpv`), or set `mpv_path` in overlay.toml. Run `saitenka doctor`.",
-            file=sys.stderr,
+            "`brew install mpv`), or set `mpv_path` in overlay.toml. Run `saitenka doctor`."
         )
-        return None, None, None
     if opts.native_visible and opts.geometry_source != "mpv":
-        from saitenka.mpvio.launch import (
-            NATIVE_GEOMETRY_MPV_MIN,
-            mpv_version_output,
-            supports_native_geometry_profile,
-        )
+        from saitenka.mpvio.launch import require_native_geometry_mpv
 
-        if not supports_native_geometry_profile(mpv_version_output(mpv_bin)):
-            floor = ".".join(str(part) for part in NATIVE_GEOMETRY_MPV_MIN)
-            print(
-                f"native subtitle geometry needs mpv ≥ {floor}; disable "
-                "subtitle_geometry.native_visible or upgrade mpv",
-                file=sys.stderr,
-            )
-            return None, None, None
+        require_native_geometry_mpv(mpv_bin)
     # On Windows mpv IPC is a named pipe, not a filesystem socket — see default_ipc_path.
     sock = default_ipc_path(tmp.name)
     # Capture mpv's own log next to ours so `report` can bundle it — the mpv side (codec, sub load,
@@ -501,11 +489,10 @@ def _launch_mpv_and_connect(
             if frame_diagnostics and environment is not None:
                 record_player(ipc, cache_dir(), session_id())
         except TimeoutError as e:
-            print("mpv IPC unreachable:", e, file=sys.stderr)
             from saitenka.app.procutil import kill_process_tree
 
             kill_process_tree(proc)
-            return None, None
+            raise MpvLaunchError(f"mpv IPC unreachable: {e}") from e
     # The hint is immediate feedback for the file-load wait: our overlay isn't built yet and the
     # next steps block the main thread on mpv, so mpv's own OSD is the only surface that can show
     # anything here. A screenshot capture must not carry the breadcrumb.
@@ -1171,24 +1158,26 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
         cfg, video, video_path, dur, tmp, subs, jimaku_title=jimaku_title, episode=episode
     )
 
-    proc, ipc = _launch_mpv_and_connect(
-        cfg,
-        tmp,
-        video_path,
-        MpvLaunchOptions(
-            slang=slang,
-            start=start,
-            screenshot=bool(screenshot),
-            use_config=use_config,
-            fullscreen=fullscreen,
-            native_visible=subtitle_geometry_options(cfg).native_visible,
-            geometry_source=subtitle_geometry_options(cfg).source,
-            extra_args=mpv_arg,
-        ),
-        sub_path=sub_path,
-        en_sub_path=en_sub_path,
-    )
-    if ipc is None:
+    try:
+        proc, ipc = _launch_mpv_and_connect(
+            cfg,
+            tmp,
+            video_path,
+            MpvLaunchOptions(
+                slang=slang,
+                start=start,
+                screenshot=bool(screenshot),
+                use_config=use_config,
+                fullscreen=fullscreen,
+                native_visible=subtitle_geometry_options(cfg).native_visible,
+                geometry_source=subtitle_geometry_options(cfg).source,
+                extra_args=mpv_arg,
+            ),
+            sub_path=sub_path,
+            en_sub_path=en_sub_path,
+        )
+    except MpvLaunchError as e:
+        print(e, file=sys.stderr)
         return 2
 
     from saitenka.app.subtitle_modes import select_initial
