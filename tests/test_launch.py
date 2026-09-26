@@ -76,25 +76,36 @@ def test_screenshot_pauses_on_the_first_frame():
     assert "--pause" in argv and "--loop-file=inf" not in argv
 
 
-def test_native_visible_launch_locks_the_proved_mpv_profile_before_user_overrides():
-    argv = _argv(native_visible=True, extra_args=["--sub-scale=1.2"])
+def _overrides(argv: list[str]) -> dict[str, object]:
+    from saitenka.app.native_subtitles import MPV_DEFAULT_RENDER_SETTINGS
 
-    required = {
-        "--sub-ass-override=no",
-        "--sub-ass-scale-with-window=no",
-        "--sub-scale=1",
-        "--sub-pos=100",
-        "--sub-use-margins=yes",
-        "--sub-ass-video-aspect-override=0",
-        "--sub-ass-use-video-data=all",
-        "--sub-ass-style-overrides=",
-        "--sub-visibility=yes",
-    }
-    assert required <= set(argv)
-    assert argv.index("--sub-scale=1") < argv.index("--sub-scale=1.2")
-    # The font options are read, not forced: pinning them threw away the very typesetting a release
-    # ships attached fonts for, and the measuring renderer now loads the same faces mpv does.
-    assert not any(argument.startswith(("--embeddedfonts", "--sub-fonts-dir")) for argument in argv)
+    settings: dict[str, object] = {}
+    for argument in argv:
+        name, _, value = argument.removeprefix("--").partition("=")
+        if name in MPV_DEFAULT_RENDER_SETTINGS:
+            settings[name] = {"yes": True, "no": False}.get(value, value)
+    return settings
+
+
+@pytest.mark.parametrize("source", ["auto", "shadow"])
+def test_a_native_visible_run_on_mpv_defaults_passes_the_geometry_gate(source) -> None:
+    from saitenka.app.native_subtitles import unsupported_render_settings
+
+    argv = _argv(native_visible=True, geometry_source=source)
+
+    assert unsupported_render_settings(_overrides(argv)) == ()
+
+
+def test_a_native_visible_run_leaves_the_users_subtitle_settings_alone() -> None:
+    # The gate reproduces mpv's defaults, so nothing needs forcing; a forced profile overrode the
+    # user's mpv.conf for settings the gate already accepts.
+    argv = _argv(native_visible=True)
+
+    assert "--sub-visibility=yes" in argv
+    assert not any(
+        argument.startswith(("--sub-ass-", "--sub-scale", "--sub-pos", "--sub-use-margins"))
+        for argument in argv
+    )
 
 
 def test_native_geometry_mpv_version_floor() -> None:

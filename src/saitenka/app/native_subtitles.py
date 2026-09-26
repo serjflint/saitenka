@@ -9,6 +9,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from saitenka_subtitles import (
@@ -412,6 +413,35 @@ def _scales_authored_styles(settings: Mapping[str, object], *, authored: bool) -
     a silently misplaced box rather than a refusal.
     """
     return authored and settings["sub-ass-override"] == "scale"
+
+
+#: `options/<name>` for every setting `_unsupported_render_inputs` reads, as a `--no-config` mpv 0.41
+#: reports them — what a user who configured nothing is running.
+MPV_DEFAULT_RENDER_SETTINGS: Mapping[str, object] = MappingProxyType(
+    {
+        "sub-ass-override": "scale",
+        "sub-ass-scale-with-window": False,
+        "sub-scale": 1.0,
+        "sub-pos": 100.0,
+        "sub-use-margins": True,
+        "sub-ass-force-margins": False,
+        "sub-ass-video-aspect-override": 0.0,
+        "sub-ass-use-video-data": "all",
+        "sub-ass-style-overrides": [],
+        "sub-scale-with-window": True,
+        "sub-scale-by-window": True,
+        "blend-subtitles": False,
+        "sub-filter-sdh": False,
+        "video-crop": "",
+        "video-rotate": 0,
+        "sub-ass-justify": False,
+    }
+)
+
+
+def unsupported_render_settings(overrides: Mapping[str, object]) -> tuple[str, ...]:
+    """The settings, among `overrides` applied over mpv's defaults, that refuse an authored track."""
+    return _unsupported_render_inputs({**MPV_DEFAULT_RENDER_SETTINGS, **overrides}, authored=True)
 
 
 def _unsupported_render_inputs(

@@ -27,11 +27,14 @@ import time
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from saitenka.app.anki import ANKI_DOWN_ERRORS
 from saitenka.app.config import config_path, load_config
 from saitenka.app.paths import cache_dir
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 # A closed set — the type-checker now rejects a typo'd status literal at every Check(...) call site,
 # and VALID_STATUSES is the runtime SSOT `Report.counts` buckets by (so a status outside the set can't
@@ -430,6 +433,66 @@ def check_sub_auto() -> Check:
             "sub-auto=fuzzy (or exact) so the overlay doesn't pick up junk externals",
         )
     return Check("sub-auto", "ok", f"mpv.conf sub-auto={val}", info=True)
+
+
+def _mpv_conf_setting(value: str) -> object:
+    value = value.strip().strip('"')
+    if value in {"yes", "no"}:
+        return value == "yes"
+    try:
+        return float(value)
+    except ValueError:
+        return value
+
+
+def _mpv_conf_subtitle_lines(path: Path, names: Iterable[str]) -> dict[str, str]:
+    """`name -> value` as written in mpv.conf's top level, for the named options."""
+    wanted = set(names)
+    written: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.strip().startswith("["):
+            break  # a profile applies only when selected
+        name, separator, value = line.partition("#")[0].partition("=")
+        name = name.strip().removeprefix("--")
+        if separator and name in wanted:
+            written[name] = value.strip()
+    return written
+
+
+def check_subtitle_options() -> Check:
+    """Name an mpv.conf subtitle setting that native-visible mode refuses.
+
+    Neither `run` nor `attach` overrides mpv's subtitle settings, so a refused one costs hover — and
+    for some, the colored track — on every authored track, with only a toast to say so at runtime.
+    """
+    from saitenka.app import colored_subs
+    from saitenka.app.config import subtitle_geometry_options
+    from saitenka.app.native_subtitles import (
+        MPV_DEFAULT_RENDER_SETTINGS,
+        unsupported_render_settings,
+    )
+
+    try:
+        options = subtitle_geometry_options(load_config())
+    except (TypeError, ValueError):
+        return Check("subtitle-options", "ok", "subtitle geometry config invalid", info=True)
+    path = _mpv_conf_path()
+    if not options.native_visible or options.source == "mpv" or not path.exists():
+        return Check("subtitle-options", "ok", "no mpv subtitle settings to check", info=True)
+    written = _mpv_conf_subtitle_lines(path, MPV_DEFAULT_RENDER_SETTINGS)
+    overrides: dict[str, object] = {
+        name: [_mpv_conf_setting(value)]
+        if name == "sub-ass-style-overrides" and value
+        else _mpv_conf_setting(value)
+        for name, value in written.items()
+    }
+    refused = unsupported_render_settings(overrides)
+    if not refused:
+        return Check("subtitle-options", "ok", "mpv.conf subtitle settings are supported")
+    colors = colored_subs.refusing_options({**MPV_DEFAULT_RENDER_SETTINGS, **overrides})
+    cost = "hover and the colored track" if colors is not None else "hover"
+    listed = ", ".join(f"{name}={written[name]}" for name in refused)
+    return Check("subtitle-options", "warn", f"mpv.conf {listed} costs {cost} on authored tracks")
 
 
 def check_sub_font() -> Check:
@@ -1292,6 +1355,7 @@ def run_checks(deck: str | None = None, model: str | None = None) -> Report:
         check_legacy_files(),
         check_sub_auto(),
         check_sub_font(),
+        check_subtitle_options(),
         check_fonts(),
         check_tts(),
         check_deinflect(),

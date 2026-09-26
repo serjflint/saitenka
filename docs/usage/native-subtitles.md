@@ -33,7 +33,7 @@ of playback. mpv activates and expires them on its video clock, so the first nat
 can already contain its colors. Cue notifications continue to update scanning and interaction.
 This path requires indexed static cues, normal subtitle speed/FPS, forward playback, unblended
 subtitles, no cue-dropping filters, and no effective `sub-fix-timing` repair. Timing repair is ignored
-by mpv under the default `sub-ass-override=no`; enabling it with `scale` declines timed coloring.
+by mpv under `sub-ass-override=no`; enabling it under mpv's default `scale` declines timed coloring.
 Co-timed events share one interval; changing overlaps or
 unsupported timing keep scanning without timed color. Subtitle delay is
 applied to the display interval while authored timestamps remain part of cue identity. Stock mpv
@@ -244,27 +244,21 @@ The complete option reference, including the bounded result cache and cue lookah
 `saitenka doctor` after enabling the mode; it reports whether the wrapper is installed and which
 compatible libass can be initialized.
 
-`saitenka run` configures the parity-tested mpv subtitle profile automatically. `saitenka attach`
-cannot change how an existing player was launched, so that mpv instance needs these settings:
+`saitenka run` and `saitenka attach` both use mpv's subtitle settings as they are: mpv's defaults
+need no configuration. `saitenka doctor` names any setting the mode refuses. These are:
 
-```conf
-# `no` or `scale`; `force` is not supported. Note this is the one line you must SET rather than
-# omit — mpv's own default is `scale`, so removing it does not give you `no`.
-sub-ass-override=no
-sub-ass-scale-with-window=no
-# Read only under `sub-ass-override=scale`, and reproduced there; ignored entirely under `no`.
-sub-scale=1
-sub-pos=100
-sub-use-margins=yes
-# Either value is supported; Saitenka mirrors the observed authored-ASS policy.
-sub-ass-force-margins=no
-sub-ass-video-aspect-override=0
-sub-ass-use-video-data=all
-sub-ass-style-overrides=
-# Either `no` or `yes` is supported; `video` is not.
-blend-subtitles=no
-sub-filter-sdh=no
-```
+| Setting | Refused value | Costs |
+|---|---|---|
+| `sub-ass-override` | `yes`, `force`, `strip` | hover, and the [colored track](#colored-track) |
+| `sub-ass-style-overrides` | any override | hover, and the colored track |
+| `sub-filter-sdh` | `yes` | hover, and the colored track |
+| `sub-ass-scale-with-window` | `yes` | hover |
+| `sub-ass-justify` | `yes`, with `sub-ass-override=scale` | hover |
+| `sub-use-margins` | `no` | hover |
+| `sub-ass-video-aspect-override` | anything but `0` | hover |
+| `sub-ass-use-video-data` | anything but `all` | hover |
+| `blend-subtitles` | `video` | hover |
+| `video-crop`, `video-rotate` | set, with `blend-subtitles=yes` | hover |
 
 `--sub-ass-override=scale` is reproduced. It only configures the libass renderer — the font scale,
 the line position, line spacing and hinting (`configure_ass`, `sd_ass.c:552-558`) — and the

@@ -7,6 +7,15 @@ logs.
 
 ## [Unreleased]
 
+### Changed
+
+- With `native_visible`, `saitenka run` no longer overrides mpv's subtitle settings. The profile it
+  forced (`sub-ass-override=no` and eight others) is no longer needed — mpv's defaults, including
+  `sub-ass-override=scale`, are supported — and it overrode the user's own `mpv.conf`. `run` and
+  `attach` now behave the same, and `saitenka doctor` names an `mpv.conf` setting the mode refuses
+  and what it costs. `run` also no longer passes `--sub-ass-justify=yes` in this mode, which
+  re-justified authored lines under `scale`.
+
 ## [4.7.0] - 2026-09-26
 
 ### Added

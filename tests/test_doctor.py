@@ -1143,3 +1143,38 @@ def test_a_single_sub_font_line_is_ok(tmp_path, monkeypatch):
     monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
 
     assert doc.check_sub_font().status == "ok"
+
+
+def _native_visible(monkeypatch) -> None:
+    monkeypatch.setattr(doc, "load_config", lambda: {"subtitle_geometry": {"native_visible": True}})
+
+
+def test_an_mpv_conf_on_defaults_passes_the_subtitle_option_check(tmp_path, monkeypatch):
+    _native_visible(monkeypatch)
+    mpvconf = tmp_path / "mpv.conf"
+    mpvconf.write_text("input-ipc-server=\\\\.\\pipe\\mpvsocket\nsub-auto=fuzzy\n")
+    monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
+
+    assert doc.check_subtitle_options().status == "ok"
+
+
+@pytest.mark.parametrize(
+    ("line", "cost"),
+    [
+        ("sub-ass-override=force", "hover and the colored track"),
+        ("sub-ass-style-overrides=Default.PrimaryColour=&H0000FFFF", "hover and the colored track"),
+        ("sub-ass-scale-with-window=yes", "hover on"),
+        ("sub-ass-justify=yes", "hover on"),
+    ],
+)
+def test_a_refused_mpv_conf_subtitle_setting_is_named(tmp_path, monkeypatch, line, cost):
+    _native_visible(monkeypatch)
+    mpvconf = tmp_path / "mpv.conf"
+    mpvconf.write_text(f"{line}  # set long ago\n[profile]\nsub-ass-override=strip\n")
+    monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
+
+    check = doc.check_subtitle_options()
+
+    assert check.status == "warn"
+    assert line.partition("=")[0] in check.detail and cost in check.detail
+    assert "strip" not in check.detail  # a profile applies only when selected
