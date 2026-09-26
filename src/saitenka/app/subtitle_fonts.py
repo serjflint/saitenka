@@ -13,6 +13,7 @@ artifact resolution (`embedded_subs`), never on the interaction loop.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import subprocess
@@ -270,33 +271,42 @@ def _osd_attachment_families(
     return frozenset(available)
 
 
-#: Installed-family answers by (attachment bytes, OSD font setup). A provider's installed set does
-#: not change within a session often enough to pay a renderer build on every track load.
-_INSTALLED: dict[tuple[tuple[bytes, ...], FontSetup], frozenset[str]] = {}
-_INSTALLED_MAX = 16
+#: Faces the OSD was found to draw as their own, by (face digest, OSD font setup). Only the "yes"
+#: answers are kept: the notice asks the user to install a font, and the next track load has to
+#: see it without a restart.
+_INSTALLED: dict[tuple[bytes, FontSetup], frozenset[str]] = {}
+_INSTALLED_MAX = 256
 
 
 def _osd_installed_families(
     attachments: tuple[tuple[str, bytes], ...], covered: frozenset[str], setup: FontSetup
 ) -> frozenset[str]:
-    """Which attachment families the OSD's provider has installed, asked of libass by name."""
-    faces = tuple(data for _name, data in attachments if not font_names.families(data) <= covered)
-    if not faces:
-        return frozenset()
-    key = (faces, setup)
-    if (known := _INSTALLED.get(key)) is not None:
-        return known
+    """Which attachment families the OSD's provider draws as the attachment does, asked by name."""
+    found: set[str] = set()
+    unknown: list[tuple[bytes, bytes]] = []
+    for _name, data in attachments:
+        if font_names.families(data) <= covered:
+            continue
+        digest = hashlib.sha256(data).digest()
+        if (known := _INSTALLED.get((digest, setup))) is not None:
+            found |= known
+        else:
+            unknown.append((digest, data))
+    if not unknown:
+        return frozenset(found)
     try:
         from saitenka_subtitles.libass_backend import installed_families
     except ImportError:
-        return frozenset()
-    found = installed_families(
-        (probe for data in faces for probe in font_names.probes(data)), setup
-    )
-    if len(_INSTALLED) >= _INSTALLED_MAX:
-        _INSTALLED.clear()
-    _INSTALLED[key] = found
-    return found
+        return frozenset(found)
+    for digest, data in unknown:
+        if installed := installed_families(
+            ((data, probe) for probe in font_names.probes(data)), setup
+        ):
+            if len(_INSTALLED) >= _INSTALLED_MAX:
+                _INSTALLED.clear()
+            _INSTALLED[digest, setup] = installed
+            found |= installed
+    return frozenset(found)
 
 
 def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:

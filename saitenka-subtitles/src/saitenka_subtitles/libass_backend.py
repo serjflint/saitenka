@@ -95,12 +95,16 @@ class RendererFactory(Protocol):
 
 log = logging.getLogger(__name__)
 
-#: A family no provider offers, so asking for it shows what the provider falls back to.
-_ABSENT_FAMILY = "saitenka absent family 7f3c"
 _PROBE_FRAME = (4096, 256)
 
+#: Ink overlap at which the face the OSD finds by name counts as the attachment's own design.
+#: Measured at the probe size: two versions of Trebuchet MS overlap 1.000, while metric-compatible
+#: clones (Liberation for Arial or Times New Roman) stay at or below 0.84 even on plain Latin, and a
+#: provider's generic fallback well below that.
+SAME_DESIGN_OVERLAP = 0.95
 
-def _probe_document(family: str, probe: font_names.FaceProbe) -> bytes:
+
+def _probe_document(probe: font_names.FaceProbe) -> bytes:
     bold, italic = -1 if probe.bold else 0, -1 if probe.italic else 0
     return (
         "[Script Info]\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\n"
@@ -108,14 +112,14 @@ def _probe_document(family: str, probe: font_names.FaceProbe) -> bytes:
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
         "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
         "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: P,{family},96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,{bold},{italic},0,0,"
-        "100,100,0,0,1,0,0,7,0,0,0,1\n\n"
+        f"Style: P,{probe.family},96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,{bold},{italic},"
+        "0,0,100,100,0,0,1,0,0,7,0,0,0,1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         f"Dialogue: 0,0:00:00.00,0:00:01.00,P,,0,0,0,,{{\\pos(0,0)}}{probe.sample}\n"
     ).encode()
 
 
-def _probe_render(renderer: NativeRenderer) -> tuple[tuple[int, int, int, int, bytes], ...]:
+def _ink(renderer: NativeRenderer) -> np.ndarray:
     result = renderer.render(
         0,
         _PROBE_FRAME,
@@ -125,64 +129,92 @@ def _probe_render(renderer: NativeRenderer) -> tuple[tuple[int, int, int, int, b
         use_margins=False,
         max_bitmap_bytes=2 * _PROBE_FRAME[0] * _PROBE_FRAME[1],
     )
-    return tuple(
-        (layer.dst_x, layer.dst_y, layer.width, layer.height, bytes(layer.bitmap))
-        for layer in result.layers
+    ink = np.zeros((_PROBE_FRAME[1], _PROBE_FRAME[0]), dtype=bool)
+    for layer in result.layers:
+        if layer.width <= 0 or layer.height <= 0:
+            continue
+        pixels = np.frombuffer(bytes(layer.bitmap), dtype=np.uint8)
+        stride = len(pixels) // layer.height
+        coverage = pixels[: stride * layer.height].reshape(layer.height, stride)[:, : layer.width]
+        ink[layer.dst_y : layer.dst_y + layer.height, layer.dst_x : layer.dst_x + layer.width] |= (
+            coverage > 127
+        )
+    return ink
+
+
+def _overlap(a: np.ndarray, b: np.ndarray) -> float:
+    union = int((a | b).sum())
+    return int((a & b).sum()) / union if union else 0.0
+
+
+def _renderer_for(
+    factory: RendererFactory,
+    document: bytes,
+    *,
+    fonts: list[tuple[str, bytes]],
+    setup: FontSetup | None,
+    library_path: Path | None,
+) -> NativeRenderer:
+    return factory(
+        document,
+        fonts=fonts,
+        library_path=library_path,
+        fonts_dir=setup.fonts_dir if setup else None,
+        extract_fonts=False,
+        default_font=None,
+        default_family=None,
+        font_provider=int(setup.font_provider) if setup else 0,
+        fontconfig_config=setup.fontconfig_config if setup else None,
+        features=[],
     )
 
 
 def installed_families(
-    probes: Iterable[font_names.FaceProbe],
+    faces: Iterable[tuple[bytes, font_names.FaceProbe]],
     setup: FontSetup,
     *,
     library_path: Path | None = None,
     renderer_factory: RendererFactory | None = None,
 ) -> frozenset[str]:
-    """The names of the faces `setup`'s provider finds by family name, with no attachments loaded.
+    """The names of attachment faces that `setup`'s provider draws, by family name, as their own.
 
-    A face counts when asking for its family draws its sample differently from asking for a family
-    nobody has — which is only the fallback. By name, not by identity: an installed face of another
-    version is found here, and the per-cue OSD qualification decides whether it lays out the same.
-    Any failure answers "none installed", which keeps the family refused.
+    Asked with no attachments loaded, as mpv's OSD library is, and compared by ink against the
+    attachment alone. Asking by name finds what the OSD will actually use for that name: another
+    version of the face passes, while a metric-compatible clone a provider substitutes for the name,
+    or its generic fallback, does not. Any failure answers "none", which keeps the family refused.
     """
-    wanted = [probe for probe in probes if "," not in probe.family]
+    wanted = [(data, probe) for data, probe in faces if "," not in probe.family]
     if not wanted:
         return frozenset()
-    factory = renderer_factory
-    renderer: NativeRenderer | None = None
+    osd: NativeRenderer | None = None
     found: set[str] = set()
     try:
-        if factory is None:
-            factory = cast("RendererFactory", importlib.import_module("libasslite").AssRenderer)
-        for probe in wanted:
-            absent = _probe_document(_ABSENT_FAMILY, probe)
-            if renderer is None:
-                renderer = factory(
-                    absent,
-                    fonts=[],
-                    library_path=library_path,
-                    fonts_dir=setup.fonts_dir,
-                    extract_fonts=False,
-                    # No default family: a fallback that happened to be the probed family would
-                    # draw the same sample and read as absent.
-                    default_font=None,
-                    default_family=None,
-                    font_provider=int(setup.font_provider),
-                    fontconfig_config=setup.fontconfig_config,
-                    features=[],
+        factory = renderer_factory or cast(
+            "RendererFactory", importlib.import_module("libasslite").AssRenderer
+        )
+        for data, probe in wanted:
+            document = _probe_document(probe)
+            reference = _renderer_for(
+                factory, document, fonts=[("face", data)], setup=None, library_path=library_path
+            )
+            try:
+                own = _ink(reference)
+            finally:
+                reference.close()
+            if osd is None:
+                osd = _renderer_for(
+                    factory, document, fonts=[], setup=setup, library_path=library_path
                 )
             else:
-                renderer.set_document(absent, [])
-            fallback = _probe_render(renderer)
-            renderer.set_document(_probe_document(probe.family, probe), [])
-            if _probe_render(renderer) != fallback:
+                osd.set_document(document, [])
+            if own.any() and _overlap(_ink(osd), own) >= SAME_DESIGN_OVERLAP:
                 found |= probe.names | {font_names.key(probe.family)}
     except (ImportError, OSError, RuntimeError, ValueError, TypeError) as error:
         log.debug("could not ask the font provider for installed families: %s", error)
         return frozenset()
     finally:
-        if renderer is not None:
-            renderer.close()
+        if osd is not None:
+            osd.close()
     return frozenset(found)
 
 

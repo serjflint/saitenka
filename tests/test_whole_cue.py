@@ -503,6 +503,8 @@ def test_a_family_the_osd_cannot_load_is_named_as_the_document_spells_it():
     [
         (FillLayer(0, 11, 20, 2, 1, b"\x7f\x00"), True),
         (FillLayer(0, 12, 20, 2, 1, b"\xff\x00"), False),
+        # One pixel each on the left edge and the width is two on the right edge.
+        (FillLayer(0, 11, 20, 3, 1, b"\xff\x00\xff"), False),
         (FillLayer(0, 10, 20, 4, 1, b"\xff\x00\xff\x00"), False),
         (FillLayer(1, 10, 20, 2, 1, b"\xff\x00"), False),
     ],

@@ -238,15 +238,14 @@ PLACEMENT_TOLERANCE_PX = 1
 
 
 def same_placement(a: tuple[FillLayer, ...], b: tuple[FillLayer, ...]) -> bool:
-    """Whether two renders put the same tokens in the same places, outlines aside."""
+    """Whether two renders put each token's ink box in the same place, outlines aside."""
+
+    def edges(layer: FillLayer) -> tuple[int, int, int, int]:
+        return (layer.x, layer.y, layer.x + layer.width, layer.y + layer.height)
+
     return len(a) == len(b) and all(
         left.token == right.token
-        and max(
-            abs(left.x - right.x),
-            abs(left.y - right.y),
-            abs(left.width - right.width),
-            abs(left.height - right.height),
-        )
+        and max(abs(p - q) for p, q in zip(edges(left), edges(right), strict=True))
         <= PLACEMENT_TOLERANCE_PX
         for left, right in zip(a, b, strict=True)
     )

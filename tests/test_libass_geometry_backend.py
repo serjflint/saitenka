@@ -659,19 +659,36 @@ def test_an_installed_substitute_qualifies_on_placement_not_on_outline(
     assert snapshot.whole_cue.osd_reason == reason
 
 
-@pytest.mark.parametrize("installed", [True, False])
-def test_the_osd_provider_finds_an_installed_family_by_name(tmp_path, *, installed: bool) -> None:
-    """Asked with no attachment loaded, as mpv's OSD library is: a face in its fonts directory is
-    found under its family name, and the same request against an empty directory is not."""
+@pytest.mark.parametrize(
+    ("installed", "found"),
+    [
+        (None, False),
+        # Other bytes, same outlines: another build of the same face.
+        ("NotoSans.ttf", True),
+        # Same family name, other outlines: what a metric-compatible clone looks like.
+        ("NotoSansJP.ttf", False),
+    ],
+)
+def test_the_osd_counts_an_installed_family_only_when_it_draws_like_the_attachment(
+    tmp_path, installed: str | None, *, found: bool
+) -> None:
+    """Asked by name with no attachment loaded, as mpv's OSD library asks, then compared by ink
+    against the attachment alone: a provider that answers the name with another design is not the
+    video's font, whatever it is called."""
     from saitenka_subtitles import font_names
     from saitenka_subtitles.libass_backend import installed_families
     from util import drawable_font, requires_libass
 
     requires_libass()
-    face = drawable_font("Saitenka Probe Sans")
-    if installed:
-        (tmp_path / "probe.ttf").write_bytes(face)
+    attached = drawable_font("Saitenka Probe Sans")
+    if installed is not None:
+        (tmp_path / "installed.ttf").write_bytes(
+            drawable_font("Saitenka Probe Sans", "Hamburgefonstiv 0123!", design=installed)
+        )
 
-    found = installed_families(font_names.probes(face), FontSetup(fonts_dir=str(tmp_path)))
+    result = installed_families(
+        ((attached, probe) for probe in font_names.probes(attached)),
+        FontSetup(fonts_dir=str(tmp_path), font_provider=FontProvider.NONE),
+    )
 
-    assert ("saitenka probe sans" in found) is installed
+    assert ("saitenka probe sans" in result) is found

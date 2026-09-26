@@ -472,7 +472,7 @@ def test_an_attachment_installed_under_its_name_is_substituted_not_refused(
     fonts = tmp_path / "fonts"
     fonts.mkdir()
     if installed:
-        (fonts / "installed.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv"))
+        (fonts / "installed.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv 0123!"))
     attached = util.drawable_font("Signs")
     monkeypatch.setattr(
         subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttf", attached),)
@@ -492,3 +492,32 @@ def test_an_attachment_installed_under_its_name_is_substituted_not_refused(
     ).osd_unreachable()
 
     assert (reach.blocks("signs"), "signs" in reach.substituted) == (not installed, installed)
+
+
+def test_a_font_installed_after_the_notice_is_found_on_the_next_track_load(tmp_path, monkeypatch):
+    """The notice asks the user to install the font. A cached "not installed" would keep refusing
+    it until Saitenka restarted, so only the finds are remembered."""
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    attached = util.drawable_font("Signs")
+    monkeypatch.setattr(
+        subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttf", attached),)
+    )
+    monkeypatch.setattr(subtitle_fonts, "_INSTALLED", {})
+
+    def reach():
+        return subtitle_fonts.resolve(
+            expand=expander(None),
+            settings={
+                "embeddedfonts": True,
+                "osd-fonts-dir": str(fonts),
+                "osd-font-provider": "none",
+                "sub-font-provider": "none",
+            },
+            video=tmp_path / "episode.mkv",
+            cache_dir=tmp_path,
+        ).osd_unreachable()
+
+    assert reach().blocks("signs")
+    (fonts / "installed.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv 0123!"))
+    assert not reach().blocks("signs")

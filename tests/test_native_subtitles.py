@@ -4191,17 +4191,10 @@ def test_a_legacy_stage_cut_off_by_the_hide_is_restarted_by_the_show(tmp_path: P
     result.close()
 
 
-@pytest.mark.parametrize("installed", [False, True])
-def test_a_font_only_the_video_carries_asks_to_be_installed_once(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-    *,
-    installed: bool,
-) -> None:
-    """mpv's OSD cannot load a container attachment. When the family is not installed either, the
-    fix is the user's to make, so they are asked — once, not on every cue that falls back for it.
-    Installed, the OSD has a face of that family and there is nothing to ask."""
+def _attach_arial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, installed: bool, coloring: str
+) -> tuple[TestSession, FakeIPC, FakeBackend]:
+    """A session whose video carries the fixture's Arial, installed for the OSD or not."""
     import util
 
     from saitenka.app import subtitle_fonts
@@ -4215,20 +4208,91 @@ def test_a_font_only_the_video_carries_asks_to_be_installed_once(
         "_osd_installed_families",
         lambda *_args: frozenset({"arial"}) if installed else frozenset(),
     )
-    result, ipc, _backend = reader(tmp_path, coloring="whole-cue-osd")
+    result, ipc, backend = reader(tmp_path, coloring=coloring)
     native = result.graph.subtitle_presentation.native
     assert native is not None
     ipc.props["options/embeddedfonts"] = True
     ipc.props["path"] = str(tmp_path / "episode.mkv")
     resolve_track_fonts(ipc, ipc.query, native)
+    return result, ipc, backend
+
+
+def _show(result: TestSession, ipc: FakeIPC, *texts: str) -> None:
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    for text in texts:
+        result.graph.cue.set_subtitle(text)
+        settle_jobs(result, ipc)
+        native.apply(result.graph.cue.geometry_observation())
+
+
+def _asked(caplog: pytest.LogCaptureFixture) -> list[tuple]:
+    return [record.args for record in caplog.records if "cannot load subtitle font" in record.msg]
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_a_font_only_the_video_carries_asks_to_be_installed_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    installed: bool,
+) -> None:
+    """mpv's OSD cannot load a container attachment. When the family is not installed either, the
+    fix is the user's to make, so they are asked — once, not on every cue that falls back for it.
+    Installed, the OSD has a face of that family, and the cue goes to qualification instead."""
+    result, ipc, backend = _attach_arial(
+        tmp_path, monkeypatch, installed=installed, coloring="whole-cue-osd"
+    )
 
     with caplog.at_level("INFO", logger="saitenka.app.native_subtitles"):
-        for text in ("猫を見る", "", "猫を見る"):
-            result.graph.cue.set_subtitle(text)
-            settle_jobs(result, ipc)
-            native.apply(result.graph.cue.geometry_observation())
+        _show(result, ipc, "猫を見る", "", "猫を見る")
 
-    asked = [record for record in caplog.records if "cannot load subtitle font" in record.message]
-    assert [record.args for record in asked] == ([] if installed else [("Arial",)])
-    assert len(toasts(ipc)) == len(asked)
+    assert _asked(caplog) == ([] if installed else [("Arial",)])
+    assert len(toasts(ipc)) == len(_asked(caplog))
+    whole = backend.requests[-1].whole_cue
+    assert whole is not None
+    assert (whole.substituted, whole.osd_reason == "font-access") == (installed, not installed)
+    result.close()
+
+
+def test_a_missing_font_is_not_toasted_where_the_raster_still_colors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """In the default mode the cue falls back to a raster drawn in the video's own fonts, so the
+    color survives; most releases attach a font nobody has installed, and a toast per release
+    would say something is wrong when nothing is."""
+    result, ipc, _backend = _attach_arial(
+        tmp_path, monkeypatch, installed=False, coloring="whole-cue-auto"
+    )
+
+    with caplog.at_level("INFO", logger="saitenka.app.native_subtitles"):
+        _show(result, ipc, "猫を見る")
+
+    assert (_asked(caplog), toasts(ipc)) == ([("Arial",)], [])
+    result.close()
+
+
+def test_a_new_font_environment_asks_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Once per font environment, not once per session: the next episode that carries the same
+    uninstalled font is a new chance to act on it."""
+    import util
+
+    from saitenka.app import subtitle_fonts
+
+    result, ipc, _backend = _attach_arial(
+        tmp_path, monkeypatch, installed=False, coloring="whole-cue-osd"
+    )
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    with caplog.at_level("INFO", logger="saitenka.app.native_subtitles"):
+        _show(result, ipc, "猫を見る")
+        faces = (("arial.ttf", util.drawable_font("Arial")), ("sign.ttf", util.tiny_font("Sign")))
+        monkeypatch.setattr(subtitle_fonts, "container_fonts", lambda *_args, **_kw: faces)
+        resolve_track_fonts(ipc, ipc.query, native)
+        _show(result, ipc, "", "猫を見る")
+
+    assert _asked(caplog) == [("Arial",), ("Arial",)]
     result.close()

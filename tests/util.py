@@ -143,12 +143,17 @@ def tiny_font(family: str) -> bytes:
     return buffer.getvalue()
 
 
-def drawable_font(family: str, text: str = "Hamburgefonstiv 0123") -> bytes:
-    """`tiny_font` with glyphs: a face a renderer can actually draw `text` in, under `family`."""
+def drawable_font(
+    family: str, text: str = "Hamburgefonstiv 0123", *, design: str = "NotoSans.ttf"
+) -> bytes:
+    """`tiny_font` with glyphs: a face a renderer can draw `text` in, under `family`.
+
+    `design` picks the outlines, so two faces can share a family name and differ in shape.
+    """
     from fontTools import subset
     from fontTools.ttLib import TTFont
 
-    font = TTFont(REPO_ROOT / "src/saitenka/assets/fonts/NotoSans.ttf")
+    font = TTFont(REPO_ROOT / "src/saitenka/assets/fonts" / design)
     subsetter = subset.Subsetter(subset.Options(layout_features=[], notdef_outline=True))
     subsetter.populate(text=text)
     subsetter.subset(font)

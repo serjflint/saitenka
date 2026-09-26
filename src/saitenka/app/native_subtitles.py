@@ -1093,12 +1093,17 @@ class NativeSubtitleGeometry:
         self._ports.notify(_fallback_notice(reason, diagnostic), "warn")
 
     def _announce_missing_fonts(self, whole: whole_cue.WholeCue | None) -> None:
-        """Ask once per family and font environment, at the first cue that falls back for it."""
+        """Ask once per family and font environment, at the first cue that falls back for it.
+
+        On screen only in `whole-cue-osd`, where the fallback loses the color. The other modes fall
+        back to a raster that still colors the cue, and most releases attach a font nobody has.
+        """
         if whole is None or not (fresh := frozenset(whole.missing_fonts) - self._announced_fonts):
             return
         self._announced_fonts |= fresh
         log.info("OSD cannot load subtitle font(s) %s", ", ".join(sorted(fresh)))
-        self._ports.notify(_missing_font_notice(tuple(sorted(fresh))), "warn")
+        if self.coloring == "whole-cue-osd":
+            self._ports.notify(_missing_font_notice(tuple(sorted(fresh))), "warn")
 
     def _set_ready(self, *, active_events: int = 0) -> bool:
         self._failure_diagnostic = None
