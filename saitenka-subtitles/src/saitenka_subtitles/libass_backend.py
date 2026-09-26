@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 
-from saitenka_subtitles import whole_cue
+from saitenka_subtitles import font_names, whole_cue
 from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometrySnapshot,
@@ -31,11 +31,11 @@ from saitenka_subtitles.telemetry import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
     from pathlib import Path
 
     from saitenka_subtitles.document import SubtitleEventId
-    from saitenka_subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.geometry import FontSetup, GeometryRequest
     from saitenka_subtitles.telemetry import GeometryTelemetry
 
 
@@ -94,6 +94,96 @@ class RendererFactory(Protocol):
 
 
 log = logging.getLogger(__name__)
+
+#: A family no provider offers, so asking for it shows what the provider falls back to.
+_ABSENT_FAMILY = "saitenka absent family 7f3c"
+_PROBE_FRAME = (4096, 256)
+
+
+def _probe_document(family: str, probe: font_names.FaceProbe) -> bytes:
+    bold, italic = -1 if probe.bold else 0, -1 if probe.italic else 0
+    return (
+        "[Script Info]\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\n"
+        f"PlayResX: {_PROBE_FRAME[0]}\nPlayResY: {_PROBE_FRAME[1]}\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
+        "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: P,{family},96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,{bold},{italic},0,0,"
+        "100,100,0,0,1,0,0,7,0,0,0,1\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        f"Dialogue: 0,0:00:00.00,0:00:01.00,P,,0,0,0,,{{\\pos(0,0)}}{probe.sample}\n"
+    ).encode()
+
+
+def _probe_render(renderer: NativeRenderer) -> tuple[tuple[int, int, int, int, bytes], ...]:
+    result = renderer.render(
+        0,
+        _PROBE_FRAME,
+        _PROBE_FRAME,
+        pixel_aspect=1.0,
+        margins=(0, 0, 0, 0),
+        use_margins=False,
+        max_bitmap_bytes=2 * _PROBE_FRAME[0] * _PROBE_FRAME[1],
+    )
+    return tuple(
+        (layer.dst_x, layer.dst_y, layer.width, layer.height, bytes(layer.bitmap))
+        for layer in result.layers
+    )
+
+
+def installed_families(
+    probes: Iterable[font_names.FaceProbe],
+    setup: FontSetup,
+    *,
+    library_path: Path | None = None,
+    renderer_factory: RendererFactory | None = None,
+) -> frozenset[str]:
+    """The names of the faces `setup`'s provider finds by family name, with no attachments loaded.
+
+    A face counts when asking for its family draws its sample differently from asking for a family
+    nobody has — which is only the fallback. By name, not by identity: an installed face of another
+    version is found here, and the per-cue OSD qualification decides whether it lays out the same.
+    Any failure answers "none installed", which keeps the family refused.
+    """
+    wanted = [probe for probe in probes if "," not in probe.family]
+    if not wanted:
+        return frozenset()
+    factory = renderer_factory
+    renderer: NativeRenderer | None = None
+    found: set[str] = set()
+    try:
+        if factory is None:
+            factory = cast("RendererFactory", importlib.import_module("libasslite").AssRenderer)
+        for probe in wanted:
+            absent = _probe_document(_ABSENT_FAMILY, probe)
+            if renderer is None:
+                renderer = factory(
+                    absent,
+                    fonts=[],
+                    library_path=library_path,
+                    fonts_dir=setup.fonts_dir,
+                    extract_fonts=False,
+                    # No default family: a fallback that happened to be the probed family would
+                    # draw the same sample and read as absent.
+                    default_font=None,
+                    default_family=None,
+                    font_provider=int(setup.font_provider),
+                    fontconfig_config=setup.fontconfig_config,
+                    features=[],
+                )
+            else:
+                renderer.set_document(absent, [])
+            fallback = _probe_render(renderer)
+            renderer.set_document(_probe_document(probe.family, probe), [])
+            if _probe_render(renderer) != fallback:
+                found |= probe.names | {font_names.key(probe.family)}
+    except (ImportError, OSError, RuntimeError, ValueError, TypeError) as error:
+        log.debug("could not ask the font provider for installed families: %s", error)
+        return frozenset()
+    finally:
+        if renderer is not None:
+            renderer.close()
+    return frozenset(found)
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +498,12 @@ class LibassGeometryBackend:
             renderer, _built = self._renderer(osd_request)
             predicted = self._render_frame(renderer, osd_request)
             candidate = whole_cue.retain_layers(predicted.layers, palette)
+            if candidate == cue.layers:
+                comparison = "exact"
+            elif cue.substituted and whole_cue.same_placement(candidate, cue.layers):
+                comparison = "placement"
+            else:
+                comparison = "shape-mismatch"
             evidence = (
                 ("shadow_bounds", whole_cue.layer_bounds(cue.layers)),
                 ("osd_bounds", whole_cue.layer_bounds(candidate)),
@@ -415,7 +511,7 @@ class LibassGeometryBackend:
                 ("mapping", cue.mapping),
                 ("qualification_cpu_ms", (time.thread_time_ns() - cpu_started) / 1_000_000),
                 ("qualification_ms", (time.perf_counter_ns() - started) / 1_000_000),
-                ("comparison", "exact" if candidate == cue.layers else "shape-mismatch"),
+                ("comparison", comparison),
             )
             span.set("generation", request.generation)
             span.set("timestamp_ms", request.timestamp_ms)
@@ -434,8 +530,8 @@ class LibassGeometryBackend:
             return replace(
                 cue,
                 evidence=evidence,
-                osd_reason="eligible" if candidate == cue.layers else "shape-mismatch",
-                blockers=() if candidate == cue.layers else ("shape-mismatch",),
+                osd_reason="shape-mismatch" if comparison == "shape-mismatch" else "eligible",
+                blockers=("shape-mismatch",) if comparison == "shape-mismatch" else (),
             )
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:

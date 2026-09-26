@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import logging
 import struct
+import unicodedata
+from dataclasses import dataclass
 from io import BytesIO
 
 from fontTools.ttLib import TTCollection, TTFont, TTLibError
@@ -70,6 +72,66 @@ def families(data: bytes) -> frozenset[str]:
     except (TTLibError, OSError, ValueError, KeyError, IndexError, struct.error) as error:
         log.debug("could not read a font's names: %s", error)
         return frozenset()
+
+
+#: Enough glyphs to tell two faces apart, few enough that a probe line stays inside its frame.
+_PROBE_GLYPHS = 24
+
+
+@dataclass(frozen=True, slots=True)
+class FaceProbe:
+    """How to ask a font provider for one face by name, and text only that face would draw."""
+
+    family: str
+    names: frozenset[str]
+    bold: bool
+    italic: bool
+    sample: str
+
+
+def _sample(font: TTFont) -> str:
+    """Characters this face covers, spread across its cmap rather than taken from the front."""
+    try:
+        cmap = font.getBestCmap() or {}
+    except (TTLibError, KeyError, AssertionError, struct.error):
+        return ""
+    drawable = [
+        chr(code)
+        for code in sorted(cmap)
+        if chr(code) not in "{}\\" and unicodedata.category(chr(code))[0] in "LNPS"
+    ]
+    step = max(1, len(drawable) // _PROBE_GLYPHS)
+    return "".join(drawable[::step][:_PROBE_GLYPHS])
+
+
+def _probe(font: TTFont) -> FaceProbe | None:
+    try:
+        family = font["name"].getDebugName(1)
+        # fontTools builds table attributes at decompile time, so the stubs cannot name them.
+        weight = getattr(font["OS/2"], "usWeightClass", 400) if "OS/2" in font else 400
+        italic = bool(getattr(font["head"], "macStyle", 0) & 2)
+    except (TTLibError, KeyError, AssertionError, struct.error):
+        return None
+    sample = _sample(font)
+    if not family or not sample:
+        return None
+    return FaceProbe(family.strip(), frozenset(_names(font)), weight >= 600, italic, sample)
+
+
+def probes(data: bytes) -> tuple[FaceProbe, ...]:
+    """One probe per face in the bytes; a face without a family name or a drawable glyph has none."""
+    if not data or len(data) > _MAX_FONT_BYTES:
+        return ()
+    try:
+        fonts = (
+            TTCollection(BytesIO(data), lazy=True).fonts
+            if data[:4] == b"ttcf"
+            else [TTFont(BytesIO(data), lazy=True, fontNumber=0)]
+        )
+        return tuple(probe for font in fonts if (probe := _probe(font)) is not None)
+    except (TTLibError, OSError, ValueError, KeyError, IndexError, struct.error) as error:
+        log.debug("could not read a font for probing: %s", error)
+        return ()
 
 
 def _decode_uu(payload: str) -> bytes:

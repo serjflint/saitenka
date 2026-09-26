@@ -51,10 +51,12 @@ scan boxes in explicit OSD mode; auto mode can use the retained whole-cue raster
 between two shadow renders, not a measurement of mpv's displayed pixels. Libass/font differences
 between installations still require live qualification.
 
-Attachment fonts reach OSD only when separately available there. Supplying the identical font files
-through mpv's `osd-fonts-dir` lets the qualifier use them; Saitenka does not install fonts or change
-that option automatically. Missing access reports `font-access`. Raster uses the existing subtitle
-font environment. Karaoke, alpha, dynamic effects, clipping and unproven occlusion remain independently
+mpv's OSD cannot load a font the video carries as an attachment, only fonts installed on the system
+or placed in `osd-fonts-dir`. When a family of the same name is installed, even another version of
+it, the OSD uses that face: each cue is still compared against the attachment's layout, and outline
+differences that leave every glyph within a pixel of its place are accepted. When it is not installed,
+Saitenka asks once to install it and the cue falls back (`font-access`). Saitenka does not install
+fonts or change `osd-fonts-dir`. Raster uses the existing subtitle font environment. Karaoke, alpha, dynamic effects, clipping and unproven occlusion remain independently
 restricted for coloring. Underlines use the existing vector decoration path.
 
 ### Colored track

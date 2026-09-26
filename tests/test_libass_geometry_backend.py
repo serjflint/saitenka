@@ -617,3 +617,61 @@ def test_whole_cue_telemetry_encloses_build_and_osd_render(monkeypatch):
     assert phases["subtitle_geometry_libass"]["render_cpu_ms"] == 20.0
     assert phases["subtitle_geometry_libass"]["extract_cpu_ms"] == 0.0
     assert dict(snapshot.whole_cue.evidence)["qualification_cpu_ms"] == 30.0
+
+
+@pytest.mark.parametrize(
+    ("substituted", "shift", "reason"),
+    [
+        (True, 1, "eligible"),
+        # The negative controls: a substitute that moves a glyph, and an exact-only cue.
+        (True, 2, "shape-mismatch"),
+        (False, 1, "shape-mismatch"),
+    ],
+)
+def test_an_installed_substitute_qualifies_on_placement_not_on_outline(
+    *, substituted: bool, shift: int, reason: str
+) -> None:
+    """Another version of a family redraws an outline, which moves an ink edge by a pixel and leaves
+    the glyph where it was. Only a cue whose family was substituted is judged on that."""
+    from saitenka_subtitles.whole_cue import OsdEvent, WholeCue
+
+    subtitle = Result((Layer(2, 1, b"\xff\x00", 0x01020300, 10, 20),))
+    osd = Result((Layer(2, 1, b"\x7f\x00", 0x01020300, 10 + shift, 20),))
+
+    def factory(ass, **_kwargs):
+        return FakeRenderer(subtitle if ass == b"ass" else osd, ass)
+
+    backend = LibassGeometryBackend(renderer_factory=factory)
+    cue = WholeCue(
+        events=(OsdEvent("猫", "", ((0, 0, 1),)),),
+        resolution=(1280, 720),
+        osd_reason="eligible",
+        qualify=True,
+        substituted=substituted,
+    )
+    try:
+        snapshot = backend.render(
+            replace(request(palette_size=1), coloring="whole-cue-osd", whole_cue=cue)
+        )
+    finally:
+        backend.close()
+
+    assert snapshot.whole_cue.osd_reason == reason
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_the_osd_provider_finds_an_installed_family_by_name(tmp_path, *, installed: bool) -> None:
+    """Asked with no attachment loaded, as mpv's OSD library is: a face in its fonts directory is
+    found under its family name, and the same request against an empty directory is not."""
+    from saitenka_subtitles import font_names
+    from saitenka_subtitles.libass_backend import installed_families
+    from util import drawable_font, requires_libass
+
+    requires_libass()
+    face = drawable_font("Saitenka Probe Sans")
+    if installed:
+        (tmp_path / "probe.ttf").write_bytes(face)
+
+    found = installed_families(font_names.probes(face), FontSetup(fonts_dir=str(tmp_path)))
+
+    assert ("saitenka probe sans" in found) is installed

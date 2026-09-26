@@ -49,6 +49,12 @@ class WholeCue:
     evidence: tuple[tuple[str, object], ...] = ()
     mapping: tuple[float, float, float, float] = (1, 1, 0, 0)
     qualify: bool = False
+    #: Styles name a family the video carries and the OSD holds only as an installed face — the
+    #: qualification then compares placement, since another version of a face differs in outline.
+    substituted: bool = False
+    #: Families, as the document spells them, that refused this cue because the OSD cannot load
+    #: them at all.
+    missing_fonts: tuple[str, ...] = ()
 
     @property
     def byte_size(self) -> int:
@@ -209,9 +215,7 @@ def _document(source: bytes) -> pysubs2.SSAFile:
     return pysubs2.SSAFile.from_string(source.decode("utf-8-sig"), format_="ass")
 
 
-def _blocked_fonts(
-    doc: pysubs2.SSAFile, prepared: PreparedAssFrame, blocked: frozenset[str]
-) -> bool:
+def _cue_fonts(doc: pysubs2.SSAFile, prepared: PreparedAssFrame) -> set[str]:
     families: set[str] = set()
     for event in prepared.events:
         raw = event.decoded.source.raw_text
@@ -221,7 +225,31 @@ def _blocked_fonts(
         )
         families.update(doc.styles[name].fontname for name in styles if name in doc.styles)
         families.update(re.findall(r"\\fn([^\\}]*)", raw))
-    return any(font_names.key(family) in blocked for family in families)
+    return families
+
+
+def _named(families: set[str], wanted: frozenset[str]) -> tuple[str, ...]:
+    return tuple(sorted(family for family in families if font_names.key(family) in wanted))
+
+
+#: Placement slack for a substituted face: another version of a family moves an outline, and with
+#: it an ink edge, by a pixel without moving the glyph.
+PLACEMENT_TOLERANCE_PX = 1
+
+
+def same_placement(a: tuple[FillLayer, ...], b: tuple[FillLayer, ...]) -> bool:
+    """Whether two renders put the same tokens in the same places, outlines aside."""
+    return len(a) == len(b) and all(
+        left.token == right.token
+        and max(
+            abs(left.x - right.x),
+            abs(left.y - right.y),
+            abs(left.width - right.width),
+            abs(left.height - right.height),
+        )
+        <= PLACEMENT_TOLERANCE_PX
+        for left, right in zip(a, b, strict=True)
+    )
 
 
 def osd_template(
@@ -232,19 +260,24 @@ def osd_template(
     frame: tuple[int, int] | None = None,
     margins: tuple[int, int, int, int] = (0, 0, 0, 0),
     blocked_families: frozenset[str] = frozenset(),
+    substituted_families: frozenset[str] = frozenset(),
 ) -> WholeCue:
     """Lower static events; the worker qualifies final whole-cue glyph geometry."""
     doc = _document(source)
-    blockers = (
-        ["font-access"] if fonts_blocked or _blocked_fonts(doc, prepared, blocked_families) else []
-    )
+    used = _cue_fonts(doc, prepared)
+    missing = _named(used, blocked_families)
+    blockers = ["font-access"] if fonts_blocked or missing else []
     if frame is None and doc.info.get("Kerning", "no").casefold() != "yes":
         blockers.append("kerning")
     if frame is None and doc.info.get("WrapStyle", "0") != "2":
         blockers.append("wrapping")
     resolution = (int(doc.info.get("PlayResX", 0)), int(doc.info.get("PlayResY", 0)))
     if min(resolution) <= 0:
-        return WholeCue(osd_reason="script-resolution", blockers=(*blockers, "script-resolution"))
+        return WholeCue(
+            osd_reason="script-resolution",
+            blockers=(*blockers, "script-resolution"),
+            missing_fonts=missing,
+        )
     if any(
         int(doc.info.get(key, resolution[i])) != resolution[i]
         for i, key in enumerate(("LayoutResX", "LayoutResY"))
@@ -312,6 +345,8 @@ def osd_template(
         osd_reason=blockers[0] if blockers else "eligible",
         blockers=tuple(blockers),
         qualify=frame is not None,
+        substituted=bool(_named(used, substituted_families)),
+        missing_fonts=missing,
     )
 
 

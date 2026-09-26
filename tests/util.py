@@ -143,6 +143,26 @@ def tiny_font(family: str) -> bytes:
     return buffer.getvalue()
 
 
+def drawable_font(family: str, text: str = "Hamburgefonstiv 0123") -> bytes:
+    """`tiny_font` with glyphs: a face a renderer can actually draw `text` in, under `family`."""
+    from fontTools import subset
+    from fontTools.ttLib import TTFont
+
+    font = TTFont(REPO_ROOT / "src/saitenka/assets/fonts/NotoSans.ttf")
+    subsetter = subset.Subsetter(subset.Options(layout_features=[], notdef_outline=True))
+    subsetter.populate(text=text)
+    subsetter.subset(font)
+    font["name"].names = [
+        record for record in font["name"].names if record.nameID in {1, 2, 4, 6, 16}
+    ]
+    for record in font["name"].names:
+        if record.nameID in {1, 4, 16}:
+            record.string = family
+    buffer = io.BytesIO()
+    font.save(buffer)
+    return buffer.getvalue()
+
+
 def uuencode(raw: bytes) -> str:
     """The inverse of libass's `decode_chars`: 3 bytes to 4 characters, big-endian, offset by 33.
 

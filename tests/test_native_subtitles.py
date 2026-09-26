@@ -4189,3 +4189,46 @@ def test_a_legacy_stage_cut_off_by_the_hide_is_restarted_by_the_show(tmp_path: P
     assert any(c[:2] == ("overlay-add", sub_slot) for c in ipc.commands[shown_at:])
     assert renderer.ownership_state.owner is PixelOwner.LEGACY
     result.close()
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_a_font_only_the_video_carries_asks_to_be_installed_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    installed: bool,
+) -> None:
+    """mpv's OSD cannot load a container attachment. When the family is not installed either, the
+    fix is the user's to make, so they are asked — once, not on every cue that falls back for it.
+    Installed, the OSD has a face of that family and there is nothing to ask."""
+    import util
+
+    from saitenka.app import subtitle_fonts
+
+    face = util.drawable_font("Arial")
+    monkeypatch.setattr(
+        subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("arial.ttf", face),)
+    )
+    monkeypatch.setattr(
+        subtitle_fonts,
+        "_osd_installed_families",
+        lambda *_args: frozenset({"arial"}) if installed else frozenset(),
+    )
+    result, ipc, _backend = reader(tmp_path, coloring="whole-cue-osd")
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    ipc.props["options/embeddedfonts"] = True
+    ipc.props["path"] = str(tmp_path / "episode.mkv")
+    resolve_track_fonts(ipc, ipc.query, native)
+
+    with caplog.at_level("INFO", logger="saitenka.app.native_subtitles"):
+        for text in ("猫を見る", "", "猫を見る"):
+            result.graph.cue.set_subtitle(text)
+            settle_jobs(result, ipc)
+            native.apply(result.graph.cue.geometry_observation())
+
+    asked = [record for record in caplog.records if "cannot load subtitle font" in record.message]
+    assert [record.args for record in asked] == ([] if installed else [("Arial",)])
+    assert len(toasts(ipc)) == len(asked)
+    result.close()

@@ -400,10 +400,12 @@ def test_two_different_font_providers_make_every_family_unsafe(tmp_path: Path) -
 @pytest.mark.integration
 @pytest.mark.timeout(60)
 def test_an_attachments_own_family_name_is_what_the_overprint_stands_down_on(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The whole point of naming families rather than counting sources: a release whose dialogue is
     a system font and whose signs are attachment-only must lose the color on its signs only."""
+    # Whether this host has Noto Sans installed is not what this test is about.
+    monkeypatch.setattr(subtitle_fonts, "_osd_installed_families", lambda *_args: frozenset())
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("test requires ffmpeg and ffprobe")
     video = tmp_path / "episode.mkv"
@@ -459,3 +461,34 @@ def test_identical_attachment_in_osd_directory_is_reachable(tmp_path, monkeypatc
     assert resolved.attachment_families
     assert not resolved.osd_unreachable().families
     assert resolved.osd_setup.fonts_dir == str(fonts)
+
+
+@pytest.mark.parametrize("installed", [True, False])
+def test_an_attachment_installed_under_its_name_is_substituted_not_refused(
+    tmp_path, monkeypatch, *, installed: bool
+):
+    """The OSD cannot load the video's copy of a family, but it can load an installed one of the
+    same name — another version, other bytes. That family goes to the per-cue qualification."""
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    if installed:
+        (fonts / "installed.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv"))
+    attached = util.drawable_font("Signs")
+    monkeypatch.setattr(
+        subtitle_fonts, "container_fonts", lambda *_args, **_kw: (("signs.ttf", attached),)
+    )
+    monkeypatch.setattr(subtitle_fonts, "_INSTALLED", {})
+
+    reach = subtitle_fonts.resolve(
+        expand=expander(None),
+        settings={
+            "embeddedfonts": True,
+            "osd-fonts-dir": str(fonts),
+            "osd-font-provider": "none",
+            "sub-font-provider": "none",
+        },
+        video=tmp_path / "episode.mkv",
+        cache_dir=tmp_path,
+    ).osd_unreachable()
+
+    assert (reach.blocks("signs"), "signs" in reach.substituted) == (not installed, installed)

@@ -104,6 +104,9 @@ class OsdReach:
 
     families: frozenset[str] = frozenset()
     all_unsafe: bool = False
+    #: Families the video carries that the OSD finds installed under the same name. Not refused:
+    #: the per-cue qualification compares what they draw against the attachment.
+    substituted: frozenset[str] = frozenset()
 
     def blocks(self, family: str) -> bool:
         return self.all_unsafe or family in self.families
@@ -133,6 +136,8 @@ class FontEnvironment:
     osd_shares_provider: bool = True
     osd_setup: FontSetup | None = None
     osd_attachment_families: frozenset[str] = frozenset()
+    #: Attachment families the OSD's provider finds installed by name.
+    osd_installed_families: frozenset[str] = frozenset()
 
     def osd_unreachable(
         self,
@@ -158,13 +163,18 @@ class FontEnvironment:
 
         Per family rather than per track, because a release whose dialogue is a system font and whose
         signs are attachment-only should lose the color on its signs, not on the whole episode.
+
+        An attachment family installed under the same name is the exception: the OSD holds a face of
+        that family, so it is handed to the per-cue qualification instead of refused.
         """
+        attached = self.attachment_families - self.osd_attachment_families
         return OsdReach(
-            (self.attachment_families - self.osd_attachment_families)
+            (attached - self.osd_installed_families)
             | (in_document if self.setup.extract_fonts else frozenset())
             | (frozenset() if self.osd_shares_fonts_dir else self.fonts_dir_families)
             | measured,
             all_unsafe=not self.osd_shares_provider,
+            substituted=attached & self.osd_installed_families,
         )
 
     @property
@@ -258,6 +268,35 @@ def _osd_attachment_families(
         except OSError:
             continue
     return frozenset(available)
+
+
+#: Installed-family answers by (attachment bytes, OSD font setup). A provider's installed set does
+#: not change within a session often enough to pay a renderer build on every track load.
+_INSTALLED: dict[tuple[tuple[bytes, ...], FontSetup], frozenset[str]] = {}
+_INSTALLED_MAX = 16
+
+
+def _osd_installed_families(
+    attachments: tuple[tuple[str, bytes], ...], covered: frozenset[str], setup: FontSetup
+) -> frozenset[str]:
+    """Which attachment families the OSD's provider has installed, asked of libass by name."""
+    faces = tuple(data for _name, data in attachments if not font_names.families(data) <= covered)
+    if not faces:
+        return frozenset()
+    key = (faces, setup)
+    if (known := _INSTALLED.get(key)) is not None:
+        return known
+    try:
+        from saitenka_subtitles.libass_backend import installed_families
+    except ImportError:
+        return frozenset()
+    found = installed_families(
+        (probe for data in faces for probe in font_names.probes(data)), setup
+    )
+    if len(_INSTALLED) >= _INSTALLED_MAX:
+        _INSTALLED.clear()
+    _INSTALLED[key] = found
+    return found
 
 
 def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:
@@ -390,6 +429,14 @@ def resolve(
     attachments = container_fonts(video, cache_dir=cache_dir) if embedded and video else ()
     osd_fonts_dir = _fonts_dir(expand, settings.get("osd-fonts-dir"))
     shares_dir = osd_fonts_dir == setup.fonts_dir
+    osd_setup = FontSetup(
+        fonts_dir=osd_fonts_dir,
+        default_font=setup.default_font,
+        default_family=str(settings.get("osd-font") or "sans-serif"),
+        fontconfig_config=setup.fontconfig_config,
+        font_provider=_font_provider(settings.get("osd-font-provider")),
+    )
+    osd_attachment_families = _osd_attachment_families(attachments, osd_fonts_dir)
     return FontEnvironment(
         setup,
         attachments,
@@ -403,12 +450,9 @@ def resolve(
         osd_shares_fonts_dir=shares_dir,
         osd_shares_provider=_font_provider(settings.get("osd-font-provider"))
         == setup.font_provider,
-        osd_attachment_families=_osd_attachment_families(attachments, osd_fonts_dir),
-        osd_setup=FontSetup(
-            fonts_dir=osd_fonts_dir,
-            default_font=setup.default_font,
-            default_family=str(settings.get("osd-font") or "sans-serif"),
-            fontconfig_config=setup.fontconfig_config,
-            font_provider=_font_provider(settings.get("osd-font-provider")),
+        osd_attachment_families=osd_attachment_families,
+        osd_setup=osd_setup,
+        osd_installed_families=_osd_installed_families(
+            attachments, osd_attachment_families, osd_setup
         ),
     )
