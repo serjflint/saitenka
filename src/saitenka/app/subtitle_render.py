@@ -486,14 +486,14 @@ class SubtitleRenderer(NoPixelOwnership):
     """Rasterize the current cue and blit it as the SUB overlay — the real draw path."""
 
     def activate(self, target: SubtitleTarget, _sid: SelectedSid = ASK_MPV) -> bool:
-        """Ask mpv to stop drawing its own subtitles; this renderer draws them either way.
+        """Ask mpv to stop drawing its own subtitles, unless the overlay is hidden and they are mpv's.
 
-        `True` unconditionally, because this path never hands the pixels back: a refused write is
-        reported on its own terminal, and returning it here would hand the caller a decision it
-        cannot act on — the legacy render is already the fallback it would fall back to.
+        `True` unconditionally: a refused write is reported on its own terminal, and `False` would
+        ask the caller for a fallback draw — the legacy render already is the fallback, and while
+        hidden nothing may be drawn at all.
         """
         if self._suspended:
-            return True  # mpv owns the pixels until the overlay is shown again
+            return True
         if not hasattr(self, "_restore_visibility"):
             self._restore_visibility = target.get("sub-visibility")
         _send_visibility(target.ipc, "subtitle:hide-for-legacy-render", visible=False)
