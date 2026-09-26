@@ -103,7 +103,6 @@ class ColoredTrackController:
         self._pending = None
         self._ready = None
         self._failed = None
-        self._stand_down = self._deferred = False
         self._stale = self._live is not None
         self.request()
 

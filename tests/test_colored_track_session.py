@@ -12,6 +12,7 @@ from saitenka_subtitles.colored_track import INJECTED, strip_colors
 from saitenka_wordstate import KnownWords, Scorer
 from session_builder import build_session, install_profile_dependencies
 from test_subtitle_modes import EN, FakeIPC
+from util import record_spans
 
 from saitenka.app import backlog, colored_subs, subtitle_modes
 from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
@@ -465,3 +466,59 @@ def test_a_profile_switch_mid_line_swaps_once_instead_of_standing_down(
     jobs.finish()
     assert _added(ipc) and ("sub-remove", 9) in ipc.commands
     assert ("set_property", "sid", 2) not in ipc.commands
+
+
+def test_a_copy_that_becomes_makeable_again_cancels_its_stand_down(tmp_path, monkeypatch) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+    ipc.set_prop("sub-text", "私は本を読む")
+    reader.pump()
+    ipc.props["options/sub-ass-override"] = "strip"
+    install_profile_dependencies(reader, scorer=_scorer("私", "本", "読む"), dictionaries=object())
+    ipc.props["options/sub-ass-override"] = "no"
+
+    reader.graph.profile_integration.warm_episode()
+    ipc.commands.clear()
+    ipc.set_prop("sub-text", "")
+    reader.pump()
+
+    assert ("set_property", "sid", 2) not in ipc.commands
+    jobs.finish()
+    assert ("sub-remove", 9) in ipc.commands
+
+
+def test_leaving_a_stale_copy_by_hand_retires_it_quietly(tmp_path, monkeypatch) -> None:
+    spans = record_spans(monkeypatch)
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    jobs.finish()
+    ipc.set_prop("sub-text", "私は本を読む")
+    reader.pump()
+    install_profile_dependencies(reader, scorer=None, dictionaries=object())
+    ipc.command("set_property", "sid", 2)
+
+    ipc.set_prop("sub-text", "")
+    reader.pump()
+    reader.graph.profile_integration.warm_episode()
+
+    outcomes = [span["attrs"].get("outcome") for span in spans if span["name"] == "colored_track"]
+    assert "stand-down-impossible" not in outcomes
+
+
+def test_a_copy_mpv_loaded_without_selecting_is_not_left_behind(tmp_path, monkeypatch) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    _ready(reader)
+    command = ipc.command
+
+    def add_unselected(*args):
+        if args[0] == "sub-add":
+            return command(args[0], args[1], "auto", *args[3:])
+        return command(*args)
+
+    monkeypatch.setattr(ipc, "command", add_unselected)
+
+    jobs.finish()
+
+    assert not any(colored_subs.is_copy(track) for track in ipc.tracks)
+    assert ipc.props["sid"] == 2

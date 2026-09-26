@@ -738,6 +738,10 @@ def select_colored_copy(
     )
     if not added:
         # A refused `sub-add` leaves the previous track selected; removing it would leave nothing.
+        # One mpv loaded without selecting must not stay loaded to hide its origin.
+        for track in loaded_sub_tracks(ports.ipc):
+            if track.get("external-filename") == str(path) and not track.get("selected"):
+                _send(ports.ipc, "remove-unselected-colored", "sub-remove", track["id"])
         return None
     if previous is not None:
         _send(ports.ipc, "remove-colored", "sub-remove", previous)
