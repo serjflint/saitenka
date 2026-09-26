@@ -492,6 +492,8 @@ class SubtitleRenderer(NoPixelOwnership):
         reported on its own terminal, and returning it here would hand the caller a decision it
         cannot act on — the legacy render is already the fallback it would fall back to.
         """
+        if self._suspended:
+            return True  # mpv owns the pixels until the overlay is shown again
         if not hasattr(self, "_restore_visibility"):
             self._restore_visibility = target.get("sub-visibility")
         _send_visibility(target.ipc, "subtitle:hide-for-legacy-render", visible=False)
@@ -503,10 +505,17 @@ class SubtitleRenderer(NoPixelOwnership):
             _send_visibility(target.ipc, "subtitle:restore-visibility", visible=bool(restore))
 
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
+        self._suspended = True
+        # Removed, not just hidden: showing the overlay re-issues every retained surface, and this
+        # one would bring back the cue from before the hide.
+        self.retire(target.surfaces)
         _send_visibility(target.ipc, "subtitle:suspend-for-overlay", visible=True)
 
-    def resume_after_overlay(self, target: SubtitleTarget) -> None:
-        _send_visibility(target.ipc, "subtitle:resume-after-overlay", visible=False)
+    def resume_after_overlay(self, _target: SubtitleTarget) -> bool:
+        """Owes the caller a redraw: the cue on screen now has not been drawn, and the redraw's own
+        `activate` takes the pixels back from mpv."""
+        self._suspended = False
+        return True
 
     def __init__(self, provider: subtitle_raster.SubtitleRasterPort | None = None) -> None:
         self.provider: subtitle_raster.SubtitleRasterPort = (
@@ -514,6 +523,7 @@ class SubtitleRenderer(NoPixelOwnership):
         )
         self._closed = False
         self._logged_first = False
+        self._suspended = False
 
     def close(self) -> None:
         """Quarantine the surface and release the provider. A cue that arrives after this — a late
@@ -596,6 +606,10 @@ class SubtitleRenderer(NoPixelOwnership):
         `_ipc` is unused here and present because the protocol has one member per renderer, not one
         per renderer's needs — the native focus path writes to mpv directly.
         """
+        if self._suspended:
+            if on_settled is not None:
+                on_settled(False)  # noqa: FBT003  # the settlement flag is the whole payload
+            return None
         return self.render(request, surfaces, on_settled=on_settled)
 
     @property
@@ -690,7 +704,8 @@ class NullRenderer(NoPixelOwnership):
 
     def suspend_for_overlay(self, _target: SubtitleTarget, /) -> None: ...
 
-    def resume_after_overlay(self, _target: SubtitleTarget, /) -> None: ...
+    def resume_after_overlay(self, _target: SubtitleTarget, /) -> bool:
+        return False
 
 
 class NativeVisibleRenderer:
@@ -1548,7 +1563,7 @@ class NativeVisibleRenderer:
         self._fallback.clear(target.surfaces, target.ipc)
         _send_visibility(target.ipc, "subtitle:suspend-native-for-overlay", visible=True)
 
-    def resume_after_overlay(self, target: SubtitleTarget) -> None:
+    def resume_after_overlay(self, target: SubtitleTarget) -> bool:
         self._suspended = False
         if self.timed is not None:
             self.timed.refresh()
@@ -1557,13 +1572,14 @@ class NativeVisibleRenderer:
                 self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)
             )
             self._execute(target, actions)
-            return
+            return False
         # The track can change while the overlay is up, so publish the selection first — `reassert`
         # did, and dropping it left the epoch naming a track that is gone.
         self._ensure_selection(target)
         # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
         # the established flag is stale by construction and only mpv can settle it.
         self._verify_native(target)
+        return False
 
     def _publish_overpaint(
         self, request: DrawRequest, surfaces, *, image: overpaint.Overpaint | None = None

@@ -7,6 +7,13 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Hiding Saitenka with `Alt+o` now keeps mpv's own subtitles on screen in their original style. The
+  default renderer redrew its subtitle over them, with its background box, on the next cue.
+- The log records when the overlay is hidden or shown, and traces name which subtitle visibility
+  write each mpv command was.
+
 ## [4.5.1] - 2026-09-23
 
 ### Fixed
