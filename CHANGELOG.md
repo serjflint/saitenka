@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.7.1] - 2026-09-27
+
 ### Changed
 
 - With `native_visible`, `saitenka run` no longer overrides mpv's subtitle settings. The profile it
