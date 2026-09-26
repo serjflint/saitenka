@@ -3820,7 +3820,6 @@ def test_a_default_mpv_render_configuration_supports_native_geometry():
     [
         ("sub-scale", 1.5),  # scales the text away from the geometry we computed
         ("sub-pos", 50.0),  # moves it up the frame
-        ("sub-use-margins", False),
         ("sub-ass-override", "force"),
         ("sub-ass-scale-with-window", True),
         ("sub-ass-use-video-data", "aspect-only"),
@@ -3836,6 +3835,33 @@ def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: s
     the setting because a user who set it needs to know which one to undo."""
     with pytest.raises(ValueError, match=name):
         _inputs(**{name: value})
+
+
+def test_sub_use_margins_is_read_only_where_mpv_reads_it() -> None:
+    """mpv hands `sub-use-margins` to libass on the converted and `force` branches only; an authored
+    track under `no` or `scale` uses `sub-ass-force-margins`. Refusing it there cost hover for a
+    setting that moves nothing."""
+    from saitenka.app.native_subtitles import unsupported_render_settings
+
+    off = {"sub-use-margins": False}
+
+    assert (
+        unsupported_render_settings(off),
+        unsupported_render_settings(off, authored=False),
+    ) == ((), ("sub-use-margins",))
+
+
+@pytest.mark.parametrize(("override", "refused"), [("scale", True), ("no", False)])
+def test_a_style_file_is_refused_once_mpv_loads_it(override: str, *, refused: bool) -> None:
+    """`sub-ass-styles` is loaded after the track's own styles whenever the override is not `no`,
+    and a same-named style in it replaces the script's — every box measured against the wrong one."""
+    from saitenka.app.native_subtitles import unsupported_render_settings
+
+    result = unsupported_render_settings(
+        {"sub-ass-override": override, "sub-ass-styles": "~~/styles.ass"}
+    )
+
+    assert ("sub-ass-styles" in result) is refused
 
 
 def _scaled(**settings):
@@ -3901,7 +3927,12 @@ def test_scale_signs_inverts_into_the_selective_font_scale_bit(
     """`ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE` CONFINES the scale to dialogue, so mpv sets it
     exactly when the user did NOT ask for signs to be scaled (`sd_ass.c:577`). Read straight
     through, every positioned sign in the episode is measured at the dialogue scale."""
-    assert _scaled(**{"sub-scale-signs": scale_signs}).selective_font_scale is selective
+    scaled = _scaled(**{"sub-scale-signs": scale_signs, "sub-scale": 1.2})
+    assert scaled.selective_font_scale is selective
+
+
+def test_the_selective_bit_is_dropped_when_there_is_no_scale_to_confine() -> None:
+    assert _scaled(**{"sub-scale-signs": False}).selective_font_scale is False
 
 
 LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
@@ -4189,6 +4220,27 @@ def test_a_legacy_stage_cut_off_by_the_hide_is_restarted_by_the_show(tmp_path: P
     assert any(c[:2] == ("overlay-add", sub_slot) for c in ipc.commands[shown_at:])
     assert renderer.ownership_state.owner is PixelOwner.LEGACY
     result.close()
+
+
+@pytest.mark.timeout(5)
+def test_mpvs_default_scale_override_keeps_the_whole_cue_osd_eligible(tmp_path) -> None:
+    # `scale` at the defaults sets nothing libass renders differently; reading it as a changed
+    # renderer refused OSD coloring on every cue once `run` stopped forcing `no`.
+    session, ipc, backend = reader(tmp_path, coloring="whole-cue-osd")
+    ipc.props |= {
+        "options/sub-ass-override": "scale",
+        "options/sub-scale-signs": False,
+        "options/sub-hinting": "none",
+        "options/sub-line-spacing": 0.0,
+    }
+    try:
+        session.graph.playback.observe("sub-text", "猫を見る")
+        session.graph.cue.settle()
+        settle_jobs(session, ipc)
+
+        assert backend.requests[-1].whole_cue.osd_reason == "eligible"
+    finally:
+        session.close()
 
 
 def _attach_arial(

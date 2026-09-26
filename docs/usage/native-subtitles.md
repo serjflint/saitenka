@@ -33,7 +33,7 @@ of playback. mpv activates and expires them on its video clock, so the first nat
 can already contain its colors. Cue notifications continue to update scanning and interaction.
 This path requires indexed static cues, normal subtitle speed/FPS, forward playback, unblended
 subtitles, no cue-dropping filters, and no effective `sub-fix-timing` repair. Timing repair is ignored
-by mpv under the default `sub-ass-override=no`; enabling it with `scale` declines timed coloring.
+by mpv under `sub-ass-override=no`; enabling it under mpv's default `scale` declines timed coloring.
 Co-timed events share one interval; changing overlaps or
 unsupported timing keep scanning without timed color. Subtitle delay is
 applied to the display interval while authored timestamps remain part of cue identity. Stock mpv
@@ -252,27 +252,25 @@ The complete option reference, including the bounded result cache and cue lookah
 `saitenka doctor` after enabling the mode; it reports whether the wrapper is installed and which
 compatible libass can be initialized.
 
-`saitenka run` configures the parity-tested mpv subtitle profile automatically. `saitenka attach`
-cannot change how an existing player was launched, so that mpv instance needs these settings:
+`saitenka run` and `saitenka attach` both use mpv's subtitle settings as they are: mpv's defaults
+need no configuration. `saitenka doctor` names any setting the mode refuses. These are:
 
-```conf
-# `no` or `scale`; `force` is not supported. Note this is the one line you must SET rather than
-# omit — mpv's own default is `scale`, so removing it does not give you `no`.
-sub-ass-override=no
-sub-ass-scale-with-window=no
-# Read only under `sub-ass-override=scale`, and reproduced there; ignored entirely under `no`.
-sub-scale=1
-sub-pos=100
-sub-use-margins=yes
-# Either value is supported; Saitenka mirrors the observed authored-ASS policy.
-sub-ass-force-margins=no
-sub-ass-video-aspect-override=0
-sub-ass-use-video-data=all
-sub-ass-style-overrides=
-# Either `no` or `yes` is supported; `video` is not.
-blend-subtitles=no
-sub-filter-sdh=no
-```
+| Setting | Refused value | Costs |
+|---|---|---|
+| `sub-ass-override` | `force`, `strip` | hover, and the [colored track](#colored-track) |
+| `sub-ass-override` | `yes` | hover |
+| `sub-ass-style-overrides` | an override of a color | hover, and the colored track |
+| `sub-ass-style-overrides` | any other override | hover |
+| `sub-filter-sdh` | `yes` | hover, and the colored track |
+| `sub-ass-scale-with-window` | `yes` | hover |
+| `sub-ass-justify` | `yes`, with `sub-ass-override=scale` | hover |
+| `sub-ass-styles` | a file, with the override on (`scale` is on) | hover |
+| `sub-use-margins` | `no` | hover on SubRip tracks, under `native_formats = "all"` |
+| `sub-ass-video-aspect-override` | anything but `0` | hover |
+| `sub-ass-use-video-data` | anything but `all` | hover |
+| `blend-subtitles` | `video` | hover |
+| `video-crop`, `video-rotate` | set, with `blend-subtitles=yes` | hover |
+| `sub-scale`, `sub-pos` | anything but `1` and `100` | hover on SubRip tracks, under `native_formats = "all"` |
 
 `--sub-ass-override=scale` is reproduced. It only configures the libass renderer — the font scale,
 the line position, line spacing and hinting (`configure_ass`, `sd_ass.c:552-558`) — and the
@@ -281,11 +279,14 @@ than refusals. `--sub-scale-signs` travels with them: mpv turns it into libass's
 `ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE`, which confines the scale to events that look like dialogue
 and leaves positioned signs alone.
 
-`--sub-ass-override=force` (and `yes`, its alias) stays refused. That branch substitutes mpv's own
+`--sub-ass-override=force` stays refused. That branch substitutes mpv's own
 style into every event — font name, size fields, colors, border — which makes every `--sub-*` style
 option an authored-track layout input rather than a renderer setting, a far wider surface than this
-measures. `--sub-ass-style-overrides` is refused under both `no` and `scale`, because mpv applies it
-to the track itself whenever the override is anything but `no`.
+measures. `yes` is refused too, though it does not substitute styles: this does not reproduce its
+renderer state. `--sub-ass-style-overrides` is refused under both `no` and `scale`, because mpv
+applies it to the track itself whenever the override is anything but `no`. A `--sub-ass-styles` file
+is loaded after the track's own styles under the same condition, and a same-named style there
+replaces the script's.
 
 `--blend-subtitles=yes` is reproduced. mpv draws the subtitle into the video texture instead of the
 OSD surface, so the cue is laid out on the video's on-screen rectangle with no letterbox margins;
@@ -331,8 +332,7 @@ within one pixel, which is the anti-aliasing threshold. The suite carries a nega
 measures at a frame size mpv did not use, so a differential that stopped detecting anything fails
 rather than passes.
 
-Supported frames are static and use the mpv profile above, without application-level style
-overrides. A cue typeset with animation (`\t`, `\move`, `\fad`), karaoke, a vector drawing, an ASS
+Supported frames are static and use none of the refused settings above. A cue typeset with animation (`\t`, `\move`, `\fad`), karaoke, a vector drawing, an ASS
 effect, bidirectional text, or a blur (`\blur`/`\be`, which spreads a word's ink past its own box and
 makes neighbouring hit boxes overlap) is reported as `typesetting-unsupported` — a property of the
 track rather than a failure, so no retry will change it and the report says so. A frame may contain several simultaneous ASS events: Saitenka
@@ -373,8 +373,9 @@ blocking the player event loop.
 - Whether *mpv* is outside the envelope is a different question, and only `saitenka subtitle-report`
   answers it. Look for `subtitle-render-input-unsupported`, which names the option that did not
   match, and `subtitle-source-conversion-unreproduced` for a track kind the mode does not take.
-- If `run` works but `attach` does not, that reason code is the fast way in; comparing the attached
-  player's options against the profile above by eye is the slow one.
+- `run` and `attach` read the same settings, so a difference between them is in how that mpv was
+  started: `saitenka doctor` checks `mpv.conf`, and the reason code names a setting passed on the
+  command line.
 - A native-geometry failure can temporarily remove scanning boxes, but the mpv subtitle style should
   remain stable. A switch to the standard renderer is a catastrophic native-visibility failure; include
   a report bundle if that occurs unexpectedly. Before reproducing, run `saitenka telemetry enable`;

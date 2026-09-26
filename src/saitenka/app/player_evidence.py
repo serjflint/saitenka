@@ -68,6 +68,7 @@ _PRIVATE = frozenset(
         "sub-fonts-dir",
         "osd-fonts-dir",
         "sub-ass-style-overrides",
+        "sub-ass-styles",
         "video-crop",
         "sub-color",
         "sub-outline-color",

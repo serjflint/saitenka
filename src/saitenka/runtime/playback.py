@@ -77,6 +77,7 @@ RENDER_SPACE_PROPERTIES = frozenset(
         "options/sub-ass-video-aspect-override",
         "options/sub-ass-use-video-data",
         "options/sub-ass-style-overrides",
+        "options/sub-ass-styles",
         "options/sub-scale-with-window",
         "options/sub-scale-by-window",
         "options/blend-subtitles",

@@ -125,30 +125,19 @@ def build_mpv_argv(
         f"--start={opts.start}",
     ]
     if not opts.native_visible or opts.geometry_source != "mpv":
-        cmd.extend(("--sub-align-x=center", "--sub-justify=center", "--sub-ass-justify=yes"))
+        cmd.extend(("--sub-align-x=center", "--sub-justify=center"))
+    if not opts.native_visible:
+        # Re-justifies authored ASS lines once the override is on (mpv's default `scale`), which
+        # native_visible exists to leave alone.
+        cmd.append("--sub-ass-justify=yes")
     if opts.screenshot:
         # keep-open=yes already holds the last frame at EOF for the interactive path (so a finished file
         # freezes instead of closing, and #100 auto-advance can see eof-reached). Screenshot mode wants
         # the FIRST frame held, so it pauses up front instead.
         cmd.append("--pause")
-    if opts.native_visible and opts.geometry_source != "mpv":
-        cmd.extend(
-            (
-                "--sub-ass-override=no",
-                "--sub-ass-scale-with-window=no",
-                "--sub-scale=1",
-                "--sub-pos=100",
-                "--sub-use-margins=yes",
-                "--sub-ass-video-aspect-override=0",
-                "--sub-ass-use-video-data=all",
-                "--sub-ass-style-overrides=",
-                # No font options here: `subtitle_fonts.resolve` reads whatever mpv is using.
-                # Forcing them to the one combination the measuring renderer could reproduce would
-                # throw away the typesetting a release attached its fonts for.
-                "--sub-visibility=yes",
-            )
-        )
-    if opts.native_visible and opts.geometry_source == "mpv":
+    if opts.native_visible:
+        # No subtitle profile: the geometry gate reproduces mpv's defaults, and a user's mpv.conf is
+        # theirs to keep — `saitenka doctor` names a setting the gate refuses.
         cmd.append("--sub-visibility=yes")
     cmd.extend(opts.extra_args or [])
     cmd.extend(

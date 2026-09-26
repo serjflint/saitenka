@@ -9,6 +9,7 @@ import time
 import unicodedata
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
 from saitenka_subtitles import (
@@ -207,6 +208,7 @@ GATE_OPTIONS = (
     "sub-ass-video-aspect-override",
     "sub-ass-use-video-data",
     "sub-ass-style-overrides",
+    "sub-ass-styles",
     "sub-scale-with-window",
     "sub-scale-by-window",
     "blend-subtitles",
@@ -408,7 +410,9 @@ def _scaled_renderer_state(scale: _ScaleOverride) -> RendererState:
         line_position=scale.line_position,
         line_spacing=scale.line_spacing,
         hinting=scale.hinting,
-        selective_font_scale=not scale.scale_signs,
+        # The bit only confines the scale; at 1 there is nothing to confine, and leaving it set would
+        # make mpv's default `scale` read as a non-default renderer and refuse the OSD path.
+        selective_font_scale=not scale.scale_signs and scale.font_scale != 1.0,
     )
 
 
@@ -424,6 +428,40 @@ def _scales_authored_styles(settings: Mapping[str, object], *, authored: bool) -
     return authored and settings["sub-ass-override"] == "scale"
 
 
+#: `options/<name>` for every setting `_unsupported_render_inputs` reads, as a `--no-config` mpv 0.41
+#: reports them — what a user who configured nothing is running.
+MPV_DEFAULT_RENDER_SETTINGS: Mapping[str, object] = MappingProxyType(
+    {
+        "sub-ass-override": "scale",
+        "sub-ass-scale-with-window": False,
+        "sub-scale": 1.0,
+        "sub-pos": 100.0,
+        "sub-use-margins": True,
+        "sub-ass-force-margins": False,
+        "sub-ass-video-aspect-override": 0.0,
+        "sub-ass-use-video-data": "all",
+        "sub-ass-style-overrides": [],
+        "sub-ass-styles": "",
+        "sub-scale-with-window": True,
+        "sub-scale-by-window": True,
+        "blend-subtitles": False,
+        "sub-filter-sdh": False,
+        "video-crop": "",
+        "video-rotate": 0,
+        "sub-ass-justify": False,
+    }
+)
+
+
+def unsupported_render_settings(
+    overrides: Mapping[str, object], *, authored: bool = True
+) -> tuple[str, ...]:
+    """The settings, among `overrides` applied over mpv's defaults, that refuse a track."""
+    return _unsupported_render_inputs(
+        {**MPV_DEFAULT_RENDER_SETTINGS, **overrides}, authored=authored
+    )
+
+
 def _unsupported_render_inputs(
     settings: Mapping[str, object], *, authored: bool
 ) -> tuple[str, ...]:
@@ -437,9 +475,9 @@ def _unsupported_render_inputs(
     """
     scaled = _scales_authored_styles(settings, authored=authored)
     supported = {
-        # `yes`/`force` substitute mpv's own style into every event (`sd_ass.c:572-581`), making
-        # every `converted.STYLE_OPTIONS` entry an authored-track layout input. `scale` only sets
-        # renderer state, which `_renderer_state` reproduces.
+        # `force` substitutes mpv's own style into every event (`sd_ass.c:572-581`), making every
+        # `converted.STYLE_OPTIONS` entry an authored-track layout input. `yes` and `scale` only set
+        # renderer state; `_renderer_state` reproduces `scale`.
         "sub-ass-override": settings["sub-ass-override"] in {False, "no", "scale"},
         "sub-ass-scale-with-window": settings["sub-ass-scale-with-window"] is False,
         # Read only on the branches `scale` and `force` take (`sd_ass.c:552-558`); under `no` mpv
@@ -447,9 +485,13 @@ def _unsupported_render_inputs(
         # when they would move the text AND we are not reproducing the branch that moves it.
         "sub-scale": scaled or settings["sub-scale"] == 1.0,
         "sub-pos": scaled or settings["sub-pos"] == 100.0,
-        # Only the converted branch reads this (`sd_ass.c:545`); the authored one reads
-        # `sub-ass-force-margins` below, gated separately and accepted at either value.
-        "sub-use-margins": settings["sub-use-margins"] is True,
+        # Only the converted and `force` branches read this (`sd_ass.c:545`); an authored track
+        # reads `sub-ass-force-margins` below, gated separately and accepted at either value.
+        "sub-use-margins": authored or settings["sub-use-margins"] is True,
+        # Loaded after the track's own styles whenever the override is not `no`
+        # (`sd_ass.c:120-124`, `277-279`), and a same-named style there replaces the script's.
+        "sub-ass-styles": not settings.get("sub-ass-styles")
+        or settings["sub-ass-override"] in {False, "no"},
         # Reachable on an authored track only once the override is on (`sd_ass.c:589-591`), and not
         # reproduced: it decides where every line of a wrapped cue starts, which is a box position.
         "sub-ass-justify": not scaled or settings["sub-ass-justify"] in {False, "no", None},
@@ -464,7 +506,7 @@ def _unsupported_render_inputs(
         # `--sub-ass-vsfilter-aspect-compat` is NOT here, and must not return as an is-None check:
         # mpv's default is `yes`, so a present bool option never reads `None` and that row refused
         # every track on every mpv that still had the option. 0.41 removed it in favour of
-        # `sub-ass-use-video-data`, gated above and forced by `mpvio.launch`.
+        # `sub-ass-use-video-data`, gated above.
         #
         # `--sub-scale-with-window` and `--sub-scale-by-window` are NOT here. mpv reads them only on
         # `configure_ass`'s forced-override branch, which a CONVERTED track takes — and there
