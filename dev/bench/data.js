@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790424950114,
+  "lastUpdate": 1790424968329,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17207,6 +17207,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.190933,
             "range": "3 replicas; min 1.18398; max 1.36069; MAD 0.006954; worst 1.36069",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3b078814b4f4c29a65cef982c4bdc4f4014aee00",
+          "message": "Merge pull request #539 from serjflint/fix/alt-o-native-suspend\n\nfix(subtitles): hold native-renderer legacy staging while the overlay is hidden",
+          "timestamp": "2026-09-26T15:14:29+03:00",
+          "tree_id": "444e0a357f3f1dc37238009e4ee87d2af169008d",
+          "url": "https://github.com/serjflint/saitenka/commit/3b078814b4f4c29a65cef982c4bdc4f4014aee00"
+        },
+        "date": 1790424966643,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.174972,
+            "range": "3 replicas; min 3.45925; max 6.97472; MAD 0.799751",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.39761,
+            "range": "3 replicas; min 5.34218; max 9.85737; MAD 1.45976; worst 9.85737",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 19.623929,
+            "range": "3 replicas; min 9.94443; max 22.1286; MAD 2.50469",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.82262,
+            "range": "3 replicas; min 10.1428; max 22.4774; MAD 2.65478; worst 22.4774",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.190343,
+            "range": "3 replicas; min 10.7443; max 20.8981; MAD 3.446",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.092603,
+            "range": "3 replicas; min 0.047202; max 0.126736; MAD 0.034133; worst 0.126736",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.282435,
+            "range": "3 replicas; min 20.8164; max 44.6953; MAD 0.412877; worst 44.6953",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.25793,
+            "range": "3 replicas; min 2.54443; max 335.971; MAD 0.713503; worst 335.971",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.391528,
+            "range": "3 replicas; min 0.843263; max 116.911; MAD 0.548265; worst 116.911",
             "unit": "ms"
           }
         ]
