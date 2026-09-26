@@ -9,15 +9,18 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 from __future__ import annotations
 
 import threading
+from itertools import starmap
 
 import pytest
+from saitenka_subtitles import CueIndex
+from saitenka_subtitles.model import Cue
 from saitenka_tokenize.japanese import Token
 from session_builder import TestSession, build_session
 from util import FakeIPC, RecordingRasterProvider
 
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
-from saitenka.app.token_cache import TokenCache, TokenizedCue
+from saitenka.app.token_cache import TokenCache, TokenizedCue, event_lines
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 
@@ -44,15 +47,15 @@ class _ExistsDS:
 def test_get_returns_a_stored_complete_cue():
     cache = TokenCache()
     cue = _cue("猫")
-    cache.put("猫", cue)
-    assert cache.get("猫") is cue
-    assert cache.get("犬") is None
+    cache.put("猫", (), cue)
+    assert cache.get("猫", ()) is cue
+    assert cache.get("犬", ()) is None
 
 
 def test_empty_tokenization_is_never_stored():
     cache = TokenCache()
-    cache.put("　", TokenizedCue(lines=[], tokens=[], styles=None))  # no tokens
-    assert cache.get("　") is None
+    cache.put("　", (), TokenizedCue(lines=[], tokens=[], styles=None))  # no tokens
+    assert cache.get("　", ()) is None
     assert len(cache) == 0
 
 
@@ -60,18 +63,42 @@ def test_incomplete_tokenization_is_never_stored():
     """A pre-deps tokenization (no compound-merge dict) must not be memoized — the negative-cache the
     issue forbids, so a later identical line re-attempts once the dicts load."""
     cache = TokenCache()
-    cache.put("猫", _cue("猫"), complete=False)
-    assert cache.get("猫") is None
+    cache.put("猫", (), _cue("猫"), complete=False)
+    assert cache.get("猫", ()) is None
 
 
 def test_lru_evicts_oldest_beyond_capacity():
     cache = TokenCache(maxsize=2)
-    cache.put("a", _cue("a"))
-    cache.put("b", _cue("b"))
-    cache.get("a")  # touch → "b" is now the oldest
-    cache.put("c", _cue("c"))
-    assert cache.get("b") is None  # evicted
-    assert cache.get("a") is not None and cache.get("c") is not None
+    cache.put("a", (), _cue("a"))
+    cache.put("b", (), _cue("b"))
+    cache.get("a", ())  # touch → "b" is now the oldest
+    cache.put("c", (), _cue("c"))
+    assert cache.get("b", ()) is None  # evicted
+    assert cache.get("a", ()) is not None and cache.get("c", ()) is not None
+
+
+# --- event_lines: where one subtitle event ends inside a frame -----------------------------------
+
+
+def _index(*cues: tuple[float, float, str]) -> CueIndex:
+    return CueIndex(list(starmap(Cue, cues)))
+
+
+@pytest.mark.parametrize(
+    ("index", "norm", "expected"),
+    [
+        (_index((0, 5, "猫"), (0, 5, "犬\n鳥")), "猫\n犬\n鳥", (1, 2)),
+        (_index((0, 5, "猫\n犬")), "猫\n犬", ()),  # one wrapped event
+        (None, "猫\n犬", ()),  # no index: the old single sentence
+        (_index((0, 5, "猫"), (0, 5, "犬")), "猫\n馬", ()),  # not in the index
+        (_index((0, 5, "猫 犬"), (0, 5, "鳥")), "猫\n犬 鳥", ()),  # same text up to whitespace only
+        # The same text drawn as two events and as one wrapped event: ambiguous, so unsplit.
+        (_index((0, 5, "猫"), (0, 5, "犬"), (100, 105, "猫\n犬")), "猫\n犬", ()),
+    ],
+    ids=["co-timed", "wrapped", "no-index", "unknown", "whitespace", "ambiguous"],
+)
+def test_event_lines_splits_only_a_frame_the_index_proves(index, norm, expected):
+    assert event_lines(norm, index) == expected
 
 
 # --- controller seam: plain-then-upgrade + cache hit ----------------------------------------------

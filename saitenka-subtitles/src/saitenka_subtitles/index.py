@@ -99,6 +99,23 @@ class CueIndex:
         """
         return "\n".join(self.cues[index].text for index in self.frame_at_position(position))
 
+    def frame_events(self, text: str) -> tuple[str, ...] | None:
+        """The authored events behind on-screen ``text``, in draw order, or ``None`` if unknown.
+
+        mpv's ``sub-text`` joins co-timed events with the same newline a ``\\N`` produces, so the
+        event boundaries exist only in the document. Known only for frames as they stand when one
+        of their cues starts; a text drawn with two different splits is ambiguous.
+        """
+        key = _normalize(text)
+        splits = set()
+        for position in self._by_text.get(key, ()):
+            frame = self.frame_at_position(position)
+            if len(frame) > 1 and _normalize(self.frame_text(position)) == key:
+                splits.add(tuple(self.cues[index].text for index in frame))
+            if _normalize(self.cues[position].text) == key:
+                splits.add((self.cues[position].text,))
+        return splits.pop() if len(splits) == 1 else None
+
     def __len__(self) -> int:
         return len(self.cues)
 

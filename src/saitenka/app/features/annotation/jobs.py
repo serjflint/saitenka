@@ -19,7 +19,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from concurrent.futures import Future
 
+    from saitenka_tokenize.japanese import Token
     from saitenka_tokenize.registry import Tokenizer
+
+    from saitenka.app.scoring import TokenStyle
 
 
 class AnnotationPriority(IntEnum):
@@ -47,6 +50,7 @@ class AnnotationWorkKey:
     subtitle_role: str
     token_cache_generation: int
     dependency_generation: int
+    events: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +60,7 @@ class AnnotationInputs:
     terms_exist: Callable[[Sequence[str]], set[str]] | None
     scorer: Any | None
     selected_dictionaries: int = 0
+    events: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,31 +239,69 @@ def configure_runtime_job(ipc, executor: AnnotationExecutor) -> JobSubmitter | N
     )
 
 
+def event_groups(norm: str, events: tuple[int, ...]) -> list[list[str]]:
+    """``norm``'s lines grouped per co-timed event (``event_lines``); one group when unknown."""
+    lines = norm.split("\n")
+    groups: list[list[str]] = []
+    start = 0
+    for count in events or (len(lines),):
+        groups.append(lines[start : start + count])
+        start += count
+    return groups
+
+
+def score_events(scorer: Any, groups: list[list[list[Token]]]) -> list[TokenStyle]:
+    """Score each event on its own, so co-timed events never share an N+1 sentence."""
+    styles: list[TokenStyle] = []
+    for group in groups:
+        tokens = [token for line in group for token in line]
+        if tokens:
+            styles.extend(scorer.score_line(tokens))
+    return styles
+
+
+def tokenize_events(
+    tokenizer: Tokenizer,
+    norm: str,
+    events: tuple[int, ...],
+    terms_exist: Callable[[Sequence[str]], set[str]] | None,
+) -> list[list[list[Token]]]:
+    """Token lines of ``norm``, grouped per event, compounds merged when a dictionary is ready."""
+    groups = []
+    for lines in event_groups(norm, events):
+        group = [tokenizer.tokenize(line) for line in lines if line.strip()]
+        if terms_exist is not None:
+            group = [tokenizer.merge_dict_compounds(tokens, terms_exist) for tokens in group]
+        groups.append(group)
+    return groups
+
+
+def _traced_attestation(inputs: AnnotationInputs) -> Callable[[Sequence[str]], set[str]] | None:
+    lookup_terms = inputs.terms_exist
+    if lookup_terms is None:
+        return None
+
+    def terms_exist(forms: Sequence[str]) -> set[str]:
+        keys = tuple(dict.fromkeys(form for form in forms if form))
+        with otel_metrics.traced(
+            "dictionary_attestation",
+            requested_forms=str(len(keys)),
+            selected_dictionaries=str(inputs.selected_dictionaries),
+        ) as span:
+            found = lookup_terms(keys)
+            span.set("hit_count", len(found))
+            return found
+
+    return terms_exist
+
+
 def annotate(inputs: AnnotationInputs) -> TokenizedCue:
-    raw = (
-        inputs.tokenizer.tokenize(line)
-        for line in inputs.normalized_text.split("\n")
-        if line.strip()
+    groups = tokenize_events(
+        inputs.tokenizer, inputs.normalized_text, inputs.events, _traced_attestation(inputs)
     )
-    if inputs.terms_exist is None:
-        lines = list(raw)
-    else:
-        lookup_terms = inputs.terms_exist
-
-        def terms_exist(forms: Sequence[str]) -> set[str]:
-            keys = tuple(dict.fromkeys(form for form in forms if form))
-            with otel_metrics.traced(
-                "dictionary_attestation",
-                requested_forms=str(len(keys)),
-                selected_dictionaries=str(inputs.selected_dictionaries),
-            ) as span:
-                found = lookup_terms(keys)
-                span.set("hit_count", len(found))
-                return found
-
-        lines = [inputs.tokenizer.merge_dict_compounds(tokens, terms_exist) for tokens in raw]
+    lines = [line for group in groups for line in group]
     tokens = [token for line in lines for token in line]
-    styles = inputs.scorer.score_line(tokens) if inputs.scorer is not None else None
+    styles = score_events(inputs.scorer, groups) if inputs.scorer is not None else None
     return TokenizedCue(lines, tokens, styles)
 
 

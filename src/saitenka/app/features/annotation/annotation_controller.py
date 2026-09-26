@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
 from saitenka.app.features.annotation import jobs as cue_annotation
-from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key
+from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key, event_lines
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -54,6 +54,8 @@ class AnnotationInputs:
     selected_dictionaries: int
     dependencies_ready: bool
     annotate: bool
+    #: The selected track's index, the only source of event boundaries inside a frame.
+    sub_index: CueIndex | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +175,7 @@ class CueAnnotationController:
                 publish=True,
                 schedule_geometry=True,
             )
-        cached = self._token_cache.get(norm)
+        cached = self._token_cache.get(norm, event_lines(norm, inputs.sub_index))
         if cached is not None:
             return AnnotationTransition(
                 AnnotationOutcome.CACHED,
@@ -227,7 +229,9 @@ class CueAnnotationController:
             priority=cue_annotation.AnnotationPriority.CURRENT,
             drive=drive,
         )
-        self._token_cache.put(norm, cue, generation=cache_generation)
+        self._token_cache.put(
+            norm, event_lines(norm, inputs.sub_index), cue, generation=cache_generation
+        )
 
     def lookahead_captured(
         self,
@@ -429,6 +433,7 @@ class CueAnnotationController:
             identity.subtitle_role,
             cache_generation,
             dependency_generation,
+            event_lines(norm, inputs.sub_index),
         )
 
     @staticmethod
@@ -439,6 +444,7 @@ class CueAnnotationController:
             inputs.terms_exist,
             inputs.scorer,
             inputs.selected_dictionaries,
+            event_lines(norm, inputs.sub_index),
         )
 
     def _submit_current(
@@ -495,6 +501,7 @@ class CueAnnotationController:
                 assert result.cue is not None and result.identity is not None
                 self._token_cache.put(
                     result.identity.normalized_text,
+                    result.key.events,
                     result.cue,
                     complete=result.complete,
                     generation=result.key.token_cache_generation,
@@ -527,6 +534,7 @@ class CueAnnotationController:
         cue = self._compute_cue(norm, inputs)
         self._token_cache.put(
             norm,
+            event_lines(norm, inputs.sub_index),
             cue,
             complete=inputs.terms_exist is not None,
             generation=generation,
@@ -536,17 +544,17 @@ class CueAnnotationController:
     @staticmethod
     def _compute_cue(norm: str, inputs: AnnotationInputs) -> TokenizedCue:
         with otel_metrics.traced("tokenize_line", chars=str(len(norm))):
-            raw = (inputs.tokenizer.tokenize(line) for line in norm.split("\n") if line.strip())
-            lines = [
-                inputs.tokenizer.merge_dict_compounds(tokens, inputs.terms_exist)
-                if inputs.terms_exist
-                else tokens
-                for tokens in raw
-            ]
+            groups = cue_annotation.tokenize_events(
+                inputs.tokenizer,
+                norm,
+                event_lines(norm, inputs.sub_index),
+                inputs.terms_exist,
+            )
+        lines = [line for group in groups for line in group]
         tokens = [token for line in lines for token in line]
         with otel_metrics.traced("score_line"):
             styles: list[TokenStyle] | None = (
-                inputs.scorer.score_line(tokens) if inputs.scorer else None
+                cue_annotation.score_events(inputs.scorer, groups) if inputs.scorer else None
             )
         return TokenizedCue(lines, tokens, styles)
 
@@ -591,6 +599,7 @@ class CueAnnotationController:
                     return
                 self._token_cache.put(
                     norm,
+                    event_lines(norm, inputs.sub_index),
                     tokenized,
                     complete=inputs.terms_exist is not None,
                     generation=generation,
