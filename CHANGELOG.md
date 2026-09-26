@@ -10,8 +10,8 @@ logs.
 ### Changed
 
 - `saitenka report` includes the latest session's own log and trace again, alongside the metadata
-  envelope, version and doctor output. The log is written without video or subtitle file names,
-  their titles, cue text, looked-up words or home paths; those appear as digests. Sessions logged by
+  envelope, version and doctor output. Video and subtitle file names, their titles, cue text and
+  looked-up words are written to the log as digests, and home paths are redacted. Sessions logged by
   an earlier version are left out. `--diagnostic-detail` still adds configuration, the mpv log,
   crash reports and every session.
 

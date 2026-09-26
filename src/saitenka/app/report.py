@@ -519,7 +519,7 @@ def _current_format(lines: list[str]) -> bool:
 
 
 def _collect_default(log_path: Path, *, include_log: bool) -> dict[str, str]:
-    """Saitenka's own diagnostics for the latest session, from logs written without private data.
+    """Saitenka's own diagnostics for the latest session, from a log that labels media and content.
 
     A session logged by an older build ships neither its log nor its trace: those lines still carry
     the media names and cue text the current format keeps out.
@@ -566,8 +566,9 @@ def _default_manifest(members: dict[str, str], *, session: str | None, status: s
         f"latest session: {session or 'n/a'}",
         "",
         "Created locally and NEVER uploaded by saitenka. Review before sharing.",
-        "Saitenka's own log and trace for the latest session, written without video or subtitle",
-        "file names, cue text, looked-up words or home paths. Cue timings and content digests remain.",
+        "Saitenka's own log and trace for the latest session. Video and subtitle file names, cue text",
+        "and looked-up words appear as digests, home paths as <HOME>. Cue timings, deck, note type",
+        "and dictionary names remain.",
         "No configuration, mpv config or log, or crash text: those need `report --diagnostic-detail`.",
         "",
         f"log: {status}",

@@ -8,10 +8,11 @@ a claim that every listed platform, renderer, failure, or integration has been e
 ## Reading a report
 
 `saitenka report` creates a ZIP with a versioned `diagnostics/envelope.json`, `versions.txt`, a
-redacted `doctor.json`, and the latest session's own `overlay.log` lines and trace. The file log never
-records video or subtitle file names, the titles parsed from them, cue text or looked-up words: media
-identities are replaced with `<media:…>` / `<title:…>` digests where they are written, content with
-`<text:… len=N>`, and home paths with `<HOME>` / `<USER>`. Cue timings and content digests remain. A
+redacted `doctor.json`, and the latest session's own `overlay.log` lines and trace. The file log writes
+the video and subtitle files Saitenka resolves, and the titles parsed from them, as `<media:…>` /
+`<title:…>` digests — also inside provider statuses and exception text — and cue text, looked-up words
+and dictionary queries as `<text:… len=N>`; home paths become `<HOME>` / `<USER>`. Cue timings and
+content digests remain, and so do configuration names such as deck, note type and dictionary. A
 session whose lines predate that format (`log_format` in each record) ships neither its log nor its
 trace; `logs/collection.json` says `predates-sanitised-format`.
 The envelope separates the collector build from the producer recorded in the latest log session's summary.
