@@ -15,6 +15,7 @@ import pytest
 
 from saitenka.mpvio.ipc import MpvIPC
 from saitenka.mpvio.launch import (
+    MpvLaunchError,
     MpvLaunchOptions,
     build_mpv_argv,
     supports_native_geometry_profile,
@@ -188,3 +189,45 @@ def test_launched_process_serves_the_ipc_socket(tmp_path):
         proc.terminate()
         proc.wait(timeout=5)
         Path(sock).unlink(missing_ok=True)
+
+
+def _fake_mpv(tmp_path: Path, body: str) -> Path:
+    exe = tmp_path / "mpv"
+    exe.write_text(f"#!/bin/sh\n{body}\n")
+    exe.chmod(0o755)
+    return exe
+
+
+def _launch_native(mpv_path: Path, tmp_path: Path):
+    from saitenka.app.launch.run import _launch_mpv_and_connect
+
+    return _launch_mpv_and_connect(
+        {"mpv_path": str(mpv_path)},
+        tmp_path,
+        tmp_path / "video.mkv",
+        MpvLaunchOptions(slang="jpn", start="0", native_visible=True),
+        sub_path=None,
+        en_sub_path=None,
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake mpv is a shell script")
+def test_an_mpv_that_cannot_run_is_not_reported_as_too_old(tmp_path):
+    broken = _fake_mpv(
+        tmp_path, "echo 'dyld: Library not loaded: libunibreak.7.dylib' >&2\nexit 134"
+    )
+
+    with pytest.raises(MpvLaunchError) as refused:
+        _launch_native(broken, tmp_path)
+
+    assert "could not run" in str(refused.value)
+    assert "libunibreak.7.dylib" in str(refused.value)
+    assert "needs mpv" not in str(refused.value)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the fake mpv is a shell script")
+def test_an_old_mpv_is_refused_with_the_version_it_reported(tmp_path):
+    old = _fake_mpv(tmp_path, "echo 'mpv v0.37.0 Copyright'")
+
+    with pytest.raises(MpvLaunchError, match=r"needs mpv ≥ 0\.40, found 0\.37"):
+        _launch_native(old, tmp_path)

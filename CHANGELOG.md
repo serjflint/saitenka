@@ -7,6 +7,12 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- `saitenka run` exits with a message instead of crashing when mpv can't be found, can't be
+  reached, or is too old for native subtitle geometry. An `mpv_path` that points at a binary which
+  cannot run is now reported as such, rather than as an mpv older than 0.40.
+
 ## [4.6.0] - 2026-09-26
 
 ### Changed
