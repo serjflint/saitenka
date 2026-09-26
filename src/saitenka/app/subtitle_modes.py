@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, Language
 
+from saitenka.app import colored_subs
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 from saitenka.app.subtitle_selection import (
@@ -49,9 +50,15 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def sub_tracks(ipc) -> list[dict]:
+def loaded_sub_tracks(ipc) -> list[dict]:
+    """Every subtitle track mpv has loaded, colored copies and their origins alike."""
     data = ipc.query("track-list") or []
     return [track for track in data if track.get("type") == "sub"]
+
+
+def sub_tracks(ipc) -> list[dict]:
+    """The subtitle tracks discovery chooses from: a loaded colored copy stands in for its origin."""
+    return colored_subs.hide_origins(loaded_sub_tracks(ipc))
 
 
 def _send(ipc, identity: str, *command: object) -> None:
@@ -487,13 +494,28 @@ def _finish_retry(source: SubtitleRetryState) -> None:
 
 
 def _current_external_sub(ipc) -> Path | None:
-    """The on-screen primary subtitle file, if it's an external srt (ours or a user ``--sub-file``)."""
-    from pathlib import Path
+    """The on-screen primary subtitle file, if it's an external srt (ours or a user ``--sub-file``).
 
+    A colored copy answers with its origin: re-timing the copy would publish a cache file as if it
+    were the user's subtitle, and a copy of an embedded track has no file to re-time at all.
+    """
     from saitenka.app.embedded_subs import _selected_sub_track
 
     track = _selected_sub_track(ipc)
-    ext = track.get("external-filename") if track else None
+    return authored_external(track)
+
+
+def authored_external(track: dict | None) -> Path | None:
+    """The authored file behind `track`: its own path, or its origin's when it is a colored copy."""
+    from pathlib import Path
+
+    if track is None:
+        return None
+    origin = colored_subs.copy_origin(track)
+    if origin is not None:
+        path = origin.removeprefix("external:")
+        return Path(path) if path != origin else None
+    ext = track.get("external-filename")
     return Path(ext) if ext else None
 
 
@@ -635,6 +657,19 @@ def _mpv_language_tag(language: str) -> str:
     return "jpn" if language == MAIN_LANG else language
 
 
+def _retired_with(loaded: list[dict], replaced_sid: object) -> list[dict]:
+    """The external tracks a replacement drops: the replaced one, and its colored copy or origin."""
+    replaced = next((track for track in loaded if track.get("id") == replaced_sid), None)
+    if replaced is None:
+        return []
+    ref = colored_subs.origin_ref(replaced)
+    related = [
+        colored_subs.origin_track(loaded, replaced),
+        *(track for track in loaded if ref and colored_subs.copy_origin(track) == ref),
+    ]
+    return [t for t in (replaced, *related) if t is not None and t.get("external")]
+
+
 def _replace_target_track(
     ports: TrackPorts,
     path,
@@ -650,9 +685,8 @@ def _replace_target_track(
     + selects the fresh one and rebuilds the lookahead index, so the corrected timing shows immediately."""
     state = ports.tracks()
     replaced_sid = state.jp_sid if target_role == MAIN_LANG else state.en_sid
-    for track in sub_tracks(ports.ipc):
-        if track.get("external") and track.get("id") == replaced_sid:
-            _send(ports.ipc, "remove-external", "sub-remove", track["id"])
+    for track in _retired_with(loaded_sub_tracks(ports.ipc), replaced_sid):
+        _send(ports.ipc, "remove-external", "sub-remove", track["id"])
     _send(ports.ipc, "clear-secondary", "set_property", "secondary-sid", "no")
     ports.declare(SubtitleSecondaryLeased(None))
     _send(
@@ -684,6 +718,65 @@ def _replace_target_track(
     # can't resolve yet (rebuild is fail-soft) rather than blanking the cues
     ports.toast(toast or f"{language_name(target_language)} subtitles re-synced")
     log.info("%s", status)
+
+
+def select_colored_copy(
+    ports: TrackPorts, path: Path, *, title: str, lang: str, previous: object = None
+) -> int | None:
+    """Make a colored copy the Japanese track, as quietly as an ordinary ``sid`` change.
+
+    Not announced and no ``sub-delay`` reset: to the user this is the track they already had. The
+    origin stays loaded — discovery hides it while the copy is — so standing the copy down is only a
+    ``sub-remove``.
+    """
+    state = ports.tracks()
+    _send(ports.ipc, "add-colored", "sub-add", str(path), "select", title, lang)
+    selected = ports.get("sid")
+    added = any(
+        track.get("id") == selected and track.get("external-filename") == str(path)
+        for track in loaded_sub_tracks(ports.ipc)
+    )
+    if not added:
+        # A refused `sub-add` leaves the previous track selected; removing it would leave nothing.
+        # One mpv loaded without selecting must not stay loaded to hide its origin.
+        for track in loaded_sub_tracks(ports.ipc):
+            if track.get("external-filename") == str(path) and not track.get("selected"):
+                _send(ports.ipc, "remove-unselected-colored", "sub-remove", track["id"])
+        return None
+    if previous is not None:
+        _send(ports.ipc, "remove-colored", "sub-remove", previous)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
+    sid = selected if isinstance(selected, int) else found.jp_sid
+    ports.declare(SubtitleTracksDiscovered(sid, found.en_sid))
+    ports.declare(SubtitleTrackAnnounced(sid))
+    ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
+    ports.rebuild_index()
+    return sid
+
+
+def remove_colored_copies(ports: TrackPorts, sids: list[int]) -> None:
+    """Drop unselected colored copies, and re-read the roles their origins take back."""
+    state = ports.tracks()
+    for sid in sids:
+        _send(ports.ipc, "remove-colored", "sub-remove", sid)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
+    ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
+
+
+def stand_down_colored_copy(ports: TrackPorts, copy_sid: int, origin_sid: int) -> None:
+    """Put the authored track back on screen and drop its colored copy, as quietly as the swap."""
+    state = ports.tracks()
+    _send(ports.ipc, "select-origin", "set_property", "sid", origin_sid)
+    _send(ports.ipc, "remove-colored", "sub-remove", copy_sid)
+    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
+    ports.declare(SubtitleTracksDiscovered(origin_sid, found.en_sid))
+    ports.declare(SubtitleTrackAnnounced(origin_sid))
+    ports.clear_cue()
+    if ports.translation_visible():
+        setup_secondary(ports)
+    ports.rebuild_index()
 
 
 def _add_background_target(ports: TrackPorts, result: SubtitleFetchResult) -> None:

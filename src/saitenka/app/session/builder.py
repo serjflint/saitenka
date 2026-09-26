@@ -72,6 +72,13 @@ from saitenka.app.features.profiles.profile_session import (
 )
 from saitenka.app.features.sidebar.sidebar_controller import SidebarViewOwners
 from saitenka.app.features.subtitle import SubtitleAcquisitionController
+from saitenka.app.features.subtitle.colored_track_controller import (
+    ColoredTrackController,
+    ColoredTrackPorts,
+)
+from saitenka.app.features.subtitle.colored_track_controller import (
+    configure_runtime_job as configure_colored_track_job,
+)
 from saitenka.app.features.subtitle.navigation_state import NavigationStore
 from saitenka.app.features.tooltip import tooltip_controller as tooltip_module
 from saitenka.app.features.tooltip.hover_adapter import (
@@ -572,6 +579,22 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
         install_cue=install_cue,
     )
+    colored_track = ColoredTrackController(
+        ColoredTrackPorts(
+            query=playback_observation.query,
+            value=playback_observation.value,
+            cue_text=lambda: playback_observation.cue.text,
+            annotation_inputs=lambda: cue_ref.get().annotation_inputs(),
+            event_annotation=annotation_controller.event_annotation,
+            token_generation=lambda: annotation_controller.token_generation,
+            dependency_generation=lambda: annotation_controller.view.dependency_generation,
+            track_ports=track_commands.ports,
+        ),
+        enabled=o.subtitle_geometry.native_visible
+        and o.subtitle_geometry.source != "mpv"
+        and o.subtitle_geometry.coloring == "whole-cue-auto",
+        submit=configure_colored_track_job(ipc),
+    )
     translation_store = TranslationStore(ipc)
     translation_controller = translation_ref.bind(
         TranslationController(
@@ -646,6 +669,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             ),
             rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
             track_ports=track_commands.ports,
+            colored_track=colored_track,
         )
     )
 
@@ -823,6 +847,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 picker=picker_controller,
                 acquisition=subtitle_acquisition,
                 translation=translation_controller,
+                colored_track=colored_track,
             )
         )
     )
@@ -859,6 +884,8 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     # The sidebar follows the active line on the events that move it — a settled cue and a
     # render-space change (its geometry key) — not on every turn ahead of the cue settle.
     cue_coordinator.on_settled(sidebar_controller.follow)
+    # A copy waits for a cue gap: swapping under a visible line retires it once.
+    cue_coordinator.on_settled(colored_track.try_swap)
 
     def render_space_changed() -> None:
         presentation.redraw_after_resize()  # follows the sidebar itself once the OSD is re-read

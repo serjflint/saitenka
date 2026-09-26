@@ -379,3 +379,15 @@ def test_async_lane_counts_n_plus_one_per_event(scorer) -> None:
     (publication,) = owner.settle()
 
     assert _n_plus_one(publication.cue) == {"読む", "書く"}
+
+
+def test_an_event_scored_under_replaced_dependencies_is_not_cached(scorer) -> None:
+    controller = CueAnnotationController(FakeIPC(), mode="full", cache_max=8)
+    inputs = _scored_inputs(scorer, Cue(0.0, 5.0, SIGN), attested=True)
+    admitted = controller.token_generation
+    controller.invalidate_tokenizer()
+
+    controller.event_annotation(SIGN, inputs, generation=admitted)
+
+    assert controller.replace(SIGN, inputs).outcome is AnnotationOutcome.TOKENIZED
+    assert controller.replace(SIGN, inputs).outcome is AnnotationOutcome.CACHED

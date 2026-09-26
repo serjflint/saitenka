@@ -19,6 +19,7 @@ from saitenka_subtitles import (
     TokenAnnotation,
     authored_ass_rows_at,
     canonical_active_ass_rows,
+    colored_track,
     converted,
     decode_ass_event,
     font_names,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import SupportsFloat
 
-    from saitenka_subtitles import Cue, CueIndex
+    from saitenka_subtitles import Cue, CueIndex, PreparedAssFrame
     from saitenka_subtitles.geometry import GeometrySnapshot
     from saitenka_tokenize.japanese import Token
 
@@ -288,6 +289,55 @@ def _annotation_for_token(
     if not any(unicodedata.category(char)[0] not in {"C", "Z"} for char in surface):
         return None, "unpaintable"
     return TokenAnnotation(token_index, offset + token.start, offset + token.end), None
+
+
+def token_annotations(
+    text: str,
+    lines,
+    tokens,
+    is_skippable: Callable[[Token], bool],
+) -> AnnotationSelection:
+    """The tokens that owe a color and a box, as spans of `text`'s semantic projection."""
+    source_lines = text.replace("\\N", "\n").replace("\r", "").split("\n")
+    annotated: list[TokenAnnotation] = []
+    skipped: list[str] = []
+    token_index = 0
+    offset = 0
+    line_index = 0
+    for line_tokens in lines:
+        while line_index < len(source_lines) and not source_lines[line_index].strip():
+            offset += len(source_lines[line_index]) + 1
+            line_index += 1
+        if line_index >= len(source_lines):
+            raise ValueError("token lines exceed subtitle semantic text")
+        line = source_lines[line_index]
+        for token in line_tokens:
+            annotation, reason = _annotation_for_token(
+                token, token_index, line, offset, is_skippable
+            )
+            if annotation is not None:
+                annotated.append(annotation)
+            if reason is not None:
+                skipped.append(reason)
+            token_index += 1
+        offset += len(line) + 1
+        line_index += 1
+    if token_index != len(tokens):
+        raise ValueError("token lines do not cover the flattened subtitle tokens")
+    return AnnotationSelection(
+        tuple(annotated),
+        skipped.count("whitespace"),
+        skipped.count("tokenizer"),
+        skipped.count("unpaintable"),
+    )
+
+
+def _track_colors(source: bytes, prepared: PreparedAssFrame) -> bool:
+    """Whether the document is a colored copy that colors every event of this frame itself."""
+    head = source[: colored_track.HEAD_BYTES].decode("utf-8", errors="replace")
+    return colored_track.colored_origin(head) is not None and all(
+        colored_track.INJECTED.search(event.decoded.source.raw_text) for event in prepared.events
+    )
 
 
 def _short_repr(value: object, *, limit: int = 80) -> str:
@@ -1391,46 +1441,6 @@ class NativeSubtitleGeometry:
         self._set_decision(GeometryOutcome.EMPTY, "empty", owner=self._owner)
 
     @staticmethod
-    def _annotations(
-        text: str,
-        lines,
-        tokens,
-        is_skippable: Callable[[Token], bool],
-    ) -> AnnotationSelection:
-        source_lines = text.replace("\\N", "\n").replace("\r", "").split("\n")
-        annotated: list[TokenAnnotation] = []
-        skipped: list[str] = []
-        token_index = 0
-        offset = 0
-        line_index = 0
-        for line_tokens in lines:
-            while line_index < len(source_lines) and not source_lines[line_index].strip():
-                offset += len(source_lines[line_index]) + 1
-                line_index += 1
-            if line_index >= len(source_lines):
-                raise ValueError("token lines exceed subtitle semantic text")
-            line = source_lines[line_index]
-            for token in line_tokens:
-                annotation, reason = _annotation_for_token(
-                    token, token_index, line, offset, is_skippable
-                )
-                if annotation is not None:
-                    annotated.append(annotation)
-                if reason is not None:
-                    skipped.append(reason)
-                token_index += 1
-            offset += len(line) + 1
-            line_index += 1
-        if token_index != len(tokens):
-            raise ValueError("token lines do not cover the flattened subtitle tokens")
-        return AnnotationSelection(
-            tuple(annotated),
-            skipped.count("whitespace"),
-            skipped.count("tokenizer"),
-            skipped.count("unpaintable"),
-        )
-
-    @staticmethod
     def _key(path: Path, cue: _CueInputs) -> str:
         return repr(
             (
@@ -1538,7 +1548,9 @@ class NativeSubtitleGeometry:
                 otel_metrics.subtitle_geometry_prepare_ms.record(prepare_ms)
         palette = prepared.palette
         whole = None
-        if self.coloring.startswith("whole-cue"):
+        if self.coloring.startswith("whole-cue") and _track_colors(source, prepared):
+            whole = whole_cue.WholeCue(osd_reason="track")
+        elif self.coloring.startswith("whole-cue"):
             whole = whole_cue.WholeCue(osd_reason="configured-overpaint")
             if self.coloring != "whole-cue-overpaint":
                 try:
@@ -1719,7 +1731,7 @@ class NativeSubtitleGeometry:
                 source_kind: str = self.source_kind,
             ) -> GeometryRequest:
                 tokenized = self._ports.tokenize_lookahead(inputs.text)
-                selection = self._annotations(
+                selection = token_annotations(
                     inputs.text,
                     tokenized.lines,
                     tokenized.tokens,
@@ -2066,7 +2078,7 @@ class NativeSubtitleGeometry:
             self._ports.reschedule()
             return True
         try:
-            selection = self._annotations(
+            selection = token_annotations(
                 seen.text,
                 seen.lines,
                 seen.tokens,

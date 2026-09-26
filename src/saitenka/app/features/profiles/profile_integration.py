@@ -19,6 +19,7 @@ if TYPE_CHECKING:
         CueAnnotationController,
     )
     from saitenka.app.features.profiles.profile_controller import ProfileController
+    from saitenka.app.features.subtitle.colored_track_controller import ColoredTrackController
     from saitenka.app.features.subtitle.navigation_state import NavigationStore
     from saitenka.app.features.tooltip.preparation import TooltipPreparationController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
@@ -49,6 +50,7 @@ class ProfileIntegration:
     configure_subtitle_mode: Callable[[SubtitleStartup, str, str], None]
     rebuild_index: Callable[[], None]
     track_ports: Callable[[], subtitle_modes.TrackPorts]
+    colored_track: ColoredTrackController
 
     def enable_async_annotation(self) -> None:
         self.annotation.enable_async()
@@ -61,6 +63,8 @@ class ProfileIntegration:
             self.cue_text(),
             self.annotation_inputs(),
         )
+        # After the annotation owner: the copy is keyed on the generation it just moved to.
+        self.colored_track.dependencies_changed()
         if transition is None:
             return
         self.teardown_tooltip()
@@ -70,6 +74,7 @@ class ProfileIntegration:
         self.apply_annotation(transition)
 
     def warm_episode(self) -> None:
+        self.colored_track.request()
         index = self.navigation.current.sub_index
         if index is None or not self.preparation.config.enabled or self.profile.dict_set is None:
             return
@@ -78,6 +83,7 @@ class ProfileIntegration:
     def invalidate_tokenizer(self) -> None:
         self.presentation.invalidate_geometry()
         self.annotation.invalidate_tokenizer()
+        self.colored_track.dependencies_changed()
 
     def invalidate_dictionary(self) -> None:
         self.preparation.invalidate_dependencies(self.tooltip)

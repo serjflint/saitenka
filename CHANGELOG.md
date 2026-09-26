@@ -7,6 +7,15 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- Word colors on the first frame of every cue on stock mpv. With `native_visible` and the default
+  `whole-cue-auto` coloring, an authored ASS track is replaced by a colored copy in the cache that
+  mpv renders itself, so colors no longer arrive a frame after the line, and survive a seek. The
+  copy strips back to the original byte for byte; re-timing and bookmarks use the original.
+  Animated, clipped, karaoke and similar events stay uncolored in the copy and keep the overlay
+  path. See [Colored track](docs/usage/native-subtitles.md#colored-track).
+
 ### Fixed
 
 - `saitenka run` exits with a message instead of crashing when mpv can't be found, can't be

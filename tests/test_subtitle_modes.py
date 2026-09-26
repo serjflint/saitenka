@@ -42,9 +42,11 @@ class FakeIPC(RuntimeFakeIPC):
         if args[:2] == ("set_property", "secondary-sid"):
             self.props["secondary-sid"] = args[2]
         if args[0] == "sub-add":
+            # mpv numbers each new track past every earlier one and never reuses an id.
+            added = self.next_id = max(getattr(self, "next_id", 8) + 1, 9)
             self.tracks.append(
                 {
-                    "id": 9,
+                    "id": added,
                     "type": "sub",
                     "lang": args[4],
                     "external": True,
@@ -52,9 +54,9 @@ class FakeIPC(RuntimeFakeIPC):
                 }
             )
             if len(args) > 2 and args[2] == "select":  # mpv's "select" flag activates the new track
-                self.props["sid"] = 9
+                self.props["sid"] = added
                 for track in self.tracks:
-                    track["selected"] = track["id"] == 9
+                    track["selected"] = track["id"] == added
         if args[0] == "sub-remove":
             self.tracks[:] = [t for t in self.tracks if t.get("id") != args[1]]
         return reply
@@ -246,6 +248,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch, make_sessi
 _LANES_BEFORE_ARTIFACTS = [
     "subtitle-fetch",
     "subtitle-picker",
+    "colored-track",
     "subtitle-geometry",
     "cue-annotation",
     "tooltip-render-ahead",

@@ -6,6 +6,8 @@ import json
 import zipfile
 from typing import TYPE_CHECKING
 
+from saitenka_subtitles.colored_track import Verbatim
+
 from saitenka.app import font_resolution
 from saitenka.app.render_evidence import safe_runtime_configuration
 from saitenka.app.report_reader import read_member, trace_evidence
@@ -28,6 +30,8 @@ _SPAN_NAMES = frozenset(
         "subtitle_geometry_libass",
         "subtitle_geometry_fallback",
         "subtitle_pixel_ownership",
+        "colored_track",
+        "colored_track_swap",
     }
 )
 
@@ -121,6 +125,9 @@ _FIELDS = frozenset(
         "osd_units",
         "shadow_units_omitted",
         "osd_units_omitted",
+        "colored",
+        "sid",
+        *(f"verbatim_{reason.value}" for reason in Verbatim),
     }
 )
 
@@ -316,7 +323,21 @@ def _osd_qualification_diagnosis(args: dict) -> str:
     )
 
 
+def _colored_track_diagnosis(args: dict) -> str:
+    verbatim = {
+        key.removeprefix("verbatim_"): value
+        for key, value in args.items()
+        if key.startswith("verbatim_")
+    }
+    return (
+        f"outcome={args.get('outcome', '?')} reason={args.get('reason', '-')} "
+        f"colored_events={args.get('colored', '-')} verbatim={verbatim}"
+    )
+
+
 _DIAGNOSIS = {
+    "colored_track": _colored_track_diagnosis,
+    "colored_track_swap": lambda a: f"copy selected as sid={a.get('sid', '?')}",
     "subtitle_whole_cue": _whole_cue_diagnosis,
     "subtitle_osd_qualification": _osd_qualification_diagnosis,
     "subtitle_whole_cue_summary": lambda a: (
