@@ -17,7 +17,7 @@ import stamina
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from saitenka.app import jimaku
+from saitenka.app import jimaku, log_privacy
 
 
 class _FakeResp:
@@ -281,7 +281,8 @@ def test_fetch_span_records_the_picked_release_and_resolution_match(monkeypatch,
     monkeypatch.setattr(otel_metrics, "traced", _traced)
     _client().fetch("Show", 3, tmp_path, video="[Grp] Show - 03 [1080p WEBRip].mkv")
 
-    assert attrs["picked"] == "[GroupA] Show - 03 (WebRip 1920x1080).srt"
+    # A label, not the name: the trace ships in the default report.
+    assert attrs["picked"] == log_privacy.media_label("[GroupA] Show - 03 (WebRip 1920x1080).srt")
     assert attrs["resolution_match"] is True  # the 1920x1080 WebRip release matched the 1080p video
     assert attrs["episode"] == 3
     assert attrs["candidates"] == 2

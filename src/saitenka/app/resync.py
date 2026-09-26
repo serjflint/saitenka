@@ -22,7 +22,7 @@ import statistics
 import subprocess
 from typing import TYPE_CHECKING
 
-from saitenka.app import subtitle_artifact
+from saitenka.app import log_privacy, subtitle_artifact
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -432,6 +432,8 @@ def maybe_resync(
     # and — via the cue fingerprints — enough to replay it offline. Without this a silent fallback-to-raw
     # (tool missing/failed) and a real-but-zero-offset sync are indistinguishable — the ep03 "synced"
     # cache was byte-identical to raw, mistimed subs.
+    for media in (video, src):
+        log_privacy.register_media(media)
     with otel_metrics.traced("subtitle.resync") as span:
         span.set("trigger", trigger)
         details: dict = {}
@@ -543,6 +545,7 @@ def _windowed_align(
     + a ``fail_reason``. The whole windowed alignment lives here so :func:`resync_window` stays the thin
     parse→offset→persist orchestration."""
     ref_details: dict = {}
+    log_privacy.register_media(video)
     ref = _embedded_sub_reference(video, workdir, details=ref_details)
     if ref is None:  # windowed alignment needs a reference; audio VAD on a slice is unreliable
         reason = ref_details.get("embedded_ref", "unknown")

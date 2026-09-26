@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 import msgspec
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 
+from saitenka.app import log_privacy
 from saitenka.app.diagnostic_summary import DiagnosticSummary
 
 if TYPE_CHECKING:
@@ -59,7 +60,12 @@ def _span_to_ctf_event(span: ReadableSpan) -> dict[str, object]:
     ctx = span.get_span_context()
     start_ns = span.start_time or 0
     end_ns = span.end_time or start_ns
-    attrs = dict((span.attributes or {}).items())
+    # Scrubbed here, on the exporter thread, for the reason the file log is: a registered media name
+    # can reach an attribute through provider or tool text no call site controls.
+    attrs = {
+        key: log_privacy.scrub(value) if isinstance(value, str) else value
+        for key, value in (span.attributes or {}).items()
+    }
     tid = attrs.pop("thread.id", 0)
     attrs.pop("session", None)  # constant per file — written once into "otherData", not 4589 times
     # `parent_id` names the edge, so `trace_id` (34 bytes, 10.6% of a real file) carries nothing a
