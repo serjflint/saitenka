@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated
 import cyclopts
 
 from saitenka import otel_metrics
-from saitenka.app import player_supervisor
+from saitenka.app import log_privacy, player_supervisor
 from saitenka.app.config import TooltipOptions, load_config
 from saitenka.app.session.factory import SessionIdentity, prepare_session_controller
 from saitenka.app.subselect import ProviderConfig
@@ -141,6 +141,7 @@ def _attach_reslot(ports: ReslotPorts, ipc, path: Path, cfg: ProviderConfig) -> 
     )
 
     title, episode = parse_filename(path)
+    log_privacy.register_media(path, title=title)
     ep_cfg = replace(
         cfg, jimaku_title=title, episode=episode
     )  # per-episode overrides from filename

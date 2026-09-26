@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
+from saitenka.app import log_privacy
 from saitenka.app.session.mpv_gateway import register_observer_set
 from saitenka.runtime import events, playback
 from saitenka.runtime.playback_slice import PlaybackReducer, PlaybackStore
@@ -205,9 +206,9 @@ class PlaybackObservationController:
         self._startup.reconcile_cue(str(self.value("sub-text") or ""))
         osd = self.value("osd-dimensions")
         log.info(
-            "observing mpv props; seed osd-dimensions=%r sub-text=%r",
+            "observing mpv props; seed osd-dimensions=%r sub-text=%s",
             osd,
-            self.value("sub-text"),
+            log_privacy.text_label(self.value("sub-text")),
         )
         self._startup.refresh_render_space()
         if osd is None:

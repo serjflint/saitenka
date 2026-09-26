@@ -11,6 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from saitenka.app import doctor as doc
+from saitenka.app import log_privacy
 from saitenka.app.logsetup import (
     CONSOLE_LOGGER_NAME,
     _add_session,
@@ -95,6 +96,22 @@ def test_a_user_facing_line_reaches_the_terminal_and_the_file(tmp_path, capsys):
     assert capsys.readouterr().err.strip() == "[saitenka] runtime: GIL · 4 prefetch worker(s)"
     (record,) = [d for d in _lines(log_path) if d["event"].startswith("runtime:")]
     assert record["level"] == "info"
+
+
+def test_a_registered_video_is_named_on_the_terminal_and_labeled_in_the_file(
+    tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setattr(log_privacy, "_labels", {})
+    monkeypatch.setattr(log_privacy, "_snapshot", None)
+    log_path = _configure(tmp_path)
+    log_privacy.register_media(tmp_path / "Show - 01.mkv", title="Show")
+
+    user_facing_logger().info("now playing %s", "Show - 01.mkv")
+
+    assert capsys.readouterr().err.strip() == "[saitenka] now playing Show - 01.mkv"
+    (record,) = [d for d in _lines(log_path) if d["event"].startswith("now playing")]
+    assert record["event"] == f"now playing {log_privacy.media_label('Show - 01.mkv')}"
+    assert record["log_format"] == log_privacy.LOG_FORMAT
 
 
 def test_a_user_facing_line_is_printed_once(tmp_path, capsys):

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 
+from saitenka.app import log_privacy
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.subtitle_modes import (
     has_track_for_slang,
@@ -90,11 +91,9 @@ def _subtitle_identity(
 
     video_path = Path(video)
     parsed_title, parsed_episode = parse_filename(video_path)
-    return (
-        video_path,
-        title_override or parsed_title,
-        episode if episode is not None else parsed_episode,
-    )
+    title = title_override or parsed_title
+    log_privacy.register_media(video_path, title=title)
+    return video_path, title, episode if episode is not None else parsed_episode
 
 
 def _cached_subtitle(
@@ -123,6 +122,7 @@ def _finish_subtitle(
     language: str | None = None,
 ) -> Path:
     finished = Path(sub_path)
+    log_privacy.register_media(finished)
     if resync and video_path.exists():
         from saitenka.app.resync import maybe_resync
 
@@ -660,9 +660,9 @@ def remove_external_sub_tracks(ipc) -> int:
     for track in data:
         if track.get("type") == "sub" and track.get("external") and track.get("id") is not None:
             log.info(
-                "re-slot: dropping carried-over external sub sid=%s %r",
+                "re-slot: dropping carried-over external sub sid=%s %s",
                 track["id"],
-                track.get("external-filename"),
+                log_privacy.media_label(track.get("external-filename") or ""),
             )
             send_correlated(
                 ipc,

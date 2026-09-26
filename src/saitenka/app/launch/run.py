@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from saitenka import otel_metrics
-from saitenka.app import player_supervisor
+from saitenka.app import log_privacy, player_supervisor
 from saitenka.app import subselect as _subselect
 from saitenka.app.config import config_path, load_config, subtitle_geometry_options
 from saitenka.app.continuity import resolve_sibling
@@ -310,6 +310,7 @@ def _cached_subtitles(
 
     title, parsed_episode = parse_filename(video_path)
     title = jimaku_title or title
+    log_privacy.register_media(video_path, title=title)
     episode = episode if episode is not None else parsed_episode
     hit = (
         cached_subs(video_path, title, episode, resync=resync, language=language)
@@ -475,6 +476,9 @@ def _launch_mpv_and_connect(
     mpv_log = cache_dir() / "mpv.log"
     from saitenka.mpvio.launch import build_mpv_argv
 
+    for media in (video_path, sub_path, en_sub_path):
+        if media:
+            log_privacy.register_media(media)
     cmd = build_mpv_argv(
         mpv_bin, sock, mpv_log, video_path, opts, sub_path=sub_path, en_sub_path=en_sub_path
     )
@@ -774,6 +778,7 @@ def reslot_to_current(
     ipc = ports.ipc
     primary_slang, second_slang = subs.slang, subs.second_slang
     title, parsed_episode = parse_filename(video_path)
+    log_privacy.register_media(video_path, title=title)
     # One span over the whole re-slot: it's a discrete, non-trivial cost on the reader thread (a cold
     # re-slot resolves+ffsubsync-resyncs subs, ~1.3s live), and its attributes make a wrong-track
     # advance queryable from trace.json — not just overlay.log. Span is a no-op with telemetry off.

@@ -7,6 +7,8 @@ from pathlib import Path
 
 from saitenka_subtitles import CueIndex, parse_cues
 
+from saitenka.app import log_privacy
+
 log = logging.getLogger(__name__)
 
 __all__ = ["load_index"]
@@ -15,6 +17,7 @@ __all__ = ["load_index"]
 def load_index(path: str | Path) -> CueIndex | None:
     """Load a subtitle file, degrading to ``None`` when it cannot produce cues."""
     subtitle_path = Path(path)
+    log_privacy.register_media(subtitle_path)
     try:
         content = subtitle_path.read_text(encoding="utf-8", errors="replace")
     except OSError:

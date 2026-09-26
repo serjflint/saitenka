@@ -22,6 +22,8 @@ from pathlib import Path
 
 import stamina
 
+from saitenka.app import log_privacy
+
 log = logging.getLogger(__name__)
 
 BASE = "https://jimaku.cc/api"
@@ -366,7 +368,7 @@ class JimakuClient:
         match = _resolution_match(video, best.name)
         log.info(
             "jimaku: picked %s (candidates=%d, resolution_match=%s)",
-            best.name,
+            log_privacy.media_label(best.name),
             len(candidates),
             match,
         )

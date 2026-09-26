@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_tokenize.japanese import Token
 
+from saitenka.app import log_privacy
 from saitenka.app.features.tooltip import prefetch, tooltip_panel
 from saitenka.app.features.tooltip.preparation import (
     PersistentHeadCache,
@@ -321,7 +322,7 @@ class _PrewarmJob:
                 # land in the per-glyph mask atlas — full population coverage — without a render-cache row.
                 st.precompose_head(cap)
         except Exception:  # a single pathological entry must never abort the whole prebuild
-            log.debug("prewarm failed for %r", term, exc_info=True)
+            log.debug("prewarm failed for %s", log_privacy.text_label(term), exc_info=True)
         self._raster_native(preparation, tok, term)
         self._tick()
 
@@ -345,7 +346,9 @@ class _PrewarmJob:
             try:
                 preparation.panel_for(tok, term, mined=False).precompose_head(preparation.scale.cap)
             except Exception:  # a single pathological entry must never abort the whole prebuild
-                log.debug("prewarm(atlas ref) failed for %r", term, exc_info=True)
+                log.debug(
+                    "prewarm(atlas ref) failed for %s", log_privacy.text_label(term), exc_info=True
+                )
             if atlas is not None:
                 atlas.mark_done(REFERENCE_SCALE, term)  # 1× reference masks persisted
         if native_needed and not native_done:
@@ -368,7 +371,12 @@ class _PrewarmJob:
                 0, cap, scale=self.native_scale
             )  # native compose → glyph masks to the atlas
         except Exception:  # never abort the prebuild over one pathological native raster
-            log.debug("prewarm(native %.2f) failed for %r", self.native_scale, term, exc_info=True)
+            log.debug(
+                "prewarm(native %.2f) failed for %s",
+                self.native_scale,
+                log_privacy.text_label(term),
+                exc_info=True,
+            )
 
     def _tick(self) -> None:
         with self._lock:
