@@ -762,6 +762,9 @@ class NativeVisibleRenderer:
         #: Whether a saitenka overlay window (or `Alt+o`) has taken the session's pixels down. The
         #: focus slot is not a `LifecycleSurfaces` one, so nothing else stops a redraw repainting it.
         self._suspended = False
+        #: A legacy stage fell due while suspended and was held back, so ownership must be
+        #: re-established from a fresh context on resume rather than continued.
+        self._resync_owed = False
         #: Placement and pixels of the raster currently on the slot, so a redraw that changes
         #: neither can skip the upload. `None` whenever the slot is down — see `_drop_overpaint`.
         self._overpaint_published: tuple[int, int, bytes] | None = None
@@ -1072,6 +1075,14 @@ class NativeVisibleRenderer:
                 pending.extend(self._retry_actions(effect_id))
 
     def _apply_action(self, target: SubtitleTarget, action: OwnershipAction) -> None:
+        if self._suspended and action.kind in {ActionKind.STAGE_LEGACY, ActionKind.RESTAGE_LEGACY}:
+            # Staging hides mpv's subtitles, which are the whole point of being hidden. The FSM is
+            # left waiting on an effect that never ran; resume replaces its context wholesale.
+            self._resync_owed = True
+            return
+        self._dispatch_action(target, action)
+
+    def _dispatch_action(self, target: SubtitleTarget, action: OwnershipAction) -> None:
         if action.kind == ActionKind.ASSERT_NATIVE_VISIBILITY:
             self._assert_native(target, action)
         elif action.kind == ActionKind.CLEAR_LEGACY:
@@ -1136,7 +1147,9 @@ class NativeVisibleRenderer:
         )
         return actions
 
-    def _ensure_selection(self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV) -> None:
+    def _ensure_selection(
+        self, target: SubtitleTarget, sid: SelectedSid = ASK_MPV, *, force: bool = False
+    ) -> None:
         """Publish a selection change if one happened.
 
         The change is enough on its own: `_change_context` re-runs `_start_mode`, which re-shows
@@ -1156,7 +1169,7 @@ class NativeVisibleRenderer:
                 target.legacy_forced,
             )
         )
-        if selection == self._selection:
+        if selection == self._selection and not force:
             return
         self._selection = selection
         # A source geometry can never accept (an .srt, say) would otherwise leave the episode with
@@ -1567,15 +1580,27 @@ class NativeVisibleRenderer:
         self._suspended = False
         if self.timed is not None:
             self.timed.refresh()
+        stranded = self._state.active_effect_kind in {
+            ActionKind.STAGE_LEGACY,
+            ActionKind.RESTAGE_LEGACY,
+        }
+        if self._resync_owed or stranded:
+            # A stage was held back while hidden, or the suspend's clear superseded one in flight,
+            # whose settlement then never arrives. A new context fences it and starts over.
+            self._resync_owed = False
+            self._ensure_selection(target, force=True)
+            return False
+        selection = self._selection
+        # The track can change while the overlay is up; a changed selection starts its own mode.
+        self._ensure_selection(target)
+        if self._selection != selection:
+            return False
         if self._state.owner == PixelOwner.LEGACY:
             self._state, actions = reduce_ownership(
                 self._state, OwnershipEvent(EventKind.LEGACY_REHANDOFF)
             )
             self._execute(target, actions)
             return False
-        # The track can change while the overlay is up, so publish the selection first — `reassert`
-        # did, and dropping it left the epoch naming a track that is gone.
-        self._ensure_selection(target)
         # Verify, not activate: `suspend_for_overlay` set sub-visibility behind the FSM's back, so
         # the established flag is stale by construction and only mpv can settle it.
         self._verify_native(target)
