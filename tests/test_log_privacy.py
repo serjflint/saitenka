@@ -52,3 +52,9 @@ def test_a_jimaku_entry_name_is_scrubbed_from_its_no_files_error(monkeypatch):
         JimakuClient("k" * 32).episode_files("Frieren", 7)
 
     assert "Sousou no Frieren" not in log_privacy.scrub(str(raised.value))
+
+
+def test_a_japanese_title_is_scrubbed_where_japanese_text_surrounds_it():
+    log_privacy.register_title("葬送のフリーレン")
+
+    assert "フリーレン" not in log_privacy.scrub("字幕：葬送のフリーレン第1話")

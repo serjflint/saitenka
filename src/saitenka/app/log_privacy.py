@@ -26,8 +26,8 @@ LOG_FORMAT = 2
 
 #: Shorter tokens would scrub ordinary words out of unrelated records.
 _MIN_TOKEN = 4
-#: A bare stem or a one-word title is often a word the log uses itself (`English.ass`, `video.mp4`);
-#: only a distinctive one is registered. Full names and paths always are.
+#: A bare stem (`English` of English.ass) or a one-word title (`video` parsed from video.mp4) is often a
+#: word the log uses itself; only a distinctive one is registered. Full names and paths always are.
 _MIN_DISTINCTIVE = 8
 #: Episodes change within one long session; the oldest identities are the least likely to recur.
 _CAPACITY = 256
@@ -120,11 +120,16 @@ def _register(tokens: dict[str, str]) -> None:
         while len(_labels) > _CAPACITY:
             del _labels[next(iter(_labels))]
         # Longest first, so a full path is replaced whole rather than around its registered name;
-        # bounded by non-word characters, so a title never rewrites part of a longer word.
+        # bounded by ASCII word characters only, so a title never rewrites part of a longer Latin word
+        # yet is still found glued to Japanese text, which has no spaces to bound it.
         ordered = sorted(_labels, key=len, reverse=True)
         _snapshot = (
             (
-                re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, ordered)) + r")(?!\w)"),
+                re.compile(
+                    r"(?<![A-Za-z0-9_])(?:"
+                    + "|".join(map(re.escape, ordered))
+                    + r")(?![A-Za-z0-9_])"
+                ),
                 dict(_labels),
             )
             if ordered
