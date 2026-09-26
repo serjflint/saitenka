@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790439421516,
+  "lastUpdate": 1790452152866,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17675,6 +17675,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.123699,
             "range": "3 replicas; min 1.11264; max 1.46709; MAD 0.011056; worst 1.46709",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6b89aef074782064dda31ec3cd6aacfe00c81ed5",
+          "message": "Merge pull request #545 from serjflint/feat/colored-track\n\nfeat(subtitles): color the Japanese track itself with a colored copy",
+          "timestamp": "2026-09-26T22:46:27+03:00",
+          "tree_id": "852a6b24b1c91801ca34399550bde364a81b8970",
+          "url": "https://github.com/serjflint/saitenka/commit/6b89aef074782064dda31ec3cd6aacfe00c81ed5"
+        },
+        "date": 1790452151801,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.700249,
+            "range": "3 replicas; min 6.66206; max 6.8427; MAD 0.038191",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.419981,
+            "range": "3 replicas; min 9.11122; max 9.9224; MAD 0.308761; worst 9.9224",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.920161,
+            "range": "3 replicas; min 21.7548; max 22.0034; MAD 0.083204",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.167452,
+            "range": "3 replicas; min 22.017; max 22.1874; MAD 0.019938; worst 22.1874",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.908072,
+            "range": "3 replicas; min 13.3305; max 13.9614; MAD 0.053335",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.12278,
+            "range": "3 replicas; min 0.121076; max 0.12293; MAD 0.00015; worst 0.12293",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.564831,
+            "range": "3 replicas; min 43.3106; max 43.9865; MAD 0.254227; worst 43.9865",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.72752,
+            "range": "3 replicas; min 3.10936; max 4.39818; MAD 0.618157; worst 4.39818",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.346045,
+            "range": "3 replicas; min 1.09566; max 1.38743; MAD 0.041382; worst 1.38743",
             "unit": "ms"
           }
         ]
