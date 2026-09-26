@@ -145,6 +145,16 @@ def _fallback_notice(reason: str, diagnostic: str | None) -> str:
     return f"no word scanning: {cause}{detail}"
 
 
+def _missing_font_notice(families: tuple[str, ...]) -> str:
+    """Ask for the one fix that restores OSD coloring: the family installed where the OSD looks."""
+    names = ", ".join(families)
+    if len(names) > _NOTICE_DETAIL_MAX:
+        names = names[: _NOTICE_DETAIL_MAX - 1] + "…"
+    return (
+        f"install font {names}: it comes inside the video, and mpv's OSD uses installed fonts only"
+    )
+
+
 def _font_option_delta(
     ours: tuple[tuple[str, str], ...], theirs: tuple[tuple[str, str], ...]
 ) -> str:
@@ -897,6 +907,7 @@ class NativeSubtitleGeometry:
         #: fire again if the user fixes one cause and hits a different one.
         self._announced_reason: str | None = None
         self._fonts = subtitle_fonts.FontEnvironment()
+        self._announced_fonts: frozenset[str] = frozenset()
         self._in_document_families: frozenset[str] = frozenset()
         #: A converted track's cue markup, by millisecond span — see `_adopt_converted`.
         self._converted_markup: dict[tuple[int, int], str] = {}
@@ -1117,6 +1128,19 @@ class NativeSubtitleGeometry:
         self._announced_reason = reason
         self._ports.notify(_fallback_notice(reason, diagnostic), "warn")
 
+    def _announce_missing_fonts(self, whole: whole_cue.WholeCue | None) -> None:
+        """Ask once per family and font environment, at the first cue that falls back for it.
+
+        On screen only in `whole-cue-osd`, where the fallback loses the color. The other modes fall
+        back to a raster that still colors the cue, and most releases attach a font nobody has.
+        """
+        if whole is None or not (fresh := frozenset(whole.missing_fonts) - self._announced_fonts):
+            return
+        self._announced_fonts |= fresh
+        log.info("OSD cannot load subtitle font(s) %s", ", ".join(sorted(fresh)))
+        if self.coloring == "whole-cue-osd":
+            self._ports.notify(_missing_font_notice(tuple(sorted(fresh))), "warn")
+
     def _set_ready(self, *, active_events: int = 0) -> bool:
         self._failure_diagnostic = None
         self.fallback_reason = None
@@ -1192,6 +1216,7 @@ class NativeSubtitleGeometry:
         if environment == self._fonts:
             return
         self._fonts = environment
+        self._announced_fonts = frozenset()
         log.info(
             "subtitle font sources: %s (%d attachment(s), fonts-dir %s)",
             "+".join(environment.sources) or "none",
@@ -1595,6 +1620,8 @@ class NativeSubtitleGeometry:
                         prepared,
                         fonts_blocked=unreachable.all_unsafe,
                         blocked_families=unreachable.families,
+                        substituted_families=unreachable.substituted,
+                        installable_families=unreachable.installable,
                         frame=cue.frame_size,
                         margins=cue.margins,
                     )
@@ -2065,6 +2092,7 @@ class NativeSubtitleGeometry:
         self._eligible_tokens = len(cached.palette)
         self._eligible_indices = frozenset(entry.token_index for entry in cached.palette)
         self.worker.mark_presented(cached)
+        self._announce_missing_fonts(cached.whole_cue)
         if not self._ports.use_native():
             if self._ports.ownership_undecided():
                 return True  # the assertion's terminal re-drives the refresh
@@ -2315,6 +2343,7 @@ class NativeSubtitleGeometry:
                 self._degrade_geometry("geometry-token-identity-invalid")
                 return False
             self._ports.publish(self._install_snapshot(snapshot), (0, 0))
+            self._announce_missing_fonts(snapshot.whole_cue)
             self._record_ready_latency(snapshot.generation)
             if not self._ports.use_native():
                 if self._ports.ownership_undecided():

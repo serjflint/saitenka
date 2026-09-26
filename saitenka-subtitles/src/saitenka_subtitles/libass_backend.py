@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 
-from saitenka_subtitles import whole_cue
+from saitenka_subtitles import font_names, whole_cue
 from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometrySnapshot,
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from saitenka_subtitles.document import SubtitleEventId
-    from saitenka_subtitles.geometry import GeometryRequest
+    from saitenka_subtitles.geometry import FontSetup, GeometryRequest
     from saitenka_subtitles.telemetry import GeometryTelemetry
 
 
@@ -94,6 +94,141 @@ class RendererFactory(Protocol):
 
 
 log = logging.getLogger(__name__)
+
+_PROBE_FRAME = (4096, 256)
+
+#: Ink overlap at which the face the OSD finds by name counts as the attachment's own design.
+#: Measured at the probe size: two versions of Trebuchet MS overlap 1.000, while metric-compatible
+#: clones (Liberation for Arial or Times New Roman) stay at or below 0.84 even on plain Latin, and a
+#: provider's generic fallback well below that.
+SAME_DESIGN_OVERLAP = 0.95
+
+
+def _probe_document(probe: font_names.FaceProbe) -> bytes:
+    bold, italic = -1 if probe.bold else 0, -1 if probe.italic else 0
+    return (
+        "[Script Info]\nScriptType: v4.00+\nWrapStyle: 2\nScaledBorderAndShadow: yes\n"
+        f"PlayResX: {_PROBE_FRAME[0]}\nPlayResY: {_PROBE_FRAME[1]}\n\n"
+        "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+        "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, "
+        "Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: P,{probe.family},96,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,{bold},{italic},"
+        "0,0,100,100,0,0,1,0,0,7,0,0,0,1\n\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        f"Dialogue: 0,0:00:00.00,0:00:01.00,P,,0,0,0,,{{\\pos(0,0)}}{probe.sample}\n"
+    ).encode()
+
+
+def _ink(renderer: NativeRenderer) -> np.ndarray:
+    result = renderer.render(
+        0,
+        _PROBE_FRAME,
+        _PROBE_FRAME,
+        pixel_aspect=1.0,
+        margins=(0, 0, 0, 0),
+        use_margins=False,
+        max_bitmap_bytes=2 * _PROBE_FRAME[0] * _PROBE_FRAME[1],
+    )
+    ink = np.zeros((_PROBE_FRAME[1], _PROBE_FRAME[0]), dtype=bool)
+    for layer in result.layers:
+        if layer.width <= 0 or layer.height <= 0:
+            continue
+        pixels = np.frombuffer(bytes(layer.bitmap), dtype=np.uint8)
+        stride = len(pixels) // layer.height
+        coverage = pixels[: stride * layer.height].reshape(layer.height, stride)[:, : layer.width]
+        ink[layer.dst_y : layer.dst_y + layer.height, layer.dst_x : layer.dst_x + layer.width] |= (
+            coverage > 127
+        )
+    return ink
+
+
+def _overlap(a: np.ndarray, b: np.ndarray) -> float:
+    union = int((a | b).sum())
+    return int((a & b).sum()) / union if union else 0.0
+
+
+def _renderer_for(
+    factory: RendererFactory,
+    document: bytes,
+    *,
+    fonts: list[tuple[str, bytes]],
+    setup: FontSetup | None,
+    library_path: Path | None,
+) -> NativeRenderer:
+    return factory(
+        document,
+        fonts=fonts,
+        library_path=library_path,
+        fonts_dir=setup.fonts_dir if setup else None,
+        extract_fonts=False,
+        default_font=None,
+        default_family=None,
+        font_provider=int(setup.font_provider) if setup else 0,
+        fontconfig_config=setup.fontconfig_config if setup else None,
+        features=[],
+    )
+
+
+def _drawn_as_own(
+    factory: RendererFactory,
+    osd: NativeRenderer,
+    probe: font_names.FaceProbe,
+    library_path: Path | None,
+) -> bool:
+    document = _probe_document(probe)
+    reference = _renderer_for(
+        factory, document, fonts=[("face", probe.face)], setup=None, library_path=library_path
+    )
+    try:
+        own = _ink(reference)
+    finally:
+        reference.close()
+    osd.set_document(document, [])
+    return bool(own.any()) and _overlap(_ink(osd), own) >= SAME_DESIGN_OVERLAP
+
+
+def faces_drawn_as_own(
+    probes: Sequence[font_names.FaceProbe],
+    setup: FontSetup,
+    *,
+    library_path: Path | None = None,
+    renderer_factory: RendererFactory | None = None,
+) -> tuple[bool, ...]:
+    """Whether `setup`'s provider, asked by family name, draws each attached face as its own.
+
+    Asked with no attachments loaded, as mpv's OSD library is, and compared by ink against the face
+    alone. Asking by name finds what the OSD will actually use for that name: another build of the
+    face passes, while a metric-compatible clone a provider substitutes for the name, or its
+    generic fallback, does not. A face that cannot be asked about, or any failure, answers "no",
+    which keeps it refused. One OSD renderer serves every face, so the provider starts once.
+    """
+    answers = [False] * len(probes)
+    askable = [
+        index
+        for index, probe in enumerate(probes)
+        if probe.family and probe.sample and probe.face and "," not in probe.family
+    ]
+    if not askable:
+        return tuple(answers)
+    osd: NativeRenderer | None = None
+    try:
+        factory = renderer_factory or cast(
+            "RendererFactory", importlib.import_module("libasslite").AssRenderer
+        )
+        first = _probe_document(probes[askable[0]])
+        osd = _renderer_for(factory, first, fonts=[], setup=setup, library_path=library_path)
+        for index in askable:
+            probe = probes[index]
+            try:
+                answers[index] = _drawn_as_own(factory, osd, probe, library_path)
+            except (OSError, RuntimeError, ValueError, TypeError) as error:
+                log.debug("could not probe the installed face of %s: %s", probe.family, error)
+    except (ImportError, OSError, RuntimeError, ValueError, TypeError) as error:
+        log.debug("could not ask the font provider for installed families: %s", error)
+    finally:
+        if osd is not None:
+            osd.close()
+    return tuple(answers)
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +543,12 @@ class LibassGeometryBackend:
             renderer, _built = self._renderer(osd_request)
             predicted = self._render_frame(renderer, osd_request)
             candidate = whole_cue.retain_layers(predicted.layers, palette)
+            if candidate == cue.layers:
+                comparison = "exact"
+            elif cue.substituted and whole_cue.same_placement(candidate, cue.layers):
+                comparison = "placement"
+            else:
+                comparison = "shape-mismatch"
             evidence = (
                 ("shadow_bounds", whole_cue.layer_bounds(cue.layers)),
                 ("osd_bounds", whole_cue.layer_bounds(candidate)),
@@ -415,7 +556,7 @@ class LibassGeometryBackend:
                 ("mapping", cue.mapping),
                 ("qualification_cpu_ms", (time.thread_time_ns() - cpu_started) / 1_000_000),
                 ("qualification_ms", (time.perf_counter_ns() - started) / 1_000_000),
-                ("comparison", "exact" if candidate == cue.layers else "shape-mismatch"),
+                ("comparison", comparison),
             )
             span.set("generation", request.generation)
             span.set("timestamp_ms", request.timestamp_ms)
@@ -434,8 +575,8 @@ class LibassGeometryBackend:
             return replace(
                 cue,
                 evidence=evidence,
-                osd_reason="eligible" if candidate == cue.layers else "shape-mismatch",
-                blockers=() if candidate == cue.layers else ("shape-mismatch",),
+                osd_reason="shape-mismatch" if comparison == "shape-mismatch" else "eligible",
+                blockers=("shape-mismatch",) if comparison == "shape-mismatch" else (),
             )
 
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
