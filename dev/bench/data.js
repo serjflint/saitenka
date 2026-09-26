@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790436226750,
+  "lastUpdate": 1790438009883,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17519,6 +17519,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.167624,
             "range": "3 replicas; min 0.89902; max 1.3108; MAD 0.143179; worst 1.3108",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4cd146e82f47c440af7a2213d14d8bb8607dff98",
+          "message": "Merge pull request #543 from serjflint/fix/close-with-pending-effects\n\nfix(runtime): keep completions popped in the same batch as a close request",
+          "timestamp": "2026-09-26T18:50:29+03:00",
+          "tree_id": "0c0149c6438dd2a5cab2394c17cd93392ec69722",
+          "url": "https://github.com/serjflint/saitenka/commit/4cd146e82f47c440af7a2213d14d8bb8607dff98"
+        },
+        "date": 1790438008813,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.698635,
+            "range": "3 replicas; min 6.19189; max 6.7386; MAD 0.039963",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.166896,
+            "range": "3 replicas; min 8.51202; max 9.20331; MAD 0.036417; worst 9.20331",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.922762,
+            "range": "3 replicas; min 18.9988; max 22.0465; MAD 0.12375",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.084435,
+            "range": "3 replicas; min 19.283; max 22.3009; MAD 0.216484; worst 22.3009",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.263555,
+            "range": "3 replicas; min 13.0974; max 16.625; MAD 1.16611",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.124283,
+            "range": "3 replicas; min 0.095706; max 0.124352; MAD 6.9e-05; worst 0.124352",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.54297,
+            "range": "3 replicas; min 43.4342; max 45.73; MAD 0.108815; worst 45.73",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.283073,
+            "range": "3 replicas; min 2.99934; max 5.01185; MAD 0.28373; worst 5.01185",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.119543,
+            "range": "3 replicas; min 1.03808; max 1.59786; MAD 0.081464; worst 1.59786",
             "unit": "ms"
           }
         ]
