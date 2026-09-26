@@ -645,3 +645,38 @@ def test_a_cached_answer_reads_no_font_again(tmp_path, monkeypatch):
     load()
 
     assert len(parsed) == 1
+
+
+def test_a_face_that_cannot_be_read_still_refuses_its_family(tmp_path, monkeypatch):
+    """A bold face nobody can probe must not ride on the regular face that passed: the OSD would
+    take over the family and synthesize the bold."""
+    util.requires_libass()
+    fonts = tmp_path / "fonts"
+    fonts.mkdir()
+    (fonts / "regular.ttf").write_bytes(util.drawable_font("Signs", "Hamburgefonstiv 0123!"))
+    regular = util.drawable_font("Signs")
+    unreadable = util.drawable_font("Signs", "Hamburgefonstiv 0123?")
+    monkeypatch.setattr(
+        subtitle_fonts,
+        "container_fonts",
+        lambda *_args, **_kw: (("regular.ttf", regular), ("bold.ttf", unreadable)),
+    )
+    monkeypatch.setattr(subtitle_fonts, "_PROBED", {})
+    real = subtitle_fonts.font_names.probes
+    monkeypatch.setattr(
+        subtitle_fonts.font_names, "probes", lambda data: () if data == unreadable else real(data)
+    )
+
+    reach = subtitle_fonts.resolve(
+        expand=expander(None),
+        settings={
+            "embeddedfonts": True,
+            "osd-fonts-dir": str(fonts),
+            "osd-font-provider": "none",
+            "sub-font-provider": "none",
+        },
+        video=tmp_path / "episode.mkv",
+        cache_dir=tmp_path,
+    ).osd_unreachable()
+
+    assert reach.blocks("signs")

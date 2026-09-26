@@ -299,24 +299,31 @@ def _is_current(digest: bytes, setup: FontSetup, now: float) -> bool:
     )
 
 
-def _probe_attachments(stale: list[tuple[bytes, bytes]], setup: FontSetup, now: float) -> None:
+def _probe_attachments(
+    stale: list[tuple[bytes, bytes]], setup: FontSetup, now: float
+) -> dict[bytes, tuple[tuple[frozenset[str], bool], ...]]:
+    """Ask about `stale` and remember the answers; returned too, so a cache clear cannot lose them."""
     try:
         from saitenka_subtitles.libass_backend import faces_drawn_as_own
     except ImportError:
-        return
+        return {}
     probes = {digest: font_names.probes(data) for digest, data in stale}
     flat = [probe for digest, _data in stale for probe in probes[digest]]
     answers = iter(faces_drawn_as_own(flat, setup))
-    if len(_PROBED) >= _PROBED_MAX:
-        _PROBED.clear()
-    for digest, _data in stale:
-        _PROBED[digest, setup] = (
-            tuple(
-                (probe.names | {font_names.key(probe.family)} - {""}, next(answers))
-                for probe in probes[digest]
-            ),
-            now,
+    fresh = {
+        digest: tuple(
+            (probe.names | {font_names.key(probe.family)} - {""}, next(answers))
+            for probe in probes[digest]
         )
+        # A file whose faces could not be read at all still names its families: they count as
+        # "no", or a sibling that passed would vouch for them.
+        or ((font_names.families(data), False),)
+        for digest, data in stale
+    }
+    if len(_PROBED) + len(fresh) > _PROBED_MAX:
+        _PROBED.clear()
+    _PROBED.update({(digest, setup): (faces, now) for digest, faces in fresh.items()})
+    return fresh
 
 
 def _osd_installed_families(
@@ -333,13 +340,13 @@ def _osd_installed_families(
         for _name, data in attachments
         if not font_names.families(data) <= covered
     ]
+    known = {d: entry[0] for d, _data in wanted if (entry := _PROBED.get((d, setup))) is not None}
     if stale := [(d, data) for d, data in wanted if not _is_current(d, setup, now)]:
-        _probe_attachments(stale, setup, now)
+        known |= _probe_attachments(stale, setup, now)
     passed: set[str] = set()
     failed: set[str] = set()
-    for digest, _data in wanted:
-        faces, _asked = _PROBED.get((digest, setup), ((), now))
-        for names, drawn in faces:
+    for digest, data in wanted:
+        for names, drawn in known.get(digest, ((font_names.families(data), False),)):
             (passed if drawn else failed).update(names)
     return frozenset(passed - failed)
 

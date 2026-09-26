@@ -104,7 +104,10 @@ def _sample(font: TTFont) -> str:
     drawable = [
         chr(code)
         for code in sorted(cmap)
-        if chr(code) not in "{}\\" and unicodedata.category(chr(code))[0] in "LNPS"
+        # A cmap can map past Unicode; `chr` would raise and cost the collection's other faces.
+        if code <= 0x10FFFF
+        and chr(code) not in "{}\\"
+        and unicodedata.category(chr(code))[0] in "LNPS"
     ]
     step = max(1, len(drawable) // _PROBE_GLYPHS)
     return "".join(drawable[::step][:_PROBE_GLYPHS])
