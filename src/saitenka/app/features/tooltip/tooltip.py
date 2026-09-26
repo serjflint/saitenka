@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
-from saitenka.app import log_privacy
 from saitenka.app.features.tooltip import nested_popup, tooltip_engaged
 from saitenka.app.features.tooltip.hover_metadata import HoverMetadataKey
 from saitenka.app.features.tooltip.popups import (
@@ -626,12 +625,12 @@ def _click_tip(
         # stacked entry ⊕ → mine that entry
         terms = hovered_meta(ports.word_store).terms
         if _mine_link(panel.style.dict_set, terms, click.mine_token, lb, tok):
-            log.debug("tip click → mine link %s", log_privacy.text_label(lb.query))
+            log.debug("tip click → mine link %r", lb.query)
         else:
             # A headword kanji (``kanji:<ch>``) and a cross-reference both navigate the base tooltip IN
             # PLACE (Yomitan; Esc/back returns). A click must NEVER spawn a nested popup — that popup is
             # hover-governed, so it dismisses itself unless the cursor chases it into it.
-            log.debug("tip click → navigate %s", log_privacy.text_label(lb.query))
+            log.debug("tip click → navigate %r", lb.query)
             navigate_tip(ports, panel, lb.query)
     else:
         # No link under the cursor: a single-ideograph scan cell opens its kanji entry. If this fires on
@@ -859,10 +858,10 @@ def show_tooltip_impl(
     view.state, view.key = st, key
     ports.word_store.dispatch(events.HoverWordRead(st.reading))
     log.debug(
-        "tooltip shown: word=%s phrases=%d reading=%s mined=%s painted_from_cache=%s",
-        log_privacy.text_label(tok.surface),
-        len(meta.terms),
-        log_privacy.text_label(st.reading),
+        "tooltip shown: word=%r phrases=%r reading=%r mined=%s painted_from_cache=%s",
+        tok.surface,
+        list(meta.terms),
+        st.reading,
         meta.mined,
         painted,
     )

@@ -1,10 +1,9 @@
-"""What the file log may not carry verbatim: the user's media identity and subtitle content.
+"""Keeps the user's media identity out of the file log and exported spans.
 
-Two mechanisms, because the two kinds of data reach the log differently. Content — a cue, a word,
-a dictionary query — is unbounded, so the call site that logs it passes it through `text_label`.
-Media identity — a video or subtitle path, the title parsed from it — is known once and then
-reappears inside status strings, provider errors and exception text that no call site controls, so
-it is registered where it is resolved and replaced in every file-log record by `scrub`.
+The class list is `docs/contributing/diagnostics-privacy.md`. A video or subtitle path, and the title
+parsed from it, is known once and then reappears inside status strings, provider errors and exception
+text that no call site controls, so it is registered where it is resolved and replaced in every
+record by `scrub`.
 
 Console output is not scrubbed: the user watching the terminal is looking at their own files.
 """
@@ -36,13 +35,6 @@ _lock = threading.Lock()
 _labels: dict[str, str] = {}
 #: Rebuilt under the lock and swapped whole, so `scrub` — on every file-log record — never locks.
 _snapshot: tuple[re.Pattern[str], dict[str, str]] | None = None
-
-
-def text_label(text: object) -> str:
-    """A cue, word or query as a join key and a length, never the text."""
-    if not isinstance(text, str):
-        return repr(text)
-    return f"<text:{cue_digest(text)} len={len(text)}>"
 
 
 def media_label(path: str | Path) -> str:

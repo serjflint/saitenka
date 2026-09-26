@@ -1,4 +1,4 @@
-"""The default report ships Saitenka's own log and trace without the user's media, cue text or home.
+"""The default report ships Saitenka's own log and trace without the user's media names or home.
 
 Each canary enters through the production path that carries it in the field; the negative control
 proves every one of them reaches the bundle once sanitising is off, so an absence is evidence.
@@ -43,8 +43,6 @@ CANARIES = (
     "Zetacanary",
     "Thetacanary",
     "Omegacanary",
-    "Kappacanary",
-    "猫が好き",
     "Lambdacanary",
     "Iotacanary",
     "Muattach",
@@ -192,7 +190,8 @@ def test_default_report_carries_the_session_log_without_any_canary(monkeypatch, 
     log_text = members["overlay.log"].decode()
     assert "<media:" in log_text
     assert "<title:" in log_text
-    assert "<text:" in log_text
+    # Cue text is kept by policy: it is what a tokenization bug is diagnosed from.
+    assert "Kappacanary" in log_text
     assert _leaks(members) == set()
 
 
@@ -201,12 +200,10 @@ def test_default_report_carries_the_session_log_without_any_canary(monkeypatch, 
 def test_every_canary_reaches_the_bundle_when_sanitising_is_off(monkeypatch, tmp_path):
     home, cache = _environment(monkeypatch, tmp_path)
     monkeypatch.setattr(log_privacy, "scrub", lambda text: text)
-    monkeypatch.setattr(log_privacy, "text_label", str)
     monkeypatch.setattr(log_privacy, "media_label", str)
     monkeypatch.setattr(logsetup, "redact", lambda text: text)
     monkeypatch.setattr(report, "redact", lambda text: text)
     monkeypatch.setattr(report, "_without_log_excerpts", lambda text: text)
-    monkeypatch.setattr(report, "_scrub_trace_names", lambda text: text)
     _configure_logging(cache)
     _field_session(home, cache)
 

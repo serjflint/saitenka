@@ -507,24 +507,6 @@ def _without_log_excerpts(doctor_json: str) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-_LABEL_RE = re.compile(r"<(?:media|title|text):[^>]*>")
-_FILE_NAME_RE = re.compile(r"\.(?:mkv|mp4|m4v|avi|webm|mov|ass|ssa|srt|vtt|sup)\b", re.IGNORECASE)
-
-
-def _scrub_trace_names(raw: str) -> str:
-    """Second layer for the default trace: drop any attribute that still names a media or subtitle
-    file. The exporter scrubs registered names; this catches one that was never registered."""
-    doc = json.loads(raw)
-    for event in doc.get("traceEvents", []):
-        args = event.get("args") if isinstance(event, dict) else None
-        if not isinstance(args, dict):
-            continue
-        for key, value in args.items():
-            if isinstance(value, str) and _FILE_NAME_RE.search(_LABEL_RE.sub("", value)):
-                args[key] = "<file-name-redacted>"
-    return json.dumps(doc, ensure_ascii=False)
-
-
 def _current_format(lines: list[str]) -> bool:
     """Whether every line was written by a build that scrubs what `log_privacy` scrubs."""
     from saitenka.app.log_privacy import LOG_FORMAT
@@ -533,10 +515,10 @@ def _current_format(lines: list[str]) -> bool:
 
 
 def _collect_default(log_path: Path, *, include_log: bool) -> dict[str, str]:
-    """Saitenka's own diagnostics for the latest session, from a log that labels media and content.
+    """Saitenka's own diagnostics for the latest session, from a log that labels media names.
 
     A session logged by an older build ships neither its log nor its trace: those lines still carry
-    the media names and cue text the current format keeps out.
+    the media names the current format keeps out.
     """
     text, _ = _read_log_snapshot(log_path)
     session = _latest_session(text)
@@ -560,8 +542,6 @@ def _collect_default(log_path: Path, *, include_log: bool) -> dict[str, str]:
         members["overlay.log"] = redact("\n".join(lines) + "\n")
     if current:
         members.update(_collect_telemetry(session))
-        if "telemetry/trace.json" in members:
-            members["telemetry/trace.json"] = _scrub_trace_names(members["telemetry/trace.json"])
     members["logs/collection.json"] = json.dumps(
         {
             "session": session,
@@ -581,9 +561,8 @@ def _default_manifest(members: dict[str, str], *, session: str | None, status: s
         f"latest session: {session or 'n/a'}",
         "",
         "Created locally and NEVER uploaded by saitenka. Review before sharing.",
-        "Saitenka's own log and trace for the latest session. Video and subtitle file names, cue text",
-        "and looked-up words appear as digests, home paths as <HOME>. Cue timings, deck, note type",
-        "and dictionary names remain.",
+        "Saitenka's own log and trace for the latest session. Video, subtitle and release names",
+        "appear as digests, home paths as <HOME>. Subtitle text, looked-up words and timings remain.",
         "No configuration, mpv config or log, or crash text: those need `report --diagnostic-detail`.",
         "",
         f"log: {status}",

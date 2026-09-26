@@ -360,7 +360,7 @@ def report(
     print(f"wrote {dest}")
     if not diagnostic_detail:
         print(
-            "Latest session's log and trace, with file names, cue text and home paths replaced."
+            "Latest session's log and trace, with media names and home paths replaced."
             " Review before sharing."
         )
         return 0
