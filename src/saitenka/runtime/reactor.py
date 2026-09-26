@@ -179,7 +179,11 @@ class SessionReactor[StateT]:
                 self._reduce(completion)
         self.run_until_idle()
         if self._pending:
-            raise RuntimeError("cannot close with pending effects")
+            stuck = ", ".join(
+                f"{type(effect).__name__}#{effect.effect_id.value}({effect.owner.value}:{effect.identity})"
+                for effect in self._pending.values()
+            )
+            raise RuntimeError(f"cannot close with pending effects: {stuck}")
         self._lifecycle = Lifecycle.CLOSED
         self._mailbox.close()
 

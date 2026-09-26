@@ -132,8 +132,16 @@ class SessionLoop:
         # over adjacent envelopes, so handling the head separately would let a repeat arriving
         # behind it through — the one press in ten that woke the loop rather than joining a batch
         # already there.
+        closing: str | None = None
         for envelope in self._mailbox.receive_ready(start=head):
-            self._turn(envelope, handle)
+            if closing is None:
+                closing = self._turn(envelope, handle)
+            else:
+                # Popped with the close: the session is done with it, but a completion still has to
+                # reach the reactor and correlator, or its effect stays pending through close.
+                self._turn(envelope, lambda _payload: None)
+        if closing is not None:
+            raise OSError(closing)
 
     def _bounded_by_deadline(self, timeout: float | None) -> float | None:
         """Never block past the earliest armed timer.
@@ -149,7 +157,7 @@ class SessionLoop:
         remaining = max(0.0, due_at - self._clock())
         return remaining if timeout is None else min(timeout, remaining)
 
-    def _turn(self, envelope: EventEnvelope, handle: Callable[[object], None]) -> None:
+    def _turn(self, envelope: EventEnvelope, handle: Callable[[object], None]) -> str | None:
         """One envelope: the reactor always sees it; the session sees it unless the reactor owns it.
 
         The order matters — the reactor's dispatch has always preceded the session's handling of the
@@ -164,8 +172,7 @@ class SessionLoop:
         if claimed:
             self._claimed[name] += 1
         self._observe(envelope)
-        if not claimed:
-            self._route(envelope.payload, handle)
+        return None if claimed else self._route(envelope.payload, handle)
 
     def announce(self, event: RuntimeEvent, now: float, connection_epoch: int) -> bool:
         """Show the reactor one event that never went through the mailbox.
@@ -183,19 +190,19 @@ class SessionLoop:
         if self._reactor is not None:
             self._reactor.handle(envelope)
 
-    def _route(self, payload: RuntimeEvent, handle: Callable[[object], None]) -> None:
+    def _route(self, payload: RuntimeEvent, handle: Callable[[object], None]) -> str | None:
+        """Hand `payload` on; a close request is returned as its reason rather than handled."""
         if isinstance(payload, CloseRequested):
-            reason = (
+            return (
                 "runtime mailbox overloaded"
                 if payload.reason == "runtime-overloaded"
                 else payload.reason
             )
-            raise OSError(reason)
         if isinstance(payload, EffectFinished):
             # A completion belongs to the correlator that issued the effect, and never went out to
             # the session for any reason but order.
             self._correlator.handle_terminal(payload)
-            return
+            return None
         if isinstance(payload, RawMpvEvent) and isinstance(payload.data, dict):
             handle(payload.data)
         elif isinstance(
@@ -208,3 +215,4 @@ class SessionLoop:
             | PropertyObserved,
         ):
             handle(payload)
+        return None
