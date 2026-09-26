@@ -4126,3 +4126,66 @@ def test_boxes_are_laid_out_in_the_surface_they_are_drawn_onto(
     assert framed, "no decision reached the frame branch"
     assert {(s["frame_width"], s["frame_height"]) for s in framed} == {surface}
     result.close()
+
+
+def test_a_switch_to_the_legacy_renderer_while_hidden_waits_for_the_show(tmp_path: Path) -> None:
+    """Hidden means mpv's own subtitles: a selection that picks the legacy renderer stages nothing
+    until the overlay is shown, and is not lost by waiting."""
+    from saitenka.app import bindings
+    from saitenka.app.overlay_ids import OverlayId
+
+    result, ipc, _backend = reader(tmp_path, correlated_surfaces=True)
+    result.graph.cue.set_subtitle("猫を見る")
+    settle_jobs(result, ipc)
+    sub_slot = result.graph.overlay.physical_oid(OverlayId.SUB)
+    renderer = result.graph.subtitle_presentation.pipeline.renderer
+
+    def legacy_writes(commands):
+        return [
+            c
+            for c in commands
+            if c[:2] == ("overlay-add", sub_slot) or c == ("set_property", "sub-visibility", False)
+        ]
+
+    result.command(bindings.OVERLAY_TOGGLE_MSG)
+    hidden_at = len(ipc.commands)
+    result.graph.subtitle_presentation.toggle_renderer()
+    result.graph.cue.set_subtitle("犬を見る")
+    settle_jobs(result, ipc)
+
+    assert legacy_writes(ipc.commands[hidden_at:]) == []
+
+    shown_at = len(ipc.commands)
+    result.command(bindings.OVERLAY_TOGGLE_MSG)
+    settle_jobs(result, ipc)
+
+    assert legacy_writes(ipc.commands[shown_at:])
+    assert renderer.ownership_state.owner is PixelOwner.LEGACY
+    result.close()
+
+
+def test_a_legacy_stage_cut_off_by_the_hide_is_restarted_by_the_show(tmp_path: Path) -> None:
+    """The hide's clear supersedes a stage still in flight, and a superseded present never settles:
+    without a fresh start the show would leave neither renderer drawing."""
+    from saitenka.app import bindings
+    from saitenka.app.overlay_ids import OverlayId
+
+    result, ipc, _backend = _correlated_reader(tmp_path)
+    result.graph.cue.set_subtitle("猫を見る")
+    while ipc.deliver_runtime_mpv():
+        pass
+    renderer = result.graph.subtitle_presentation.pipeline.renderer
+    sub_slot = result.graph.overlay.physical_oid(OverlayId.SUB)
+    result.graph.subtitle_presentation.toggle_renderer()  # the stage is now waiting on mpv
+    result.command(bindings.OVERLAY_TOGGLE_MSG)
+    while ipc.deliver_runtime_mpv():
+        pass
+    shown_at = len(ipc.commands)
+
+    result.command(bindings.OVERLAY_TOGGLE_MSG)
+    while ipc.deliver_runtime_mpv():
+        pass
+
+    assert any(c[:2] == ("overlay-add", sub_slot) for c in ipc.commands[shown_at:])
+    assert renderer.ownership_state.owner is PixelOwner.LEGACY
+    result.close()
