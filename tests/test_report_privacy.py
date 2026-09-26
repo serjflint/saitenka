@@ -19,7 +19,11 @@ from util import FakeIPC
 from saitenka.app import doctor, log_privacy, logsetup, report, telemetry
 from saitenka.app.jimaku import JimakuClient, JimakuFile, parse_filename
 from saitenka.app.sub_index import load_index
-from saitenka.app.subselect import fetch_jimaku_path
+from saitenka.app.subselect import (
+    AttachSubtitleOptions,
+    fetch_jimaku_path,
+    prepare_attach_startup,
+)
 from saitenka.app.subtitle_cache import store_subs
 from saitenka.app.subtitle_fonts import container_fonts
 
@@ -43,6 +47,8 @@ CANARIES = (
     "猫が好き",
     "Lambdacanary",
     "Iotacanary",
+    "Muattach",
+    "Nuattach",
 )
 
 
@@ -126,7 +132,35 @@ def _field_session(home, cache):
     ipc.props["sub-text"] = CUE
     build_session(ipc).start()
     JimakuClient("k" * 32).fetch("Show", 7, cache, video=str(video))
+    _attach_legs(home, cache)
     telemetry.shutdown()
+
+
+def _attach_legs(home, cache):
+    """`attach` resolves the file mpv already plays, so nothing upstream registered it."""
+    attached = home / "Muattach Series" / "Muattach Show - 03.mkv"
+    attached.parent.mkdir()
+    attached.write_bytes(b"not a real container")
+    log = logging.getLogger("saitenka.app.commands.attach")
+
+    embedded = FakeIPC()
+    embedded.props["path"] = str(attached)
+    embedded.props["track-list"] = [{"type": "sub", "id": 1, "lang": "jpn"}]
+    _startup, status, _providers = prepare_attach_startup(embedded, AttachSubtitleOptions())
+    log.info("attach subs: %s", status)
+    fonts = cache / "attach-fonts"
+    stale = fonts / f"{attached.stem}-{attached.stat().st_size}-fonts"
+    stale.mkdir(parents=True)
+    (stale / "manifest.json").write_text("{not json", encoding="utf-8")
+    container_fonts(attached, cache_dir=fonts)
+
+    explicit = FakeIPC()
+    explicit.props["path"] = str(attached)
+    sub_file = home / "Nuattach.ja.ass"
+    _startup, status, _providers = prepare_attach_startup(
+        explicit, AttachSubtitleOptions(sub_file=str(sub_file))
+    )
+    log.info("attach subs: %s", status)
 
 
 def _bundle(tmp_path) -> dict[str, bytes]:

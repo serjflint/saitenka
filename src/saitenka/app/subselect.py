@@ -615,8 +615,10 @@ def ensure_jp_subs(ipc, opts: AttachSubtitleOptions) -> str:
     executor performs any handoff. Returns a human-readable status line for the CLI to print.
     (``opts.tsukihime`` is a deferred-fetch provider choice handled by the caller, not here.)"""
     if opts.sub_file:
-        _add_and_select(ipc, Path(opts.sub_file).expanduser())
-        return f"using sub file {Path(opts.sub_file).name}"
+        sub_file = Path(opts.sub_file).expanduser()
+        log_privacy.register_media(sub_file)
+        _add_and_select(ipc, sub_file)
+        return f"using sub file {sub_file.name}"
 
     jimaku_eligible = bool(enabled_providers_for(opts.language, (("jimaku", True),)))
     if opts.jimaku and opts.jimaku_force and jimaku_eligible:
@@ -723,6 +725,11 @@ def _adopt_cached_subtitle(ipc, opts: AttachSubtitleOptions) -> str:
 
 def prepare_attach_startup(ipc, opts: AttachSubtitleOptions):
     """Select the immediate attach track and defer a missing-JP provider fetch."""
+    # Registered here, not only on re-slot: the first file's name otherwise reaches font and
+    # extraction warnings whenever it carries its own Japanese track.
+    video = ipc.query("path")
+    if video:
+        _subtitle_identity(str(video), opts.jimaku_title, opts.episode)
     status = ""
     if opts.sub_file or opts.jimaku_force:
         status = ensure_jp_subs(ipc, opts)
