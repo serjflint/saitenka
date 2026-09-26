@@ -484,9 +484,10 @@ def _collect_logs(log_path: Path, *, include: bool) -> tuple[str | None, dict[st
 
 def _session_records(log_path: Path, session: str | None) -> tuple[list[str], list[dict]]:
     """The reported session's lines from the active log and its rotated segments, oldest first."""
+    # Only the handler's own numbered segments: a `.bak` copy would duplicate the lines it holds.
     segments = sorted(
-        log_path.parent.glob("overlay.log.*"),
-        key=lambda p: int(p.suffix[1:]) if p.suffix[1:].isdigit() else 0,
+        (p for p in log_path.parent.glob("overlay.log.*") if p.suffix[1:].isdigit()),
+        key=lambda p: int(p.suffix[1:]),
         reverse=True,
     )[:5]
     lines: list[str] = []
@@ -509,6 +510,41 @@ def _session_records(log_path: Path, session: str | None) -> tuple[list[str], li
         info["session_lines"] = matched
         sources.append(info)
     return lines, sources
+
+
+def _without_log_excerpts(doctor_json: str) -> str:
+    """`recent-errors` quotes raw lines from every session and format in the log; keep its count."""
+    try:
+        payload = json.loads(doctor_json)
+        checks = payload.get("checks", [])
+    except (ValueError, AttributeError):
+        return doctor_json
+    for check in checks:
+        if isinstance(check, dict) and check.get("name") == "recent-errors":
+            excerpts = str(check.get("detail", "")).splitlines()[1:]
+            if excerpts:
+                check["detail"] = (
+                    f"{len(excerpts)} recent log error(s); excerpts need --diagnostic-detail"
+                )
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+_LABEL_RE = re.compile(r"<(?:media|title|text):[^>]*>")
+_FILE_NAME_RE = re.compile(r"\.(?:mkv|mp4|m4v|avi|webm|mov|ass|ssa|srt|vtt|sup)\b", re.IGNORECASE)
+
+
+def _scrub_trace_names(raw: str) -> str:
+    """Second layer for the default trace: drop any attribute that still names a media or subtitle
+    file. The exporter scrubs registered names; this catches one that was never registered."""
+    doc = json.loads(raw)
+    for event in doc.get("traceEvents", []):
+        args = event.get("args") if isinstance(event, dict) else None
+        if not isinstance(args, dict):
+            continue
+        for key, value in args.items():
+            if isinstance(value, str) and _FILE_NAME_RE.search(_LABEL_RE.sub("", value)):
+                args[key] = "<file-name-redacted>"
+    return json.dumps(doc, ensure_ascii=False)
 
 
 def _current_format(lines: list[str]) -> bool:
@@ -539,14 +575,15 @@ def _collect_default(log_path: Path, *, include_log: bool) -> dict[str, str]:
 
     members: dict[str, str] = {}
     members.update(_collect_versions())
-    doctor = _collect_doctor()
-    members["doctor.json"] = doctor["doctor.json"]
+    members["doctor.json"] = _without_log_excerpts(_collect_doctor()["doctor.json"])
     # Not `session.json`: the producer writes it unfiltered; the envelope is its allowlisted projection.
     members.update(_collect_metadata(session))
     if status == "collected":
         members["overlay.log"] = redact("\n".join(lines) + "\n")
     if current:
         members.update(_collect_telemetry(session))
+        if "telemetry/trace.json" in members:
+            members["telemetry/trace.json"] = _scrub_trace_names(members["telemetry/trace.json"])
     members["logs/collection.json"] = json.dumps(
         {
             "session": session,

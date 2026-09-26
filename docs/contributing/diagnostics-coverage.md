@@ -13,6 +13,10 @@ the video and subtitle files Saitenka resolves, and the titles parsed from them,
 `<title:…>` digests — also inside provider statuses and exception text — and cue text, looked-up words
 and dictionary queries as `<text:… len=N>`; home paths become `<HOME>` / `<USER>`. Cue timings and
 content digests remain, and so do configuration names such as deck, note type and dictionary. A
+title of one short word is not replaced, so the word stays readable elsewhere in the log. Trace
+attributes get the same replacement when exported, and the report then drops any attribute that
+still names a media or subtitle file. `doctor.json`'s `recent-errors` keeps only its count; its
+excerpts come from every logged session and need `--diagnostic-detail`. A
 session whose lines predate that format (`log_format` in each record) ships neither its log nor its
 trace; `logs/collection.json` says `predates-sanitised-format`.
 The envelope separates the collector build from the producer recorded in the latest log session's summary.

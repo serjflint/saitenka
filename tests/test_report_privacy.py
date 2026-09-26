@@ -1,4 +1,4 @@
-"""The default report ships Saitenka's own log without the user's media, cue text or home paths.
+"""The default report ships Saitenka's own log and trace without the user's media, cue text or home.
 
 Each canary enters through the production path that carries it in the field; the negative control
 proves every one of them reaches the bundle once sanitising is off, so an absence is evidence.
@@ -9,13 +9,15 @@ from __future__ import annotations
 import json
 import logging
 import zipfile
+from pathlib import Path
 
 import pytest
 from session_builder import build_session
+from telemetry_helpers import enable_telemetry
 from util import FakeIPC
 
-from saitenka.app import doctor, log_privacy, logsetup, report
-from saitenka.app.jimaku import parse_filename
+from saitenka.app import doctor, log_privacy, logsetup, report, telemetry
+from saitenka.app.jimaku import JimakuClient, JimakuFile, parse_filename
 from saitenka.app.sub_index import load_index
 from saitenka.app.subselect import fetch_jimaku_path
 from saitenka.app.subtitle_cache import store_subs
@@ -23,10 +25,32 @@ from saitenka.app.subtitle_fonts import container_fonts
 
 HOME = "Home-Sigmacanary"
 USER = "canaryuser7"
+SERIES_DIR = "Thetacanary Season 1"
 VIDEO = "[Grp] Zetacanary Show - 07 [1080p].mkv"
 SUBTITLE = "Omegacanary.ja.srt"
 CUE = "Kappacanary 猫が好き"
-CANARIES = ("Sigmacanary", USER, "Zetacanary", "Omegacanary", "Kappacanary", "猫が好き")
+#: Written by an older build; it must not reach the bundle through doctor's recent-errors.
+OLD_LINE = "Lambdacanary.ja.srt"
+#: A release name a provider picked, which reaches a trace attribute.
+PICKED = "Iotacanary.WEBRip.ja.srt"
+CANARIES = (
+    "Sigmacanary",
+    USER,
+    "Zetacanary",
+    "Thetacanary",
+    "Omegacanary",
+    "Kappacanary",
+    "猫が好き",
+    "Lambdacanary",
+    "Iotacanary",
+)
+
+
+@pytest.fixture
+def fresh_registry():
+    log_privacy.reset()
+    yield
+    log_privacy.reset()
 
 
 def _environment(monkeypatch, tmp_path):
@@ -39,17 +63,30 @@ def _environment(monkeypatch, tmp_path):
         monkeypatch.setenv(name, USER)
     monkeypatch.setenv("LOCALAPPDATA", str(home / "AppData" / "Local"))
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(cache))
-    monkeypatch.setattr(log_privacy, "_labels", {})
-    monkeypatch.setattr(log_privacy, "_snapshot", None)
+    old = {"level": "error", "event": f"cannot read {OLD_LINE}", "session": "old", "log_format": 1}
+    (cache / "overlay.log").write_text(json.dumps(old) + "\n", encoding="utf-8")
+    monkeypatch.setattr(doctor, "LOG_PATH", cache / "overlay.log")
+    windows = rf"C:\Users\{USER}\AppData\Local\saitenka\overlay.toml"
+    home_check = doctor.Check("config", "ok", f"{windows} | {home / 'overlay.toml'}")
+    monkeypatch.setattr(
+        doctor,
+        "run_checks",
+        lambda *_a, **_k: doctor.Report([home_check, doctor.check_recent_errors()]),
+    )
+    config = tmp_path / "telemetry.toml"
+    config.write_text(
+        f'[telemetry]\nenabled = true\nexport_dir = "{(tmp_path / "trace").as_posix()}"\n'
+    )
+    monkeypatch.setenv("SAITENKA_CONFIG", str(config))
+    enable_telemetry(monkeypatch, tmp_path)
 
-    class _Doctor:
-        def to_json(self):
-            windows = rf"C:\Users\{USER}\AppData\Local\saitenka\overlay.toml"
-            return {
-                "checks": [{"name": "config", "detail": f"{windows} | {home / 'overlay.toml'}"}]
-            }
+    def download(_client, jf, dest_dir):
+        return Path(dest_dir) / jf.name
 
-    monkeypatch.setattr(doctor, "run_checks", lambda *_a, **_k: _Doctor())
+    monkeypatch.setattr(
+        JimakuClient, "episode_files", lambda *_a, **_k: [JimakuFile(PICKED, "https://x")]
+    )
+    monkeypatch.setattr(JimakuClient, "download", download)
     return home, cache
 
 
@@ -63,8 +100,8 @@ def _configure_logging(cache):
 
 
 def _field_session(home, cache):
-    video = home / "Anime" / VIDEO
-    video.parent.mkdir()
+    video = home / "Anime" / SERIES_DIR / VIDEO
+    video.parent.mkdir(parents=True)
     video.write_bytes(b"not a real container")
     subtitle = home / "Downloads" / SUBTITLE
     subtitle.parent.mkdir()
@@ -83,10 +120,13 @@ def _field_session(home, cache):
 
     load_index(subtitle)
     load_index(home / "Missing" / "Omegacanary-lost.ass")
+    load_index(video.parent / "Omegacanary-beside.ass")
 
     ipc = FakeIPC()
     ipc.props["sub-text"] = CUE
     build_session(ipc).start()
+    JimakuClient("k" * 32).fetch("Show", 7, cache, video=str(video))
+    telemetry.shutdown()
 
 
 def _bundle(tmp_path) -> dict[str, bytes]:
@@ -105,6 +145,7 @@ def _leaks(members: dict[str, bytes]) -> set[str]:
 
 
 @pytest.mark.timeout(10)
+@pytest.mark.usefixtures("fresh_registry")
 def test_default_report_carries_the_session_log_without_any_canary(monkeypatch, tmp_path):
     home, cache = _environment(monkeypatch, tmp_path)
     _configure_logging(cache)
@@ -113,6 +154,7 @@ def test_default_report_carries_the_session_log_without_any_canary(monkeypatch, 
     members = _bundle(tmp_path)
 
     assert json.loads(members["logs/collection.json"])["status"] == "collected"
+    assert "telemetry/trace.json" in members
     log_text = members["overlay.log"].decode()
     assert "<media:" in log_text
     assert "<title:" in log_text
@@ -121,12 +163,16 @@ def test_default_report_carries_the_session_log_without_any_canary(monkeypatch, 
 
 
 @pytest.mark.timeout(10)
+@pytest.mark.usefixtures("fresh_registry")
 def test_every_canary_reaches_the_bundle_when_sanitising_is_off(monkeypatch, tmp_path):
     home, cache = _environment(monkeypatch, tmp_path)
     monkeypatch.setattr(log_privacy, "scrub", lambda text: text)
     monkeypatch.setattr(log_privacy, "text_label", str)
+    monkeypatch.setattr(log_privacy, "media_label", str)
     monkeypatch.setattr(logsetup, "redact", lambda text: text)
     monkeypatch.setattr(report, "redact", lambda text: text)
+    monkeypatch.setattr(report, "_without_log_excerpts", lambda text: text)
+    monkeypatch.setattr(report, "_scrub_trace_names", lambda text: text)
     _configure_logging(cache)
     _field_session(home, cache)
 

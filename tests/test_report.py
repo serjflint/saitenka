@@ -457,6 +457,17 @@ def test_default_report_ships_only_the_reported_sessions_lines(monkeypatch, tmp_
     assert events == ["first half", "second half", "end"]
 
 
+def test_a_backup_copy_of_the_log_is_not_read_as_a_segment(monkeypatch, tmp_path):
+    _hermetic(monkeypatch, tmp_path)
+    cache = tmp_path / "cache"
+    (cache / "overlay.log").write_text(_record("latest", "only once") + "\n")
+    (cache / "overlay.log.bak").write_text(_record("latest", "only once") + "\n")
+
+    members = report.collect()
+
+    assert members["overlay.log"].splitlines() == [_record("latest", "only once")]
+
+
 def test_session_logged_in_an_older_format_ships_no_log_or_trace(monkeypatch, tmp_path):
     cfg = _hermetic(monkeypatch, tmp_path)
     directory = tmp_path / "telemetry"
