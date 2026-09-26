@@ -1083,6 +1083,7 @@ def _assemble_stateless_commands(
 
     def report_overlay_visibility(*, visible: bool) -> None:
         state = "shown" if visible else "hidden"
+        log.info("overlay %s", state)
         send_correlated(
             owners.ipc,
             "overlay-visibility",
@@ -1104,6 +1105,7 @@ def _assemble_stateless_commands(
             report_overlay_visibility=report_overlay_visibility,
             teardown_tip=owners.tooltip.teardown,
             subtitle_target=owners.subtitles.target,
+            redraw_subtitle=owners.subtitles.draw,
         )
     )
     subtitle = SubtitleCommandCoordinator(

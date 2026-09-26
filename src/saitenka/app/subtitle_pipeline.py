@@ -65,7 +65,10 @@ class CurrentSubtitleRenderer(Protocol):
 
     def suspend_for_overlay(self, target: SubtitleTarget, /) -> None: ...
 
-    def resume_after_overlay(self, target: SubtitleTarget, /) -> None: ...
+    def resume_after_overlay(self, target: SubtitleTarget, /) -> bool:
+        """Hand the pixels back after the overlay is shown; `True` when the current cue must be
+        redrawn for that, which only the presentation can do with its geometry intact."""
+        ...
 
     def cue_changed(self, target: SubtitleTarget, /, *, nonempty: bool) -> None: ...
 
@@ -229,8 +232,8 @@ class SubtitleModeCoordinator:
     def suspend_for_overlay(self, target: SubtitleTarget) -> None:
         self._renderer.suspend_for_overlay(target)
 
-    def resume_after_overlay(self, target: SubtitleTarget) -> None:
-        self._renderer.resume_after_overlay(target)
+    def resume_after_overlay(self, target: SubtitleTarget) -> bool:
+        return self._renderer.resume_after_overlay(target)
 
     def connection_replaced(self, target: SubtitleTarget) -> None:
         self._renderer.connection_replaced(target)

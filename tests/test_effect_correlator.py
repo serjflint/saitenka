@@ -428,3 +428,56 @@ def test_a_claimed_batch_still_completes_the_effect_it_carried() -> None:
 
     assert seen == [("terminal", "probe")]
     assert drained == [], "the observation was claimed and the completion never left the receive"
+
+
+def _record_deferred_spans(monkeypatch) -> list[dict]:
+    from saitenka import otel_metrics
+
+    ended: list[dict] = []
+
+    class _Span:
+        def __init__(self):
+            self.attributes: dict = {}
+
+        def set_attribute(self, key, value):
+            self.attributes[key] = value
+
+        def end(self):
+            ended.append(dict(self.attributes))
+
+    class _Tracer:
+        def start_span(self, _name, **_kwargs):
+            return _Span()
+
+    class _Trace:
+        @staticmethod
+        def get_current_span():
+            return None
+
+        def get_tracer(self, _name):
+            return _Tracer()
+
+    monkeypatch.setattr(otel_metrics, "_resolve_trace_module", lambda: _Trace())
+    return ended
+
+
+def test_a_labelled_mpv_write_names_itself_in_its_span(monkeypatch) -> None:
+    """A field trace showed three anonymous `sub-visibility` writes around one Alt+o; which was the
+    suspend and which re-hid mpv's subtitles could only be inferred from code."""
+    ended = _record_deferred_spans(monkeypatch)
+    ipc = FakeIPC()
+    gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
+    for identity in ("subtitle:suspend-for-overlay", ("fence", 1)):
+        assert gateway.correlator.submit_mpv(
+            owner=Owner.SUBTITLE,
+            identity=identity,
+            command=("set_property", "sub-visibility", True),
+            timeout_s=10.0,
+            on_finished=lambda _completion: None,
+        )
+    for request in ipc.requests:
+        request.future.set_result({"error": "success"})
+    assert ipc.session_loop is not None
+    ipc.session_loop.receive(0.0, lambda _event: None)
+
+    assert [span.get("identity") for span in ended] == ["subtitle:suspend-for-overlay", None]

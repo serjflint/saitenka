@@ -39,6 +39,8 @@ class SessionCommandPorts:
     report_overlay_visibility: OverlayVisibilityReporter
     teardown_tip: Callable[[], None]
     subtitle_target: Callable[[], SubtitleTarget]
+    #: The presentation's draw, not the renderer's: only it publishes the hit geometry.
+    redraw_subtitle: Callable[[], None]
 
 
 class SessionCommandCoordinator:
@@ -67,7 +69,8 @@ class SessionCommandCoordinator:
         elif isinstance(effect, session_intents.SuspendSubtitles):
             ports.subtitle_pipeline.suspend_for_overlay(ports.subtitle_target())
         elif isinstance(effect, session_intents.ResumeSubtitles):
-            ports.subtitle_pipeline.resume_after_overlay(ports.subtitle_target())
+            if ports.subtitle_pipeline.resume_after_overlay(ports.subtitle_target()):
+                ports.redraw_subtitle()
         elif isinstance(effect, session_intents.ShowTranslation):
             ports.translation.reveal(ports.translation_inputs())
         elif isinstance(effect, session_intents.ToggleRenderer):

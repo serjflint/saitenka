@@ -17,6 +17,13 @@ logs.
 
 ### Fixed
 
+- Hiding Saitenka with `Alt+o` now keeps mpv's own subtitles on screen in their original style. The
+  default renderer redrew its subtitle over them, with its background box, on the next cue.
+- With `native_visible`, switching to the legacy renderer or a track only it can draw while Saitenka
+  is hidden no longer draws over mpv's subtitles; the switch takes effect when Saitenka is shown. A
+  legacy handoff cut off by hiding no longer leaves neither renderer drawing after the show.
+- The log records when the overlay is hidden or shown, and traces name which subtitle visibility
+  write each mpv command was.
 - `doctor.json` in a report no longer contains the home directory or username.
 
 ## [4.5.1] - 2026-09-23
