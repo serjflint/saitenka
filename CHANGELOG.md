@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.7.0] - 2026-09-26
+
 ### Added
 
 - Word colors on the first frame of every cue on stock mpv. With `native_visible` and the default
