@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.6.0] - 2026-09-26
+
 ### Changed
 
 - `saitenka report` includes the latest session's own log and trace again, alongside the metadata
