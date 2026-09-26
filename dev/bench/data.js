@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790453540266,
+  "lastUpdate": 1790463500648,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -17831,6 +17831,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.205817,
             "range": "3 replicas; min 1.11072; max 2.09537; MAD 0.095093; worst 2.09537",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6b1bf0d14d6f005d57c89f3eb3acea9e0b488872",
+          "message": "Merge pull request #547 from serjflint/fix/osd-installed-attachment-fonts\n\nfix(subtitles): let the OSD use an installed copy of a video's font",
+          "timestamp": "2026-09-27T01:55:41+03:00",
+          "tree_id": "a190402b4f44ffc7cfab21ea58ebb9c934d31704",
+          "url": "https://github.com/serjflint/saitenka/commit/6b1bf0d14d6f005d57c89f3eb3acea9e0b488872"
+        },
+        "date": 1790463499483,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.754696,
+            "range": "3 replicas; min 5.05777; max 6.8603; MAD 0.1056",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.425683,
+            "range": "3 replicas; min 7.02707; max 10.054; MAD 0.628332; worst 10.054",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.687758,
+            "range": "3 replicas; min 14.7044; max 22.1096; MAD 0.421833",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.086957,
+            "range": "3 replicas; min 14.9031; max 22.3476; MAD 0.26062; worst 22.3476",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.605214,
+            "range": "3 replicas; min 11.1609; max 16.0893; MAD 2.44427",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.123151,
+            "range": "3 replicas; min 0.069442; max 0.124253; MAD 0.001102; worst 0.124253",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.715673,
+            "range": "3 replicas; min 30.2583; max 43.923; MAD 0.207343; worst 43.923",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.918595,
+            "range": "3 replicas; min 2.88239; max 4.33751; MAD 0.036202; worst 4.33751",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.072122,
+            "range": "3 replicas; min 0.869396; max 1.49075; MAD 0.202726; worst 1.49075",
             "unit": "ms"
           }
         ]
