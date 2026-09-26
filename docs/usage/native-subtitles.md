@@ -249,8 +249,10 @@ need no configuration. `saitenka doctor` names any setting the mode refuses. The
 
 | Setting | Refused value | Costs |
 |---|---|---|
-| `sub-ass-override` | `yes`, `force`, `strip` | hover, and the [colored track](#colored-track) |
-| `sub-ass-style-overrides` | any override | hover, and the colored track |
+| `sub-ass-override` | `force`, `strip` | hover, and the [colored track](#colored-track) |
+| `sub-ass-override` | `yes` | hover |
+| `sub-ass-style-overrides` | an override of a color | hover, and the colored track |
+| `sub-ass-style-overrides` | any other override | hover |
 | `sub-filter-sdh` | `yes` | hover, and the colored track |
 | `sub-ass-scale-with-window` | `yes` | hover |
 | `sub-ass-justify` | `yes`, with `sub-ass-override=scale` | hover |
@@ -259,6 +261,7 @@ need no configuration. `saitenka doctor` names any setting the mode refuses. The
 | `sub-ass-use-video-data` | anything but `all` | hover |
 | `blend-subtitles` | `video` | hover |
 | `video-crop`, `video-rotate` | set, with `blend-subtitles=yes` | hover |
+| `sub-scale`, `sub-pos` | anything but `1` and `100` | hover on SubRip tracks, under `native_formats = "all"` |
 
 `--sub-ass-override=scale` is reproduced. It only configures the libass renderer — the font scale,
 the line position, line spacing and hinting (`configure_ass`, `sd_ass.c:552-558`) — and the
@@ -317,8 +320,7 @@ within one pixel, which is the anti-aliasing threshold. The suite carries a nega
 measures at a frame size mpv did not use, so a differential that stopped detecting anything fails
 rather than passes.
 
-Supported frames are static and use the mpv profile above, without application-level style
-overrides. A cue typeset with animation (`\t`, `\move`, `\fad`), karaoke, a vector drawing, an ASS
+Supported frames are static and use none of the refused settings above. A cue typeset with animation (`\t`, `\move`, `\fad`), karaoke, a vector drawing, an ASS
 effect, bidirectional text, or a blur (`\blur`/`\be`, which spreads a word's ink past its own box and
 makes neighbouring hit boxes overlap) is reported as `typesetting-unsupported` — a property of the
 track rather than a failure, so no retry will change it and the report says so. A frame may contain several simultaneous ASS events: Saitenka
@@ -359,8 +361,9 @@ blocking the player event loop.
 - Whether *mpv* is outside the envelope is a different question, and only `saitenka subtitle-report`
   answers it. Look for `subtitle-render-input-unsupported`, which names the option that did not
   match, and `subtitle-source-conversion-unreproduced` for a track kind the mode does not take.
-- If `run` works but `attach` does not, that reason code is the fast way in; comparing the attached
-  player's options against the profile above by eye is the slow one.
+- `run` and `attach` read the same settings, so a difference between them is in how that mpv was
+  started: `saitenka doctor` checks `mpv.conf`, and the reason code names a setting passed on the
+  command line.
 - A native-geometry failure can temporarily remove scanning boxes, but the mpv subtitle style should
   remain stable. A switch to the standard renderer is a catastrophic native-visibility failure; include
   a report bundle if that occurs unexpectedly. Before reproducing, run `saitenka telemetry enable`;

@@ -435,35 +435,81 @@ def check_sub_auto() -> Check:
     return Check("sub-auto", "ok", f"mpv.conf sub-auto={val}", info=True)
 
 
-def _mpv_conf_setting(value: str) -> object:
-    value = value.strip().strip('"')
-    if value in {"yes", "no"}:
-        return value == "yes"
-    try:
-        return float(value)
-    except ValueError:
-        return value
+_LIST_OPTIONS = frozenset({"sub-ass-style-overrides"})
 
 
-def _mpv_conf_subtitle_lines(path: Path, names: Iterable[str]) -> dict[str, str]:
-    """`name -> value` as written in mpv.conf's top level, for the named options."""
-    wanted = set(names)
-    written: dict[str, str] = {}
+def _mpv_conf_value(raw: str) -> str:
+    """One option value the way mpv's config parser reads it: quoted, `%N%`-quoted, or bare."""
+    raw = raw.strip()
+    if raw[:1] in {'"', "'"}:
+        end = raw.find(raw[0], 1)
+        return raw[1:end] if end > 0 else raw[1:]
+    if raw.startswith("%"):
+        length, _, rest = raw[1:].partition("%")
+        if length.isdigit():
+            return rest[: int(length)]
+    return raw.partition("#")[0].strip()
+
+
+def _mpv_conf_entry(line: str) -> tuple[str, str] | None:
+    """`(option, value)` for one config line; a bare flag is `yes`, a `no-` flag is `no`."""
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    name, separator, raw = line.partition("=")
+    name = name.strip().removeprefix("--")
+    if separator:
+        return name, _mpv_conf_value(raw)
+    name = name.partition("#")[0].strip()
+    return (name.removeprefix("no-"), "no") if name.startswith("no-") else (name, "yes")
+
+
+def _mpv_conf_top_level(path: Path) -> list[tuple[str, str]]:
+    """`(option, value)` in order, outside profiles — mpv.conf's top level and `[default]`."""
+    entries: list[tuple[str, str]] = []
+    active = True
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if line.strip().startswith("["):
-            break  # a profile applies only when selected
-        name, separator, value = line.partition("#")[0].partition("=")
-        name = name.strip().removeprefix("--")
-        if separator and name in wanted:
-            written[name] = value.strip()
-    return written
+        stripped = line.strip()
+        if stripped.startswith("["):
+            active = stripped[1:].partition("]")[0].strip() == "default"
+        elif active and (entry := _mpv_conf_entry(line)) is not None:
+            entries.append(entry)
+    return entries
+
+
+def _mpv_conf_options(path: Path, names: Iterable[str]) -> dict[str, str | list[str]]:
+    """The named options mpv.conf sets outside profiles, last one winning; lists appended."""
+    wanted = set(names)
+    options: dict[str, str | list[str]] = {}
+    for name, value in _mpv_conf_top_level(path):
+        base = name.removesuffix("-append")
+        if base not in wanted:
+            continue
+        if base not in _LIST_OPTIONS:
+            options[base] = value
+            continue
+        items = [item for item in value.split(",") if item]
+        previous = options.get(base, [])
+        options[base] = (
+            [*previous, *items] if name != base and isinstance(previous, list) else items
+        )
+    return options
+
+
+def _typed(value: str | list[str]) -> object:
+    if isinstance(value, list) or value not in {"yes", "no"}:
+        try:
+            return float(value) if isinstance(value, str) else value
+        except ValueError:
+            return value
+    return value == "yes"
 
 
 def check_subtitle_options() -> Check:
     """Name an mpv.conf subtitle setting that native-visible mode refuses.
 
     Neither `run` nor `attach` overrides mpv's subtitle settings, so a refused one costs hover — and
-    for some, the colored track — on every authored track, with only a toast to say so at runtime.
+    for some, the colored track — with only a toast to say so at runtime.
     """
     from saitenka.app import colored_subs
     from saitenka.app.config import subtitle_geometry_options
@@ -479,20 +525,34 @@ def check_subtitle_options() -> Check:
     path = _mpv_conf_path()
     if not options.native_visible or options.source == "mpv" or not path.exists():
         return Check("subtitle-options", "ok", "no mpv subtitle settings to check", info=True)
-    written = _mpv_conf_subtitle_lines(path, MPV_DEFAULT_RENDER_SETTINGS)
-    overrides: dict[str, object] = {
-        name: [_mpv_conf_setting(value)]
-        if name == "sub-ass-style-overrides" and value
-        else _mpv_conf_setting(value)
-        for name, value in written.items()
-    }
-    refused = unsupported_render_settings(overrides)
-    if not refused:
+    written = _mpv_conf_options(path, MPV_DEFAULT_RENDER_SETTINGS)
+    overrides = {name: _typed(value) for name, value in written.items()}
+    authored = unsupported_render_settings(overrides)
+    converted = (
+        unsupported_render_settings(overrides, authored=False)
+        if options.native_formats == "all"
+        else ()
+    )
+    if not authored and not converted:
         return Check("subtitle-options", "ok", "mpv.conf subtitle settings are supported")
     colors = colored_subs.refusing_options({**MPV_DEFAULT_RENDER_SETTINGS, **overrides})
-    cost = "hover and the colored track" if colors is not None else "hover"
-    listed = ", ".join(f"{name}={written[name]}" for name in refused)
-    return Check("subtitle-options", "warn", f"mpv.conf {listed} costs {cost} on authored tracks")
+    costs = [
+        _refusal("authored", authored, written, colors=colors is not None),
+        _refusal("SubRip", tuple(n for n in converted if n not in authored), written, colors=False),
+    ]
+    return Check("subtitle-options", "warn", "; ".join(cost for cost in costs if cost))
+
+
+def _refusal(tracks: str, names: tuple[str, ...], written: dict, *, colors: bool) -> str:
+    if not names:
+        return ""
+    listed = ", ".join(f"{name}={_shown(written[name])}" for name in names)
+    cost = "hover and the colored track" if colors else "hover"
+    return f"mpv.conf {listed} costs {cost} on {tracks} tracks"
+
+
+def _shown(value: str | list[str]) -> str:
+    return ",".join(value) if isinstance(value, list) else value
 
 
 def check_sub_font() -> Check:

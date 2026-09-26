@@ -3901,7 +3901,12 @@ def test_scale_signs_inverts_into_the_selective_font_scale_bit(
     """`ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE` CONFINES the scale to dialogue, so mpv sets it
     exactly when the user did NOT ask for signs to be scaled (`sd_ass.c:577`). Read straight
     through, every positioned sign in the episode is measured at the dialogue scale."""
-    assert _scaled(**{"sub-scale-signs": scale_signs}).selective_font_scale is selective
+    scaled = _scaled(**{"sub-scale-signs": scale_signs, "sub-scale": 1.2})
+    assert scaled.selective_font_scale is selective
+
+
+def test_the_selective_bit_is_dropped_when_there_is_no_scale_to_confine() -> None:
+    assert _scaled(**{"sub-scale-signs": False}).selective_font_scale is False
 
 
 LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
@@ -4189,3 +4194,24 @@ def test_a_legacy_stage_cut_off_by_the_hide_is_restarted_by_the_show(tmp_path: P
     assert any(c[:2] == ("overlay-add", sub_slot) for c in ipc.commands[shown_at:])
     assert renderer.ownership_state.owner is PixelOwner.LEGACY
     result.close()
+
+
+@pytest.mark.timeout(5)
+def test_mpvs_default_scale_override_keeps_the_whole_cue_osd_eligible(tmp_path) -> None:
+    # `scale` at the defaults sets nothing libass renders differently; reading it as a changed
+    # renderer refused OSD coloring on every cue once `run` stopped forcing `no`.
+    session, ipc, backend = reader(tmp_path, coloring="whole-cue-osd")
+    ipc.props |= {
+        "options/sub-ass-override": "scale",
+        "options/sub-scale-signs": False,
+        "options/sub-hinting": "none",
+        "options/sub-line-spacing": 0.0,
+    }
+    try:
+        session.graph.playback.observe("sub-text", "猫を見る")
+        session.graph.cue.settle()
+        settle_jobs(session, ipc)
+
+        assert backend.requests[-1].whole_cue.osd_reason == "eligible"
+    finally:
+        session.close()

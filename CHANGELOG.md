@@ -13,7 +13,8 @@ logs.
   forced (`sub-ass-override=no` and eight others) is no longer needed — mpv's defaults, including
   `sub-ass-override=scale`, are supported — and it overrode the user's own `mpv.conf`. `run` and
   `attach` now behave the same, and `saitenka doctor` names an `mpv.conf` setting the mode refuses
-  and what it costs. `run` also no longer passes `--sub-ass-justify=yes` in this mode, which
+  and what it costs. Whole-cue OSD coloring now also qualifies under `scale`, where an inert
+  renderer flag made every cue refuse it. `run` also no longer passes `--sub-ass-justify=yes` in this mode, which
   re-justified authored lines under `scale`.
 
 ## [4.7.0] - 2026-09-26

@@ -1178,3 +1178,45 @@ def test_a_refused_mpv_conf_subtitle_setting_is_named(tmp_path, monkeypatch, lin
     assert check.status == "warn"
     assert line.partition("=")[0] in check.detail and cost in check.detail
     assert "strip" not in check.detail  # a profile applies only when selected
+
+
+@pytest.mark.parametrize(
+    ("conf", "named"),
+    [
+        ("[anime]\nsub-scale=2\n[default]\nsub-ass-override=force\n", "sub-ass-override=force"),
+        ("sub-ass-scale-with-window\n", "sub-ass-scale-with-window=yes"),
+        ("no-sub-use-margins\n", "sub-use-margins=no"),
+        ("sub-ass-override='force'\n", "hover and the colored track"),
+        (
+            "sub-ass-style-overrides=Default.Fontname=Foo,Default.PrimaryColour=&H0000FFFF\n",
+            "hover and the colored track",
+        ),
+        ("sub-ass-style-overrides-append=PrimaryColour=&H0000FFFF\n", "the colored track"),
+    ],
+)
+def test_the_subtitle_option_check_reads_mpv_conf_as_mpv_does(tmp_path, monkeypatch, conf, named):
+    _native_visible(monkeypatch)
+    mpvconf = tmp_path / "mpv.conf"
+    mpvconf.write_text(conf)
+    monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
+
+    check = doc.check_subtitle_options()
+
+    assert check.status == "warn" and named in check.detail
+
+
+def test_subrip_only_refusals_are_named_when_subrip_tracks_are_measured(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        doc,
+        "load_config",
+        lambda: {"subtitle_geometry": {"native_visible": True, "native_formats": "all"}},
+    )
+    mpvconf = tmp_path / "mpv.conf"
+    mpvconf.write_text("sub-pos=90\nsub-scale=1.2\n")
+    monkeypatch.setattr(doc, "_mpv_conf_path", lambda: mpvconf)
+
+    check = doc.check_subtitle_options()
+
+    assert check.status == "warn"
+    assert "sub-scale=1.2" in check.detail and "SubRip" in check.detail
+    assert "authored" not in check.detail  # `scale` reproduces both on authored tracks

@@ -399,7 +399,9 @@ def _scaled_renderer_state(scale: _ScaleOverride) -> RendererState:
         line_position=scale.line_position,
         line_spacing=scale.line_spacing,
         hinting=scale.hinting,
-        selective_font_scale=not scale.scale_signs,
+        # The bit only confines the scale; at 1 there is nothing to confine, and leaving it set would
+        # make mpv's default `scale` read as a non-default renderer and refuse the OSD path.
+        selective_font_scale=not scale.scale_signs and scale.font_scale != 1.0,
     )
 
 
@@ -439,9 +441,13 @@ MPV_DEFAULT_RENDER_SETTINGS: Mapping[str, object] = MappingProxyType(
 )
 
 
-def unsupported_render_settings(overrides: Mapping[str, object]) -> tuple[str, ...]:
-    """The settings, among `overrides` applied over mpv's defaults, that refuse an authored track."""
-    return _unsupported_render_inputs({**MPV_DEFAULT_RENDER_SETTINGS, **overrides}, authored=True)
+def unsupported_render_settings(
+    overrides: Mapping[str, object], *, authored: bool = True
+) -> tuple[str, ...]:
+    """The settings, among `overrides` applied over mpv's defaults, that refuse a track."""
+    return _unsupported_render_inputs(
+        {**MPV_DEFAULT_RENDER_SETTINGS, **overrides}, authored=authored
+    )
 
 
 def _unsupported_render_inputs(
@@ -484,7 +490,7 @@ def _unsupported_render_inputs(
         # `--sub-ass-vsfilter-aspect-compat` is NOT here, and must not return as an is-None check:
         # mpv's default is `yes`, so a present bool option never reads `None` and that row refused
         # every track on every mpv that still had the option. 0.41 removed it in favour of
-        # `sub-ass-use-video-data`, gated above and forced by `mpvio.launch`.
+        # `sub-ass-use-video-data`, gated above.
         #
         # `--sub-scale-with-window` and `--sub-scale-by-window` are NOT here. mpv reads them only on
         # `configure_ass`'s forced-override branch, which a CONVERTED track takes — and there
