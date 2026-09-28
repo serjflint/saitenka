@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790598500195,
+  "lastUpdate": 1790598528340,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19161,6 +19161,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 52.073415,
             "range": "3 replicas; min 47.5399; max 54.4657; MAD 2.39229",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "f85ada94e8a2bac78a190a57d4d6c96e76ec97c6",
+          "message": "Merge pull request #549 from serjflint/release/4.7.1\n\nchore(overlay): release 4.7.1",
+          "timestamp": "2026-09-26T23:42:55Z",
+          "url": "https://github.com/serjflint/saitenka/commit/f85ada94e8a2bac78a190a57d4d6c96e76ec97c6"
+        },
+        "date": 1790598527047,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 343.829586,
+            "range": "3 replicas; min 309.537; max 384.076; MAD 34.2926",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 68.126934,
+            "range": "3 replicas; min 55.9754; max 76.7855; MAD 8.65858",
             "unit": "ms"
           }
         ]
