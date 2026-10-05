@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790598528340,
+  "lastUpdate": 1791205714862,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -20313,6 +20313,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 8.56064,
             "range": "3 replicas; min 8.48282; max 9.22829; MAD 0.077824",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "f85ada94e8a2bac78a190a57d4d6c96e76ec97c6",
+          "message": "Merge pull request #549 from serjflint/release/4.7.1\n\nchore(overlay): release 4.7.1",
+          "timestamp": "2026-09-26T23:42:55Z",
+          "url": "https://github.com/serjflint/saitenka/commit/f85ada94e8a2bac78a190a57d4d6c96e76ec97c6"
+        },
+        "date": 1791205713659,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 22.583325,
+            "range": "3 replicas; min 17.4871; max 22.62; MAD 0.036652; worst 22.62",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 35.308802,
+            "range": "3 replicas; min 25.7285; max 124.641; MAD 9.58032; worst 124.641",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 9.281536,
+            "range": "3 replicas; min 8.14694; max 9.49043; MAD 0.208896",
             "unit": "MB"
           }
         ]
