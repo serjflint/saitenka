@@ -63,6 +63,7 @@ class ProfileIntegration:
             self.cue_text(),
             self.annotation_inputs(),
         )
+        self.presentation.invalidate_geometry()
         # After the annotation owner: the copy is keyed on the generation it just moved to.
         self.colored_track.dependencies_changed()
         if transition is None:
@@ -70,7 +71,6 @@ class ProfileIntegration:
         self.teardown_tooltip()
         self.tooltip.retire_selection()
         self.presentation.cue.reset()
-        self.presentation.invalidate_geometry()
         self.apply_annotation(transition)
 
     def warm_episode(self) -> None:

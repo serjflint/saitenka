@@ -28,8 +28,10 @@ if TYPE_CHECKING:
         GeometryReservation,
         SubtitleModeCoordinator,
     )
+    from saitenka.app.token_cache import TokenizedCue
 
     GeometryRequestBuilder = Callable[[], GeometryRequest]
+    GeometryPrefetchBuilder = Callable[[], tuple[GeometryRequest, TokenizedCue]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,7 +77,7 @@ class GeometryJob:
 
     worker: SubtitleGeometryWorker
     current: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None
-    prefetch: tuple[str, int, GeometryRequestBuilder] | None
+    prefetch: tuple[str, int, GeometryPrefetchBuilder] | None
 
 
 class _Prefetched(NamedTuple):
@@ -90,6 +92,7 @@ class _Prefetched(NamedTuple):
     cache_key: str
     request: GeometryRequest
     snapshot: GeometrySnapshot
+    tokenized: TokenizedCue
 
 
 def run_geometry_job(request: object, cancelled: threading.Event) -> object:
@@ -118,7 +121,7 @@ class SubtitleGeometryWorker:
         *,
         cache_max: int = 3,
         submit: JobSubmitter | None = None,
-        on_prefetched: Callable[[GeometrySnapshot], None] | None = None,
+        on_prefetched: Callable[[GeometrySnapshot, TokenizedCue], None] | None = None,
         on_invalidated: Callable[[], None] | None = None,
     ) -> None:
         if cache_max <= 0:
@@ -130,7 +133,7 @@ class SubtitleGeometryWorker:
         self._cache: OrderedDict[str, GeometrySnapshot] = OrderedDict()
         self._condition = threading.Condition()
         self._pending: tuple[GeometryReservation, GeometryRequestBuilder, str | None] | None = None
-        self._prefetch_pending: OrderedDict[str, GeometryRequestBuilder] = OrderedDict()
+        self._prefetch_pending: OrderedDict[str, GeometryPrefetchBuilder] = OrderedDict()
         self._prefetched: OrderedDict[str, _Prefetched] = OrderedDict()
         #: Frames whose build reported they have nothing to paint — a music marker, a lone sign.
         #: Whether one is paintable is only known on the worker, after tokenizing, so the queuer
@@ -241,7 +244,7 @@ class SubtitleGeometryWorker:
         with self._condition:
             return key in self._unpaintable
 
-    def prefetch(self, key: str, build: GeometryRequestBuilder) -> bool:
+    def prefetch(self, key: str, build: GeometryPrefetchBuilder) -> bool:
         """Queue one speculation. Deliberately *not* fenced by the live generation.
 
         A prefetch is work about a cue that has not arrived. Gating it on the generation gated it on
@@ -390,7 +393,7 @@ class SubtitleGeometryWorker:
             if self._closed or epoch != self._prefetch_epoch or cached is None:
                 return
         if self._on_prefetched is not None:
-            self._on_prefetched(cached.snapshot)
+            self._on_prefetched(cached.snapshot, cached.tokenized)
 
     def _remember_provenance(self, key: str, reason: GeometryCacheReason) -> None:
         self._provenance.pop(key, None)
@@ -612,14 +615,14 @@ class SubtitleGeometryWorker:
             self._idle()
 
     def _process_prefetch(
-        self, item: tuple[str, int, GeometryRequestBuilder], cancelled: threading.Event | None
+        self, item: tuple[str, int, GeometryPrefetchBuilder], cancelled: threading.Event | None
     ) -> None:
         key, epoch, build = item
         if self._prefetch_cancelled(epoch, cancelled):
             self._drop_prefetch(key, reason=GeometryCacheReason.PREFETCH_SUPERSEDED)
             return
         try:
-            request = build()
+            request, tokenized = build()
         except Exception as error:  # noqa: BLE001 -- a promoted waiter turns this into a failure
             self._drop_prefetch(key, error)
             return
@@ -627,7 +630,7 @@ class SubtitleGeometryWorker:
             self._drop_prefetch(key, reason=GeometryCacheReason.PREFETCH_SUPERSEDED)
             return
         outcome = self._coordinator.render_prefetch_outcome(request)
-        waiter = self._cache_prefetch_outcome(key, epoch, request, outcome.snapshot)
+        waiter = self._cache_prefetch_outcome(key, epoch, request, outcome.snapshot, tokenized)
         published, failure_recorded = self._resolve_prefetch_waiter(waiter, request, outcome)
         with self._condition:
             if waiter is not None:
@@ -654,6 +657,7 @@ class SubtitleGeometryWorker:
         epoch: int,
         request: GeometryRequest,
         result: GeometrySnapshot | None,
+        tokenized: TokenizedCue,
     ) -> GeometryReservation | None:
         with self._condition:
             waiter = self._prefetch_waiters.pop(key, None)
@@ -665,7 +669,7 @@ class SubtitleGeometryWorker:
                 return waiter
             cache_key = request.cache_key()
             self._prefetched.pop(key, None)
-            self._prefetched[key] = _Prefetched(cache_key, request, result)
+            self._prefetched[key] = _Prefetched(cache_key, request, result, tokenized)
             self._store(request, result, cache_key)
             self._prefetched_count += 1
             while len(self._prefetched) > self._cache_max:
