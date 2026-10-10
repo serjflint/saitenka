@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791205763337,
+  "lastUpdate": 1791652415215,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18065,6 +18065,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.101472,
             "range": "3 replicas; min 0.934663; max 1.27272; MAD 0.166809; worst 1.27272",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9a162f06b873da324589c5dcbcd4825a0775eef2",
+          "message": "Merge pull request #550 from serjflint/fix/subtitle-lookahead-deadlock\n\nfix(subtitles): prevent lookahead annotation deadlock",
+          "timestamp": "2026-10-10T20:11:24+03:00",
+          "tree_id": "13bb1c5bd2a955c22364eaa5f187ab8ff9f12dab",
+          "url": "https://github.com/serjflint/saitenka/commit/9a162f06b873da324589c5dcbcd4825a0775eef2"
+        },
+        "date": 1791652413758,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.726561,
+            "range": "3 replicas; min 6.70118; max 6.95903; MAD 0.025382",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.257662,
+            "range": "3 replicas; min 9.2449; max 9.73065; MAD 0.012766; worst 9.73065",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.918539,
+            "range": "3 replicas; min 21.6557; max 22.083; MAD 0.164474",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.179098,
+            "range": "3 replicas; min 21.8143; max 22.3415; MAD 0.162371; worst 22.3415",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.127523,
+            "range": "3 replicas; min 12.6318; max 16.2803; MAD 0.495707",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.124253,
+            "range": "3 replicas; min 0.123122; max 0.125796; MAD 0.001131; worst 0.125796",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 44.542925,
+            "range": "3 replicas; min 43.4978; max 44.9503; MAD 0.407408; worst 44.9503",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.167087,
+            "range": "3 replicas; min 2.89155; max 3.30853; MAD 0.141446; worst 3.30853",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.302866,
+            "range": "3 replicas; min 1.12494; max 1.32501; MAD 0.022147; worst 1.32501",
             "unit": "ms"
           }
         ]
