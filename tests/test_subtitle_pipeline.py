@@ -26,6 +26,7 @@ from saitenka.app.subtitle_pipeline import (
     SubtitleModeCoordinator,
 )
 from saitenka.app.subtitle_render import NullRenderer
+from saitenka.app.token_cache import TokenizedCue
 from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 
 
@@ -139,6 +140,10 @@ def request(generation: int, timestamp_ms: int = 1_250) -> GeometryRequest:
         storage_size=(1920, 1080),
         ass=b"[Script Info]\n",
     )
+
+
+def prefetch_builder(build):
+    return lambda: (build(), TokenizedCue([], [], None))
 
 
 def test_coordinator_publishes_matching_generation() -> None:
@@ -258,7 +263,7 @@ def test_worker_drops_superseded_pending_request() -> None:
     second = request(coordinator.generation, 1_300)
 
     # Occupy the lane so both currents queue rather than executing on arrival.
-    assert worker.prefetch("blocking", lambda: request(0, 1_100))
+    assert worker.prefetch("blocking", prefetch_builder(lambda: request(0, 1_100)))
     assert backend.entered.wait(1)
     assert worker.submit(first)
     assert worker.submit(second)
@@ -332,7 +337,7 @@ def test_source_change_during_prefetch_build_cancels_native_work() -> None:
         return inputs
 
     try:
-        assert worker.prefetch("retired-source", build) and worker.wait_idle()
+        assert worker.prefetch("retired-source", prefetch_builder(build)) and worker.wait_idle()
 
         assert rendered == []
         assert worker.stats.prefetch_dropped == 1
@@ -482,7 +487,7 @@ def test_worker_prefetch_publishes_synchronously_after_generation_change() -> No
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", lambda: future)
+    assert worker.prefetch("future", prefetch_builder(lambda: future))
     assert worker.wait_idle()
     assert coordinator.current is None
     coordinator.invalidate()
@@ -506,7 +511,7 @@ def test_a_queued_prefetch_survives_the_cue_arrival_it_was_built_for() -> None:
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", lambda: future)
+    assert worker.prefetch("future", prefetch_builder(lambda: future))
     assert backend.entered.wait(1)
     coordinator.invalidate()  # the next cue arrives: the fence moves, render identity does not
     backend.release.set()
@@ -525,7 +530,7 @@ def test_a_prefetch_is_admitted_after_the_fence_has_already_moved() -> None:
     future = request(coordinator.generation, 1_300)
     coordinator.invalidate()
 
-    assert worker.prefetch("future", lambda: future)
+    assert worker.prefetch("future", prefetch_builder(lambda: future))
     assert worker.wait_idle()
 
     assert worker.publish_prefetched("future", coordinator.generation) is not None
@@ -537,7 +542,9 @@ def test_retiring_the_live_cue_keeps_the_lookahead_that_was_filed() -> None:
     changed."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
-    assert worker.prefetch("future", lambda: request(coordinator.generation, 1_300))
+    assert worker.prefetch(
+        "future", prefetch_builder(lambda: request(coordinator.generation, 1_300))
+    )
     assert worker.wait_idle()
 
     worker.retire_live()
@@ -552,7 +559,9 @@ def test_a_render_identity_change_still_discards_the_lookahead() -> None:
     gone."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
-    assert worker.prefetch("future", lambda: request(coordinator.generation, 1_300))
+    assert worker.prefetch(
+        "future", prefetch_builder(lambda: request(coordinator.generation, 1_300))
+    )
     assert worker.wait_idle()
 
     worker.invalidate(cause=GeometryCacheReason.SOURCE_CHANGED)
@@ -646,7 +655,7 @@ def test_worker_drops_prefetch_invalidated_during_backend_render() -> None:
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", lambda: future)
+    assert worker.prefetch("future", prefetch_builder(lambda: future))
     assert backend.entered.wait(1)
     worker.invalidate()
     backend.release.set()
@@ -664,7 +673,7 @@ def test_worker_attaches_current_waiter_to_inflight_prefetch() -> None:
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", lambda: future)
+    assert worker.prefetch("future", prefetch_builder(lambda: future))
     assert backend.entered.wait(1)
     assert worker.submit_job(
         coordinator.generation,
@@ -700,7 +709,7 @@ def test_worker_promotes_queued_prefetch_without_running_its_builder() -> None:
 
     assert worker.submit_job(coordinator.generation, blocked_current)
     assert entered.wait(1)
-    assert worker.prefetch("future", speculative)
+    assert worker.prefetch("future", prefetch_builder(speculative))
     assert worker.submit_job(
         coordinator.generation,
         lambda: request(coordinator.generation, 1_300),
@@ -721,7 +730,7 @@ def test_worker_reports_failure_from_inflight_prefetch_with_current_waiter() -> 
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
     future = request(coordinator.generation, 1_300)
 
-    assert worker.prefetch("future", lambda: future)
+    assert worker.prefetch("future", prefetch_builder(lambda: future))
     assert backend.entered.wait(1)
     assert worker.submit_job(
         coordinator.generation,
@@ -748,10 +757,10 @@ def test_worker_bounds_prefetch_queue_and_records_drop() -> None:
         assert release.wait(1)
         return request(coordinator.generation, 1_200)
 
-    assert worker.prefetch("running", blocking)
+    assert worker.prefetch("running", prefetch_builder(blocking))
     assert entered.wait(1)
-    assert worker.prefetch("drop", lambda: request(0, 1_300))
-    assert worker.prefetch("keep", lambda: request(0, 1_400))
+    assert worker.prefetch("drop", prefetch_builder(lambda: request(0, 1_300)))
+    assert worker.prefetch("keep", prefetch_builder(lambda: request(0, 1_400)))
     release.set()
     assert worker.wait_idle()
 
@@ -772,9 +781,9 @@ def test_worker_reports_loss_aware_prefetch_miss_provenance() -> None:
 
     assert worker.submit_job(coordinator.generation, blocking)
     assert entered.wait(1)
-    assert worker.prefetch("oldest", lambda: request(0, 1_300))
-    assert worker.prefetch("middle", lambda: request(0, 1_400))
-    assert worker.prefetch("newest", lambda: request(0, 1_500))
+    assert worker.prefetch("oldest", prefetch_builder(lambda: request(0, 1_300)))
+    assert worker.prefetch("middle", prefetch_builder(lambda: request(0, 1_400)))
+    assert worker.prefetch("newest", prefetch_builder(lambda: request(0, 1_500)))
 
     assert worker.prefetch_miss_reason("newest") == "prefetch-pending"
     assert worker.prefetch_miss_reason("oldest") == "provenance-unknown"
@@ -934,7 +943,7 @@ def fill_cache(worker: SubtitleGeometryWorker, coordinator, count: int) -> None:
     for index in range(count):
         assert worker.prefetch(
             f"cue-{index}",
-            lambda index=index: request(coordinator.generation, 1_300 + index),
+            prefetch_builder(lambda index=index: request(coordinator.generation, 1_300 + index)),
         )
         assert worker.wait_idle()
 
@@ -1084,7 +1093,7 @@ def test_a_caller_that_attached_to_a_refused_speculation_is_settled_too() -> Non
         return False
 
     worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=refuse_after_a_caller_attaches)
-    assert worker.prefetch("cue-0", lambda: request(coordinator.generation))
+    assert worker.prefetch("cue-0", prefetch_builder(lambda: request(coordinator.generation)))
 
     assert settled == ["attached"]
     assert not worker._prefetch_waiters, "the refused speculation left a waiter behind"
@@ -1127,6 +1136,48 @@ class SplitLane(DeferredLane):
     def deliver(self, owner, index: int = 0) -> None:
         _job, identity, on_finished = self.held.pop(index)
         on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
+
+
+def test_prefetch_delivers_the_tokenization_that_built_its_geometry() -> None:
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    delivered = []
+    worker = SubtitleGeometryWorker(
+        coordinator,
+        submit=lane,
+        on_prefetched=lambda snapshot, tokens: delivered.append((snapshot, tokens)),
+    )
+    tokenized = TokenizedCue([], [], [])
+    future = request(coordinator.generation, 1_300)
+    worker.prefetch("future", lambda: (future, tokenized))
+    lane.run_body()
+
+    lane.deliver(Owner.SUBTITLE)
+
+    snapshot, tokens = delivered[0]
+    assert snapshot.timestamp_ms == future.timestamp_ms
+    assert tokens is tokenized
+    worker.close()
+
+
+@pytest.mark.parametrize("retire", ["invalidate_cache", "close"])
+def test_retired_prefetch_does_not_deliver_its_tokenization(retire: str) -> None:
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    delivered = []
+    worker = SubtitleGeometryWorker(
+        coordinator,
+        submit=lane,
+        on_prefetched=lambda snapshot, tokens: delivered.append((snapshot, tokens)),
+    )
+    worker.prefetch("future", prefetch_builder(lambda: request(coordinator.generation)))
+    lane.run_body()
+    getattr(worker, retire)()
+
+    lane.deliver(Owner.SUBTITLE)
+
+    assert delivered == []
+    worker.close()
 
 
 def test_the_claim_slot_is_held_until_the_terminal_not_until_the_body_ends() -> None:
@@ -1267,7 +1318,9 @@ def test_a_refusal_does_not_free_the_slot_its_successor_already_took() -> None:
     worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
 
     assert worker.submit(request(coordinator.generation, 1_100))  # occupies the slot
-    assert worker.prefetch("successor", lambda: request(coordinator.generation, 1_300))
+    assert worker.prefetch(
+        "successor", prefetch_builder(lambda: request(coordinator.generation, 1_300))
+    )
     assert worker.submit(request(coordinator.generation, 1_200))  # queues behind the running job
 
     lane.refuse_next = True  # the queued current is the one the lane will turn away
@@ -1291,8 +1344,12 @@ def test_a_refused_speculation_retires_its_own_key_not_the_one_now_running() -> 
     worker = SubtitleGeometryWorker(coordinator, cache_max=4, submit=lane)
 
     assert worker.submit(request(coordinator.generation, 1_100))  # occupies the slot
-    assert worker.prefetch("refused", lambda: request(coordinator.generation, 1_200))
-    assert worker.prefetch("successor", lambda: request(coordinator.generation, 1_300))
+    assert worker.prefetch(
+        "refused", prefetch_builder(lambda: request(coordinator.generation, 1_200))
+    )
+    assert worker.prefetch(
+        "successor", prefetch_builder(lambda: request(coordinator.generation, 1_300))
+    )
 
     lane.refuse_next = True
     lane.deliver((GEOMETRY_LANE, 1))

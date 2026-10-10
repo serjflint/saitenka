@@ -1555,7 +1555,7 @@ def test_invalid_lookahead_is_only_a_cache_miss_for_valid_current_frame(tmp_path
     result.close()
 
 
-def test_native_lookahead_uses_the_single_annotation_coordinator(
+def test_native_lookahead_finishes_with_async_annotation_enabled(
     tmp_path: Path,
 ) -> None:
     result, ipc, backend = reader(tmp_path, annotation_jobs=True)
@@ -1581,6 +1581,90 @@ def test_native_lookahead_uses_the_single_annotation_coordinator(
     settle_jobs(result, ipc)
 
     assert any(request.timestamp_ms == 4_001 for request in backend.requests)
+    result.close()
+
+
+@pytest.mark.timeout(5)
+def test_prefetched_warming_does_not_tokenize_again_on_completion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from saitenka.app.bindings import SUB_NEXT_MSG
+    from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
+
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    source.write_bytes(ASS_TWO)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    native.set_source(source, live=True)
+    result.graph.subtitle_navigation.load_index(str(source))
+    ipc.set_prop("sub-text", "猫を見る")
+    result.pump()
+    callback, completion = ipc.pending_jobs.pop(0)
+    callback(completion)
+    assert any(request.timestamp_ms == 4_001 for request in backend.requests)
+
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("prefetched warming asked for tokenization again")
+
+    monkeypatch.setattr(CueAnnotationController, "lookahead_captured", unavailable)
+    ipc.deliver_runtime_jobs()
+    result.command(SUB_NEXT_MSG)
+
+    assert any(command[0] == "seek" and float(command[1]) >= 4.0 for command in ipc.commands)
+    result.close()
+
+
+@pytest.mark.parametrize("source", ["shadow", "auto"])
+@pytest.mark.parametrize("inflight", [False, True])
+def test_dependencies_changing_in_a_gap_retire_prefetch_tokens(
+    tmp_path: Path, source: str, monkeypatch, *, inflight: bool
+) -> None:
+    from saitenka_subtitles import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+
+    from saitenka.app.session import factory
+    from saitenka.app.token_cache import TokenizedCue
+
+    monkeypatch.setattr(factory, "_geometry_backend", lambda _settings: FakeBackend())
+
+    class DeferredIPC(FakeIPC):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.held = []
+
+        def submit_runtime_job(self, **kwargs) -> bool:
+            self.held.append(kwargs)
+            return True
+
+        def run_geometry(self) -> None:
+            while self.held:
+                super().submit_runtime_job(**self.held.pop(0))
+                self.deliver_runtime_jobs()
+
+    monkeypatch.setattr(__name__ + ".FakeIPC", DeferredIPC)
+    result, ipc, _backend = reader(tmp_path, geometry_source=source)
+    native = result.graph.subtitle_presentation.native
+    assert native is not None
+    track = SubtitleTrackId("future")
+    event = SubtitleEventId(track, 4_000, 6_000, 0, 1)
+    request = GeometryRequest(
+        generation=native.worker.generation,
+        track_id=track,
+        frame_id=SubtitleFrameId(track, (event,)),
+        timestamp_ms=4_001,
+        frame_size=(1280, 720),
+        storage_size=(1280, 720),
+        ass=ASS_TWO,
+    )
+    native.worker.prefetch("future", lambda: (request, TokenizedCue([], [], [])))
+    if not inflight:
+        ipc.run_geometry()
+        assert native.worker.publish_prefetched("future", native.worker.generation) is not None
+
+    result.graph.profile_integration.dependencies_changed()
+    ipc.run_geometry()
+
+    assert native.worker.publish_prefetched("future", native.worker.generation) is None
     result.close()
 
 

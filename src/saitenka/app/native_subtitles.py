@@ -1375,18 +1375,11 @@ class NativeSubtitleGeometry:
                 inputs.cue.timestamp_ms,
             )
 
-    def prefetched_cue(
+    def prefetched_boxes(
         self, snapshot: GeometrySnapshot, seen: GeometryObservation
-    ) -> tuple[TokenizedCue, list[WordBox]] | None:
-        if seen.index is None:
-            return None
+    ) -> list[WordBox]:
         render = self._render_inputs(seen.prop, seen.osd)
-        inputs = self._lookahead_cue(snapshot.track_id, snapshot.timestamp_ms, render, seen.index)
-        if inputs is None:
-            return None
-        return self._ports.tokenize_lookahead(inputs.text), self.snapshot_boxes(
-            snapshot, render.box_origin
-        )
+        return self.snapshot_boxes(snapshot, render.box_origin)
 
     def refresh(self, seen: GeometryObservation) -> None:
         self._refresh(seen)
@@ -1798,7 +1791,7 @@ class NativeSubtitleGeometry:
                 fonts: subtitle_fonts.FontEnvironment = self._fonts,
                 unreachable: subtitle_fonts.OsdReach = self.unreachable_families,
                 source_kind: str = self.source_kind,
-            ) -> GeometryRequest:
+            ) -> tuple[GeometryRequest, TokenizedCue]:
                 tokenized = self._ports.tokenize_lookahead(inputs.text)
                 selection = token_annotations(
                     inputs.text,
@@ -1818,7 +1811,7 @@ class NativeSubtitleGeometry:
                     state,
                     unreachable,
                 )
-                return replace(request, source_kind=source_kind)
+                return replace(request, source_kind=source_kind), tokenized
 
             self.worker.prefetch(key, build)
             if len(queued_keys) >= self.lookahead:

@@ -520,10 +520,10 @@ class SubtitlePresentation:
     def invalidate_geometry(self) -> None:
         self.invalidate_timed("annotation-or-geometry")
         if self.layout is not None:
-            self.layout.invalidate()
-        elif self.native is not None:
+            self.layout.invalidate(shared=self.native is None)
+        if self.native is not None:
             self.native.invalidate(live=True)
-        else:
+        elif self.layout is None:
             self.pipeline.invalidate()
 
     def connection_replaced(self) -> None:
@@ -593,7 +593,7 @@ class SubtitlePresentation:
         renderer = self.pipeline.renderer
         return isinstance(renderer, NativeVisibleRenderer) and renderer.assertion_in_flight
 
-    def _warm_prefetched(self, snapshot: GeometrySnapshot) -> None:
+    def _warm_prefetched(self, snapshot: GeometrySnapshot, tokens: TokenizedCue) -> None:
         renderer = self.renderer
         if not isinstance(renderer, NativeVisibleRenderer) or self.pipeline.legacy_forced:
             return
@@ -602,23 +602,21 @@ class SubtitlePresentation:
         if cue is None:
             return
         if self.native is not None:
-            prepared = self.native.prefetched_cue(snapshot, seen)
-            if prepared is not None:
-                tokens, boxes = prepared
-                request = replace(
-                    self.target().draw_request(),
-                    lines=tokens.lines,
-                    styles=tokens.styles,
-                    boxes=boxes,
-                    paint_boxes=None,
-                    whole_cue=cue,
-                    osd=seen.osd,
-                    paint_allowed=snapshot.paint_qualification is PaintQualification.STATIC,
-                    color_token_indices=frozenset(box.index for box in boxes),
-                )
-                artifact = renderer.prepare_osd(request)
-                if artifact is not None and renderer.can_stage_timed and self.timed is not None:
-                    self.timed.stage(snapshot.timestamp_ms, *artifact)
+            boxes = self.native.prefetched_boxes(snapshot, seen)
+            request = replace(
+                self.target().draw_request(),
+                lines=tokens.lines,
+                styles=tokens.styles,
+                boxes=boxes,
+                paint_boxes=None,
+                whole_cue=cue,
+                osd=seen.osd,
+                paint_allowed=snapshot.paint_qualification is PaintQualification.STATIC,
+                color_token_indices=frozenset(box.index for box in boxes),
+            )
+            artifact = renderer.prepare_osd(request)
+            if artifact is not None and renderer.can_stage_timed and self.timed is not None:
+                self.timed.stage(snapshot.timestamp_ms, *artifact)
         if not seen.text.strip():
             renderer.warm_osd(self.target(), cue, self.pipeline.record_whole_cue)
 

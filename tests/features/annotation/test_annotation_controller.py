@@ -188,6 +188,23 @@ def test_profile_invalidation_drops_lookahead_captured_before_the_switch() -> No
     assert owner.replace("猫", _inputs()).outcome is AnnotationOutcome.TOKENIZED
 
 
+@pytest.mark.timeout(5)
+def test_lookahead_finishes_while_annotation_completion_is_pending() -> None:
+    ipc = _CapturingIPC()
+    owner = CueAnnotationController(ipc, mode="full", cache_max=4)
+    owner.enable_async()
+    inputs = _inputs()
+    owner.dependencies_changed("猫", inputs)
+
+    cue = owner.lookahead_captured("猫", lambda: inputs)
+
+    assert [token.surface for token in cue.tokens] == ["猫"]
+    ipc.finish_next()
+    publications = owner.settle()
+    assert publications[0].cue == cue
+    owner.close()
+
+
 def test_profile_invalidation_during_blocking_prepare_drops_the_old_result() -> None:
     ipc = _CapturingIPC()
     owner = CueAnnotationController(ipc, mode="full", cache_max=4)

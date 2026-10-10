@@ -64,6 +64,8 @@ logs.
 
 ### Fixed
 
+- Subtitle lookahead no longer waits for annotation completions, which could freeze Saitenka and
+  its keyboard shortcuts. Prefetched geometry retains the tokenization used to build it.
 - Hiding Saitenka with `Alt+o` now keeps mpv's own subtitles on screen in their original style. The
   default renderer redrew its subtitle over them, with its background box, on the next cue.
 - With `native_visible`, switching to the legacy renderer or a track only it can draw while Saitenka

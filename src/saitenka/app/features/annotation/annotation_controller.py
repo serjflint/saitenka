@@ -272,11 +272,15 @@ class CueAnnotationController:
             dependency_generation = self._dependency_generation
         if not self._async_enabled or inputs.terms_exist is None:
             return self._tokenize(norm, inputs, generation=cache_generation)
-        return self._ensure_coordinator().resolve(
-            self._key_at(norm, inputs, cache_generation, dependency_generation),
-            self._work_inputs(norm, inputs),
-            priority=cue_annotation.AnnotationPriority.LOOKAHEAD,
-        )
+        coordinator = self._coordinator
+        if coordinator is not None:
+            cached = coordinator.cached(
+                self._key_at(norm, inputs, cache_generation, dependency_generation)
+            )
+            if cached is not None:
+                return cached
+        # Geometry work must not wait for an annotation terminal on the session thread.
+        return self._tokenize(norm, inputs, generation=cache_generation)
 
     @property
     def token_generation(self) -> int:
