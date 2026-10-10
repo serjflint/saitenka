@@ -18,6 +18,7 @@ from saitenka.app.bindings import CLICK_MSG
 from saitenka.app.features.analysis.episode_analysis import analyze_cues
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
+from saitenka.app.features.preview.preview_controller import PreviewController
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.scoring import Coloring
 from saitenka.app.session import sidebar_coordination
@@ -492,7 +493,6 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
 
 def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, monkeypatch):
     from saitenka.app.features.mining import mined_store
-    from saitenka.app.features.preview import miner_ui
 
     video = tmp_path / "Show - 03.mkv"
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
@@ -509,16 +509,17 @@ def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, mo
     _enable_mining(reader)
     opened = []
     monkeypatch.setattr(
-        miner_ui,
-        "preview_existing",
-        lambda _ports, _src, nid, card, status: opened.append((nid, card.expression, status)),
+        PreviewController,
+        "present_existing",
+        lambda _owner, _ports, _src, _toast, nid, card, status, **_options: opened.append(
+            (nid, card.expression, status)
+        ),
     )
 
     sidebar_coordination.open_mined(
         reader.graph.sidebar.view(),
         reader.graph.interaction.sidebar_actions(),
-        reader.graph.preview_commands.ports(),
-        reader.graph.preview_commands.card_source(),
+        reader.graph.preview_commands,
         111,
     )
 

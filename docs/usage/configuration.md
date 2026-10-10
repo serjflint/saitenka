@@ -118,6 +118,9 @@ verify panel popping up; mining and the ⊕→✓ flip are unaffected. `normaliz
 `loudnorm` pass (−23 LUFS) so cards mined from quiet
 and loud lines play back at an even volume; it adds one ffmpeg pass per mine, so it's off by default.
 
+Card previews prepare their note and media data in the background. Dismissing a pending preview
+prevents it from appearing later; a preview failure does not undo a completed mine.
+
 **Note type, card kind, and field map.** `model` is your Anki note type — it must already exist (a
 deck is auto-created on the first mine, a note type can't be). `preset` (`"Lapis"` or `"Kiku"`) fills
 the field map and card kind for those known types, so you don't spell them out; the two share field

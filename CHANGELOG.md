@@ -7,6 +7,13 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Resizing no longer blocks input on diagnostic player queries. Display diagnostics use observed
+  playback state, and card-preview note, image and audio preparation runs in the background.
+- Closing no longer waits for an active subtitle-geometry render before retiring the session;
+  its backend is disposed after the render returns.
+
 ## [4.7.1] - 2026-09-27
 
 ### Changed

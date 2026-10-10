@@ -51,6 +51,7 @@ class ProfileIntegration:
     rebuild_index: Callable[[], None]
     track_ports: Callable[[], subtitle_modes.TrackPorts]
     colored_track: ColoredTrackController
+    retire_preview: Callable[[], None]
 
     def enable_async_annotation(self) -> None:
         self.annotation.enable_async()
@@ -81,6 +82,7 @@ class ProfileIntegration:
         self.annotation.start_episode_warm(index, self.annotation_inputs())
 
     def invalidate_tokenizer(self) -> None:
+        self.retire_preview()
         self.presentation.invalidate_geometry()
         self.annotation.invalidate_tokenizer()
         self.colored_track.dependencies_changed()

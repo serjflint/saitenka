@@ -246,6 +246,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch, make_sessi
 
 #: Every lane the LANES phase closes, in the order `WORKER_LANE_PARTICIPANTS` declares.
 _LANES_BEFORE_ARTIFACTS = [
+    "card-preview",
     "subtitle-fetch",
     "subtitle-picker",
     "colored-track",

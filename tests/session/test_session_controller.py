@@ -3217,6 +3217,7 @@ def test_provenance_is_clean_anime_episode_timestamp(make_session):
     ipc = FakeIPC()
     ipc.props["time-pos"] = 607
     r = make_session(ipc)
+    r.graph.playback.install_seed({"time-pos": 607})
     assert r.graph.preview_commands.card_source().provenance(VIDEO) == (
         "Nippon Sangoku · ep10 · 10:07"
     )
@@ -4197,12 +4198,7 @@ def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
 
 
 def _seeded_reader(request, *, latched, settled):
-    """A SessionController whose `self.osd` was latched pre-observe, then seeded from a settled `osd-dimensions`.
-
-    Driven through `start_observing` and a real gateway rather than by assigning `osd`: the transient
-    only reaches `self.osd` because `observed_property` falls through to a BLOCKING read before
-    observing begins, and that fall-through IS the mechanism under test.
-    """
+    """Adopt one observed size before a fresh startup seed arrives."""
     from util import FakeIPC as EventIPC
 
     ipc = EventIPC()
@@ -4211,7 +4207,8 @@ def _seeded_reader(request, *, latched, settled):
     request.addfinalizer(gateway.close)
     r = build_session(ipc)
     request.addfinalizer(r.close)
-    r.graph.presentation.refresh_osd()  # the pre-observe blocking read, mid mpv fullscreen animation
+    r.graph.playback.install_seed({"osd-dimensions": latched})
+    r.graph.presentation.refresh_osd()
     ipc.props["osd-dimensions"] = settled
     r.graph.playback.start_session()
     return r

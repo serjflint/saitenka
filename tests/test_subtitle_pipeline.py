@@ -1357,3 +1357,103 @@ def test_a_refused_speculation_retires_its_own_key_not_the_one_now_running() -> 
     assert worker.prefetch_miss_reason("successor") is GeometryCacheReason.PREFETCH_PENDING
     assert worker.prefetch_miss_reason("refused") is GeometryCacheReason.PREFETCH_SUPERSEDED
     worker.close()
+
+
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("prefetch", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
+def test_close_does_not_wait_for_render_and_disposes_after_release(*, prefetch, failed):
+    class HeldBackend(FakeGeometryBackend):
+        def __init__(self):
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def render(self, req):
+            self.entered.set()
+            assert self.release.wait(3)
+            if failed:
+                raise RuntimeError("render failed")
+            return super().render(req)
+
+    backend = HeldBackend()
+    renderer = FakeCurrentRenderer()
+    coordinator = SubtitleModeCoordinator(renderer, backend)
+    req = request(coordinator.generation)
+    results = []
+    render = coordinator.render_prefetch if prefetch else coordinator.render
+    worker = threading.Thread(target=lambda: results.append(render(req)))
+    worker.start()
+    try:
+        assert backend.entered.wait(1)
+
+        coordinator.close()
+
+        assert renderer.closed
+        assert not backend.closed
+        assert coordinator.current is None
+    finally:
+        backend.release.set()
+        worker.join(1)
+    assert not worker.is_alive()
+    assert backend.closed
+    assert results == [None]
+    coordinator.close()
+
+
+def test_close_at_backend_release_still_disposes_backend(monkeypatch):
+    backend = FakeGeometryBackend()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
+    req = request(coordinator.generation)
+
+    class CloseAtRelease:
+        def __init__(self):
+            self.lock = threading.Lock()
+            self.remaining = 0
+
+        def __enter__(self):
+            self.lock.acquire()
+
+        def __exit__(self, *_error):
+            self.lock.release()
+            if self.remaining:
+                self.remaining -= 1
+                if not self.remaining:
+                    coordinator.close()
+
+    state_lock = CloseAtRelease()
+    render = backend.render
+
+    def arm_close(request):
+        result = render(request)
+        # Close between the final state check and the backend operation's exit.
+        state_lock.remaining = 2
+        return result
+
+    monkeypatch.setattr(coordinator, "_state_lock", state_lock)
+    monkeypatch.setattr(backend, "render", arm_close)
+
+    coordinator.render_prefetch(req)
+
+    assert backend.closed
+    assert coordinator.current is None
+
+
+def test_prefetch_finishing_after_close_does_not_repopulate_caches(monkeypatch):
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    lane = SplitLane()
+    worker = SubtitleGeometryWorker(coordinator, submit=lane)
+    render = coordinator.render_prefetch_outcome
+
+    def close_after_render(request):
+        outcome = render(request)
+        worker.close()
+        return outcome
+
+    monkeypatch.setattr(coordinator, "render_prefetch_outcome", close_after_render)
+    worker.prefetch("future", prefetch_builder(lambda: request(coordinator.generation)))
+
+    lane.run_body()
+
+    assert worker.stats.result_cache_entries == 0
+    assert worker.stats.prefetch_cache_entries == 0

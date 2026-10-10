@@ -35,26 +35,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-_DISPLAY_PROBE_PROPS = (
-    "osd-width",
-    "osd-height",
-    "osd-par",
-    "dwidth",
-    "dheight",
-    "width",
-    "height",
-    "window-scale",
-    "current-window-scale",
-    "display-hidpi-scale",
-    "display-fps",
-    "display-names",
-    "fullscreen",
-    "window-maximized",
-    "window-minimized",
-    "focused",
-    "video-out-params",
-)
-
 
 class PlaybackAccess(Protocol):
     def __call__(self) -> PlaybackObservationController: ...
@@ -78,7 +58,8 @@ class SessionPresentation:
 
     def refresh_osd(self) -> bool:
         playback = self.playback()
-        dimensions = playback.value("osd-dimensions") or {}
+        observed = playback.state.value("osd-dimensions")
+        dimensions = observed if isinstance(observed, dict) else {}
         width = int(dimensions.get("w") or self.screen.osd[0])
         height = int(dimensions.get("h") or self.screen.osd[1])
         if (width, height) == self.screen.osd or width <= 0 or height <= 0:
@@ -91,8 +72,7 @@ class SessionPresentation:
 
     def probe_display_sources(self, reason: str, osd: dict) -> None:
         playback = self.playback()
-        probe = {name: playback.query(name) for name in _DISPLAY_PROBE_PROPS}
-        raw_video = probe.get("video-out-params")
+        raw_video = playback.state.value("video-out-params")
         video = raw_video if isinstance(raw_video, dict) else {}
         attrs = {
             "reason": reason,
@@ -101,21 +81,16 @@ class SessionPresentation:
             "osd_h": str(osd.get("h")),
             "osd_mt": str(osd.get("mt")),
             "osd_mb": str(osd.get("mb")),
-            "hidpi_scale": str(probe.get("display-hidpi-scale")),
-            "window_scale": str(probe.get("current-window-scale") or probe.get("window-scale")),
-            "dwidth": str(probe.get("dwidth")),
-            "dheight": str(probe.get("dheight")),
             "vop_dh": str(video.get("dh")),
-            "fullscreen": str(probe.get("fullscreen")),
         }
         with otel_metrics.traced("osd_probe", **attrs):
             pass
         log.info(
-            "display sources (%s): tip_scale=%s osd=%r probe=%r",
+            "display sources (%s): tip_scale=%s osd=%r video=%r",
             reason,
             attrs["tip_scale"],
             osd,
-            probe,
+            video,
         )
 
     def redraw_after_resize(self) -> None:
