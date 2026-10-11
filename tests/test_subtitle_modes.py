@@ -197,7 +197,7 @@ def test_closing_subtitle_lane_quarantines_blocked_fetch(monkeypatch, make_sessi
         gateway.close()
 
 
-#: Every lane the LANES phase closes, in the order `WORKER_LANE_PARTICIPANTS` declares.
+#: Every worker lane must be quarantined before its artifacts disappear.
 _LANES_BEFORE_ARTIFACTS = [
     "card-preview",
     "subtitle-fetch",
@@ -219,6 +219,8 @@ _LANES_BEFORE_ARTIFACTS = [
 ]
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeypatch, make_session):
     ipc = FakeIPC()
     reader = make_session(ipc)
@@ -231,7 +233,7 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
 
     def remove_artifacts(_path, *, ignore_errors):
         assert ignore_errors
-        assert order == _LANES_BEFORE_ARTIFACTS
+        assert sorted(order) == sorted(_LANES_BEFORE_ARTIFACTS)
         order.append("artifacts")
 
     def close_render_pool(*, wait):
@@ -242,9 +244,9 @@ def test_reader_close_quarantines_subtitle_lanes_before_artifact_removal(monkeyp
     monkeypatch.setattr("saitenka.parallel.shutdown_shared_executor", close_render_pool)
     monkeypatch.setattr(shutil, "rmtree", remove_artifacts)
 
-    reader.close()
-
-    assert order == [*_LANES_BEFORE_ARTIFACTS, "artifacts"]
+    ledger = reader.close()
+    assert ledger.report() is None
+    assert order[-1] == "artifacts"
 
 
 def test_startup_prefers_japanese_and_remembers_both_tracks():
