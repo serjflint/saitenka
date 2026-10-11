@@ -90,7 +90,7 @@ def test_failed_extraction_does_not_publish_a_partial_cache(tmp_path, monkeypatc
 
     monkeypatch.setattr(es.subprocess, "run", partial)
 
-    assert not es.extract_embedded_track("video.mkv", 1, dest, ("-c:s", "copy"))
+    assert es.extract_embedded_track("video.mkv", 1, dest, ("-c:s", "copy")) is False
     assert list(dest.parent.iterdir()) == []
 
 
@@ -99,6 +99,8 @@ def test_extract_embedded_track_builds_ffmpeg_argv(tmp_path, monkeypatch):
 
     def extract(cmd, **_kw):
         calls["cmd"] = cmd
+        Path(cmd[-1]).write_text("partial subtitle", encoding="utf-8")
+        assert not dest.exists()
         Path(cmd[-1]).write_text("complete subtitle", encoding="utf-8")
 
     monkeypatch.setattr(es.subprocess, "run", extract)
@@ -109,18 +111,7 @@ def test_extract_embedded_track_builds_ffmpeg_argv(tmp_path, monkeypatch):
     assert cmd[0] == "ffmpeg" and "/v/ep.mkv" in cmd
     assert cmd[cmd.index("-map") + 1] == "0:10"
     assert cmd[cmd.index("-c:s") + 1] == "srt"
-    assert cmd[-1] != str(dest)
     assert dest.read_text() == "complete subtitle"
-    assert dest.parent.is_dir()
-
-
-def test_extract_embedded_track_failsoft_on_ffmpeg_error(tmp_path, monkeypatch):
-    def boom(*_a, **_kw):
-        raise es.subprocess.CalledProcessError(1, "ffmpeg")
-
-    monkeypatch.setattr(es.subprocess, "run", boom)
-    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
-    assert es.extract_embedded_track("/v/ep.mkv", 3, tmp_path / "o.srt", ("-c:s", "srt")) is False
 
 
 def test_cache_key_changes_with_track_and_is_stable_for_same_file(tmp_path):

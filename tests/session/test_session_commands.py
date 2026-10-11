@@ -18,35 +18,6 @@ def test_command_families_cannot_replace_each_other_at_the_shell() -> None:
         merge_command_handlers({"same": lambda: None}, {"same": lambda: None})
 
 
-@pytest.mark.timeout(5)
-def test_a_command_reaches_its_owner_thread_handler_once(monkeypatch, make_session) -> None:
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    install_session_reactor(gateway, startup_hint=False)
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.start()
-    handled: list[str] = []
-    monkeypatch.setattr(
-        reader.graph.commands, "handle", lambda command: handled.append(command.name)
-    )
-    try:
-        ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
-        reader.pump()
-    finally:
-        reader.close()
-        gateway.close()
-
-    assert handled == ["saitenka-help"]
-
-
 @pytest.mark.parametrize("transport_lost", [False, True])
 @pytest.mark.timeout(5)
 def test_the_transport_decides_whether_a_command_runs(

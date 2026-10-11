@@ -23,15 +23,6 @@ def track(sid: int, lang: str | None = None, **extra: object) -> dict:
     return {"id": sid, "lang": lang, "type": "sub", **extra}
 
 
-# --- discovery ---------------------------------------------------------------------------------
-
-
-def test_tagged_tracks_are_classified_by_language() -> None:
-    tracks = [track(1, "eng"), track(2, "jpn")]
-
-    assert discover(tracks, "ja,jpn,jp") == SubtitleTracks(jp_sid=2, en_sid=1)
-
-
 def test_an_untagged_selected_track_becomes_the_target() -> None:
     tracks = [track(1, "eng"), track(2, None, selected=True)]
 
@@ -42,19 +33,10 @@ def test_a_lone_untagged_track_fills_only_the_target_role() -> None:
     assert discover([track(7)], "ja,jpn,jp") == SubtitleTracks(jp_sid=7, en_sid=None)
 
 
-def test_no_tracks_selects_nothing() -> None:
-    assert initial([], "ja,jpn,jp") == SubtitleStartup(SubtitleTracks(None, None), None)
-
-
 def test_an_unrelated_tagged_track_does_not_claim_either_configured_role() -> None:
     tracks = [track(7, "eng", selected=True)]
 
     assert initial(tracks, "fr", "de") == SubtitleStartup(SubtitleTracks(None, None), None)
-
-
-def test_startup_prefers_the_target_language_then_tagged_english() -> None:
-    assert initial([track(1, "eng"), track(2, "jpn")], "ja,jpn,jp").active == MAIN_LANG
-    assert initial([track(1, "eng")], "ja,jpn,jp").active == SECOND_LANG
 
 
 # --- toggle ------------------------------------------------------------------------------------

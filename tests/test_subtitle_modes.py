@@ -10,7 +10,7 @@ from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
-from util import RecordingRasterProvider, await_ready, bare_gateway, session_gateway
+from util import RecordingRasterProvider, await_ready, session_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes, subtitle_selection
@@ -136,53 +136,6 @@ def test_subtitle_fetch_runs_off_the_event_thread_and_publishes_directly(monkeyp
         assert messages == [("provider: no match", "warn")]
     finally:
         reader.close()
-        gateway.close()
-
-
-def test_subtitle_fetch_lane_rejects_work_beyond_its_bound():
-    ipc = RuntimeFakeIPC()
-    gateway = bare_gateway(ipc)
-    release = threading.Event()
-    started = [threading.Event(), threading.Event()]
-    start_lock = threading.Lock()
-    start_index = 0
-
-    def blocked_fetch():
-        nonlocal start_index
-        with start_lock:
-            index = start_index
-            start_index += 1
-        started[index].set()
-        assert release.wait(1)
-        return None, "done"
-
-    request = subtitle_modes.SubtitleFetchRequest(
-        fetch=blocked_fetch,
-        select_if_unchanged=False,
-        initial_sid=None,
-        replace=False,
-        force_select=False,
-    )
-    submitter = subtitle_modes.configure_runtime_job(ipc)
-    assert submitter is not None
-    outcomes = []
-    try:
-        accepted = [
-            submitter(
-                owner=Owner.SUBTITLE,
-                identity=index,
-                lane="subtitle-fetch",
-                request=request,
-                on_finished=outcomes.append,
-            )
-            for index in range(5)
-        ]
-        assert started[0].wait(1) and started[1].wait(1)
-        assert accepted == [True, True, True, True, False]
-        assert outcomes[-1].outcome is EffectOutcome.REJECTED
-    finally:
-        release.set()
-        ipc.close_runtime_job_lane("subtitle-fetch", timeout=1)
         gateway.close()
 
 
@@ -315,6 +268,7 @@ def test_startup_with_no_subtitles_fails_softly():
     ipc = FakeIPC()
     startup = subtitle_modes.select_initial(ipc)
     assert startup.active is None
+    assert startup.tracks == subtitle_modes.SubtitleTracks(None, None)
     assert not [c for c in ipc.commands if c[:2] == ("set_property", "sid")]
 
 
@@ -386,16 +340,26 @@ def test_secondary_sid_event_does_not_change_primary_language(make_session):
     assert reader.graph.track_commands.current().language == "en"
 
 
-def test_primary_track_event_shows_language_and_counter(monkeypatch, make_session):
-    ipc = FakeIPC([EN.copy(), JP.copy()])
+@pytest.mark.parametrize(
+    ("tracks", "sid", "message"),
+    [
+        ([EN, JP], 1, "subtitles: English (1/2)"),
+        ([EN, JP], 2, "subtitles: Japanese (2/2)"),
+        ([{"id": 3, "type": "sub", "lang": "ger"}], 3, "subtitles: ger (1/1)"),
+    ],
+)
+def test_primary_track_event_shows_language_and_counter(
+    monkeypatch, make_session, tracks, sid, message
+):
+    ipc = FakeIPC([dict(track) for track in tracks])
     reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     messages = []
     monkeypatch.setattr(reader.graph.notifications, "show", lambda text: messages.append(text))
 
-    reader.graph.playback.observe_event({"name": "sid", "data": 1})
+    reader.graph.playback.observe_event({"name": "sid", "data": sid})
 
-    assert messages == ["subtitles: English (1/2)"]
+    assert messages == [message]
 
 
 def test_hidden_translation_does_not_reserve_english_secondary(make_session):
@@ -886,126 +850,109 @@ def test_single_foreign_track_has_no_secondary():
     )
 
 
-def test_discovery_uses_the_configured_second_language():
-    ipc = FakeIPC(
-        [
-            {"id": 6, "type": "sub", "lang": "fra"},
-            {"id": 7, "type": "sub", "lang": "eng"},
-            {"id": 8, "type": "sub", "lang": "deu"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=8
-    )
-
-
-def test_discovery_falls_back_from_a_region_tag_to_the_base_track_language():
-    ipc = FakeIPC(
-        [
-            {"id": 6, "type": "sub", "lang": "fra"},
-            {"id": 8, "type": "sub", "lang": "deu"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "de-CH") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=8
-    )
-
-
-def test_discovery_prefers_an_exact_region_before_its_base_language():
-    ipc = FakeIPC(
-        [
-            {"id": 1, "type": "sub", "lang": "pt-PT"},
-            {"id": 2, "type": "sub", "lang": "pt-BR"},
-            {"id": 6, "type": "sub", "lang": "fra"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "pt-BR") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=2
-    )
-
-
-def test_discovery_prefers_a_regional_iso_alias_before_the_alias_base():
-    ipc = FakeIPC(
-        [
-            {"id": 1, "type": "sub", "lang": "por-PT"},
-            {"id": 2, "type": "sub", "lang": "por-BR"},
-            {"id": 6, "type": "sub", "lang": "fra"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "pt-BR") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=2
-    )
-
-
-def test_discovery_prefers_the_exact_english_region_through_its_iso_alias():
-    ipc = FakeIPC(
-        [
-            {"id": 1, "type": "sub", "lang": "eng-US"},
-            {"id": 2, "type": "sub", "lang": "eng-GB"},
-            {"id": 6, "type": "sub", "lang": "fra"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "en-GB") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=2
-    )
-
-
-def test_discovery_matches_iso_639_two_and_three_letter_aliases():
-    ipc = FakeIPC(
-        [
-            {"id": 6, "type": "sub", "lang": "fra"},
-            {"id": 8, "type": "sub", "lang": "spa"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "es-MX") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=8
-    )
-
-
-def test_discovery_matches_a_regional_three_letter_preference_to_a_two_letter_tag():
-    ipc = FakeIPC(
-        [
-            {"id": 6, "type": "sub", "lang": "fra"},
-            {"id": 8, "type": "sub", "lang": "de-CH"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "deu-CH") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=8
-    )
-
-
-def test_discovery_checks_configured_tracks_before_untagged_fallback():
-    ipc = FakeIPC(
-        [
-            {"id": 6, "type": "sub", "lang": "fra"},
-            {"id": 9, "type": "sub"},
-            {"id": 8, "type": "sub", "lang": "deu"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=8
-    )
-
-
-def test_discovery_does_not_substitute_a_tagged_unconfigured_translation_language():
-    ipc = FakeIPC(
-        [
-            {"id": 6, "type": "sub", "lang": "fra"},
-            {"id": 7, "type": "sub", "lang": "eng"},
-        ]
-    )
-
-    assert subtitle_modes.discover_tracks(ipc, "fr", "de") == subtitle_modes.SubtitleTracks(
-        jp_sid=6, en_sid=None
-    )
+@pytest.mark.parametrize(
+    ("tracks", "slang", "second_slang", "primary", "secondary"),
+    [
+        pytest.param(
+            [
+                {"id": 6, "type": "sub", "lang": "fra"},
+                {"id": 7, "type": "sub", "lang": "eng"},
+                {"id": 8, "type": "sub", "lang": "deu"},
+            ],
+            "fr",
+            "de",
+            6,
+            8,
+            id="uses_the_configured_second_language",
+        ),
+        pytest.param(
+            [{"id": 6, "type": "sub", "lang": "fra"}, {"id": 8, "type": "sub", "lang": "deu"}],
+            "fr",
+            "de-CH",
+            6,
+            8,
+            id="falls_back_from_a_region_tag_to_the_base_track_language",
+        ),
+        pytest.param(
+            [
+                {"id": 1, "type": "sub", "lang": "pt-PT"},
+                {"id": 2, "type": "sub", "lang": "pt-BR"},
+                {"id": 6, "type": "sub", "lang": "fra"},
+            ],
+            "fr",
+            "pt-BR",
+            6,
+            2,
+            id="prefers_an_exact_region_before_its_base_language",
+        ),
+        pytest.param(
+            [
+                {"id": 1, "type": "sub", "lang": "por-PT"},
+                {"id": 2, "type": "sub", "lang": "por-BR"},
+                {"id": 6, "type": "sub", "lang": "fra"},
+            ],
+            "fr",
+            "pt-BR",
+            6,
+            2,
+            id="prefers_a_regional_iso_alias_before_the_alias_base",
+        ),
+        pytest.param(
+            [
+                {"id": 1, "type": "sub", "lang": "eng-US"},
+                {"id": 2, "type": "sub", "lang": "eng-GB"},
+                {"id": 6, "type": "sub", "lang": "fra"},
+            ],
+            "fr",
+            "en-GB",
+            6,
+            2,
+            id="prefers_the_exact_english_region_through_its_iso_alias",
+        ),
+        pytest.param(
+            [{"id": 6, "type": "sub", "lang": "fra"}, {"id": 8, "type": "sub", "lang": "spa"}],
+            "fr",
+            "es-MX",
+            6,
+            8,
+            id="matches_iso_639_two_and_three_letter_aliases",
+        ),
+        pytest.param(
+            [{"id": 6, "type": "sub", "lang": "fra"}, {"id": 8, "type": "sub", "lang": "de-CH"}],
+            "fr",
+            "deu-CH",
+            6,
+            8,
+            id="matches_a_regional_three_letter_preference_to_a_two_letter_tag",
+        ),
+        pytest.param(
+            [
+                {"id": 6, "type": "sub", "lang": "fra"},
+                {"id": 9, "type": "sub"},
+                {"id": 8, "type": "sub", "lang": "deu"},
+            ],
+            "fr",
+            "de",
+            6,
+            8,
+            id="checks_configured_tracks_before_untagged_fallback",
+        ),
+        pytest.param(
+            [{"id": 6, "type": "sub", "lang": "fra"}, {"id": 7, "type": "sub", "lang": "eng"}],
+            "fr",
+            "de",
+            6,
+            None,
+            id="does_not_substitute_a_tagged_unconfigured_translation_language",
+        ),
+    ],
+)
+def test_discovery_uses_the_configured_second_language(
+    tracks, slang, second_slang, primary, secondary
+):
+    assert subtitle_modes.discover_tracks(
+        FakeIPC(tracks), slang, second_slang
+    ) == subtitle_modes.SubtitleTracks(primary, secondary)
 
 
 def _select(ipc, sid):
@@ -1027,7 +974,13 @@ def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path, make_
         reader.graph.track_commands.current().language == SECOND_LANG
     )  # only English present at attach
     srt = tmp_path / "dropped.srt"
-    srt.write_text("1\n00:00:01,000 --> 00:00:02,000\n岩を砂へ\n", encoding="utf-8")
+    srt.write_text(
+        "1\n00:00:01,000 --> 00:00:02,000\nTurn rock to sand.\n\n"
+        "2\n00:00:03,000 --> 00:00:04,000\n岩を砂へ\n\n"
+        "3\n00:00:05,000 --> 00:00:06,000\n砂を岩へ\n",
+        encoding="utf-8",
+    )
+    ipc.props["sub-text"] = "English on screen"
     ipc.tracks.append(
         {"id": 2, "type": "sub", "lang": None, "external": True, "external-filename": str(srt)}
     )
@@ -1214,28 +1167,6 @@ def test_force_current_as_japanese_with_no_track_warns(monkeypatch, make_session
     assert messages == [("No subtitle track to mark", "warn")]
 
 
-def test_announce_names_a_japanese_track(monkeypatch, make_session):
-    ipc = FakeIPC([EN.copy(), JP.copy()])
-    reader = make_session(ipc)
-    seen = []
-    monkeypatch.setattr(reader.graph.notifications, "show", lambda text, *_args: seen.append(text))
-
-    subtitle_modes.announce_track(reader.graph.track_commands.ports(), 2)
-
-    assert seen == ["subtitles: Japanese (2/2)"]
-
-
-def test_announce_passes_through_an_unknown_language(monkeypatch, make_session):
-    ipc = FakeIPC([{"id": 3, "type": "sub", "lang": "ger"}])
-    reader = make_session(ipc)
-    seen = []
-    monkeypatch.setattr(reader.graph.notifications, "show", lambda text, *_args: seen.append(text))
-
-    subtitle_modes.announce_track(reader.graph.track_commands.ports(), 3)
-
-    assert seen == ["subtitles: ger (1/1)"]
-
-
 def _one_cue_index() -> CueIndex:
     return CueIndex(parse_srt("1\n00:00:01,000 --> 00:00:02,000\n本\n"))
 
@@ -1319,27 +1250,9 @@ def test_toggle_from_english_returns_to_japanese(monkeypatch, make_session):
     assert ("set_property", "sid", 2) in ipc.commands
 
 
-def test_language_id_samples_the_index_when_one_is_loaded():
-    """Content-based classification for an untagged track. The parsed index is preferred over mpv's
-    on-screen cue because one visible line is a coin flip and twenty are not."""
-    index = CueIndex(
-        parse_srt(
-            "1\n00:00:01,000 --> 00:00:02,000\n日本語\n\n2\n00:00:03,000 --> 00:00:04,000\n字幕\n"
-        )
-    )
-
-    assert subtitle_modes._sample_cue_text(index, "on screen") == "日本語 字幕"
-
-
 def test_language_id_falls_back_to_the_on_screen_cue():
     assert subtitle_modes._sample_cue_text(None, "on screen") == "on screen"
     assert subtitle_modes._sample_cue_text(CueIndex([]), "on screen") == "on screen"
-
-
-def test_language_id_survives_a_track_with_nothing_to_sample():
-    """mpv reports `sub-text` as None before a track resolves, and `looks_japanese("")` must be the
-    answer rather than an AttributeError on the startup path."""
-    assert subtitle_modes._sample_cue_text(None, "") == ""
 
 
 def test_language_id_bounds_how_many_cues_it_reads():

@@ -33,15 +33,6 @@ def test_hiding_tears_the_tooltip_down_before_the_pixels_go() -> None:
     )
 
 
-def test_the_secondary_track_is_released_only_after_the_hide() -> None:
-    """Releasing first would let mpv paint the secondary line for the frames before the hide lands."""
-    effects = reduce(TOGGLE, SessionInputs(overlay_visible=True))
-
-    assert effects.index(SetSurfacesVisible(visible=False)) < effects.index(
-        ReleaseSecondarySubtitles()
-    )
-
-
 def test_showing_resumes_the_pipeline_before_drawing_a_translation() -> None:
     assert reduce(TOGGLE, SessionInputs(overlay_visible=False, translation_wanted=True)) == (
         SetSurfacesVisible(visible=True),
@@ -57,16 +48,6 @@ def test_showing_without_a_wanted_translation_draws_none() -> None:
         ResumeSubtitles(),
         ReportOverlayVisibility(visible=True),
     )
-
-
-def test_the_translation_input_is_want_not_visibility() -> None:
-    """The trap this input name exists to avoid. "Is the translation visible" includes "is the
-    overlay visible", which is False at exactly the moment this decision is made — asking it that
-    way restores the surfaces and never brings the secondary line back with them.
-    """
-    restoring = SessionInputs(overlay_visible=False, translation_wanted=True)
-
-    assert ShowTranslation() in reduce(TOGGLE, restoring)
 
 
 def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:

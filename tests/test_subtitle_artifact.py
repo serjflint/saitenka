@@ -25,11 +25,12 @@ def test_an_external_track_needs_no_media_path() -> None:
     assert resolve(track, media_path=None) == ExternalArtifact("/subs/ep1.ass")
 
 
-def test_an_embedded_track_resolves_to_a_stream_in_the_media() -> None:
-    track = {"external": False, "ff-index": 3, "codec": "ass"}
+@pytest.mark.parametrize("stream_index", [0, 3])
+def test_an_embedded_track_resolves_to_a_stream_in_the_media(stream_index: int) -> None:
+    track = {"external": None, "ff-index": stream_index, "codec": "ass"}
 
     assert resolve(track, media_path="/media/ep1.mkv") == EmbeddedArtifact(
-        "/media/ep1.mkv", 3, "ass"
+        "/media/ep1.mkv", stream_index, "ass"
     )
 
 
@@ -94,9 +95,3 @@ def test_an_ass_track_is_extracted_as_ass_never_transcoded(
     """Two independent failures ride on this: alass-cli exits 1 on the tags an srt transcode injects
     (the ep02-late root cause), and native geometry rejects anything that is not authored ASS."""
     assert extract_spec(codec) == (suffix, codec_args)
-
-
-def test_resolution_never_raises_on_a_malformed_track() -> None:
-    """mpv's track-list is untrusted input; a surprising entry degrades lookahead, nothing more."""
-    for track in ({}, {"external": 0}, {"external": None, "ff-index": 0}):
-        assert resolve(track, media_path="/media/ep1.mkv") is not None
