@@ -19,6 +19,7 @@ from saitenka.app.features.annotation.jobs import (
     annotate,
 )
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime.jobs import JobLanePolicy, LocalJobLane
 
 
 def _identity(text: str, *, start: float = 1.0) -> CueIdentity:
@@ -166,58 +167,15 @@ def test_current_request_reclaims_cancelled_same_key_episode_work() -> None:
     coordinator.close()
 
 
-class _SerialSubmitter:
-    def __init__(self, handler) -> None:
-        self._handler = handler
-        self._condition = threading.Condition()
-        self._queue = deque()
-        self._closed = False
-        self._sequence = 0
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def __call__(self, **kwargs) -> bool:
-        with self._condition:
-            self._sequence += 1
-            self._queue.append((self._sequence, kwargs))
-            self._condition.notify()
-        return True
-
-    def _run(self) -> None:
-        while True:
-            with self._condition:
-                while not self._queue and not self._closed:
-                    self._condition.wait()
-                if self._closed:
-                    return
-                sequence, item = self._queue.popleft()
-            result = self._handler(item["request"], threading.Event())
-            item["on_finished"](
-                EffectFinished(
-                    EffectId(sequence),
-                    item["owner"],
-                    item["identity"],
-                    EffectOutcome.SUCCEEDED,
-                    result=result,
-                )
-            )
-
-    def close(self) -> None:
-        with self._condition:
-            self._closed = True
-            self._condition.notify_all()
-        self._thread.join(2)
-
-
 def _coordinator(**kwargs):
     results = deque()
     warm = kwargs.pop("tokenizer_warm", None)
     executor = AnnotationExecutor(warm)
-    submitter = _SerialSubmitter(executor.run)
+    submitter = LocalJobLane("cue-annotation", JobLanePolicy(capacity=1), executor.run)
     coordinator = CueAnnotationCoordinator(
         **kwargs,
         executor=executor,
-        submitter=submitter,
+        submitter=submitter.submit,
         on_result=results.append,
     )
     return coordinator, submitter, results
@@ -432,7 +390,7 @@ def test_rejected_job_does_not_consume_tokenizer_warm() -> None:
     warm = _ObservedWarm()
     tokenizer = _Tokenizer()
     executor = AnnotationExecutor(warm)
-    serial = _SerialSubmitter(executor.run)
+    serial = LocalJobLane("cue-annotation", JobLanePolicy(capacity=1), executor.run)
     results = deque()
     reject = True
 
@@ -441,7 +399,7 @@ def test_rejected_job_does_not_consume_tokenizer_warm() -> None:
         if reject:
             reject = False
             return False
-        return serial(**kwargs)
+        return serial.submit(**kwargs)
 
     coordinator = CueAnnotationCoordinator(
         executor=executor,
