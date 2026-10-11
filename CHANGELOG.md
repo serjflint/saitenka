@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- `libasslite` now refuses to reuse a renderer when track features change, raising
+  `RendererRecreationRequired` while leaving the current document usable.
 - Switching subtitle tracks no longer crashes Saitenka when libass bracket matching changes. Native
   geometry now uses a fresh renderer when track features differ.
 - Resizing no longer blocks input on diagnostic player queries. Display diagnostics use observed

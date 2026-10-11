@@ -46,7 +46,8 @@ arrive), and an `[Fonts]` section inside the document when `extract_fonts=True`.
 position, hinting, shaper, and selective style override. It is passed per render because every member
 of it is a function of the display geometry; omitting it restores libass's defaults, so one render's
 result never depends on the render before it. `unsupported_features()` reports the track features
-this libass build could not apply.
+this libass build could not apply. `set_document()` preserves the renderer's font cache but requires
+the initial feature sequence; a change raises `RendererRecreationRequired` before libass is called.
 
 `AssRenderResult.layers` preserves libass list order. Each layer contains a tightly packed `bytes`
 bitmap (`width * height`), placement, `0xRRGGBBAA` color, and public image type. Rendering releases

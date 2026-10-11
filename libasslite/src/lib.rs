@@ -10,6 +10,8 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
+pyo3::create_exception!(libasslite, RendererRecreationRequired, PyRuntimeError);
+
 type AssLibrary = c_void;
 type AssRendererHandle = c_void;
 type AssTrack = c_void;
@@ -127,6 +129,7 @@ struct NativeRenderer {
     renderer: *mut AssRendererHandle,
     track: *mut AssTrack,
     library_path: String,
+    track_features: Vec<(i32, bool)>,
     unsupported_features: Vec<i32>,
     _library: Library,
 }
@@ -145,6 +148,11 @@ impl NativeRenderer {
     /// The new track is read BEFORE the old one is freed, so a document libass rejects leaves the
     /// renderer holding the document it already had rather than none at all.
     fn set_document(&mut self, mut ass: Vec<u8>, features: &[(i32, bool)]) -> PyResult<()> {
+        if features != self.track_features {
+            return Err(RendererRecreationRequired::new_err(
+                "track features changed; create a new AssRenderer",
+            ));
+        }
         let track = unsafe {
             (self.api.read_memory)(
                 self.library_handle,
@@ -534,9 +542,8 @@ fn open_native(
         return Err(PyValueError::new_err("libass rejected the ASS document"));
     }
     let mut unsupported_features = Vec::new();
-    for (feature, enable) in features {
-        let applied =
-            unsafe { track_set_feature(track, feature, c_int::from(enable)) };
+    for &(feature, enable) in &features {
+        let applied = unsafe { track_set_feature(track, feature, c_int::from(enable)) };
         if applied != 0 {
             unsupported_features.push(feature);
         }
@@ -585,6 +592,7 @@ fn open_native(
         renderer,
         track,
         library_path,
+        track_features: features,
         unsupported_features,
         _library: library,
     })
@@ -844,8 +852,9 @@ impl AssRenderer {
     /// Render a different document from here on, keeping the library and the glyph cache.
     ///
     /// The document is the only per-cue handle libass has; rebuilding a whole renderer to change
-    /// it discards the font cache built for the very same fonts. `features` are re-applied because
-    /// libass stores them on the track, so they do not survive the swap.
+    /// it discards the font cache built for the very same fonts. `features` must match the renderer's
+    /// initial track; changing them requires a fresh renderer because libass caches feature-dependent
+    /// shaping allocations there.
     #[pyo3(signature = (ass, features=Vec::new()))]
     fn set_document(
         &self,
@@ -1036,6 +1045,10 @@ fn library_version(library_path: Option<PathBuf>) -> PyResult<u32> {
 
 #[pymodule(gil_used = false)]
 fn libasslite(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add(
+        "RendererRecreationRequired",
+        module.py().get_type::<RendererRecreationRequired>(),
+    )?;
     module.add_class::<AssImageLayer>()?;
     module.add_class::<AssRenderResult>()?;
     module.add_class::<AssRenderer>()?;

@@ -15,6 +15,7 @@ AssImageLayer = _native.AssImageLayer
 AssRenderResult = _native.AssRenderResult
 AssStyle = _native.AssStyle
 RenderStyle = _native.RenderStyle
+RendererRecreationRequired = _native.RendererRecreationRequired
 
 _BUNDLE_ENV = "LIBASSLITE_BUNDLE"
 _LIBRARY_ENV = "LIBASSLITE_LIBRARY"
@@ -150,8 +151,8 @@ class AssRenderer:
 
         The document is libass's only per-cue handle. Rebuilding a renderer to change it also
         rebuilds the library and rescans the font directory, and discards the glyph cache built
-        for the very same fonts. `features` are re-applied because libass stores them on the
-        track, so they do not survive the swap.
+        for the very same fonts. `features` must match this renderer's initial track; changing
+        them raises `RendererRecreationRequired` so the caller can create a fresh renderer.
         """
         self._native.set_document(ass, list(features))
 
@@ -182,6 +183,7 @@ __all__ = [
     "Hinting",
     "OverrideBits",
     "RenderStyle",
+    "RendererRecreationRequired",
     "Shaping",
     "library_version",
 ]

@@ -437,6 +437,28 @@ def test_track_features_report_what_this_build_cannot_apply() -> None:
     }
 
 
+def test_changing_track_features_requires_a_fresh_renderer() -> None:
+    ass_renderer = renderer()
+    frame(ass_renderer)
+
+    with pytest.raises(libasslite.RendererRecreationRequired, match="new AssRenderer"):
+        ass_renderer.set_document(
+            b"not an ASS document",
+            [(libasslite.Feature.BIDI_BRACKETS, True)],
+        )
+
+    assert character_bounds(frame(ass_renderer), 0x332211)
+
+
+def test_same_track_features_allow_document_swap() -> None:
+    features = [(libasslite.Feature.BIDI_BRACKETS, True)]
+    ass_renderer = renderer(features=features)
+
+    ass_renderer.set_document(ASS.replace(b"112233", b"AABBCC"), features)
+
+    assert character_bounds(frame(ass_renderer), 0xCCBBAA)
+
+
 def test_an_unknown_track_feature_is_reported_not_silently_applied() -> None:
     ass_renderer = renderer(features=[(999, True)])
 
