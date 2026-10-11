@@ -95,7 +95,7 @@ jobs:
       - name: Install the published libass runtime
         run: >-
           uv pip install --no-deps --only-binary libasslite-bundle
-          --no-sources-package libasslite-bundle libasslite-bundle==0.1.3
+          --no-sources-package libasslite-bundle libasslite-bundle==0.1.4
 
       # Real per-OS boundary, no GUI: integration (real socket/subprocess) + windows_sim executing on
       # the real kernel. This is the leg that catches the named-pipe / Scripts-vs-bin class Linux can't.
@@ -226,7 +226,7 @@ jobs:
       - name: Install the published libass runtime
         run: >-
           uv pip install --no-deps --only-binary libasslite-bundle
-          --no-sources-package libasslite-bundle libasslite-bundle==0.1.3
+          --no-sources-package libasslite-bundle libasslite-bundle==0.1.4
 
       # Identical on every leg: which tests run is decided per test by `mpv_min`, not by selection
       # here. (`smoke-live` selects by path — the live tests are env-gated, so `-m` matches nothing.)
