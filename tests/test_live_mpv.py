@@ -33,6 +33,30 @@ def _screenshot(ipc, path: Path) -> Image.Image:
     return Image.open(path).convert("RGB")
 
 
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_live_mining_screenshot_can_finish_on_a_worker(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from saitenka.app.features.mining.scratch import ScratchArtifacts
+    from saitenka.app.media import screenshot
+
+    with _live_reader() as (_tmp, reader, ipc):
+        directory = tmp_path / "mine"
+        directory.mkdir()
+        artifacts = ScratchArtifacts(directory)
+        destination = directory / "frame.jpg"
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(screenshot, ipc, destination, retain=artifacts.retain)
+            _poll_until(reader, future.done, "worker screenshot did not finish")
+            assert future.result() == destination
+        with Image.open(destination) as image:
+            assert image.size == (1280, 720)
+        artifacts.retire()
+        _poll_until(reader, lambda: not directory.exists(), "settled scratch did not retire")
+        assert not directory.exists()
+
+
 def _targets_for(reader, x, y):
     """The live check's view of `_hover_targets`, wired from the reader it is probing."""
     from saitenka.app.features.tooltip.tooltip import _hover_targets

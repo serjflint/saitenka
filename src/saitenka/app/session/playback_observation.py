@@ -98,6 +98,7 @@ OBSERVED_PROPERTIES = (
 
 @dataclass(frozen=True, slots=True)
 class PlaybackStartup:
+    prepare_track: Callable[[], None]
     reconcile_cue: Callable[[str], None]
     refresh_render_space: Callable[[], object]
     observe_authored_subtitle: Callable[[dict], None]
@@ -148,19 +149,19 @@ class PlaybackObservationController:
         return self.query(name)
 
     def text(self, name: str) -> str | None:
-        value = self.query(name)
+        value = self.value(name)
         return value if isinstance(value, str) else None
 
     def number(self, name: str) -> float | None:
-        value = self.query(name)
+        value = self.value(name)
         return float(value) if isinstance(value, int | float) else None
 
     def mapping(self, name: str) -> dict:
-        value = self.query(name)
+        value = self.value(name)
         return deepcopy(value) if isinstance(value, dict) else {}
 
     def sequence(self, name: str) -> list:
-        value = self.query(name)
+        value = self.value(name)
         return deepcopy(value) if isinstance(value, list) else []
 
     def dispatch(self, event: events.PlaybackEvent | events.EpisodeRetired) -> None:
@@ -202,6 +203,7 @@ class PlaybackObservationController:
 
     def start_session(self, *, connection_replaced: bool = False) -> None:
         replies = self.start(connection_replaced=connection_replaced)
+        self._startup.prepare_track()
         self._startup.observe_authored_subtitle(replies["sub-text/ass-full"])
         self._startup.reconcile_cue(str(self.value("sub-text") or ""))
         osd = self.value("osd-dimensions")
@@ -262,6 +264,7 @@ class PlaybackApplication:
     probe_authored_subtitle: Callable[[], None]
     observe_cue: Callable[[playback.ObservedCue], None]
     subtitle_selection_changed: Callable[[object], None]
+    subtitle_tracks_changed: Callable[[], None]
     subtitle_timing_changed: Callable[[], None]
     geometry_input_changed: Callable[[str], None]
     render_space_changed: Callable[[], None]
@@ -269,6 +272,7 @@ class PlaybackApplication:
     pause_changed: PauseEffect
     secondary_text_changed: Callable[[object], None]
     pointer_moved: Callable[[], None]
+    media_path_changed: Callable[[object], None]
 
 
 class PlaybackProjection:
@@ -287,7 +291,9 @@ class PlaybackProjection:
 
     def apply(self, delta: playback.PlaybackDelta) -> None:
         target = self._application
-        if isinstance(delta, playback.CueIdentityRetired):
+        if isinstance(delta, playback.MediaPathChanged):
+            target.media_path_changed(delta.path)
+        elif isinstance(delta, playback.CueIdentityRetired):
             target.retire_cue(delta.reason.value)
         elif isinstance(delta, playback.AuthoredCueStale):
             target.probe_authored_subtitle()
@@ -295,6 +301,8 @@ class PlaybackProjection:
             target.observe_cue(delta.cue)
         elif isinstance(delta, playback.SubtitleSelectionChanged):
             target.subtitle_selection_changed(delta.sid)
+        elif isinstance(delta, playback.SubtitleTracksChanged):
+            target.subtitle_tracks_changed()
         elif isinstance(delta, playback.SubtitleTimingChanged):
             target.subtitle_timing_changed()
         elif isinstance(delta, playback.GeometryInputChanged):

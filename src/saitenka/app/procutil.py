@@ -10,8 +10,37 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import time
 
 log = logging.getLogger(__name__)
+
+
+def run_cancellable(command, *, cancelled=None, timeout=30, **kwargs):
+    check = kwargs.pop("check", False)
+    if cancelled is None:
+        return subprocess.run(command, check=check, timeout=timeout, **kwargs)
+    if kwargs.pop("capture_output", False):
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    with subprocess.Popen(command, **kwargs) as proc:
+        stdout, stderr = _communicate(proc, command, cancelled, timeout)
+        if check and proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, command, stdout, stderr)
+        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+
+
+def _communicate(proc, command, cancelled, timeout):
+    deadline = time.monotonic() + timeout
+    while not cancelled() and time.monotonic() < deadline:
+        try:
+            return proc.communicate(timeout=max(0.001, min(0.1, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            continue
+    kill_process_tree(proc, timeout=0)
+    for stream in (proc.stdout, proc.stderr):
+        if stream is not None:
+            stream.close()
+    proc.wait(timeout=1)
+    raise subprocess.TimeoutExpired(command, timeout)
 
 
 def kill_process_tree(proc, timeout: float = 5.0) -> None:

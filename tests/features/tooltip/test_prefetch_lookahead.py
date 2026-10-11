@@ -1,6 +1,10 @@
 """Prefetch lookahead: WARM the next cues' words while the current line plays, and the cache-size /
 RSS gauges the telemetry interval sampler reports."""
 
+import threading
+from dataclasses import replace
+
+import pytest
 import util
 from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.japanese import Token
@@ -88,7 +92,14 @@ def _submitted_items(r, monkeypatch):
     submitted = []
 
     def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
-        submitted.extend(item for _priority, item in jobs)
+        for _priority, item in jobs:
+            if isinstance(item, prefetch.CandidateScan):
+                submitted.extend(
+                    candidate
+                    for _, candidate in prefetch.candidate_jobs(item.ports, item.head, item.gen)
+                )
+            else:
+                submitted.append(item)
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
@@ -155,6 +166,55 @@ def test_no_lookahead_when_disabled(monkeypatch):
     r.graph.cue.set_subtitle("本を読む")
     surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
     assert "書く" not in surfaces and "水" not in surfaces  # only the current line queued
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_future_tokenization_and_scoring_leave_the_owner_free_to_process_input(monkeypatch):
+    from util import await_ready
+
+    owner = threading.get_ident()
+    entered, release = threading.Event(), threading.Event()
+    scored = []
+
+    class Scorer:
+        def score_line(self, tokens):
+            assert threading.get_ident() != owner
+            scored.extend(token.surface for token in tokens)
+            return [_style("n+1") for _token in tokens]
+
+    reader = _reader(monkeypatch, lookahead=1, head_lookahead=1)
+    reader.graph.cue.set_subtitle("本を読む")
+    reader.graph.mining.record_mined_expression("猫")
+    tokenizer = reader.graph.profile.profile.tokenizer
+    tokenize = tokenizer.tokenize
+
+    def held(text):
+        if text == "本を書く":
+            assert threading.get_ident() != owner
+            entered.set()
+            assert release.wait(5)
+        return tokenize(text)
+
+    monkeypatch.setattr(tokenizer, "tokenize", held)
+    probe = replace(reader.graph.tooltip.head_probe, scorer=Scorer())
+    monkeypatch.setattr(type(reader.graph.tooltip), "head_probe", property(lambda _self: probe))
+    reader.graph.tooltip.start_prefetch()
+    try:
+        reader.graph.tooltip.update_prefetch()
+        assert entered.wait(2)
+        reader.graph.ipc.set_prop("pause", value=True)
+        reader.pump()
+        assert reader.graph.playback.value("pause") is True
+        release.set()
+        await_ready(
+            lambda: "書く" in reader.graph.profile.profile.dict_set.warmed,
+            "future word was not warmed",
+            pump=reader.pump,
+        )
+        assert "書く" in scored
+    finally:
+        release.set()
 
 
 def test_lookahead_construction_is_bounded_before_job_admission(monkeypatch):
@@ -228,7 +288,10 @@ def test_head_construction_bounds_candidate_probes_within_one_long_cue(monkeypat
     monkeypatch.setattr(prefetch, "upcoming_cue_texts", lambda _index, _n, **_kw: ["long"])
 
     heads = prefetch._head_prefetch_items(
-        r.graph.tooltip.prefetch_ports, r.graph.tooltip.head_probe, 1, set()
+        replace(r.graph.tooltip.prefetch_ports, is_mined=is_mined),
+        r.graph.tooltip.head_probe,
+        1,
+        set(),
     )
 
     assert len(heads) == probes == 4

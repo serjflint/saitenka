@@ -3136,11 +3136,18 @@ def test_a_selection_the_session_made_itself_keeps_its_geometry_source(tmp_path:
     # Declared before the echo, as the selecting call declares it — that is what makes sid 3
     # "known", and so the coordinate this regression lives at.
     result.graph.cue.configure_subtitle_mode(SubtitleStartup(SubtitleTracks(3, None), MAIN_LANG))
+    result.graph.playback.install_seed(dict(ipc.props))
     result.graph.cue.rebuild_sub_index()
+    util.await_ready(
+        lambda: native.source_path == source, "source was not prepared", pump=result.pump
+    )
     assert native.source_path == source
 
     result.graph.playback.observe_event({"name": "sid", "data": 3})
 
+    util.await_ready(
+        lambda: native.source_path == source, "selection echo lost source", pump=result.pump
+    )
     assert native.source_path == source
     result.close()
 

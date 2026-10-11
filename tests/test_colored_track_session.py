@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -46,6 +47,7 @@ class ColorJobs:
 
     def __init__(self) -> None:
         self.accepted: list[dict] = []
+        self.pump = lambda: None
 
     def submit(self, **kwargs) -> bool:
         self.accepted.append(kwargs)
@@ -66,6 +68,8 @@ class ColorJobs:
                 result=result,
             )
         )
+        self.pump()
+        self.pump()
         return result
 
 
@@ -94,9 +98,7 @@ def _session(tmp_path, monkeypatch, *, coloring="whole-cue-auto", tracks=None, r
         "saitenka.app.session.builder.configure_colored_track_job", lambda _ipc: jobs.submit
     )
     if not real_index:
-        monkeypatch.setattr(
-            "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-        )
+        monkeypatch.setattr("saitenka.app.track_preparation.prepare_track", lambda *_a: None)
     reader = build_session(
         ipc,
         options=ReaderOptions(
@@ -104,9 +106,11 @@ def _session(tmp_path, monkeypatch, *, coloring="whole-cue-auto", tracks=None, r
             prefetch=False,
         ),
     )
+    jobs.pump = reader.pump
     toasts: list[str] = []
     monkeypatch.setattr(reader.graph.notifications, "show", lambda text, *_a: toasts.append(text))
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
+    reader.graph.playback.install_seed(deepcopy(ipc.props))
     return reader, ipc, jobs, origin, toasts
 
 
@@ -144,6 +148,118 @@ def test_a_generated_copy_becomes_the_japanese_track(tmp_path, monkeypatch) -> N
     reader.pump()
     assert not any(text.startswith("subtitles:") for text in toasts)
     assert not any(command[:2] == ("set_property", "sub-delay") for command in ipc.commands)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("order", ["sid-first", "tracks-first"])
+def test_a_copy_echo_before_verification_keeps_one_generation_and_adopts_the_copy(
+    tmp_path, monkeypatch, order
+):
+    reader, ipc, jobs, _origin, toasts = _session(tmp_path, monkeypatch)
+    pending = []
+    submit = ipc.submit_runtime_mpv
+
+    def held(**kwargs):
+        if kwargs["identity"] == "verify-colored":
+            pending.append(kwargs)
+            return True
+        return submit(**kwargs)
+
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", held)
+    _ready(reader)
+    jobs.finish()
+    observations = [("sid", 9), ("track-list", deepcopy(ipc.tracks))]
+    if order == "tracks-first":
+        observations.reverse()
+    for name, value in observations:
+        ipc.set_prop(name, value)
+        reader.pump()
+    pending[0]["on_finished"](
+        EffectFinished(
+            EffectId(123),
+            Owner.SUBTITLE,
+            "verify-colored",
+            EffectOutcome.SUCCEEDED,
+            result=deepcopy(ipc.tracks),
+        )
+    )
+    assert reader.graph.track_commands.current().jp_sid == 9
+    assert len(_added(ipc)) == 1
+    assert len(jobs.accepted) == 1
+    assert not any(text.startswith("subtitles:") for text in toasts)
+
+
+@pytest.mark.parametrize("sid", [1, 2])
+@pytest.mark.parametrize("echo_copy", [False, True])
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_a_late_copy_verification_cannot_overwrite_a_manual_selection(
+    tmp_path, monkeypatch, sid, echo_copy
+):
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+    pending = []
+    submit = ipc.submit_runtime_mpv
+
+    def held(**kwargs):
+        if kwargs["identity"] == "verify-colored":
+            pending.append(kwargs)
+            return True
+        return submit(**kwargs)
+
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", held)
+    _ready(reader)
+    jobs.finish()
+    stale = deepcopy(ipc.tracks)
+    if echo_copy:
+        ipc.set_prop("sid", 9)
+        reader.pump()
+    ipc.command("set_property", "sid", sid)
+    ipc.set_prop("sid", sid)
+    reader.pump()
+    before = reader.graph.track_commands.current()
+
+    pending[0]["on_finished"](
+        EffectFinished(
+            EffectId(123), Owner.SUBTITLE, "verify-colored", EffectOutcome.SUCCEEDED, result=stale
+        )
+    )
+
+    assert ipc.props["sid"] == sid
+    assert reader.graph.track_commands.current() == before
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_late_copy_verification_preserves_a_cue_that_has_already_arrived(tmp_path, monkeypatch):
+    reader, ipc, jobs, _origin, _toasts = _session(tmp_path, monkeypatch)
+    pending = []
+    submit = ipc.submit_runtime_mpv
+
+    def held(**kwargs):
+        if kwargs["identity"] == "verify-colored":
+            pending.append(kwargs)
+            return True
+        return submit(**kwargs)
+
+    monkeypatch.setattr(ipc, "submit_runtime_mpv", held)
+    _ready(reader)
+    jobs.finish()
+    ipc.set_prop("sid", 9)
+    ipc.set_prop("track-list", deepcopy(ipc.tracks))
+    ipc.set_prop("sub-text", "犬も見る")
+    reader.pump()
+    pending[0]["on_finished"](
+        EffectFinished(
+            EffectId(123),
+            Owner.SUBTITLE,
+            "verify-colored",
+            EffectOutcome.SUCCEEDED,
+            result=deepcopy(ipc.tracks),
+        )
+    )
+    reader.pump()
+    assert reader.graph.playback.cue.text == "犬も見る"
 
 
 def test_the_copy_colors_static_events_and_leaves_the_rest_to_the_live_path(
@@ -230,6 +346,8 @@ def test_new_dependencies_regenerate_and_replace_the_copy(tmp_path, monkeypatch)
     reader.pump()
 
     assert len(jobs.accepted) == 2
+    reader.pump()
+    reader.pump()
     assert ("sub-remove", 9) in ipc.commands
     assert _added(ipc)[-1][1] != first
     assert not Path(first).exists()
@@ -347,7 +465,7 @@ def test_an_embedded_track_is_colored_from_its_extraction(tmp_path, monkeypatch)
 
     embedded = {"id": 2, "type": "sub", "lang": "jpn", "codec": "ass", "ff-index": 3}
     reader, ipc, jobs, _origin_path, _toasts = _session(
-        tmp_path, monkeypatch, tracks=[EN.copy(), embedded]
+        tmp_path, monkeypatch, tracks=[EN.copy(), embedded], real_index=True
     )
     extracted = embedded_subs_cache_dir() / embedded_subs_cache_key(
         "/videos/episode.mkv", 3, ".ass"
@@ -355,6 +473,10 @@ def test_an_embedded_track_is_colored_from_its_extraction(tmp_path, monkeypatch)
     extracted.parent.mkdir(parents=True, exist_ok=True)
     extracted.write_text(ASS, encoding="utf-8")
     _ready(reader)
+    reader.graph.cue.rebuild_sub_index()
+    from util import await_ready
+
+    await_ready(lambda: bool(jobs.accepted), "embedded source was not prepared", pump=reader.pump)
 
     jobs.finish()
 

@@ -10,16 +10,13 @@ from __future__ import annotations
 import threading
 import unicodedata
 from dataclasses import dataclass, replace
-from functools import lru_cache
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-# fugashi/MeCab wraps a C extension that has NOT declared free-threaded safety, so on a free-threaded
-# build we run with PYTHON_GIL=0 (see examples/mpv_reader._ensure_free_threaded). Tokenising is
-# main-thread-only in the app, but this lock makes it safe even if called concurrently.
-_TAG_LOCK = threading.Lock()
+# Nodes borrow their tagger's parse storage; independent taggers keep speculative work off live cues.
+_TAGGERS = threading.local()
 
 _KANA_PUNCT = frozenset({0x30A0, 0x30FB})  # ゠ double-hyphen, ・ nakaguro — separators, not kana
 
@@ -134,11 +131,12 @@ def strip_inline_furigana(tokens: list[Token]) -> list[Token]:
     return out
 
 
-@lru_cache(maxsize=1)
 def _tagger():
     import fugashi
 
-    return fugashi.Tagger()
+    if not hasattr(_TAGGERS, "tagger"):
+        _TAGGERS.tagger = fugashi.Tagger()
+    return _TAGGERS.tagger
 
 
 _HEAD_POS = {"動詞", "形容詞", "形状詞"}  # can start a conjugation chain
@@ -394,22 +392,18 @@ def tokenize(line: str, *, strip_furigana: bool = True, merge: bool = True) -> l
     idx = 0
     original = line
     line, offsets = _compose_voiced_kana(line)
-    # Hold _TAG_LOCK across the full parse AND feature attribute reads: fugashi's C extension has
-    # not declared free-threading safety, and w.feature may access MeCab-internal state that is
-    # only safe from one thread at a time on a free-threaded (no-GIL) build.
-    with _TAG_LOCK:
-        parsed = list(_tagger()(line))
-        raw: list[tuple[str, str, str, str, str]] = []
-        for w in parsed:
-            surf = w.surface
-            f = w.feature  # read inside the lock (free-threaded safety)
-            reading = kata_to_hira(getattr(f, "kana", None) or surf)
-            lemma = getattr(f, "lemma", None) or surf
-            # unidic lemma can carry a "-reading" suffix (e.g. read-ヨム); strip it
-            lemma = lemma.split("-", 1)[0]
-            pos = getattr(f, "pos1", None) or ""
-            pos2 = getattr(f, "pos2", None) or ""
-            raw.append((surf, lemma, reading, pos, pos2))
+    parsed = list(_tagger()(line))
+    raw: list[tuple[str, str, str, str, str]] = []
+    for w in parsed:
+        surf = w.surface
+        f = w.feature
+        reading = kata_to_hira(getattr(f, "kana", None) or surf)
+        lemma = getattr(f, "lemma", None) or surf
+        # unidic lemma can carry a "-reading" suffix (e.g. read-ヨム); strip it
+        lemma = lemma.split("-", 1)[0]
+        pos = getattr(f, "pos1", None) or ""
+        pos2 = getattr(f, "pos2", None) or ""
+        raw.append((surf, lemma, reading, pos, pos2))
     for surf, lemma, reading, pos, pos2 in raw:
         start = line.find(surf, idx)
         if start < 0:

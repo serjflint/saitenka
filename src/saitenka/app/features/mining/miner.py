@@ -15,6 +15,7 @@ import logging
 import re
 import subprocess
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -71,6 +72,7 @@ class MiningEncounter:
     span: Timespan | None
     sentence_html: str
     hovered_terms: tuple
+    connection_epoch: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +103,7 @@ class MiningTransaction:
     encounter: MiningEncounter
     apply: MiningApply
     cancelled: Callable[[], bool] = lambda: False
+    retain_capture: Callable[[], Callable[[], None]] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +289,7 @@ def media_needs(config: MineConfig) -> MediaNeeds:
 def prepare_capture(
     p: MiningTransaction, base: str, *, animated: bool | None = None
 ) -> PreparedCapture:
-    """Freeze media inputs and perform the sole mpv command before background work starts."""
+    """Capture the current frame before encoding and committing the note."""
     needs = media_needs(p.mine_cfg)
     use_animation = needs.picture and (
         p.mine_cfg.animated.enabled if animated is None else animated
@@ -296,8 +299,16 @@ def prepare_capture(
     error: Exception | None = None
     if still is not None:
         try:
-            screenshot(p.encounter.ipc, still)
-        except OSError as exc:
+            if p.retain_capture is None:
+                screenshot(p.encounter.ipc, still)
+            else:
+                screenshot(
+                    p.encounter.ipc,
+                    still,
+                    retain=p.retain_capture,
+                    expected_connection_epoch=p.encounter.connection_epoch,
+                )
+        except (OSError, FutureTimeoutError) as exc:
             error = exc
             still = None
     return PreparedCapture(base, p.encounter.span, needs, still, error, use_animation)

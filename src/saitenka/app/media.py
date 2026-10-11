@@ -33,9 +33,32 @@ class Timespan:
         return max(0.05, self.end - self.start)
 
 
-def screenshot(ipc, path: str | Path) -> Path:
+def screenshot(ipc, path: str | Path, *, retain=None, expected_connection_epoch=None) -> Path:
     """Save the current frame (video only — no subs/OSD) via mpv."""
-    ipc.command("screenshot-to-file", str(path), "video")
+    if retain is None:
+        reply = ipc.command("screenshot-to-file", str(path), "video")
+    else:
+        release = retain()
+        try:
+            request = ipc.command_async(
+                "screenshot-to-file",
+                str(path),
+                "video",
+                expected_connection_epoch=expected_connection_epoch,
+            )
+        except Exception:
+            release()
+            raise
+
+        def settled(future) -> None:
+            result = future.result()
+            if not request.accepted or result.get("error") not in {"disconnected", "timeout"}:
+                release()
+
+        request.future.add_done_callback(settled)
+        reply = request.future.result(timeout=10.0)
+    if reply.get("error") not in {None, "success"}:
+        raise OSError(f"screenshot failed: {reply.get('error')}")
     return Path(path)
 
 

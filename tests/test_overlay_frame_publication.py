@@ -22,6 +22,73 @@ from saitenka.app.overlay_ids import OverlayId
 from saitenka.mpvio.osd import RETAINED_FRAMES, Overlay
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("reply", ["success", "disconnected"])
+def test_repaint_returns_before_reply_and_keeps_its_file_through_close(reply):
+    from concurrent.futures import Future
+
+    from saitenka.mpvio.ipc import IPCRequest
+
+    class HeldIPC(util.FakeIPC):
+        def __init__(self):
+            super().__init__()
+            self.pending = []
+
+        def command_async(self, *args, **_kwargs):
+            self.command(*args)
+            future = Future()
+            self.pending.append(future)
+            return IPCRequest(len(self.pending), 0, future)
+
+    ipc = HeldIPC()
+    overlay = Overlay(ipc)
+    overlay.show_bgra(_frame(1), oid=OverlayId.SUB)
+    path = pathlib.Path(ipc.commands[-1][4])
+    try:
+        overlay.repaint()
+        overlay.repaint()
+        ipc.command("script-message", "later-input")
+        overlay.close()
+
+        assert len(ipc.pending) == 1
+        assert not ipc.pending[0].done()
+        assert path.exists()
+        assert ("script-message", "later-input") in ipc.commands
+        ipc.pending[0].set_result({"error": reply})
+        assert path.exists() is (reply == "disconnected")
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_show_after_a_pending_repaint_is_ordered_after_hide():
+    from concurrent.futures import Future
+
+    from saitenka.mpvio.ipc import IPCRequest
+
+    class HeldIPC(util.FakeIPC):
+        def command_async(self, *args, **_kwargs):
+            self.command(*args)
+            return IPCRequest(1, 0, Future())
+
+    ipc = HeldIPC()
+    overlay = Overlay(ipc)
+    overlay.show_bgra(_frame(1), oid=OverlayId.SUB)
+    try:
+        overlay.repaint()
+        overlay.set_visible(visible=False)
+        overlay.set_visible(visible=True)
+        commands = [command[0] for command in ipc.commands if command[0].startswith("overlay-")]
+        assert commands == ["overlay-add", "overlay-add", "overlay-remove", "overlay-add"]
+    finally:
+        overlay.close()
+        for command in ipc.commands:
+            if command[0] == "overlay-add":
+                pathlib.Path(command[4]).unlink(missing_ok=True)
+
+
 def _frame(value: int, size: int = 16) -> np.ndarray:
     return np.full((size, size, 4), value, dtype=np.uint8)
 

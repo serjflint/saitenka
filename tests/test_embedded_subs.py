@@ -169,14 +169,37 @@ def test_primary_selection_wins_over_secondary():
     assert es._selected_sub_track(ipc) is EMBEDDED_JA
 
 
+def test_failed_extraction_does_not_publish_a_partial_cache(tmp_path, monkeypatch):
+    import subprocess
+    from pathlib import Path
+
+    dest = tmp_path / "cache" / "track.ass"
+
+    def partial(command, **_kwargs):
+        Path(command[-1]).write_bytes(b"partial document")
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(es.subprocess, "run", partial)
+
+    assert not es.extract_embedded_track("video.mkv", 1, dest, ("-c:s", "copy"))
+    assert list(dest.parent.iterdir()) == []
+
+
 # --- the ffmpeg extraction argv itself (the tests above monkeypatch extract_embedded_track away) ---
 
 
 def test_extract_embedded_track_builds_ffmpeg_argv(tmp_path, monkeypatch):
     calls = {}
+
+    def extract(cmd, **_kw):
+        from pathlib import Path
+
+        calls["cmd"] = cmd
+        Path(cmd[-1]).write_text("complete subtitle", encoding="utf-8")
+
     monkeypatch.setattr(
         "saitenka.app.embedded_subs.subprocess.run",
-        lambda cmd, **_kw: calls.__setitem__("cmd", cmd),
+        extract,
     )
     # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
     monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
@@ -186,7 +209,8 @@ def test_extract_embedded_track_builds_ffmpeg_argv(tmp_path, monkeypatch):
     assert cmd[0] == "ffmpeg" and "/v/ep.mkv" in cmd
     assert cmd[cmd.index("-map") + 1] == "0:10"  # mpv ff-index maps straight onto ffmpeg -map 0:<n>
     assert cmd[cmd.index("-c:s") + 1] == "srt"
-    assert cmd[-1] == str(dest)
+    assert cmd[-1] != str(dest)
+    assert dest.read_text() == "complete subtitle"
     assert dest.parent.is_dir()  # destination dir created before the run
 
 

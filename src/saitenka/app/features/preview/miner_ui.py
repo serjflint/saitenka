@@ -198,7 +198,7 @@ def _stop_preview_audio(preview: PreviewPanel) -> None:
     """Kill the ▶ clip's player if one is running (afplay / mpv --no-video / ffplay) — the fire-and-
     forget Popen outlives the panel otherwise, so a dismiss left the clip playing (#251). Idempotent."""
     proc, preview.audio_proc = preview.audio_proc, None
-    kill_process_tree(proc)  # no-op on None / an already-exited process
+    kill_process_tree(proc, timeout=0)
 
 
 def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:

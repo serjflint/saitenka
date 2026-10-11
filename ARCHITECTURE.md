@@ -537,11 +537,11 @@ or episode changes. Interactive requests are checked before speculative work:
   than accumulating a queue. The worker warms the current intent first; the tick revalidates it before
   showing anything.
 
-`mined` state (jamdict/`card_for`) is resolved on the **main thread** and passed by value — jamdict is
-not worker-safe under free-threading. The speculative head priority queue has a hard capacity and drops
-excess candidates. The decode-warm FIFO is not capacity-bounded; its practical input is the finite set
-of de-duplicated content words in the configured cue window, and generation checks make old work cheap
-to discard. That is a workload bound, not a strict memory bound.
+Candidate preparation runs on a speculative worker using captured cue, scorer and mined-set inputs.
+MeCab taggers and Jamdict connections are thread-local, so a future cue cannot hold the live cue's
+parser lock. Candidate scanning checks cancellation between cues and skips oversized speculative
+texts. Both candidate admission and pending warm/head work are bounded; generation checks discard
+obsolete results.
 
 `saitenka prewarm` constructs only headless panel and `PersistentHeadCache` capabilities. It does not
 construct a study session or an mpv stand-in. The live and offline paths therefore share cache identity
@@ -626,10 +626,24 @@ One key mines the hovered subtitle token. Clicking a definition group's `mine:<c
 selects that exact card, while the add button on a nested scan popup mines its inner token. Each path
 builds an Anki note over AnkiConnect with sentence, screenshot, audio, and provenance.
 The selected target, seed/probe state, mined-expression index, local store, and scratch lifetime have
-one writer: `MiningController`. `MiningEncounterSource` samples mpv/cue facts and
+one writer: `MiningController`. `MiningEncounterSource` captures observed mpv/cue facts once and
 `MiningProjection` applies UI outcomes on the owner thread; the live controller retains no shadow
 deck or mined-set fields. `poe mining-ownership` rejects
 those old fields and direct construction or mutation outside the declared owner/composition sites.
+
+Preflight, screenshot waiting and commit run on the mining worker. UI outcomes return through the
+owner-thread journal. During playback, source/target retirement cancels pending progression; retired
+operations still publish completed Anki adds through their terminal journal. Scratch leases outlive
+cancelled workers and unsettled screenshot commands; a disconnected player leaves uncertain files
+quarantined.
+
+Selected tracks use a bounded serial preparation lane with one newest pending request. Extraction,
+font resolution, source parsing and indexing happen there; the owner adopts the prepared values only
+while media, selection, font options and connection still match. Track changes retire the old index;
+native mpv subtitles remain available while preparation is pending.
+Initial preparation starts after playback observers are seeded.
+Track-list observations retry preparation; failed indexing still adopts the current language role
+from its tag or on-screen text.
 
 ## Why the interactive path stays responsive
 
@@ -649,7 +663,7 @@ current bounds and failure modes:
 | Speculation | Fixed worker count; bounded head-render priority queue; newest-wins input slots for hover, navigation, open, and scroll; generation cancellation. | The current intent displaces an older pending intent and stale output is rejected. The decode-warm FIFO and worker-result handoff queues are not capacity-bounded. |
 | Hi-DPI | A cold native-scale viewport first shows the bounded 1× composition; native bands warm in the background and replace it only when ready. | Crispness cannot force native raster work onto the interaction tick. |
 | Cross-session render cache | Disk rows are cost-gated and keyed by format, geometry, and dictionaries; the RAM front tier has a byte LRU. | A valid hit is inflate/copy/upload rather than layout+raster. Key or geometry drift is a safe miss; malformed compressed data is a known robustness gap. |
-| Providers and analysis | Subtitle acquisition and episode analysis run outside the hover-to-paint chain and hand results back to the tick. | Provider network and analysis work do not block pointer interaction. Mining is user-triggered and remains synchronous on the main thread. |
+| Providers, tracks and mining | Acquisition, track preparation, analysis and mining I/O run on workers and publish qualified results. | Player replies, extraction and Anki calls do not occupy the input thread. Native rendering and Anki add calls already in progress are not preemptible. |
 
 ### Mechanically checked defaults
 

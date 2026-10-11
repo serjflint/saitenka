@@ -16,6 +16,44 @@ from saitenka.app.features.preview.card_preview import PreviewData
 from saitenka.runtime import events
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_dismissal_kills_a_player_that_ignores_graceful_termination(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    import sys
+
+    if os.name == "nt":
+        pytest.skip("Windows terminate is unconditional")
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(30)",
+        ],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert proc.stdout.readline() == b"ready\n"
+        monkeypatch.setattr(miner_ui, "play_audio", lambda _path: proc)
+        clip = tmp_path / "clip.opus"
+        clip.write_bytes(b"x")
+        reader = build_session(FakeIPC())
+        reader.graph.preview.store.dispatch(events.PreviewShown(_preview_data(), clip))
+        panel = reader.graph.preview.panel
+        panel.rect, panel.audio_rect = (0, 0, 200, 200), (10, 10, 40, 40)
+        miner_ui.click_preview(reader.graph.preview_commands.ports(), 20, 20)
+
+        reader.graph.preview_commands.hide()
+
+        assert proc.wait(timeout=1) != 0
+        assert reader.graph.preview.panel.audio_proc is None
+    finally:
+        proc.kill()
+        proc.wait(timeout=1)
+        proc.stdout.close()
+
+
 class _FakeProc:
     """Stands in for the ▶ clip's Popen; kill_process_tree is patched to a recorder, so no real pid."""
 
@@ -31,7 +69,12 @@ def reader_with_clip(tmp_path, monkeypatch):
     """A reader whose ▶ clip is 'playing': the ▶ branch stored an injected handle, and every stop is
     recorded instead of touching a real process."""
     killed: list = []
-    monkeypatch.setattr(miner_ui, "kill_process_tree", killed.append)
+
+    def kill(proc, *, timeout=5):
+        assert timeout == 0
+        killed.append(proc)
+
+    monkeypatch.setattr(miner_ui, "kill_process_tree", kill)
     proc = _FakeProc()
     monkeypatch.setattr(miner_ui, "play_audio", lambda _p: proc)
     clip = tmp_path / "clip.opus"

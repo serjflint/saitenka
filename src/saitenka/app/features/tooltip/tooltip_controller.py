@@ -597,6 +597,8 @@ class TooltipController:
         view = self._session().observe()
         navigation = view.navigation
         cue = view.cue
+        mined = frozenset(view.mined)
+        tokens = list(cue.tokens)
         return prefetch.PrefetchPorts(
             enabled=bool(self._preparation.config.enabled and view.dictionary is not None),
             engaged=bool(self._session().read_playback("pause")) or self._mouse_engaged,
@@ -606,19 +608,22 @@ class TooltipController:
                 navigation.nav_idx,
                 self._preparation.config.cue_lookahead,
             ),
-            tokens=cue.tokens,
+            tokens=tokens,
             styles=cue.styles,
             tokenizer=view.tokenizer,
-            inflected=self.inflected_surface,
-            is_mined=self.is_mined,
+            inflected=lambda index: view.tokenizer.inflected_in(tokens, index),
+            is_mined=lambda token: tooltip_panel.is_mined(token, mined),
         )
 
     @property
     def head_probe(self) -> prefetch.HeadProbe:
         view = self._session().observe()
+        panels = self.panel_ports
         return prefetch.HeadProbe(
             scorer=view.scorer,
-            panel_key=self.panel_key,
+            panel_key=lambda token, inflected, *, mined: tooltip_panel.panel_key(
+                panels, token, inflected, mined=mined
+            ),
             panel_present=self.has_cached_panel,
             lookahead=self._preparation.config.head_lookahead,
             queue_max=self._preparation.config.head_queue_max,

@@ -14,6 +14,7 @@ from saitenka.app.intents import Announce
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.features.mining.miner import MiningEncounter
     from saitenka.app.features.mining.mining_controller import MiningController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.subtitle_presentation import CueRenderStore
@@ -88,24 +89,29 @@ class MineCommandCoordinator:
 
     def __init__(self, ports: MineCommandPorts) -> None:
         self._ports = ports
+        self._encounter: MiningEncounter | None = None
 
     def inputs(self) -> mine_intents.MineInputs:
         ports = self._ports
         mining = ports.mining
+        self._encounter = mining.capture_encounter() if mining.configured else None
         return mine_intents.MineInputs(
             has_active_cue=ports.bookmark.has_active_cue(),
             configured=mining.configured,
-            target=mining.mine_target() if mining.configured else None,
+            target=mining.mine_target(self._encounter) if mining.configured else None,
         )
 
     def apply(self, effect: mine_intents.MineEffect, /) -> None:
+        encounter, self._encounter = self._encounter, None
         if isinstance(effect, mine_intents.MineToken):
             log.info("mine: token-index=%d animated=%s", effect.index, effect.animated)
             with otel_metrics.traced("anki_mine", source="base") as span:
                 span.set("animated", bool(effect.animated))
-                self._ports.mining.mine_index(effect.index, animated=effect.animated)
+                self._ports.mining.mine_index(
+                    effect.index, animated=effect.animated, encounter=encounter
+                )
         elif isinstance(effect, mine_intents.MineEpisode):
-            self._ports.mining.bulk_mine()
+            self._ports.mining.bulk_mine(encounter)
         elif isinstance(effect, mine_intents.BookmarkCue):
             self._ports.bookmark.capture()
         elif isinstance(effect, Announce):

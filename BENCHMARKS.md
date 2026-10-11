@@ -1,5 +1,47 @@
 # Responsiveness benchmark — in-mpv tooltip
 
+## Main-thread responsiveness — 2026-10-11
+
+Paired against `a78d4b5d`, Python 3.14.6t with `PYTHON_GIL=0`; medians of three unprofiled
+samples. Owner CPU uses `thread_time_ns`; owner-turn duration includes waiting. Separate
+owner-filtered CPU profiles attribute the work. These are component measurements, not display
+latency or a playback-wide speedup.
+
+| Stage and workload | Owner CPU, before → after | Longest owner turn, before → after |
+|---|---:|---:|
+| A: configured word-mine admission, 20 ms simulated property reply | 1.97 → 1.06 ms | 259 → 1.06 ms; queries 11 → 0 |
+| B: four live overlays, 20 ms simulated repaint reply | 0.14 → 0.19 ms | 92.6 → 0.25 ms |
+| C: real preview player ignoring SIGTERM | 11.3 → 11.1 ms | 5,012 → 11.1 ms |
+| D: real ffmpeg extraction, font probe and 1,800-cue ASS index, cold artifact cache | 21.3 → 9.57 ms | 57.7 → 3.78 ms |
+| D: same track, warm artifact cache | 13.8 → 2.66 ms | 13.6 → 1.64 ms |
+| E: mining with 100 ms simulated screenshot reply and fake Anki | 2.30 → 9.25 ms | 105 → 1.83 ms |
+| F: real tokenizer/scorer, two future cues, five useful candidates | 0.18 → 0.06 ms | 0.18 → 0.06 ms |
+
+A/B/E deliberately hold the player boundary; their wait reductions are **not healthy-player RTT
+estimates**. E's aggregate owner CPU rises because the harness keeps pumping during the screenshot;
+it does not consume fewer total resources. D's complete cold operation takes 58.0 → 65.4 ms, and
+warm takes 13.8 → 15.0 ms: the gain is availability of the input thread. F's candidate computation
+moves to a worker (1.01 ms including that worker's tagger setup); the usual short-cue saving is small.
+Independent taggers also prevent a held speculative parse from serializing a live cue.
+
+Real stock-mpv screenshot measurements used isolated paused navy clips and no Anki connection:
+
+| Video | Synchronous owner wait | Worker admission | Worker completion |
+|---|---:|---:|---:|
+| 720p | 3.73 ms | 0.007 ms | 5.21 ms |
+| 1080p | 6.37 ms | 0.011 ms | 8.12 ms |
+| 4K | 22.0 ms | 0.037 ms | 23.0 ms |
+
+The component harness, source fingerprints, raw samples and CPU attribution are retained locally
+under `vibe/plans/2026-10-11-six-stage-measurements`. The regression scenarios live in the test suite:
+held replies/parsing, obsolete source/selection/environment, partial-cache failure, delayed Anki
+commit, late screenshot consumption and concurrent taggers. Every stage has a negative control
+against the original main; new assertion oracles were also checked with the liveness gate.
+
+Remaining inline work includes preview process discovery, index-analysis admission, bitmap staging,
+startup seeding and remaining track-selection metadata queries. Uncertain disconnects quarantine
+player-owned files. These measurements do not qualify Windows or patched native-layout mpv.
+
 ## Live cue-color profiling
 
 `poe cue-replay` runs the actual player and session with the live harness's small synthetic

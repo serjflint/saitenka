@@ -13,6 +13,9 @@ logs.
   `RendererRecreationRequired` while leaving the current document usable.
 - Switching subtitle tracks no longer crashes Saitenka when libass bracket matching changes. Native
   geometry now uses a fresh renderer when track features differ.
+- Subtitle indexing, tooltip lookahead, paused repaints and mining screenshots no longer wait on
+  the input thread. Mining reuses observed playback facts, and dismissing preview audio skips the
+  graceful-exit wait.
 - Resizing no longer blocks input on diagnostic player queries. Display diagnostics use observed
   playback state, and card-preview note, image and audio preparation runs in the background.
 - Closing no longer waits for an active subtitle-geometry render before retiring the session;

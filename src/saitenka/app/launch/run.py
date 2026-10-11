@@ -1292,10 +1292,6 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             environment_select=refresh_profile_sources,
         )
     if not (demo_word or screenshot):
-        # index whatever track mpv ends up with (external/jimaku path, or an embedded track
-        # extracted via ffmpeg) so Alt+←/→/↓ nav and prefetch lookahead both have upcoming lines
-        with otel_metrics.traced("startup.subtitle_index"):
-            prepared.rebuild_sub_index()
         prepared.profile.load(
             cfg, prebuilt=deps_future
         )  # the build has been running since pre-launch

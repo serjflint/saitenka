@@ -494,6 +494,126 @@ class _FakeAnki:
         return name
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("replace_source", [False, True])
+def test_screenshot_reply_does_not_block_input_or_commit_an_obsolete_source(
+    monkeypatch, make_session, replace_source
+):
+    from concurrent.futures import Future
+    from pathlib import Path
+
+    from util import FakeIPC, await_ready
+
+    from saitenka.mpvio.ipc import IPCRequest
+
+    class HeldScreenshot(FakeIPC):
+        def __init__(self):
+            super().__init__()
+            self.shot = Future()
+            self.entered = threading.Event()
+            self.destination = None
+
+        def command(self, *args):
+            if args[0] == "screenshot-to-file":
+                self.destination = Path(args[1])
+                self.entered.set()
+                return self.shot.result(timeout=5)
+            return super().command(*args)
+
+        def command_async(self, *args, **kwargs):
+            if args[0] != "screenshot-to-file":
+                return super().command_async(*args, **kwargs)
+            self.commands.append(args)
+            self.destination = Path(args[1])
+            self.entered.set()
+            return IPCRequest(123, 0, self.shot)
+
+    ipc, anki = HeldScreenshot(), _FakeAnki()
+    ipc.props.update({"path": "/video.mkv", "time-pos": 1, "sub-start": 1, "sub-end": 2})
+    reader = make_session(
+        ipc,
+        services=SessionServices(
+            anki=anki,
+            mining=MineConfig(card_format={"Word": "{expression}", "Picture": "{screenshot}"}),
+        ),
+    )
+    reader.graph.cue.set_subtitle("本を読む")
+    reader.graph.playback.install_seed(dict(ipc.props))
+    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
+    token = next(
+        t for t in reader.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む"
+    )
+    try:
+        reader.graph.mining.mine_token(token)
+        await_ready(ipc.entered.is_set, "screenshot not requested", pump=reader.pump)
+        ipc.set_prop("pause", value=True)
+        reader.pump()
+        assert reader.graph.playback.value("pause") is True
+        assert not ipc.shot.done() and not anki.added
+        if replace_source:
+            ipc.set_prop("path", "/other.mkv")
+            reader.pump()
+            reader.close()
+            assert ipc.destination.parent.exists()
+        ipc.destination.write_bytes(b"frame")
+        ipc.shot.set_result({"error": "success"})
+        if replace_source:
+            await_ready(lambda: not ipc.destination.parent.exists(), "settled scratch was retained")
+            assert anki.added == []
+        else:
+            _await_mining(reader)
+            assert len(anki.added) == 1
+            assert anki.added[0]["fields"]["Word"] == "読む"
+    finally:
+        if not ipc.shot.done():
+            ipc.shot.set_result({"error": "command failed"})
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_a_timed_out_screenshot_keeps_its_destination_until_the_real_reply(tmp_path):
+    from concurrent.futures import Future, ThreadPoolExecutor
+
+    from util import FakeIPC, await_ready
+
+    from saitenka.app.features.mining.scratch import ScratchArtifacts
+    from saitenka.app.media import screenshot
+    from saitenka.mpvio.ipc import IPCRequest
+
+    class ExpiredWait(Future):
+        def result(self, timeout=None):
+            if not self.done():
+                raise TimeoutError
+            return super().result(timeout)
+
+    class HeldIPC(FakeIPC):
+        def __init__(self):
+            super().__init__()
+            self.reply = ExpiredWait()
+
+        def command_async(self, *args, **_kwargs):
+            self.commands.append(args)
+            return IPCRequest(1, 0, self.reply)
+
+    directory = tmp_path / "mine"
+    directory.mkdir()
+    destination = directory / "frame.jpg"
+    artifacts, ipc = ScratchArtifacts(directory), HeldIPC()
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        work = executor.submit(screenshot, ipc, destination, retain=artifacts.retain)
+        with pytest.raises(TimeoutError):
+            work.result(timeout=1)
+    artifacts.retire()
+    assert directory.exists()
+
+    destination.write_bytes(b"late frame")
+    ipc.reply.set_result({"error": "success"})
+
+    await_ready(lambda: not directory.exists(), "acknowledged scratch did not retire")
+    assert not directory.exists()
+
+
 def test_mine_token_adds_note_with_fields(monkeypatch, make_session):
     from util import FakeIPC
 
@@ -704,6 +824,59 @@ def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_sessio
     )
     assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_an_anki_add_finishing_after_source_retirement_keeps_its_original_link(
+    monkeypatch, make_session
+):
+    from util import FakeIPC, await_ready
+
+    class HeldAnki(_FakeAnki):
+        def __init__(self):
+            super().__init__()
+            self.entered, self.release = threading.Event(), threading.Event()
+
+        def add_note(self, note):
+            self.entered.set()
+            assert self.release.wait(5)
+            return super().add_note(note)
+
+    ipc, anki = FakeIPC(), HeldAnki()
+    ipc.props.update({"path": "/old.mkv", "sub-start": 1, "sub-end": 2, "time-pos": 1})
+    reader = make_session(
+        ipc,
+        services=SessionServices(
+            anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
+        ),
+    )
+    reader.graph.cue.set_subtitle("本を読む")
+    reader.graph.playback.install_seed(dict(ipc.props))
+    shown = []
+    monkeypatch.setattr(
+        PreviewController, "present_mined", lambda *_args, **_kwargs: shown.append(True)
+    )
+    token = next(
+        t for t in reader.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む"
+    )
+    try:
+        reader.graph.mining.mine_token(token)
+        await_ready(anki.entered.is_set, "Anki add not started", pump=reader.pump)
+        ipc.set_prop("path", "/new.mkv")
+        reader.pump()
+        anki.release.set()
+        await_ready(
+            lambda: reader.graph.mining.store.by_note_id(1) is not None,
+            "late commit lost its local record",
+            pump=reader.pump,
+        )
+        link = reader.graph.mining.store.by_note_id(1)
+        assert (link.video_path, link.cue_start, link.cue_end) == ("/old.mkv", 1, 2)
+        assert len(anki.added) == 1
+        assert shown == []
+    finally:
+        anki.release.set()
 
 
 def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):

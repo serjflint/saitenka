@@ -181,7 +181,7 @@ def test_mine_key_fires_its_handler_after_anki_loads_post_registration(monkeypat
         MiningSpec(identity, {"deck": config.deck, "model": config.model})
     )
     assert r.graph.mining.publish_mining_target(MiningTarget(identity, object(), config))
-    monkeypatch.setattr(r.graph.mining, "mine_target", lambda: 0)
+    monkeypatch.setattr(r.graph.mining, "mine_target", lambda _encounter=None: 0)
     calls: list[tuple[int, object]] = []
     monkeypatch.setattr(
         r.graph.mining,

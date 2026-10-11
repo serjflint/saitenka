@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import shutil
+import logging
 import sqlite3
 import tempfile
 import threading
@@ -17,7 +17,10 @@ from saitenka.app.anki import AnkiError
 from saitenka.app.capabilities import CapabilityProbe
 from saitenka.app.features.mining import mined_seed, miner, mining_operation, preview_access
 from saitenka.app.features.mining.mined_set import MinedSet
+from saitenka.app.features.mining.scratch import ScratchArtifacts
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
+
+log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -206,8 +209,10 @@ class MiningController:
         self._mined_seed = mined_seed.MinedSeedLane()
         self._anki_probe: CapabilityProbe | None = None
         self._scratch_dir = Path(tempfile.mkdtemp(prefix="saitenka-mine-"))
+        self._artifacts = ScratchArtifacts(self._scratch_dir)
         self._mined_store: MinedCardStore | None = None
         self._operation_issued = 0
+        self._operation_generation = 0
         self._operation_inflight: int | None = None
         self._operation_cancelled: threading.Event | None = None
         self._operation_journal: mining_operation.MiningActionJournal | None = None
@@ -444,13 +449,22 @@ class MiningController:
 
         self._mined_seed.retry_pending = self._lifecycle.schedule_retry(delay, due)
 
-    def mine_target(self) -> int | None:
+    def capture_encounter(self) -> miner.MiningEncounter:
+        return self._encounter()
+
+    def mine_target(self, encounter: miner.MiningEncounter | None = None) -> int | None:
         if not self.configured:
             return None
-        return miner.mine_target(self._encounter().cue)
+        return miner.mine_target((encounter or self._encounter()).cue)
 
-    def mine_index(self, index: int, *, animated: bool | None = None) -> None:
-        context = self._operation()
+    def mine_index(
+        self,
+        index: int,
+        *,
+        animated: bool | None = None,
+        encounter: miner.MiningEncounter | None = None,
+    ) -> None:
+        context = self._operation(encounter)
         if context is None or index < 0 or index >= len(context.encounter.cue.tokens):
             return
         token = context.encounter.cue.tokens[index]
@@ -488,8 +502,8 @@ class MiningController:
                 context, mining_operation.OperationKind.WORD, token=request.token, force=True
             )
 
-    def bulk_mine(self) -> None:
-        context = self._operation()
+    def bulk_mine(self, encounter: miner.MiningEncounter | None = None) -> None:
+        context = self._operation(encounter)
         if context is not None:
             self._dispatch_operation(context, mining_operation.OperationKind.BULK)
 
@@ -620,6 +634,10 @@ class MiningController:
     ) -> None:
         stage = self._completion_stage(completion, identity)
         if stage is None:
+            if request.journal is not None:
+                mining_operation.apply_outcome(
+                    mining_operation.MiningOutcome(request.journal.drain()), external
+                )
             return
         if self._lifecycle.stopped() or completion.outcome is EffectOutcome.CANCELLED:
             self._finish_operation(identity)
@@ -637,15 +655,16 @@ class MiningController:
         if stage is mining_operation.OperationStage.COMMIT or outcome.plan is None:
             self._finish_operation(identity)
             return
-        prepared = miner.prepare_capture(request.transaction, base, animated=animated)
         commit = mining_operation.MiningOperationRequest(
-            request.transaction,
+            replace(request.transaction, retain_capture=self._artifacts.retain),
             request.kind,
             mining_operation.OperationStage.COMMIT,
             request.cancelled,
             plan=outcome.plan,
-            prepared=prepared,
             journal=request.journal,
+            base=base,
+            animated=animated,
+            artifacts=self._artifacts,
         )
         if not self._submit_operation_stage(submit, identity, commit, finished):
             self._finish_operation(identity)
@@ -672,13 +691,15 @@ class MiningController:
             self._operation_journal = None
             self._operation_apply = None
 
-    def _operation(self) -> miner.MiningTransaction | None:
+    def _operation(
+        self, encounter: miner.MiningEncounter | None = None
+    ) -> miner.MiningTransaction | None:
         if self._closed:
             return None
         target = self.active_target
         if target is None:
             return None
-        encounter = self._encounter()
+        encounter = encounter or self._encounter()
         cue = miner.MineCue(
             encounter.cue.tokens,
             encounter.cue.styles,
@@ -686,23 +707,19 @@ class MiningController:
             encounter.cue.tokenizer,
             self._settings.max_bulk,
         )
-        encounter = miner.MiningEncounter(
-            cue,
-            encounter.dict_set,
-            encounter.ipc,
-            encounter.media_path,
-            encounter.playhead,
-            encounter.span,
-            encounter.sentence_html,
-            encounter.hovered_terms,
-        )
+        encounter = replace(encounter, cue=cue)
         external = self._apply()
 
         admitted_identity = target.identity
+        admitted_generation = self._operation_generation
 
         def current() -> bool:
             active = self.active_target
-            return active is not None and active.identity == admitted_identity
+            return (
+                active is not None
+                and active.identity == admitted_identity
+                and admitted_generation == self._operation_generation
+            )
 
         def current_call(call):
             return lambda *args: call(*args) if current() else None
@@ -798,6 +815,10 @@ class MiningController:
     def invalidate(self) -> None:
         """Refuse in-flight seed publication before the fallible close ledger starts."""
         self._mined_seed.invalidate()
+        self.cancel_operation()
+
+    def cancel_operation(self) -> None:
+        self._operation_generation += 1
         if self._operation_cancelled is not None:
             self._operation_cancelled.set()
         if self._operation_journal is not None and self._operation_apply is not None:
@@ -816,9 +837,7 @@ class MiningController:
 
     def retire_artifacts(self, delegate: Callable[[str], bool] | None = None) -> None:
         try:
-            if delegate is not None and delegate(str(self._scratch_dir)):
-                return
-            shutil.rmtree(self._scratch_dir, ignore_errors=True)
+            self._artifacts.retire(delegate)
         finally:
             self._closed = True
 
