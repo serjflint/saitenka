@@ -199,46 +199,43 @@ class TrackPreparation:
         self._current = current
         self._adopt = adopt
         self._failed = failed
-        self._sequence = 0
-        self._cancelled = threading.Event()
         self._pending: TrackRequest | None = None
-        self._inflight = False
+        self._active: TrackRequest | None = None
         self._submit = configure_lane(ipc, LANE, JobLanePolicy(capacity=1), prepare_track)
 
     def request(self) -> None:
         self.cancel()
         properties = self._current()
         self._pending = TrackRequest(
-            self._ipc, properties, properties.get("_epoch", 0), self._cancelled
+            self._ipc, properties, properties.get("_epoch", 0), threading.Event()
         )
         self._pump()
 
     def _pump(self) -> None:
-        if self._inflight or self._pending is None or self._submit is None:
+        if self._active is not None or self._pending is None or self._submit is None:
             return
-        sequence = self._sequence
         request, self._pending = self._pending, None
-        self._inflight = True
+        self._active = request
 
         def finished(completion) -> None:
-            self._inflight = False
+            self._active = None
             try:
-                self._finish(sequence, request, completion)
+                self._finish(request, completion)
             finally:
                 self._pump()
 
         accepted = self._submit(
             owner=Owner.SUBTITLE,
-            identity=sequence,
+            identity=id(request),
             lane=LANE,
             request=request,
             on_finished=finished,
         )
         if not accepted:
-            self._inflight = False
+            self._active = None
 
-    def _finish(self, sequence, request, completion) -> None:
-        if sequence != self._sequence:
+    def _finish(self, request, completion) -> None:
+        if request.cancelled.is_set():
             return
         now = self._current()
         if any(
@@ -252,15 +249,7 @@ class TrackPreparation:
         ):
             self._failed(request.properties)
             return
-        if now.get("_epoch", 0) != request.epoch:
-            return
         if now.get("path") != result.media or now.get("sid") != result.sid:
-            return
-        tracks = now.get("track-list") or []
-        selected = next((track for track in tracks if track.get("id") == result.sid), None)
-        if subtitle_artifact.resolve(
-            selected, media_path=result.media
-        ) != subtitle_artifact.resolve(result.track, media_path=result.media):
             return
         settings = {name: now.get(f"options/{name}") for name in subtitle_fonts.FONT_OPTIONS}
         if (
@@ -272,7 +261,6 @@ class TrackPreparation:
         self._adopt(result)
 
     def cancel(self) -> None:
-        self._cancelled.set()
-        self._sequence += 1
-        self._cancelled = threading.Event()
+        if self._active is not None:
+            self._active.cancelled.set()
         self._pending = None

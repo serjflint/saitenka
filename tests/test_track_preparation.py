@@ -12,15 +12,11 @@ from saitenka.app.session.factory import SessionInfrastructure
 from saitenka.app.subtitle_render import NullRenderer
 
 
-@pytest.mark.integration
-@pytest.mark.timeout(5)
-def test_startup_prepares_the_initial_track_after_observers_are_seeded(tmp_path, make_session):
-    source = tmp_path / "initial.srt"
-    source.write_text("1\n00:00:01,000 --> 00:00:02,000\n本を読む\n", encoding="utf-8")
+def track_session(make_session, source, *, media="/video.mkv", options=None):
     ipc = FakeIPC()
     ipc.props.update(
         {
-            "path": "/video.mkv",
+            "path": media,
             "sid": 1,
             "track-list": [
                 {
@@ -35,9 +31,18 @@ def test_startup_prepares_the_initial_track_after_observers_are_seeded(tmp_path,
     )
     reader = make_session(
         ipc,
-        options=ReaderOptions().with_overrides(prefetch=False),
+        options=options or ReaderOptions().with_overrides(prefetch=False),
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
     )
+    return ipc, reader
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_startup_prepares_the_initial_track_after_observers_are_seeded(tmp_path, make_session):
+    source = tmp_path / "initial.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:02,000\n本を読む\n", encoding="utf-8")
+    _ipc, reader = track_session(make_session, source)
     reader.start()
     await_ready(
         lambda: reader.graph.track_commands.navigation.current.sub_index is not None,
@@ -60,30 +65,15 @@ def test_unusable_font_cache_preserves_navigation(tmp_path, monkeypatch, make_se
     blocked = tmp_path / "cache-file"
     blocked.touch()
     monkeypatch.setattr(embedded_subs, "container_fonts_cache_dir", lambda: blocked / "fonts")
-    ipc = FakeIPC()
-    ipc.props.update(
-        {
-            "path": str(media),
-            "sid": 1,
-            "options/embeddedfonts": True,
-            "track-list": [
-                {
-                    "id": 1,
-                    "type": "sub",
-                    "selected": True,
-                    "external": True,
-                    "external-filename": str(source),
-                }
-            ],
-        }
-    )
-    reader = make_session(
-        ipc,
+    ipc, reader = track_session(
+        make_session,
+        source,
+        media=str(media),
         options=ReaderOptions(
             subtitle_geometry=SubtitleGeometryOptions(native_visible=True), prefetch=False
         ),
-        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
     )
+    ipc.props["options/embeddedfonts"] = True
     reader.graph.playback.install_seed(dict(ipc.props))
     reader.graph.cue.rebuild_sub_index()
     await_ready(
@@ -205,26 +195,28 @@ def test_failed_preparation_still_adopts_the_current_track_role(
 
 @pytest.mark.integration
 @pytest.mark.timeout(5)
-def test_broker_shutdown_interrupts_extraction_and_removes_staging(tmp_path, monkeypatch):
-    import os
+def test_cancelling_preparation_interrupts_extraction_and_removes_staging(tmp_path, monkeypatch):
     import sys
     from concurrent.futures import ThreadPoolExecutor
 
     import psutil
 
-    from saitenka.app import embedded_subs
+    from saitenka.app import embedded_subs, procutil
 
     ready = tmp_path / "ready"
-    script = tmp_path / "extract"
-    script.write_text(
-        f"#!{sys.executable}\nimport os,signal,time\nfrom pathlib import Path\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nPath({str(ready)!r}).write_text(str(os.getpid()))\ntime.sleep(30)\n",
-        encoding="utf-8",
+    script = (
+        "import os,signal,time\nfrom pathlib import Path\n"
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"Path({str(ready)!r}).write_text(str(os.getpid()))\ntime.sleep(30)\n"
     )
-    script.chmod(0o755)
-    if os.name == "nt":
-        pytest.skip("executable-script boundary is POSIX")
+    run = procutil.run_cancellable
+
+    def extract(_command, **kwargs):
+        return run([sys.executable, "-c", script], **kwargs)
+
+    monkeypatch.setattr(procutil, "run_cancellable", extract)
     cache = tmp_path / "cache"
-    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda _name: str(script))
+    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
     monkeypatch.setattr(embedded_subs, "embedded_subs_cache_dir", lambda: cache)
     request = track_preparation.TrackRequest(
         FakeIPC(),
@@ -264,22 +256,6 @@ def test_profile_annotation_retirement_does_not_cancel_track_preparation(
 ):
     path = tmp_path / "track.srt"
     path.write_text("1\n00:00:01,000 --> 00:00:02,000\n本を読む\n", encoding="utf-8")
-    ipc = FakeIPC()
-    ipc.props.update(
-        {
-            "path": "/video.mkv",
-            "sid": 1,
-            "track-list": [
-                {
-                    "id": 1,
-                    "type": "sub",
-                    "selected": True,
-                    "external": True,
-                    "external-filename": str(path),
-                }
-            ],
-        }
-    )
     entered, release = threading.Event(), threading.Event()
     load = track_preparation.load_index
 
@@ -289,11 +265,7 @@ def test_profile_annotation_retirement_does_not_cancel_track_preparation(
         return load(path, **kwargs)
 
     monkeypatch.setattr(track_preparation, "load_index", held)
-    reader = make_session(
-        ipc,
-        options=ReaderOptions().with_overrides(prefetch=False),
-        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
-    )
+    ipc, reader = track_session(make_session, path)
     reader.graph.playback.install_seed(dict(ipc.props))
     try:
         reader.graph.cue.rebuild_sub_index()
@@ -319,18 +291,9 @@ def test_profile_annotation_retirement_does_not_cancel_track_preparation(
 def test_same_sid_replacement_cannot_install_the_previous_document(
     tmp_path, monkeypatch, make_session
 ):
-    paths = [tmp_path / "old.srt", tmp_path / "new.srt"]
-    for path, text in zip(paths, ["古い", "新しい"], strict=True):
+    paths = [tmp_path / name for name in ("old.srt", "superseded.srt", "new.srt")]
+    for path, text in zip(paths, ["古い", "Superseded", "新しい"], strict=True):
         path.write_text(f"1\n00:00:01,000 --> 00:00:02,000\n{text}\n", encoding="utf-8")
-    ipc = FakeIPC()
-    track = {
-        "id": 1,
-        "type": "sub",
-        "selected": True,
-        "external": True,
-        "external-filename": str(paths[0]),
-    }
-    ipc.props.update({"path": "/video.mkv", "sid": 1, "track-list": [track]})
     entered, release = threading.Event(), threading.Event()
     load = track_preparation.load_index
 
@@ -341,19 +304,17 @@ def test_same_sid_replacement_cannot_install_the_previous_document(
         return load(path, **kwargs)
 
     monkeypatch.setattr(track_preparation, "load_index", held)
-    reader = make_session(
-        ipc,
-        options=ReaderOptions().with_overrides(prefetch=False),
-        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
-    )
+    ipc, reader = track_session(make_session, paths[0])
+    track = ipc.props["track-list"][0]
     reader.graph.playback.install_seed(dict(ipc.props))
     try:
         reader.graph.cue.rebuild_sub_index()
         assert entered.wait(2)
-        replacement = [{**track, "external-filename": str(paths[1])}]
-        ipc.props["track-list"] = replacement
-        reader.graph.playback.observe("track-list", replacement)
-        reader.graph.cue.rebuild_sub_index()
+        for path in paths[1:]:
+            replacement = [{**track, "external-filename": str(path)}]
+            ipc.props["track-list"] = replacement
+            reader.graph.playback.observe("track-list", replacement)
+            reader.graph.cue.rebuild_sub_index()
         release.set()
         await_ready(
             lambda: reader.graph.track_commands.navigation.current.sub_index is not None,
@@ -365,7 +326,9 @@ def test_same_sid_replacement_cannot_install_the_previous_document(
         release.set()
 
 
-@pytest.mark.parametrize("changed", [None, "artifact", "font", "epoch", "media", "selection"])
+@pytest.mark.parametrize(
+    "changed", [None, "artifact", "font", "epoch", "media", "selection", "retired"]
+)
 def test_preparation_adoption_requires_the_same_source_and_environment(monkeypatch, changed):
     from pathlib import Path
 
@@ -417,8 +380,11 @@ def test_preparation_adoption_requires_the_same_source_and_environment(monkeypat
         "epoch": {"_epoch": 1},
         "media": {"path": "/new.mkv"},
         "selection": {"sid": 2},
+        "retired": {},
     }
     current.update(updates[changed])
+    if changed == "retired":
+        controller.cancel()
 
     accepted[0]["on_finished"](
         EffectFinished(
