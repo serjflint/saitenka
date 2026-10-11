@@ -131,43 +131,68 @@ class _SpyTokenizer(_FakeTokenizer):
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def tokenize(self, line, *, strip_furigana=True, merge=True):
-        self.calls.append("tokenize")
-        return super().tokenize(line, _strip_furigana=strip_furigana, _merge=merge)
-
     def query_token(self, query):
         self.calls.append("query_token")
         return super().query_token(query)
 
-    def phrase_terms(self, tokens, index, has_term):
-        self.calls.append("phrase_terms")
-        return super().phrase_terms(tokens, index, has_term)
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("work", ["INLINE", "DEFERRED"])
+def test_swapped_tokenizer_reroutes_tooltip_phrase_probing(make_session, tmp_path, work):
+    import dicthelp
+    from driver import Driver
+    from util import await_ready, session_gateway
 
-def test_swapped_tokenizer_reroutes_tooltip_phrase_probing(make_session):
-    """A profile swap (``use_tokenizer``) must reroute the base tooltip's hover phrase-probe through
-    the NEW strategy, not the JP module functions directly — the core of #254 phase 3a.2."""
-    from saitenka.app.features.tooltip import tooltip
+    from saitenka.app.session.factory import SessionInfrastructure, TooltipWorkMode
+    from saitenka.app.subtitle_raster import PillowRasterProvider
+    from saitenka.app.subtitle_render import SubtitleRenderer
 
-    class _DS:
-        def has_term(self, *_forms):
-            return True
+    class RoutedTokenizer(UnidicTokenizer):
+        name = "test-hover-routing"
 
-    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
-    spy = _SpyTokenizer()
-    reader.graph.profile.profile.use_tokenizer(spy)
-    reader.graph.subtitle_presentation.cue.replace_tokenized(
-        tokens=[Token(surface="本", lemma="本", reading="ほん", pos="名詞", start=0, end=1)]
+        def phrase_terms(self, tokens, index, has_term):
+            if tokens[index].surface == "猫" and has_term("特別"):
+                return ["特別"], index, index + 1
+            return None
+
+    register_tokenizer(RoutedTokenizer.name, RoutedTokenizer)
+    dictionary = dicthelp.load_set(
+        [
+            dicthelp.term_zip(
+                tmp_path / "words.zip",
+                "Words",
+                [
+                    ["猫", "ねこ", ["ordinary lookup"]],
+                    ["特別", "とくべつ", ["selected strategy lookup"]],
+                ],
+            )
+        ]
     )
-
-    tooltip.resolve_hover(
-        reader.graph.tooltip.tip_ports,
-        reader.graph.tooltip.word_lookup,
-        reader.graph.tooltip.hover_inputs,
-        0,
+    ipc = FakeIPC({"osd-dimensions": {"w": 1280, "h": 720}})
+    gateway = session_gateway(ipc)
+    reader = make_session(
+        ipc,
+        services=SessionServices(dictionaries=dictionary),
+        infrastructure=SessionInfrastructure(
+            renderer=SubtitleRenderer(PillowRasterProvider()),
+            tooltip_work=TooltipWorkMode[work],
+        ),
     )
+    try:
+        reader.graph.profile.profile.use_tokenizer(RoutedTokenizer())
+        reader.graph.presentation.refresh_osd()
+        reader.graph.playback.observe("sub-text", "猫")
+        reader.pump()
+        ui = Driver(reader).move_to_word(0)
+        await_ready(
+            lambda: ui.tip_shown, "selected strategy tooltip did not open", pump=reader.pump
+        )
 
-    assert "phrase_terms" in spy.calls
+        assert reader.graph.tooltip.surface_state().view.state.reading == "とくべつ"
+    finally:
+        reader.close()
+        gateway.close()
 
 
 def test_swapped_tokenizer_reroutes_nested_popup_link_lookup(make_session):
