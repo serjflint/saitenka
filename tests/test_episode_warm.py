@@ -3,12 +3,14 @@ playback, so no cue pays cold tokenization mid-episode (a track switch supersede
 
 from __future__ import annotations
 
-from saitenka_subtitles import CueIndex, parse_srt
-from session_builder import TestSession, build_session
+import pytest
+from session_builder import build_session
 from util import FakeIPC
 
-from saitenka.app.session.factory import SessionServices
+from saitenka.app.session.factory import SessionInfrastructure, SessionServices
 from saitenka.app.subtitle_render import NullRenderer
+
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(5)]
 
 _SRT = (
     "1\n00:00:01,000 --> 00:00:03,000\n本を読む\n\n"
@@ -32,16 +34,14 @@ class _ImmediateThread:
         self._target(*self._args)
 
 
-def _reader(*, dict_set=None) -> TestSession:
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=dict_set))
-    reader.graph.screen.osd = (1280, 720)
-    reader.graph.subtitle_presentation.renderer = NullRenderer()
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(parse_srt(_SRT))
-    return reader
-
-
-def test_warm_loop_tokenizes_every_cue(monkeypatch):
-    reader = _reader(dict_set=_ExistsDS())
+def _reader(monkeypatch, *, dict_set=None):
+    reader = build_session(
+        FakeIPC(),
+        services=SessionServices(dictionaries=dict_set),
+        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
+    )
+    # Independent analysis shares this tokenizer.
+    reader.graph.ipc.close_runtime_job_lane("episode-analysis")
     calls: list[str] = []
     real = reader.graph.profile.profile.tokenizer.tokenize
     monkeypatch.setattr(
@@ -53,73 +53,46 @@ def test_warm_loop_tokenizes_every_cue(monkeypatch):
         "saitenka.app.features.annotation.annotation_controller.threading.Thread",
         _ImmediateThread,
     )
+    return reader, calls
+
+
+def _load(reader, path, text=_SRT):
+    path.write_text(text, encoding="utf-8")
+    reader.graph.subtitle_navigation.load_index(path)
+
+
+def test_warm_loop_tokenizes_every_cue(monkeypatch, tmp_path):
+    reader, calls = _reader(monkeypatch, dict_set=_ExistsDS())
+    _load(reader, tmp_path / "episode.srt")
+    assert calls == list(_CUES)
 
     reader.graph.profile_integration.warm_episode()
     assert calls == list(_CUES)
 
-    reader.graph.profile_integration.warm_episode()
-
+    for text in _CUES:
+        reader.graph.playback.observe("sub-text", text)
+        reader.pump()
+        assert (
+            "".join(t.surface for t in reader.graph.subtitle_presentation.cue.current.tokens)
+            == text
+        )
     assert calls == list(_CUES)
 
 
-def test_warmed_cue_is_a_hit_with_no_retokenization(monkeypatch):
-    reader = _reader(dict_set=_ExistsDS())
-    monkeypatch.setattr(
-        "saitenka.app.features.annotation.annotation_controller.threading.Thread",
-        _ImmediateThread,
-    )
-    reader.graph.profile_integration.warm_episode()
+def test_warm_uses_the_replacement_index(monkeypatch, tmp_path):
+    reader, calls = _reader(monkeypatch, dict_set=_ExistsDS())
+    _load(reader, tmp_path / "episode.srt")
+    assert calls == list(_CUES)
+    calls.clear()
 
-    monkeypatch.setattr(
-        reader.graph.profile.profile.tokenizer,
-        "tokenize",
-        lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a warmed cue")),
-    )
-    reader.graph.cue.set_subtitle(
-        "水を飲む"
-    )  # a warmed cue → served from the cache, annotated at cue time
-
-    assert reader.graph.annotation.view.pending_text is None and [
-        t.surface for t in reader.graph.subtitle_presentation.cue.current.tokens
-    ]
-
-
-def test_warm_uses_the_replacement_index(monkeypatch):
-    reader = _reader(dict_set=_ExistsDS())
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
-        parse_srt("1\n00:00:01,000 --> 00:00:03,000\n犬\n")
-    )
-    calls: list[str] = []
-    real = reader.graph.profile.profile.tokenizer.tokenize
-    monkeypatch.setattr(
-        reader.graph.profile.profile.tokenizer,
-        "tokenize",
-        lambda line: calls.append(line) or real(line),
-    )
-    monkeypatch.setattr(
-        "saitenka.app.features.annotation.annotation_controller.threading.Thread",
-        _ImmediateThread,
-    )
-
-    reader.graph.profile_integration.warm_episode()
+    _load(reader, tmp_path / "replacement.srt", "1\n00:00:01,000 --> 00:00:03,000\n犬\n")
 
     assert calls == ["犬"]
 
 
-def test_launcher_is_a_noop_without_a_dictionary(monkeypatch):
-    reader = _reader(dict_set=None)
-    calls: list[str] = []
-    real = reader.graph.profile.profile.tokenizer.tokenize
-    monkeypatch.setattr(
-        reader.graph.profile.profile.tokenizer,
-        "tokenize",
-        lambda line: calls.append(line) or real(line),
-    )
-    monkeypatch.setattr(
-        "saitenka.app.features.annotation.annotation_controller.threading.Thread",
-        _ImmediateThread,
-    )
+def test_launcher_is_a_noop_without_a_dictionary(monkeypatch, tmp_path):
+    reader, calls = _reader(monkeypatch)
 
-    reader.graph.profile_integration.warm_episode()
+    _load(reader, tmp_path / "episode.srt")
 
     assert calls == []
