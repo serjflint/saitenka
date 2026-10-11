@@ -2138,9 +2138,10 @@ def test_changed_render_space_replaces_pending_geometry(tmp_path: Path) -> None:
     assert native is not None
     result.graph.playback.observe_event({"name": "sub-text", "data": "猫を見る"})
     result.graph.cue.settle()
-    ipc.props["osd-dimensions"] = {"w": 1920, "h": 1080}
+    ipc.set_prop("osd-dimensions", {"w": 1920, "h": 1080})
+    result.pump()
 
-    assert result.graph.presentation.refresh_osd()
+    assert result.graph.screen.osd == (1920, 1080)
     native.refresh(result.graph.cue.geometry_observation())
     settle_jobs(result, ipc)
 
@@ -2981,8 +2982,9 @@ def test_retina_letterbox_geometry_uses_mpv_frame_margins(tmp_path: Path) -> Non
         "h": 1080,
         "par": 1.0,
     }
-    # Through the path production uses: the host adopts a new OSD surface in `refresh_osd`, and the
-    # layout follows the host rather than re-reading the property.
+    result.graph.playback.install_seed(
+        {name: ipc.props[name] for name in ("osd-dimensions", "video-out-params")}
+    )
     assert result.graph.presentation.refresh_osd()
 
     result.graph.cue.set_subtitle("猫を見る")

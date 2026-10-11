@@ -507,6 +507,7 @@ def test_observed_ultrawide_cue_exports_consumed_configuration(monkeypatch, tmp_
     spans = record_spans(monkeypatch)
     session, ipc, backend = reader(tmp_path)
     ipc.props["osd-dimensions"] = {"w": 3440, "h": 1440, "mt": 10, "mb": 11, "ml": 0, "mr": 0}
+    session.graph.playback.install_seed({"osd-dimensions": ipc.props["osd-dimensions"]})
     assert session.graph.presentation.refresh_osd()
     try:
         session.graph.playback.observe("sub-text", "猫を見る")

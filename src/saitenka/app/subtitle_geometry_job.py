@@ -664,7 +664,7 @@ class SubtitleGeometryWorker:
             self._prefetch_inflight_key = None
             # The epoch, not the generation: a source or font change mid-render means this was
             # built from a document that is gone, and filing it would resurrect a cleared cache.
-            if result is None or epoch != self._prefetch_epoch:
+            if self._closed or result is None or epoch != self._prefetch_epoch:
                 self._prefetch_dropped += 1
                 return waiter
             cache_key = request.cache_key()

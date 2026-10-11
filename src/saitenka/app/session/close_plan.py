@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka.app.features.mining.mining_operation import LANE as MINING_OPERATION_LANE
+from saitenka.app.features.preview.preparation import LANE as PREVIEW_LANE
 from saitenka.app.features.subtitle.colored_track_controller import LANE as COLORED_TRACK_LANE
 from saitenka.app.features.tooltip.preparation import TOOLTIP_PREPARATION_CLOSE_PARTICIPANTS
 from saitenka.app.session.close_ledger import CloseStep
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
     from saitenka.app.features.history.history_owner import HistoryOwner
     from saitenka.app.features.mining.mining_controller import MiningController
+    from saitenka.app.features.preview.preview_controller import PreviewController
     from saitenka.app.features.tooltip.preparation import TooltipPreparationController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.interaction.mouse_capture import MouseCapture
@@ -30,9 +32,10 @@ if TYPE_CHECKING:
 CloseAct = Callable[[], object]
 
 CAPABILITY_PARTICIPANTS = ("capability:tts", "capability:anki")
-INTERACTION_WORK_PARTICIPANTS = ("interaction-jobs", "hover-metadata")
+INTERACTION_WORK_PARTICIPANTS = ("interaction-jobs", "hover-metadata", "preview")
 WORKER_LANE_PARTICIPANTS = (
     "lanes:stop-workers",
+    "lanes:card-preview",
     "lanes:subtitle-fetch",
     "lanes:subtitle-picker",
     "lanes:colored-track",
@@ -63,6 +66,7 @@ class CloseContributions:
     close_anki: CloseAct
     cancel_interaction_jobs: CloseAct
     close_hover_metadata: CloseAct
+    close_preview: CloseAct
     start_lane_budget: CloseAct
     close_lane: Callable[[str, float], object]
     lane_remaining: Callable[[], float]
@@ -94,7 +98,9 @@ def assemble_close_participants(contributions: CloseContributions) -> dict[str, 
         "capability:anki": contributions.close_anki,
         "interaction-jobs": contributions.cancel_interaction_jobs,
         "hover-metadata": contributions.close_hover_metadata,
+        "preview": contributions.close_preview,
         "lanes:stop-workers": contributions.start_lane_budget,
+        "lanes:card-preview": lane(PREVIEW_LANE),
         "lanes:subtitle-fetch": lane("subtitle-fetch"),
         "lanes:subtitle-picker": lane("subtitle-picker"),
         "lanes:colored-track": lane(COLORED_TRACK_LANE),
@@ -143,6 +149,7 @@ class SessionClosePlan:
         tooltip_preparation: TooltipPreparationController,
         annotation: CueAnnotationController,
         analysis: AnalysisController,
+        preview: PreviewController,
         mouse: MouseCapture,
         geometry_refresh: Retirable,
         retire_settle_window: Callable[[], None],
@@ -164,6 +171,7 @@ class SessionClosePlan:
         self._tooltip_preparation = tooltip_preparation
         self._annotation = annotation
         self._analysis = analysis
+        self._preview = preview
         self._mouse = mouse
         self._geometry_refresh = geometry_refresh
         self._retire_settle_window = retire_settle_window
@@ -230,6 +238,7 @@ class SessionClosePlan:
                 close_anki=lambda: self._mining.close_capability(),
                 cancel_interaction_jobs=lambda: self._tooltip.cancel_jobs(),
                 close_hover_metadata=lambda: self._tooltip.close_metadata(),
+                close_preview=self._preview.close,
                 start_lane_budget=start_lane_budget,
                 close_lane=self._close_lane,
                 lane_remaining=self._remaining,

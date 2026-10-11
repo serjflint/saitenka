@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from saitenka.app.features.annotation.annotation_controller import CueAnnotationController
     from saitenka.app.features.history.history_owner import HistoryOwner
     from saitenka.app.features.mining.mining_controller import MiningController
+    from saitenka.app.features.preview.preview_controller import PreviewController
     from saitenka.app.features.tooltip.preparation import TooltipPreparationController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
     from saitenka.app.interaction.mouse_capture import MouseCapture
@@ -69,6 +70,7 @@ class SessionLifecycleOwners:
     tooltip_preparation: TooltipPreparationController
     annotation: CueAnnotationController
     analysis: AnalysisController
+    preview: PreviewController
     mouse: MouseCapture
     geometry_refresh: Retirable
     subtitle_presentation: SubtitlePresentation
@@ -260,6 +262,7 @@ def compose_session_lifecycle(
         tooltip_preparation=owners.tooltip_preparation,
         annotation=owners.annotation,
         analysis=owners.analysis,
+        preview=owners.preview,
         mouse=owners.mouse,
         geometry_refresh=owners.geometry_refresh,
         retire_settle_window=acts.retire_settle_window,
@@ -302,7 +305,7 @@ def compose_session_lifecycle(
         actions=start,
         close_plan=close_plan,
         stop=stop,
-        before_close=owners.mining.invalidate,
+        before_close=start_sequence(owners.preview.close, owners.mining.invalidate),
     )
 
 

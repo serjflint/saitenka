@@ -132,4 +132,4 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container(
 
     assert reader.graph.subtitle_tracks.current == SubtitleTrackState()
     assert reader.graph.translation.state.held  # the hold is session-lived
-    assert removed == [OverlayId.TRANS]
+    assert removed == [OverlayId.PREVIEW, OverlayId.TRANS]

@@ -223,7 +223,7 @@ class CueCoordinator:
             mark("navigation_reset")
             with otel_metrics.traced("hide_preview"):
                 mark("preview_span_enter")
-                o.preview.hide()
+                o.preview.retire_cue()
                 mark("preview_body")
             mark("preview_span_exit")
         if not text.strip():
@@ -485,6 +485,15 @@ class CueCoordinator:
         self._request_playback_retirement()
 
     def retire(self, reason: str) -> None:
+        if reason in {
+            "profile",
+            "connection-lost",
+            playback.RetireReason.SOURCE.value,
+            playback.RetireReason.CONNECTION.value,
+            playback.RetireReason.TRACK.value,
+            playback.RetireReason.ROLE.value,
+        }:
+            self._o.preview.hide()
         o = self._o
         transient = reason == playback.RetireReason.CUE_TEXT.value and self._mid_seek_transient()
         if o.presentation.layout is not None:
@@ -535,6 +544,7 @@ class CueCoordinator:
 
     def replace_source(self, path: object = None, *, reason: str) -> None:
         o = self._o
+        o.preview.hide()
         self._cue_start_ms = None
         o.presentation.invalidate_timed("source-replaced")
         o.presentation.color_telemetry.retire("source-changed")
@@ -544,6 +554,7 @@ class CueCoordinator:
 
     def rebind_episode(self) -> None:
         o = self._o
+        o.preview.hide()
         o.presentation.color_telemetry.retire("episode-changed")
         o.picker.close()
         o.acquisition.retire_episode()

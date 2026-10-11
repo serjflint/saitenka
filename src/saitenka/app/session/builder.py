@@ -670,6 +670,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             rebuild_index=lambda: cue_ref.get().rebuild_sub_index(),
             track_ports=track_commands.ports,
             colored_track=colored_track,
+            retire_preview=preview_commands.hide,
         )
     )
 
@@ -756,8 +757,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             open_mined=lambda note_id: sidebar_coordination.open_mined(
                 sidebar_controller.view(),
                 build_sidebar_actions(),
-                preview_commands.ports(),
-                preview_commands.card_source(),
+                preview_commands,
                 note_id,
             ),
         )
@@ -964,6 +964,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             tooltip_preparation,
             annotation_controller,
             analysis_controller,
+            preview_controller,
             mouse,
             subtitle_presentation.refresh,
             subtitle_presentation,

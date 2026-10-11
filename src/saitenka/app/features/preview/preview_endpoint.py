@@ -63,10 +63,14 @@ class PreviewCommandEndpoint:
 
         self.mining.force_duplicate(ForceDuplicate(miner_ui.duplicate_token(self.preview.panel)))
 
-    def card_source(self) -> miner_ui.CardSource:
+    def card_source(self, *, at: float | None = None) -> miner_ui.CardSource:
         from saitenka.app.features.mining import miner
 
         access = self.mining.preview_access()
+        target = self.mining.active_target
+        state = self.playback.state
+        playhead = self.playback.state.value("time-pos") if at is None else at
+        video = self.playback.state.value("path")
         return miner_ui.CardSource(
             deck=access.deck,
             model=access.model,
@@ -74,13 +78,18 @@ class PreviewCommandEndpoint:
             note_info=access.note_info,
             fetch_image=access.fetch_image,
             fetch_media=access.fetch_media,
-            lines=self.cue.current.lines,
+            lines=[list(line) for line in self.cue.current.lines],
             provenance=lambda video: miner.provenance(
-                self.playback.number("time-pos") or 0.0,
+                float(playhead) if isinstance(playhead, int | float) else 0.0,
                 video,
             ),
-            video_path=lambda: self.playback.query("path"),
-            toast=self.toast,
+            video_path=lambda: video,
+            current=lambda: (
+                self.playback.state.media == state.media
+                and self.playback.state.value("path") == video
+                and self.playback.state.connection == state.connection
+                and self.mining.active_target is target
+            ),
         )
 
     def sentence_lines(self) -> list[str]:
@@ -96,6 +105,14 @@ class PreviewCommandEndpoint:
 
     def hide(self) -> None:
         miner_ui.hide_preview(self.ports())
+
+    def retire_cue(self) -> None:
+        if not self.preview.retains_cue(
+            self.playback.cue.text,
+            self.playback.state.value("sub-start"),
+            self.playback.state.value("sub-end"),
+        ):
+            self.hide()
 
     def replay(self) -> None:
         miner_ui.replay_preview(self.ports())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
@@ -12,7 +13,7 @@ from saitenka.app.subtitle_geometry_diagnostics import geometry_error_code
 from saitenka.app.subtitle_ownership import ASK_MPV, SelectedSid
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from saitenka_subtitles.geometry import GeometryBackend, GeometryRequest, GeometrySnapshot
 
@@ -302,7 +303,7 @@ class SubtitleModeCoordinator:
             span.set("requested_tokens", len(request.palette))
             span.set("frame_width", request.frame_size[0])
             span.set("frame_height", request.frame_size[1])
-            with self._backend_lock:
+            with self._backend_operation():
                 with self._state_lock:
                     if self._closed or ticket.sequence != self._request_sequence:
                         span.set("outcome", "superseded")
@@ -402,7 +403,7 @@ class SubtitleModeCoordinator:
         return self.render_prefetch_outcome(request).snapshot
 
     def render_prefetch_outcome(self, request: GeometryRequest) -> GeometryPrefetchResolution:
-        with self._backend_lock:
+        with self._backend_operation():
             with self._state_lock:
                 # Deliberately not fenced by the generation: this renders from the request's own
                 # document and never reads or writes `_current`, so a speculation outliving the cue
@@ -423,7 +424,11 @@ class SubtitleModeCoordinator:
                     span.set("error_code", geometry_error_code(error))
                     return GeometryPrefetchResolution(None, error)
                 span.set("outcome", "ready")
-                return GeometryPrefetchResolution(result)
+                return self._prefetch_result(result)
+
+    def _prefetch_result(self, result: GeometrySnapshot) -> GeometryPrefetchResolution:
+        with self._state_lock:
+            return GeometryPrefetchResolution(None if self._closed else result)
 
     def close(self) -> None:
         with self._state_lock:
@@ -436,6 +441,30 @@ class SubtitleModeCoordinator:
         # The renderer is a close participant alongside the geometry backend: quarantining geometry
         # while the raster surface stays live leaves a late annotation able to publish pixels.
         self._renderer.close()
-        with self._backend_lock:
-            if self._backend is not None:
-                self._backend.close()
+        # An active render disposes its backend on exit; never join it through this lock.
+        if self._backend_lock.acquire(blocking=False):
+            try:
+                self._dispose_backend()
+            finally:
+                self._backend_lock.release()
+
+    @contextmanager
+    def _backend_operation(self) -> Iterator[None]:
+        self._backend_lock.acquire()
+        try:
+            yield
+        finally:
+            with self._state_lock:
+                closed = self._closed
+                if not closed:
+                    self._backend_lock.release()
+            if closed:
+                try:
+                    self._dispose_backend()
+                finally:
+                    self._backend_lock.release()
+
+    def _dispose_backend(self) -> None:
+        backend, self._backend = self._backend, None
+        if backend is not None:
+            backend.close()

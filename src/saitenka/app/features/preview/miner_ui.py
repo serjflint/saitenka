@@ -75,7 +75,7 @@ class CardSource:
     lines: list[list[Token]]
     provenance: Callable[[object], str]
     video_path: Callable[[], object]
-    toast: Callable[[str, str], None]
+    current: Callable[[], bool] = lambda: True
 
 
 def duplicate_token(panel: PreviewPanel) -> Token | None:
@@ -108,14 +108,18 @@ def footer(deck: str | None, model: str | None, provenance: str) -> str:
     return f"{deck} · {model} · {provenance}"
 
 
-def preview_mined(
-    ports: PreviewPorts, source: CardSource, card, tok, video, status: str = "mined"
-) -> None:
-    panel = ports.preview.panel
+@dataclass(frozen=True, slots=True)
+class PreparedPreview:
+    data: PreviewData
+    audio: Path | str | None
+
+
+def prepare_mined(source: CardSource, card, tok, video, status: str, jpg, audio) -> PreparedPreview:
     img = None
-    if panel.last_jpg and Path(panel.last_jpg).exists():
-        img = Image.open(panel.last_jpg)
-    secs = audio_duration(panel.last_audio) if panel.last_audio else None
+    if jpg and Path(jpg).exists():
+        with Image.open(jpg) as opened:
+            img = opened.copy()
+    secs = audio_duration(audio) if audio else None
     pv = PreviewData(
         status,
         card.expression,
@@ -127,16 +131,13 @@ def preview_mined(
         secs,
         footer(source.deck, source.model, source.provenance(video)),
     )
-    show_preview(ports, pv, panel.last_audio)
+    return PreparedPreview(pv, audio)
 
 
-def preview_existing(
-    ports: PreviewPorts, source: CardSource, note_id: int, card, status: str
-) -> None:
+def prepare_existing(source: CardSource, note_id: int, card, status: str) -> PreparedPreview | None:
     info = source.note_info(note_id)
     if info is None:
-        source.toast(f"already have {card.expression}", "warn")
-        return
+        return None
     f, fld = info["fields"], dict(source.fields)
 
     def val(logical):
@@ -144,6 +145,8 @@ def preview_existing(
 
     img = source.fetch_image(_media_name(val("picture"), r'src="([^"]+)"'))
     mp3 = source.fetch_media(_media_name(val("audio"), r"\[sound:([^\]]+)\]"))
+    if img is not None:
+        img.load()
     secs = audio_duration(mp3) if mp3 else None
     pv = PreviewData(
         status,
@@ -156,7 +159,7 @@ def preview_existing(
         secs,
         footer(source.deck, source.model, source.provenance(source.video_path())),
     )
-    show_preview(ports, pv, mp3)
+    return PreparedPreview(pv, mp3)
 
 
 def _grab_preview_keys(ipc, bindings) -> None:
@@ -237,6 +240,7 @@ def render_preview(
 
 def hide_preview(ports: PreviewPorts) -> None:
     # every dismiss path (✕ / Esc / new-cue) funnels here
+    ports.preview.cancel()
     _stop_preview_audio(ports.preview.panel)
     ports.surfaces.remove(OverlayId.PREVIEW)
     ports.preview.store.dispatch(events.PreviewDismissed())

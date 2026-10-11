@@ -17,6 +17,7 @@ def test_feature_close_contribution_cannot_replace_another_participant() -> None
         close_anki=close,
         cancel_interaction_jobs=close,
         close_hover_metadata=close,
+        close_preview=close,
         start_lane_budget=close,
         close_lane=lambda _name, _remaining: None,
         lane_remaining=lambda: 0.0,
