@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791715600156,
+  "lastUpdate": 1791719436423,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18299,6 +18299,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.317398,
             "range": "3 replicas; min 0.997673; max 1.33111; MAD 0.013713; worst 1.33111",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "57a6179af547215e40d9044846175d91a9499e10",
+          "message": "Merge pull request #553 from serjflint/fix/libasslite-feature-transition-guard\n\nfix(libasslite): reject unsafe track feature changes",
+          "timestamp": "2026-10-11T14:48:06+03:00",
+          "tree_id": "cd666973e1c24d6e7f1cce521a5c306c94ee5e9e",
+          "url": "https://github.com/serjflint/saitenka/commit/57a6179af547215e40d9044846175d91a9499e10"
+        },
+        "date": 1791719435502,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 5.163584,
+            "range": "3 replicas; min 3.58173; max 6.8269; MAD 1.58186",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.228031,
+            "range": "3 replicas; min 5.28664; max 9.68596; MAD 1.9414; worst 9.68596",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.741416,
+            "range": "3 replicas; min 10.6926; max 22.2185; MAD 4.04887",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.852793,
+            "range": "3 replicas; min 10.8683; max 22.3612; MAD 3.98445; worst 22.3612",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 11.605271,
+            "range": "3 replicas; min 11.3551; max 15.2607; MAD 0.250133",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.069351,
+            "range": "3 replicas; min 0.050095; max 0.139122; MAD 0.019256; worst 0.139122",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 30.585402,
+            "range": "3 replicas; min 20.9147; max 47.0615; MAD 9.67066; worst 47.0615",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.115307,
+            "range": "3 replicas; min 2.15704; max 19.3106; MAD 0.958268; worst 19.3106",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.183994,
+            "range": "3 replicas; min 0.924693; max 1.67889; MAD 0.259301; worst 1.67889",
             "unit": "ms"
           }
         ]
