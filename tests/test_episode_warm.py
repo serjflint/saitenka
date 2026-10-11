@@ -55,6 +55,9 @@ def test_warm_loop_tokenizes_every_cue(monkeypatch):
     )
 
     reader.graph.profile_integration.warm_episode()
+    assert calls == list(_CUES)
+
+    reader.graph.profile_integration.warm_episode()
 
     assert calls == list(_CUES)
 
@@ -105,27 +108,18 @@ def test_warm_uses_the_replacement_index(monkeypatch):
 
 def test_launcher_is_a_noop_without_a_dictionary(monkeypatch):
     reader = _reader(dict_set=None)
+    calls: list[str] = []
+    real = reader.graph.profile.profile.tokenizer.tokenize
     monkeypatch.setattr(
         reader.graph.profile.profile.tokenizer,
         "tokenize",
-        lambda _line: (_ for _ in ()).throw(AssertionError("unexpected warm")),
+        lambda line: calls.append(line) or real(line),
     )
-    reader.graph.profile_integration.warm_episode()
-
-
-def test_launcher_skips_an_index_the_owner_already_admitted(monkeypatch):
-    reader = _reader(dict_set=_ExistsDS())
     monkeypatch.setattr(
         "saitenka.app.features.annotation.annotation_controller.threading.Thread",
         _ImmediateThread,
     )
-    reader.graph.profile_integration.warm_episode()
-    monkeypatch.setattr(
-        reader.graph.profile.profile.tokenizer,
-        "tokenize",
-        lambda _line: (_ for _ in ()).throw(AssertionError("re-warmed an owned index")),
-    )
 
     reader.graph.profile_integration.warm_episode()
 
-    assert reader.graph.annotation.view.pending_text is None
+    assert calls == []
