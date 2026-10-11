@@ -20,6 +20,7 @@ def _token(surface: str = "本") -> Token:
     return Token(surface, surface, "ほん", "名詞", 0, len(surface), "")
 
 
+@pytest.mark.parametrize("binary_known", [False, True])
 @pytest.mark.parametrize(
     ("state", "tag", "color_name"),
     [
@@ -30,7 +31,9 @@ def _token(surface: str = "本") -> Token:
         ("forgotten", "forgotten", "forgotten"),
     ],
 )
-def test_fsrs_state_has_configurable_style_and_precedes_frequency(state, tag, color_name):
+def test_fsrs_state_has_configurable_style_and_precedes_frequency(
+    state, tag, color_name, binary_known
+):
     palette = Palette(
         learning=(1, 2, 3, 255),
         young=(4, 5, 6, 255),
@@ -41,7 +44,7 @@ def test_fsrs_state_has_configurable_style_and_precedes_frequency(state, tag, co
     scorer = Coloring(
         Coloring(
             Scorer(
-                known=KnownWords.from_set(["本"]),
+                known=KnownWords.from_set(["本"] if binary_known else []),
                 freq=FreqDict({"本": 1}, "test"),
                 fsrs_snap=KnownSnap.of({"本": state}),
                 enable_n_plus_one=False,

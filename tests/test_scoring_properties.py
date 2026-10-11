@@ -13,7 +13,6 @@ from hypothesis import given
 from saitenka_dict import FreqDict, JlptDict
 from saitenka_tokenize.japanese import Token
 from saitenka_wordstate import FUNCTION_POS, Scorer, TokenVerdict, mark_n_plus_one
-from saitenka_wordstate.fsrs import KnownSnap
 from saitenka_wordstate.known import KnownWords
 
 from saitenka.app.scoring import Coloring, Palette
@@ -253,43 +252,6 @@ def test_out_of_range_rank_falls_through_to_base():
     s = sc.score_line([_kanji_token()])[0]
     assert s.color == PAL.base
     assert s.tag == "base"
-
-
-# --- forgotten (FSRS) tint: the whole fsrs_snap path had no test — is_forgotten never fired. ---------
-
-
-def test_forgotten_word_gets_the_forgotten_tint():
-    """An FSRS 'forgotten' content word (not known, not N+1) resurfaces with the forgotten colour,
-    between known and unknown."""
-    snap = KnownSnap.of({"本": "forgotten"})
-    sc = Coloring(
-        Scorer(
-            known=KnownWords.from_set([]),
-            fsrs_snap=snap,
-            enable_freq=False,
-            enable_jlpt=False,
-            enable_n_plus_one=False,
-        )
-    )
-    s = sc.score_line([_kanji_token()])[0]
-    assert s.color == PAL.forgotten
-    assert s.tag.startswith("forgotten")
-
-
-def test_fsrs_known_beats_forgotten_and_freq():
-    """A word the snapshot marks 'known' takes the known colour even with a freq dict present."""
-    snap = KnownSnap.of({"本": "known"})
-    sc = Coloring(
-        Scorer(
-            known=KnownWords.from_set([]),
-            fsrs_snap=snap,
-            freq=FreqDict({"本": 1}, "t"),
-            enable_jlpt=False,
-            enable_n_plus_one=False,
-        )
-    )
-    s = sc.score_line([_kanji_token()])[0]
-    assert s.color == PAL.known
 
 
 # --- multi-sentence N+1: each sentence is scored independently — pins the `start = i + 1` advance and

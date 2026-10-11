@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from saitenka.app.scoring import Coloring, Palette
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -227,111 +225,6 @@ class TestKnownSnap:
         snap = fsrs.load_knownness(db)
         # "しる" is the reading stored from the note field parsing
         assert snap.is_known("知る", "しる") or snap.is_known("知る")
-
-
-# ---------------------------------------------------------------------------
-# 4. Scorer: forgotten tint
-# ---------------------------------------------------------------------------
-
-
-class TestScorerForgottenTint:
-    """Scorer gains a 'forgotten' tint between known and unknown."""
-
-    def test_palette_has_forgotten_color(self):
-        """Palette now has a 'forgotten' color attribute."""
-        p = Palette()
-        assert hasattr(p, "forgotten"), "Palette must have a 'forgotten' color for Stage 13"
-
-    def test_forgotten_word_gets_forgotten_tint(self, tmp_path):
-        """A word in 'forgotten' state in the snapshot is styled with the forgotten color."""
-        fsrs = _import_fsrs()
-        db = tmp_path / "col.anki2"
-        _build_minimal_anki2(db)
-        snap = fsrs.load_knownness(db)
-
-        from saitenka_tokenize.japanese import Token
-        from saitenka_wordstate import Scorer
-        from saitenka_wordstate.known import KnownWords
-
-        from saitenka.app.scoring import Palette
-
-        p = Palette()
-        # KnownWords treats the forgotten word as NOT known (binary for coloring purposes)
-        kw = KnownWords.from_set([])  # empty: nothing is "known" in the old sense
-
-        scorer = Coloring(Scorer(known=kw, fsrs_snap=snap), p)
-
-        # Build a minimal token for 忘れる (which is "forgotten")
-        tok = Token(
-            surface="忘れる",
-            lemma="忘れる",
-            reading="わすれる",
-            pos="動詞",
-            start=0,
-            end=3,
-        )
-        styles = scorer.score_line([tok])
-        assert len(styles) == 1
-        style = styles[0]
-        assert style.color == p.forgotten, (
-            f"expected forgotten color {p.forgotten!r}, got {style.color!r}"
-        )
-
-    def test_known_word_still_gets_known_tint(self, tmp_path):
-        """A word with known state in the snapshot gets the known (green) tint."""
-        fsrs = _import_fsrs()
-        db = tmp_path / "col.anki2"
-        _build_minimal_anki2(db)
-        snap = fsrs.load_knownness(db)
-
-        from saitenka_tokenize.japanese import Token
-        from saitenka_wordstate import Scorer
-        from saitenka_wordstate.known import KnownWords
-
-        from saitenka.app.scoring import Palette
-
-        p = Palette()
-        kw = KnownWords.from_set([])
-
-        scorer = Coloring(Scorer(known=kw, fsrs_snap=snap), p)
-
-        tok = Token(
-            surface="知る",
-            lemma="知る",
-            reading="しる",
-            pos="動詞",
-            start=0,
-            end=2,
-        )
-        styles = scorer.score_line([tok])
-        assert styles[0].color == p.known, (
-            f"expected known color {p.known!r}, got {styles[0].color!r}"
-        )
-
-    def test_scorer_without_fsrs_snap_unchanged(self):
-        """If fsrs_snap=None (not configured), Scorer behaves exactly as before Stage 13."""
-        from saitenka_tokenize.japanese import Token
-        from saitenka_wordstate import Scorer
-        from saitenka_wordstate.known import KnownWords
-
-        kw = KnownWords.from_set([])
-        scorer = Coloring(Scorer(known=kw, fsrs_snap=None))  # no snap: no forgotten tint
-        tok = Token(
-            surface="忘れる",
-            lemma="忘れる",
-            reading="わすれる",
-            pos="動詞",
-            start=0,
-            end=3,
-        )
-        styles = scorer.score_line([tok])
-        from saitenka.app.scoring import Palette
-
-        p = Palette()
-        # Without snap it should NOT be the forgotten color (base or freq)
-        assert styles[0].color != p.forgotten, (
-            "without fsrs_snap, no forgotten tint should be applied"
-        )
 
 
 # ---------------------------------------------------------------------------
