@@ -8,7 +8,6 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 
 from __future__ import annotations
 
-import threading
 from concurrent.futures import Future
 from itertools import starmap
 
@@ -24,7 +23,6 @@ from saitenka.app.features.profiles.dependencies import DependencyBundle
 from saitenka.app.session.factory import SessionInfrastructure, SessionServices
 from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue, event_lines
-from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
 
 def _tok(surface: str) -> Token:
@@ -34,14 +32,6 @@ def _tok(surface: str) -> Token:
 def _cue(*surfaces: str) -> TokenizedCue:
     toks = [_tok(s) for s in surfaces]
     return TokenizedCue(lines=[toks], tokens=toks, styles=None)
-
-
-class _ExistsDS:
-    """A dict set exposing only the ``terms_exist`` capability the controller probes — its presence is
-    what makes a tokenization 'complete' (cacheable, annotated-not-plain)."""
-
-    def terms_exist(self, _forms):
-        return set()  # nothing merges, but the capability is present
 
 
 def test_empty_tokenization_is_never_stored():
@@ -83,33 +73,6 @@ def _index(*cues: tuple[float, float, str]) -> CueIndex:
 )
 def test_event_lines_splits_only_a_frame_the_index_proves(index, norm, expected):
     assert event_lines(norm, index) == expected
-
-
-class _InlineAnnotationIPC(FakeIPC):
-    def __init__(self) -> None:
-        super().__init__()
-        self._annotation_handler = None
-
-    def register_runtime_job_lane(self, name, policy, handler) -> bool:  # noqa: ARG002
-        if name != "cue-annotation":
-            return False
-        self._annotation_handler = handler
-        return True
-
-    def submit_runtime_job(self, **kwargs) -> bool:
-        if kwargs["lane"] != "cue-annotation" or self._annotation_handler is None:
-            return False
-        completion = self._annotation_handler(kwargs["request"], threading.Event())
-        kwargs["on_finished"](
-            EffectFinished(
-                EffectId(1),
-                kwargs["owner"],
-                kwargs["identity"],
-                EffectOutcome.SUCCEEDED,
-                result=completion,
-            )
-        )
-        return True
 
 
 @pytest.mark.integration
@@ -159,26 +122,36 @@ def test_cue_while_dicts_load_draws_plain_then_upgrades_on_deps_ready(monkeypatc
     assert [line for line in calls if line] == [text]
 
 
+@pytest.mark.integration
 @pytest.mark.timeout(5)
 def test_annotation_failure_keeps_plain_subtitle_on_later_redraw(make_session):
-    reader = make_session(
-        _InlineAnnotationIPC(), services=SessionServices(dictionaries=_ExistsDS())
-    )
-    reader.graph.screen.osd = (1920, 1080)
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1920, "h": 1080}
     provider = RecordingRasterProvider()
-    reader.graph.subtitle_presentation.renderer = SubtitleRenderer(provider)
+    reader = make_session(
+        ipc,
+        services=SessionServices(dictionaries=dicthelp.load_set()),
+        infrastructure=SessionInfrastructure(renderer=SubtitleRenderer(provider)),
+    )
+    reader.graph.presentation.refresh_osd()
 
     class FailingTokenizer:
         def tokenize(self, _line: str):
             raise ValueError("broken tokenizer")
 
     reader.graph.profile.profile.use_tokenizer(FailingTokenizer())
-
     reader.graph.profile_integration.enable_async_annotation()
     reader.graph.profile_integration.dependencies_changed()
-    reader.graph.cue.set_subtitle("猫")
-    reader.graph.interaction.settle()
-    reader.graph.subtitle_presentation.draw()
-    reader.close()
+    reader.graph.playback.observe("sub-text", "猫")
+    await_ready(
+        lambda: reader.graph.annotation.view.degraded,
+        "annotation failure did not settle",
+        pump=reader.pump,
+        timeout=2,
+    )
+    assert (provider.requests[-1].style.value, provider.requests[-1].text) == ("plain", "猫")
 
-    assert provider.styles == ["plain", "plain"]
+    provider.requests.clear()
+    reader.graph.subtitle_presentation.draw()
+
+    assert (provider.requests[-1].style.value, provider.requests[-1].text) == ("plain", "猫")
