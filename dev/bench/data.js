@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791690921795,
+  "lastUpdate": 1791715600156,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18221,6 +18221,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.143057,
             "range": "3 replicas; min 1.01526; max 1.29444; MAD 0.127798; worst 1.29444",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "73aad2aa14260b50d1c57e9f4b28dacce1b44ace",
+          "message": "Merge pull request #552 from serjflint/fix/libass-bracket-renderer-key\n\nfix(subtitles): avoid libass crash when bracket matching changes",
+          "timestamp": "2026-10-11T13:44:40+03:00",
+          "tree_id": "45dbc5a011bc6d829b95a80307606414862adc1e",
+          "url": "https://github.com/serjflint/saitenka/commit/73aad2aa14260b50d1c57e9f4b28dacce1b44ace"
+        },
+        "date": 1791715599148,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.7442,
+            "range": "3 replicas; min 5.02483; max 6.84711; MAD 0.10291",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.701091,
+            "range": "3 replicas; min 7.1216; max 9.74616; MAD 0.045069; worst 9.74616",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.897407,
+            "range": "3 replicas; min 14.9409; max 22.0955; MAD 0.198077",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.13915,
+            "range": "3 replicas; min 15.0794; max 22.3343; MAD 0.195181; worst 22.3343",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.944442,
+            "range": "3 replicas; min 12.7428; max 14.5979; MAD 0.201612",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.123832,
+            "range": "3 replicas; min 0.068833; max 0.126938; MAD 0.003106; worst 0.126938",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.328919,
+            "range": "3 replicas; min 32.0213; max 44.0212; MAD 0.692262; worst 44.0212",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.844336,
+            "range": "3 replicas; min 2.81321; max 2.88916; MAD 0.031122; worst 2.88916",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.317398,
+            "range": "3 replicas; min 0.997673; max 1.33111; MAD 0.013713; worst 1.33111",
             "unit": "ms"
           }
         ]
