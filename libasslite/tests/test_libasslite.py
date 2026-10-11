@@ -68,6 +68,15 @@ def renderer(ass: bytes = ASS, **kwargs: object) -> libasslite.AssRenderer:
     return libasslite.AssRenderer(ass, library_path=configured_library(), **kwargs)  # type: ignore[arg-type]
 
 
+def renderer_with_bundled_font(ass: bytes = ASS) -> libasslite.AssRenderer:
+    font = REPO_FONT.with_name("NotoSansJP.ttf")
+    return renderer(
+        ass.replace(b"Default,Arial,", b"Default,Noto Sans JP Thin,"),
+        fonts=[(font.name, font.read_bytes())],
+        font_provider=libasslite.FontProvider.NONE,
+    )
+
+
 def character_bounds(result: libasslite.AssRenderResult, rgb: int) -> tuple[int, int, int, int]:
     layers = [layer for layer in result.layers if layer.image_type == 0 and layer.color >> 8 == rgb]
     assert layers
@@ -153,7 +162,7 @@ def test_full_width_space_produces_no_requested_character_layer() -> None:
 
 
 def test_one_renderer_serializes_cross_thread_calls() -> None:
-    ass_renderer = renderer()
+    ass_renderer = renderer_with_bundled_font()
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(
@@ -164,6 +173,7 @@ def test_one_renderer_serializes_cross_thread_calls() -> None:
         )
 
     signatures = [geometry_signature(result) for result in results]
+    assert all(signatures)
     assert signatures and all(signature == signatures[0] for signature in signatures)
 
 
@@ -245,7 +255,7 @@ def test_invalid_geometry_is_rejected_before_native_render() -> None:
 
 
 def test_bitmap_budget_is_exact_and_checked_before_returning_layers() -> None:
-    ass_renderer = renderer()
+    ass_renderer = renderer_with_bundled_font()
     baseline = ass_renderer.render(1_500, (1280, 720), (1280, 720))
     bitmap_bytes = sum(len(layer.bitmap) for layer in baseline.layers)
     assert bitmap_bytes > 1
@@ -307,7 +317,7 @@ def test_explicit_pixel_aspect_changes_only_horizontal_geometry() -> None:
 
 def test_use_margins_moves_bottom_aligned_authored_ass_into_video_rectangle() -> None:
     multiline = ("猫\\N" * 8 + "猫").encode()
-    ass_renderer = renderer(ASS.replace("猫".encode(), multiline))
+    ass_renderer = renderer_with_bundled_font(ASS.replace("猫".encode(), multiline))
 
     ignored = character_bounds(
         ass_renderer.render(
@@ -383,7 +393,7 @@ def test_in_file_font_section_is_read_only_when_extraction_is_asked_for(
 
 
 def test_render_style_never_carries_into_the_next_frame() -> None:
-    ass_renderer = renderer()
+    ass_renderer = renderer_with_bundled_font()
 
     plain = geometry_signature(frame(ass_renderer))
     scaled = geometry_signature(frame(ass_renderer, style=libasslite.RenderStyle(font_scale=2.0)))

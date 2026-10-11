@@ -10,7 +10,7 @@ from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG, looks_japanese
 from session_builder import TestSession, build_session
 from util import FakeIPC as RuntimeFakeIPC
-from util import RecordingRasterProvider, bare_gateway, session_gateway
+from util import RecordingRasterProvider, await_ready, bare_gateway, session_gateway
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app import subtitle_modes, subtitle_selection
@@ -250,6 +250,7 @@ _LANES_BEFORE_ARTIFACTS = [
     "subtitle-fetch",
     "subtitle-picker",
     "colored-track",
+    "track-preparation",
     "subtitle-geometry",
     "cue-annotation",
     "tooltip-render-ahead",
@@ -363,9 +364,6 @@ def test_language_switch_releases_secondary_before_selecting_its_track(monkeypat
     reader.graph.track_commands.declare(SubtitleSecondaryLeased(1))
     ipc.props["secondary-sid"] = 1
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     ipc.commands.clear()
 
     reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
@@ -542,9 +540,6 @@ def test_provider_arrival_uses_the_configured_target_language(tmp_path, monkeypa
     monkeypatch.setattr(
         reader.graph.notifications, "show", lambda text, *_args: messages.append(text)
     )
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     path = tmp_path / "episode.fr.srt"
     path.write_text("Français", encoding="utf-8")
     reader.graph.subtitle_acquisition.configure_retry(None, target_language="fr")
@@ -581,9 +576,6 @@ def test_startup_japanese_arrival_is_selected_after_missing_both(tmp_path, monke
     reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
 
@@ -604,9 +596,6 @@ def test_background_japanese_selection_zeroes_stale_sub_delay(tmp_path, monkeypa
     reader, jobs = reader_with_fetch_jobs(ipc, monkeypatch)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     path = Path(tmp_path / "episode.ja.srt")
     path.write_text("Japanese", encoding="utf-8")
 
@@ -625,9 +614,6 @@ def test_replace_track_zeroes_stale_sub_delay(tmp_path, monkeypatch, make_sessio
     reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # jp mode
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     path = Path(tmp_path / "episode.synced.srt")
     path.write_text("Japanese", encoding="utf-8")
 
@@ -666,9 +652,6 @@ def test_resync_preserves_an_external_translation_track_role(tmp_path, monkeypat
     retimed.write_text("Deutsch", encoding="utf-8")
     monkeypatch.setattr("saitenka.app.resync.resync_window", lambda *_a, **_kw: retimed)
     monkeypatch.setattr(subtitle_modes, "_published", lambda _source, result: result)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a, **_kw: None)
     ipc.commands.clear()
 
@@ -791,9 +774,6 @@ def test_picker_force_select_activates_japanese_from_english(tmp_path, monkeypat
     messages: list[str] = []
     monkeypatch.setattr(
         reader.graph.notifications, "show", lambda text, *_args: messages.append(text)
-    )
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
     )
     path = tmp_path / "episode.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
@@ -1053,13 +1033,54 @@ def test_dropped_untagged_sub_is_adopted_as_japanese_and_indexed(tmp_path, make_
     )
     _select(ipc, 2)
 
+    reader.graph.playback.install_seed(dict(ipc.props))
     subtitle_modes.on_primary_changed(reader.graph.track_commands.ports(), 2)
+    await_ready(
+        lambda: reader.graph.track_commands.navigation.current.sub_index is not None,
+        "track was not indexed",
+        pump=reader.pump,
+    )
 
     assert reader.graph.track_commands.current().language == MAIN_LANG
     assert reader.graph.track_commands.current().jp_sid == 2
     assert (
         reader.graph.track_commands.navigation.current.sub_index is not None
     )  # indexed from the dropped file
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_track_preparation_reads_the_document_off_the_owner_thread(
+    tmp_path, monkeypatch, make_session
+):
+    owner = threading.get_ident()
+    path = tmp_path / "track.srt"
+    path.write_text("1\n00:00:01,000 --> 00:00:02,000\n本を読む\n", encoding="utf-8")
+    ipc = FakeIPC(
+        [{"id": 2, "type": "sub", "lang": "jpn", "external": True, "external-filename": str(path)}]
+    )
+    _select(ipc, 2)
+    reader = make_session(ipc)
+    reader.graph.playback.install_seed(dict(ipc.props))
+    original = Path.open
+
+    def read(self, *args, **kwargs):
+        if self == path:
+            assert threading.get_ident() != owner, "track document read on input thread"
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", read)
+
+    reader.graph.cue.rebuild_sub_index()
+    ipc.set_prop("pause", value=True)
+    reader.pump()
+    assert reader.graph.playback.value("pause") is True
+    await_ready(
+        lambda: reader.graph.track_commands.navigation.current.sub_index is not None,
+        "track was not indexed",
+        pump=reader.pump,
+    )
+    assert reader.graph.track_commands.navigation.current.sub_index.cues[0].text == "本を読む"
 
 
 @pytest.mark.parametrize(
@@ -1091,7 +1112,13 @@ def test_dropped_untagged_english_sub_stays_plain_not_japanese(tmp_path, make_se
     )
     _select(ipc, 3)
 
+    reader.graph.playback.install_seed(dict(ipc.props))
     subtitle_modes.on_primary_changed(reader.graph.track_commands.ports(), 3)
+    await_ready(
+        lambda: reader.graph.track_commands.navigation.current.sub_index is not None,
+        "track was not indexed",
+        pump=reader.pump,
+    )
 
     assert reader.graph.track_commands.current().language == SECOND_LANG
     assert reader.graph.track_commands.current().en_sid == 3
@@ -1160,7 +1187,13 @@ def test_force_current_as_japanese_overrides_classification(tmp_path, monkeypatc
     monkeypatch.setattr(reader.graph.notifications, "show", lambda text, *_a: messages.append(text))
     monkeypatch.setattr(reader.graph.cue, "set_subtitle", lambda *_a, **_k: None)
 
+    reader.graph.playback.install_seed(dict(ipc.props))
     reader.command(app_bindings.SUBTITLE_MARK_JP_MSG)
+    await_ready(
+        lambda: reader.graph.track_commands.navigation.current.sub_index is not None,
+        "track was not indexed",
+        pump=reader.pump,
+    )
 
     assert reader.graph.track_commands.current().language == MAIN_LANG
     assert reader.graph.track_commands.current().jp_sid == 2
@@ -1218,9 +1251,6 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(
     old = _one_cue_index()
     reader.graph.track_commands.navigation.current.sub_index = old
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
-    monkeypatch.setattr(  # the new track isn't resolvable at this instant
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
@@ -1259,9 +1289,6 @@ def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(
         subtitle_modes, "_replace_target_track", lambda *a, **_k: replaced.append(a)
     )
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_a: None)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
     path = tmp_path / "ep.ja.srt"
     path.write_text("Japanese", encoding="utf-8")
 
@@ -1281,9 +1308,6 @@ def test_toggle_from_english_returns_to_japanese(monkeypatch, make_session):
     reader = make_session(ipc)
     reader.graph.cue.configure_subtitle_mode(subtitle_modes.select_initial(ipc))  # JP active
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.build_sub_index_for_current_track", lambda *_a: None
-    )
 
     reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)  # JP → EN
     ipc.commands.clear()

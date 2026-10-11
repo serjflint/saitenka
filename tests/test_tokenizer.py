@@ -242,3 +242,47 @@ def test_use_tokenizer_swaps_strategy_and_clears_cache(make_session):
 
     assert reader.graph.profile.profile.tokenizer is fake
     assert reader.graph.subtitle_presentation.cue.current.tokens == []
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_a_busy_speculative_tagger_does_not_serialize_other_cues(monkeypatch):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from saitenka_tokenize import japanese
+
+    expected = japanese.tokenize("本を読む")
+    expected_blocked = japanese.tokenize("看板")
+    original = japanese._tagger
+    entered, release = threading.Event(), threading.Event()
+
+    class HeldNode:
+        def __init__(self, node):
+            self.node = node
+            self.surface = node.surface
+
+        @property
+        def feature(self):
+            entered.set()
+            assert release.wait(5)
+            return self.node.feature
+
+    class HeldTagger:
+        def __init__(self, tagger):
+            self.tagger = tagger
+
+        def __call__(self, text):
+            nodes = list(self.tagger(text))
+            return [HeldNode(node) for node in nodes] if text == "看板" else nodes
+
+    monkeypatch.setattr(japanese, "_tagger", lambda: HeldTagger(original()))
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        blocked = executor.submit(japanese.tokenize, "看板")
+        try:
+            assert entered.wait(2)
+            live = executor.submit(japanese.tokenize, "本を読む")
+            assert live.result(timeout=1) == expected
+        finally:
+            release.set()
+        assert blocked.result(timeout=1) == expected_blocked

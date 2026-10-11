@@ -199,6 +199,8 @@ class Overlay:
         self._frame_history: dict[int, list[Path]] = {}
         #: Paths some command is currently naming; retirement must not delete these.
         self._in_flight: dict[Path, int] = {}
+        self._repaint_pending: set[tuple[int, Path]] = set()
+        self._repaint_lock = threading.RLock()
         #: Frames a sweep could not delete (Windows holds them open) — retried on the next sweep.
         self._pending_deletion: set[Path] = set()
 
@@ -213,7 +215,7 @@ class Overlay:
         self.lifecycle_oids: set[int] = set()
         self._staged_lifecycle_paths: set[Path] = set()
         #: Guards the path maps below plus `_live`. NOT `visible`/`ops` — no retirement reads them.
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()
 
     @property
     def runtime_submit(self):
@@ -411,20 +413,41 @@ class Overlay:
         finally:
             self._release(paths)
 
-    def _reissue_live(self) -> int:
+    def _release_on_reply(self, request, paths: list[Path], oid: int) -> None:
+        def finished(future) -> None:
+            reply = future.result()
+            # Client disconnect is not proof a surviving mpv finished reading the file.
+            if not request.accepted or reply.get("error") not in {
+                "disconnected",
+                "stale-epoch",
+                "timeout",
+            }:
+                self._release(paths)
+                self._sweep(oid)
+            with self._state_lock:
+                self._repaint_pending.discard((oid, paths[0]))
+
+        request.future.add_done_callback(finished)
+
+    def _reissue_live(self, *, force: bool = False) -> int:
         """Re-send every live tail; returns how many went out.
 
         Snapshot and hold take ONE lock acquisition: reading first and registering second reopens the
         window :meth:`_sweep` closes.
         """
-        with self._state_lock:
-            pending = list(self._live.items())
-            paths = self._hold([_tail_path(tail) for _, tail in pending])
-        try:
+        with self._repaint_lock:
+            with self._state_lock:
+                pending = [
+                    (oid, tail)
+                    for oid, tail in self._live.items()
+                    if self.visible
+                    and (force or (oid, _tail_path(tail)) not in self._repaint_pending)
+                ]
+                self._hold([_tail_path(tail) for _, tail in pending])
+                self._repaint_pending.update((oid, _tail_path(tail)) for oid, tail in pending)
             for oid, tail in pending:
-                self.ipc.command("overlay-add", oid, *tail)
-        finally:
-            self._release(paths)
+                request = self.ipc.command_async("overlay-add", oid, *tail)
+                self._release_on_reply(request, [_tail_path(tail)], oid)
         return len(pending)
 
     def _retire_frame_path(self, oid: int) -> None:
@@ -545,15 +568,16 @@ class Overlay:
 
     def set_visible(self, *, visible: bool) -> None:
         """Hide/show Saitenka's surfaces while retaining their latest desired state."""
-        if visible == self.visible:
-            return
-        self.visible = visible
-        if visible:
-            self.ops += self._reissue_live()
-        else:
-            for oid in [oid for oid, _ in list(self._live.items())]:
-                self.ipc.command("overlay-remove", oid)
-                self.ops += 1
+        with self._repaint_lock, self._state_lock:
+            if visible == self.visible:
+                return
+            self.visible = visible
+            if visible:
+                self.ops += self._reissue_live(force=True)
+            else:
+                for oid in self._live:
+                    self.ipc.command_async("overlay-remove", oid)
+                    self.ops += 1
         if not visible:
             for oid in tuple(self._interaction_oids):
                 self.hide_interactive(oid)
@@ -580,6 +604,7 @@ class Overlay:
                 path for history in self._frame_history.values() for path in history
             }
             self._pending_deletion, self._frame_history = set(), {}
-            self._in_flight.clear()  # nothing can be in flight once the presenter is closed
+            self._pending_deletion = staged & self._in_flight.keys()
+            staged -= self._pending_deletion
         for path in staged:
             _discard(path)

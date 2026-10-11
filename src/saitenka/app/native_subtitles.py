@@ -1257,7 +1257,7 @@ class NativeSubtitleGeometry:
         """
         return self._eligible_tokens
 
-    def set_source(self, path: Path | None, *, live: bool = False) -> None:
+    def set_source(self, path: Path | None, *, live: bool = False, prepared=None) -> None:
         """Point at a new source.
 
         `live` says a running session is switching, so whatever the old source left on screen has
@@ -1288,18 +1288,21 @@ class NativeSubtitleGeometry:
         if path is None:
             self._set_fallback("subtitle-source-unavailable")
         elif path.suffix.casefold() == ".ass":
-            self._adopt_authored(path)
+            self._adopt_authored(path, prepared=prepared)
         elif self.formats is not NativeFormats.ALL:
             self._set_fallback("subtitle-source-not-authored-ass")
         elif self._track_codec not in CONVERTED_CODECS:
             self._set_fallback("subtitle-source-conversion-unreproduced")
         else:
-            self._adopt_converted(path)
+            self._adopt_converted(path, prepared=prepared)
 
-    def _adopt_authored(self, path: Path) -> None:
+    def _adopt_authored(self, path: Path, *, prepared=None) -> None:
         try:
-            with path.open("rb") as source_file:
-                source = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
+            if prepared is None:
+                with path.open("rb") as source_file:
+                    source = source_file.read(MAX_ASS_SOURCE_BYTES + 1)
+            else:
+                source = prepared.raw
         except OSError:
             self._set_fallback("subtitle-source-unavailable")
             return
@@ -1309,12 +1312,14 @@ class NativeSubtitleGeometry:
         self._source_bytes = source
         # Once per track, not per cue: an `[Fonts]` section decodes megabytes, and this is already
         # the call that reads the whole file off disk.
-        self._in_document_families = font_names.in_document(source)
+        self._in_document_families = (
+            font_names.in_document(source) if prepared is None else prepared.families
+        )
         self.source_path = path
         self.source_kind = SourceKind.AUTHORED
         self.fallback_reason = None
 
-    def _adopt_converted(self, path: Path) -> None:
+    def _adopt_converted(self, path: Path, *, prepared=None) -> None:
         """Take a track mpv is rendering from libavcodec's conversion rather than from this file.
 
         The file is still read, but not as the document: mpv is not drawing it. It is read for the
@@ -1326,6 +1331,9 @@ class NativeSubtitleGeometry:
         self.source_kind = SourceKind.CONVERTED
         self.fallback_reason = None
         self._converted_markup = {}
+        if prepared is not None:
+            self._converted_markup = prepared.markup
+            return
         try:
             with path.open("rb") as source_file:
                 raw = source_file.read(MAX_ASS_SOURCE_BYTES + 1)

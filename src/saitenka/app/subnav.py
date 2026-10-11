@@ -47,18 +47,23 @@ class NavPorts:
     geometry_hint: Callable[[Cue | None], None]
 
 
-def load_sub_index(ports: NavPorts, path) -> None:
+def load_sub_index(ports: NavPorts, path, *, prepared=None) -> None:
     """Parse the external subtitle file at ``path`` into a cue index so Alt+←/→/↓ can render the
     target line instantly. Fail-soft: an unreadable/empty/unsupported file RETAINS the prior cues
     (a transient track-switch/resolve failure must not blank a good index) — navigation still falls
     back to a plain mpv sub-seek when there was never an index."""
-    idx = load_index(path)
+    idx = load_index(path) if prepared is None else prepared.index
     if idx is None:
         return
     ports.replace_source(path, reason="subtitle-index")
     ports.episode.sub_index = idx
     if ports.geometry is not None:
-        ports.geometry.set_source(Path(path), live=True)
+        if prepared is not None:
+            ports.geometry.set_track_codec(prepared.codec)
+            ports.geometry.set_fonts(prepared.fonts)
+            ports.geometry.set_source(Path(path), live=True, prepared=prepared.source)
+        else:
+            ports.geometry.set_source(Path(path), live=True)
 
     ports.invalidate()
     # Reinstall the cue that is still on screen under the new source. `replace_source`

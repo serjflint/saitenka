@@ -31,9 +31,22 @@ class MiningEncounterSource:
     def capture(self) -> miner.MiningEncounter:
         cue = self.cue.current
         tooltip = self.tooltip.observation()
-        start = self.playback.number("sub-start")
-        end = self.playback.number("sub-end")
-        span = Timespan(start, end) if start is not None and end is not None else None
+        state = self.playback.state
+
+        def value(name: str) -> object:
+            return (
+                state.value(name)
+                if self.playback.observing and state.observes(name)
+                else self.playback.query(name)
+            )
+
+        start, end = value("sub-start"), value("sub-end")
+        span = (
+            Timespan(float(start), float(end))
+            if isinstance(start, int | float) and isinstance(end, int | float)
+            else None
+        )
+        path, playhead = value("path"), value("time-pos")
         return miner.MiningEncounter(
             cue=MineCue(
                 cue.tokens,
@@ -44,9 +57,10 @@ class MiningEncounterSource:
             ),
             dict_set=self.profile.dict_set,
             ipc=self.ipc,
-            media_path=self.playback.text("path"),
-            playhead=self.playback.number("time-pos") or 0.0,
+            media_path=path if isinstance(path, str) else None,
+            playhead=float(playhead) if isinstance(playhead, int | float) else 0.0,
             span=span,
             sentence_html=miner.sentence_html(cue.lines),
             hovered_terms=tooltip.metadata.terms,
+            connection_epoch=state.connection.epoch if self.playback.observing else None,
         )

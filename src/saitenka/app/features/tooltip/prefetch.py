@@ -35,6 +35,7 @@ _AUTO_WORKERS_GIL = 2  # a GIL build can't render in parallel — extra workers 
 _MAX_WARM_PENDING = 64
 _MAX_HEAD_PENDING = 64
 _MAX_HEAD_TOKEN_PROBES = 64
+_MAX_CANDIDATE_CHARS = 16_384
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,10 +48,7 @@ class PrefetchItem:
     looked at — so that the JSON-decode cost (the single biggest cost in a `--stress` profile, see
     decoded-entry LRU) is usually already paid by the time a hover actually happens.
 
-    ``gen`` is the prefetch generation at enqueue time — a line change / resume / seek bumps the
-    SessionController's counter, so stale items are dropped by the worker. ``mined`` is evaluated on the MAIN
-    thread (card_for → jamdict is not worker-safe) and selects the ⊕/✓ header variant (unused by a
-    warm job, which never builds a header)."""
+    ``gen`` fences stale work. ``mined`` is resolved from the admitted mined-set snapshot."""
 
     gen: int
     token: Token
@@ -67,8 +65,7 @@ class HeadPrefetchItem:
     the exact path a real hover reads, so a later hover is a plain cache hit with no promotion/
     key-matching logic to get wrong. Only enqueued for words the priority function judges worth the
     extra render cost over plain decode-warming (see ``_head_priority``); selectivity is the actual
-    RAM/CPU cap, not just the queue's ``maxsize``. ``mined`` is resolved on the main thread (jamdict is
-    not worker-safe), same contract as :class:`PrefetchItem`."""
+    RAM/CPU cap, not just the queue's ``maxsize``)."""
 
     gen: int
     token: Token
@@ -144,7 +141,7 @@ class PrefetchIdentity:
 
 @dataclass(frozen=True, slots=True)
 class PrefetchWork:
-    item: PrefetchItem | HeadPrefetchItem
+    item: PrefetchItem | HeadPrefetchItem | CandidateScan
     context: object
     superseded: threading.Event
 
@@ -167,12 +164,15 @@ class PrefetchBackend(Protocol):
     ) -> bool: ...
 
 
-def run_prefetch(work: object, cancelled: threading.Event, backend: PrefetchBackend) -> bool:
+def run_prefetch(work: object, cancelled: threading.Event, backend: PrefetchBackend) -> object:
     if not isinstance(work, PrefetchWork):
         raise TypeError("invalid speculative-prefetch request")
     should_cancel = lambda: cancelled.is_set() or work.superseded.is_set()  # noqa: E731
     if should_cancel():
         return False
+    if isinstance(work.item, CandidateScan):
+        jobs = candidate_jobs(work.item.ports, work.item.head, work.item.gen, should_cancel)
+        return [] if should_cancel() else jobs
     try:
         kind = (
             "head_ahead"
@@ -271,7 +271,7 @@ def _submit_pending(
 
 def schedule(
     state: PrefetchState,
-    jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]],
+    jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem | CandidateScan]],
     on_finished,
     *,
     context: object = None,
@@ -285,7 +285,13 @@ def schedule(
         identity = PrefetchIdentity(
             state.sequence,
             item.gen,
-            "head-ahead" if isinstance(item, HeadPrefetchItem) else "head" if item.full else "warm",
+            "candidates"
+            if isinstance(item, CandidateScan)
+            else "head-ahead"
+            if isinstance(item, HeadPrefetchItem)
+            else "head"
+            if item.full
+            else "warm",
         )
         heapq.heappush(
             state.pending,
@@ -309,6 +315,13 @@ def finish(
     current = state.inflight.pop(identity.sequence, None)
     if current is None or current[0] != identity:
         return
+    if (
+        identity.kind == "candidates"
+        and identity.generation == state.gen
+        and completion.outcome is EffectOutcome.SUCCEEDED
+        and isinstance(completion.result, list)
+    ):
+        schedule(state, completion.result, on_finished, context=current[1].context)
     if completion.outcome is EffectOutcome.SUCCEEDED and completion.result is True:
         state.succeeded += 1
     elif completion.outcome is EffectOutcome.FAILED:
@@ -377,6 +390,13 @@ class HeadProbe:
     queue_max: int = _MAX_HEAD_PENDING
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateScan:
+    gen: int
+    ports: PrefetchPorts
+    head: HeadProbe
+
+
 def update_prefetch(
     state: PrefetchState,
     ports: PrefetchPorts,
@@ -400,9 +420,20 @@ def update_prefetch(
         return
     state.key = key
     gen = state.cancel()
+    schedule(state, [(0, CandidateScan(gen, ports, head))], on_finished, context=context)
+
+
+def candidate_jobs(
+    ports: PrefetchPorts,
+    head: HeadProbe,
+    gen: int,
+    should_cancel: Callable[[], bool] = lambda: False,
+) -> list[tuple[int, PrefetchItem | HeadPrefetchItem]]:
     cands = _candidates(ports.tokens, ports.styles, ports.tokenizer)
     jobs: list[tuple[int, PrefetchItem | HeadPrefetchItem]] = []
     for _, i, t in cands:
+        if should_cancel():
+            return []
         jobs.append(
             (
                 0 if ports.engaged else 2,
@@ -411,11 +442,15 @@ def update_prefetch(
         )
     if ports.cues.lookahead > 0:
         jobs.extend(
-            _lookahead_items(ports.cues, ports.tokenizer, gen, {t.lemma for _, _, t in cands})
+            _lookahead_items(
+                ports.cues, ports.tokenizer, gen, {t.lemma for _, _, t in cands}, should_cancel
+            )
         )
     if head.lookahead > 0:
-        jobs.extend(_head_prefetch_items(ports, head, gen, {t.lemma for _, _, t in cands}))
-    schedule(state, jobs, on_finished, context=context)
+        jobs.extend(
+            _head_prefetch_items(ports, head, gen, {t.lemma for _, _, t in cands}, should_cancel)
+        )
+    return jobs
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,7 +465,7 @@ class LookaheadCues:
 
 
 def _lookahead_items(
-    cues: LookaheadCues, tokenizer, gen: int, seen: set[str]
+    cues: LookaheadCues, tokenizer, gen: int, seen: set[str], should_cancel=lambda: False
 ) -> list[tuple[int, PrefetchItem]]:
     """WARM (dict-only, never full, ``mined=False``) the content words of the next
     ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
@@ -439,6 +474,10 @@ def _lookahead_items(
     items: list[tuple[int, PrefetchItem]] = []
     cue_limit = min(max(0, cues.lookahead), _MAX_WARM_PENDING)
     for text in upcoming_cue_texts(cues.index, cue_limit, text=cues.text, preferred=cues.nav_index):
+        if should_cancel():
+            return []
+        if len(text) > _MAX_CANDIDATE_CHARS:
+            continue
         toks = tokenizer.tokenize(text)
         for i, t in enumerate(toks):
             if not tokenizer.is_content(t) or t.lemma in seen:
@@ -479,7 +518,7 @@ def _head_prefetch_candidate(
     priority = _head_priority(styles[i].verdict)
     if priority is None:
         return None
-    if ports.is_mined(t):  # main thread only (jamdict) — see HeadPrefetchItem docstring
+    if ports.is_mined(t):
         return None
     inflected = ports.tokenizer.inflected_in(toks, i)
     key = head.panel_key(t, inflected, mined=False)
@@ -520,6 +559,7 @@ def _head_prefetch_items(
     head: HeadProbe,
     gen: int,
     seen: set[str],
+    should_cancel=lambda: False,
 ) -> list[tuple[int, HeadPrefetchItem]]:
     """Speculative HEAD render for a SELECTIVE subset of the next
     ``head_prefetch_lookahead`` cues' words: only ones :func:`_head_priority` judges worth the extra
@@ -535,6 +575,10 @@ def _head_prefetch_items(
     for text in upcoming_cue_texts(
         ports.cues.index, cue_limit, text=ports.cues.text, preferred=ports.cues.nav_index
     ):
+        if should_cancel():
+            return []
+        if len(text) > _MAX_CANDIDATE_CHARS:
+            continue
         found, probes = _head_candidates_for_text(
             text,
             seen,

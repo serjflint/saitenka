@@ -77,7 +77,6 @@ class PreparedSession:
 
     live: LiveSession
     profile: ProfileSession
-    rebuild_sub_index: Callable[[], None]
     configure_subtitle_mode: Callable[..., None]
     reslot: ReslotPorts
     watch: WatchPorts
@@ -185,7 +184,6 @@ def _compose_session(
     prepared = PreparedSession(
         live=controller,
         profile=graph.profile,
-        rebuild_sub_index=graph.cue.rebuild_sub_index,
         configure_subtitle_mode=graph.cue.configure_subtitle_mode,
         reslot=graph.reslot,
         watch=graph.watch,

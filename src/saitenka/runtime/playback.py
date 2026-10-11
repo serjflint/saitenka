@@ -235,10 +235,20 @@ class SourceChanged:
 
 
 @dataclass(frozen=True, slots=True)
+class MediaPathChanged:
+    path: object
+
+
+@dataclass(frozen=True, slots=True)
 class SubtitleSelectionChanged:
     track: Revision
     sid: object
     role: str
+
+
+@dataclass(frozen=True, slots=True)
+class SubtitleTracksChanged:
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,7 +320,9 @@ class ConnectionChanged:
 
 type PlaybackDelta = (
     SourceChanged
+    | MediaPathChanged
     | SubtitleSelectionChanged
+    | SubtitleTracksChanged
     | CueObservationChanged
     | CueIdentityRetired
     | AuthoredCueStale
@@ -326,7 +338,9 @@ type PlaybackDelta = (
 
 _DELTA_DOMAIN: dict[type, FactDomain] = {
     SourceChanged: FactDomain.MEDIA,
+    MediaPathChanged: FactDomain.MEDIA,
     SubtitleSelectionChanged: FactDomain.TRACK,
+    SubtitleTracksChanged: FactDomain.TRACK,
     CueObservationChanged: FactDomain.CUE,
     CueIdentityRetired: FactDomain.CUE,
     AuthoredCueStale: FactDomain.CUE,
@@ -356,6 +370,7 @@ class PlaybackState:
     pointer: PointerFacts = PointerFacts()
     paused: bool = False
     cue_text_unconfirmed: bool = False
+    sid_observations: int = 0
     properties: Mapping[str, object] = _EMPTY_PROPERTIES
 
     def value(self, name: str) -> object:
@@ -408,6 +423,8 @@ class PlaybackProjection:
         if not name:
             return Projected(state)
         changed = not state.observes(name) or state.value(name) != data
+        if name == "sid":
+            state = replace(state, sid_observations=state.sid_observations + 1)
         confirming = name == "sub-text" and state.cue_text_unconfirmed
         if confirming:
             state = replace(state, cue_text_unconfirmed=False)
@@ -447,6 +464,10 @@ class PlaybackProjection:
     def _apply_domain(
         self, state: PlaybackState, name: str, data: object
     ) -> tuple[PlaybackState, tuple[PlaybackDelta, ...]]:
+        if name == "path":
+            return state, (MediaPathChanged(data),)
+        if name == "track-list":
+            return state, (SubtitleTracksChanged(),)
         if name in TRACK_PROPERTIES:
             track = replace(state.track, track=state.track.track.advance(), sid=data)
             state = replace(state, track=track)

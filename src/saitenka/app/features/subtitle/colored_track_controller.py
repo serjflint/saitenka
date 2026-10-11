@@ -34,10 +34,9 @@ def configure_runtime_job(ipc: MpvIPC) -> JobSubmitter | None:
 class ColoredTrackPorts:
     """What the colored track reads and does, named rather than reached for.
 
-    `query` asks mpv now; `value` is the observed property, cheap enough for every draw.
+    `value` reads observed playback facts after startup.
     """
 
-    query: Callable[[str], object]
     value: Callable[[str], object]
     cue_text: Callable[[], str]
     annotation_inputs: Callable[[], AnnotationInputs]
@@ -45,6 +44,7 @@ class ColoredTrackPorts:
     token_generation: Callable[[], int]
     dependency_generation: Callable[[], int]
     track_ports: Callable[[], subtitle_modes.TrackPorts]
+    selection_revision: Callable[[], tuple[int, int]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,8 +92,13 @@ class ColoredTrackController:
         self._stale = False
         self._stand_down = False
         self._deferred = False
+        self._swapping = False
         #: Origins the user chose over their copy this episode.
         self._declined: set[str] = set()
+        self._prepared_sources: dict[tuple[object, object], Path] = {}
+
+    def source_prepared(self, prepared) -> None:
+        self._prepared_sources[prepared.media, prepared.sid] = prepared.path
 
     @property
     def enabled(self) -> bool:
@@ -102,6 +107,7 @@ class ColoredTrackController:
     def dependencies_changed(self) -> None:
         """The live copy's colors are now stale: replace it, or stand it down if nothing can."""
         self._sequence += 1
+        self._swapping = False
         self._pending = None
         self._ready = None
         self._failed = None
@@ -110,7 +116,7 @@ class ColoredTrackController:
 
     def request(self) -> None:
         """Generate a copy for the selected Japanese track unless the current one is still right."""
-        if not self.enabled:
+        if not self.enabled or self._swapping:
             return
         self._release_declined()
         if self._request():
@@ -149,7 +155,7 @@ class ColoredTrackController:
         source = None if selected is None else self._source(loaded, selected)
         if selected is None or source is None:
             return False
-        key = (str(self._ports.query("path")), source.origin, self._ports.dependency_generation())
+        key = (str(self._ports.value("path")), source.origin, self._ports.dependency_generation())
         live = self._live
         if live is not None and live.key == key and self._is_live(selected):
             return True
@@ -158,7 +164,7 @@ class ColoredTrackController:
         if key == self._pending or (self._ready is not None and self._ready.key == key):
             return True
         refusal = colored_subs.refusing_options(
-            {name: self._ports.query(f"options/{name}") for name in colored_subs.REFUSING_OPTIONS}
+            {name: self._ports.value(f"options/{name}") for name in colored_subs.REFUSING_OPTIONS}
         )
         if refusal is not None:
             _record("refused", reason=refusal)
@@ -245,38 +251,63 @@ class ColoredTrackController:
         self._ready = None
         loaded = self._loaded()
         selected = _selected(loaded)
-        current = None if selected is None else self._source(loaded, selected)
-        if selected is None or current is None or current.origin != ready.source.origin:
+        source = None if selected is None else self._source(loaded, selected)
+        if selected is None or source is None or source.origin != ready.source.origin:
             _record("superseded")
             return
         # Before the swap: it rebuilds the index, which asks for a copy again.
         self._live = ready
         if not self._is_live(selected):
-            with otel_metrics.traced("colored_track_swap") as span:
-                sid = subtitle_modes.select_colored_copy(
-                    self._ports.track_ports(),
-                    ready.path,
-                    title=ready.source.title,
-                    lang=ready.source.lang,
-                    previous=selected.get("id") if colored_subs.is_copy(selected) else None,
+            self._swapping = True
+            sequence = self._sequence
+            media = self._ports.value("path")
+            epoch, revision = self._ports.selection_revision()
+
+            def current(verified_sid=None) -> bool:
+                now_epoch, now_revision = self._ports.selection_revision()
+                if sequence != self._sequence or ready.source.origin in self._declined:
+                    return False
+                if media != self._ports.value("path") or epoch != now_epoch:
+                    return False
+                if verified_sid is None:
+                    return True
+                return now_revision == revision or (
+                    now_revision == revision + 1 and self._ports.value("sid") == verified_sid
                 )
-                span.set("sid", str(sid))
-            now = _selected(self._loaded())
-            if now is None or not self._is_live(now):
-                self._live = None
-                self._failed = ready.key
-                _record("swap-failed")
-                if self._stale:
-                    self._retire_copy()
-                return
-            log.info("colored track selected: sid=%s", sid)
+
+            subtitle_modes.select_colored_copy(
+                self._ports.track_ports(),
+                ready.path,
+                title=ready.source.title,
+                lang=ready.source.lang,
+                previous=selected.get("id") if colored_subs.is_copy(selected) else None,
+                current=current,
+                on_selected=lambda sid: self._swap_finished(ready, sequence, sid),
+            )
+            return
+        self._swap_finished(ready, self._sequence, selected.get("id"))
+
+    def _swap_finished(self, ready: _Copy, sequence: int, sid: int | None) -> None:
+        if sequence != self._sequence:
+            return
+        self._swapping = False
+        if sid is None:
+            self._live = None
+            self._failed = ready.key
+            _record("swap-failed")
+            if self._stale:
+                self._retire_copy()
+            return
+        log.info("colored track selected: sid=%s", sid)
         self._stale = self._stand_down = False
         colored_subs.evict_siblings(ready.path)
 
     def _retire_copy(self) -> None:
         self._stand_down = False
         loaded = self._loaded()
-        selected = _selected(loaded)
+        selected = next(
+            (track for track in loaded if track.get("id") == self._ports.value("sid")), None
+        )
         if selected is None or not colored_subs.is_copy(selected):
             # The user already moved off the copy; there is nothing on screen to take down.
             self._live = None
@@ -294,7 +325,9 @@ class ColoredTrackController:
         _record("stood-down")
 
     def retire_episode(self) -> None:
+        self._prepared_sources.clear()
         self._sequence += 1
+        self._swapping = False
         self._declined.clear()
         self._failed = None
         self._stale = self._stand_down = self._deferred = False
@@ -303,7 +336,7 @@ class ColoredTrackController:
         self._live = None
 
     def _loaded(self) -> list[dict]:
-        tracks = self._ports.query("track-list")
+        tracks = self._ports.value("track-list")
         return [
             track
             for track in (tracks if isinstance(tracks, list) else ())
@@ -332,20 +365,15 @@ class ColoredTrackController:
         return None if path is None else _describe(origin, path, selected)
 
     def _authored_path(self, track: dict) -> Path | None:
-        from saitenka.app.embedded_subs import embedded_subs_cache_dir, embedded_subs_cache_key
-
         external = track.get("external-filename")
         if track.get("external"):
             path = Path(str(external)) if external else None
             return path if path is not None and path.suffix.casefold() == ".ass" else None
-        media = self._ports.query("path")
+        media = self._ports.value("path")
         ff_index = track.get("ff-index")
         if str(track.get("codec") or "") not in {"ass", "ssa"} or not media or ff_index is None:
             return None
-        path = embedded_subs_cache_dir() / embedded_subs_cache_key(
-            str(media), int(ff_index), ".ass"
-        )
-        return path if path.exists() else None
+        return self._prepared_sources.get((media, track.get("id")))
 
 
 def _describe(origin: str, path: Path, track: dict) -> _Source:

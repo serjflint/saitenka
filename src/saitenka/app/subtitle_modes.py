@@ -278,15 +278,16 @@ class TrackPorts:
     sample_cue: Callable[[], str]
     clear_cue: Callable[[], None]
     redraw_cue: Callable[[], None]
+    selection_verified: Callable[[list[dict], int], None] = lambda _tracks, _sid: None
 
 
-def setup_secondary(ports: TrackPorts) -> int | None:
+def setup_secondary(ports: TrackPorts, *, primary_sid: object = None) -> int | None:
     state = ports.tracks()
     if state.jp_sid is None and state.en_sid is None:
         found = discover_tracks(ports.ipc, state.slang, state.second_slang)
         state = ports.declare(SubtitleTracksDiscovered(found.jp_sid, found.en_sid))
     sid = state.translation_sid
-    if sid is None or sid == ports.get("sid"):
+    if sid is None or sid == (ports.get("sid") if primary_sid is None else primary_sid):
         release_secondary(ports)
         return None
     if state.secondary_sid == sid:
@@ -336,7 +337,7 @@ def select_translation(ports: TrackPorts, slang: str, second_slang: str) -> None
         release_secondary(ports)
 
 
-def on_primary_changed(ports: TrackPorts, sid) -> None:
+def on_primary_changed(ports: TrackPorts, sid, *, prepared: dict | None = None) -> None:
     state = ports.tracks()
     if sid == state.secondary_sid:
         return
@@ -344,18 +345,39 @@ def on_primary_changed(ports: TrackPorts, sid) -> None:
     if sid is None:
         return
     known = sid in {state.jp_sid, state.en_sid}
-    if not known:
+    if not known and prepared is None:
         # The user just made this track primary (manual cycle / drag-'n'-drop). Index it from disk
         # FIRST, so an untagged track can be classified by its actual content just below.
         ports.drop_index()
         ports.rebuild_index()
-    language = _primary_role(
-        ports.ipc,
-        sid,
-        SubtitleTracks(state.jp_sid, state.en_sid),
-        ports.sample_cue(),
-        state.slang,
-        state.second_slang,
+        from saitenka.app import subtitle_artifact
+
+        selected = next(
+            (track for track in loaded_sub_tracks(ports.ipc) if track.get("id") == sid), None
+        )
+        if not isinstance(
+            subtitle_artifact.resolve(selected, media_path=ports.get("path")),
+            subtitle_artifact.ArtifactUnavailable,
+        ):
+            return
+    language = (
+        _primary_role_for(
+            sid,
+            SubtitleTracks(state.jp_sid, state.en_sid),
+            track_lang=prepared.get("lang"),
+            sample=ports.sample_cue(),
+            primary_slang=state.slang,
+            second_slang=state.second_slang,
+        )
+        if prepared is not None
+        else _primary_role(
+            ports.ipc,
+            sid,
+            SubtitleTracks(state.jp_sid, state.en_sid),
+            ports.sample_cue(),
+            state.slang,
+            state.second_slang,
+        )
     )
     changed = language != state.language
     if not known:
@@ -406,6 +428,8 @@ def announce_track(ports: TrackPorts, sid) -> None:
     tracks = sub_tracks(ports.ipc)
     for index, track in enumerate(tracks, 1):
         if track.get("id") == sid:
+            if colored_subs.is_copy(track):
+                return
             ports.declare(SubtitleTrackAnnounced(sid))
             name = language_name(track.get("lang"))
             # Log the same signal the toast shows: a surprising "unknown language (10/11)" here is the
@@ -720,38 +744,72 @@ def _replace_target_track(
     log.info("%s", status)
 
 
-def select_colored_copy(
-    ports: TrackPorts, path: Path, *, title: str, lang: str, previous: object = None
-) -> int | None:
-    """Make a colored copy the Japanese track, as quietly as an ordinary ``sid`` change.
+def select_colored_copy(ports, path, *, title, lang, previous, current, on_selected):
+    def verified(completion):
+        tracks = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
+        tracks = tracks if isinstance(tracks, list) else []
+        selected = _selected_colored_track(tracks, path) or {}
+        if not current(selected.get("id")):
+            on_selected(None)
+            return
+        on_selected(_adopt_colored_copy(ports, path, tracks, previous))
 
-    Not announced and no ``sub-delay`` reset: to the user this is the track they already had. The
-    origin stays loaded — discovery hides it while the copy is — so standing the copy down is only a
-    ``sub-remove``.
-    """
-    state = ports.tracks()
-    _send(ports.ipc, "add-colored", "sub-add", str(path), "select", title, lang)
-    selected = ports.get("sid")
-    added = any(
-        track.get("id") == selected and track.get("external-filename") == str(path)
-        for track in loaded_sub_tracks(ports.ipc)
+    def added(completion):
+        if not current():
+            on_selected(None)
+            return
+        if completion.outcome is not EffectOutcome.SUCCEEDED:
+            on_selected(None)
+            return
+        if not ports.ipc.submit_runtime_mpv(
+            owner=Owner.SUBTITLE,
+            identity="verify-colored",
+            command=("get_property", "track-list"),
+            timeout_s=10.0,
+            on_finished=verified,
+        ):
+            on_selected(None)
+
+    if not ports.ipc.submit_runtime_mpv(
+        owner=Owner.SUBTITLE,
+        identity="add-colored",
+        command=("sub-add", str(path), "select", title, lang),
+        timeout_s=10.0,
+        on_finished=added,
+    ):
+        on_selected(None)
+
+
+def _selected_colored_track(tracks, path):
+    return next(
+        (
+            track
+            for track in tracks
+            if track.get("selected")
+            and track.get("main-selection", 0) == 0
+            and track.get("external-filename") == str(path)
+        ),
+        None,
     )
-    if not added:
-        # A refused `sub-add` leaves the previous track selected; removing it would leave nothing.
-        # One mpv loaded without selecting must not stay loaded to hide its origin.
-        for track in loaded_sub_tracks(ports.ipc):
+
+
+def _adopt_colored_copy(ports, path, tracks, previous):
+    selected = _selected_colored_track(tracks, path)
+    if selected is None:
+        for track in tracks:
             if track.get("external-filename") == str(path) and not track.get("selected"):
                 _send(ports.ipc, "remove-unselected-colored", "sub-remove", track["id"])
         return None
+    sid = selected["id"]
     if previous is not None:
         _send(ports.ipc, "remove-colored", "sub-remove", previous)
-    found = discover_tracks(ports.ipc, state.slang, state.second_slang)
-    sid = selected if isinstance(selected, int) else found.jp_sid
+    state = ports.tracks()
+    found = _discover(colored_subs.hide_origins(tracks), state.slang, state.second_slang)
     ports.declare(SubtitleTracksDiscovered(sid, found.en_sid))
     ports.declare(SubtitleTrackAnnounced(sid))
-    ports.clear_cue()
+    ports.selection_verified(tracks, sid)
     if ports.translation_visible():
-        setup_secondary(ports)
+        setup_secondary(ports, primary_sid=sid)
     ports.rebuild_index()
     return sid
 

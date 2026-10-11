@@ -16,10 +16,9 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from saitenka.app import subtitle_artifact
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -60,7 +59,12 @@ def _selected_sub_track(ipc) -> dict | None:
 
 
 def extract_embedded_track(
-    video: str | Path, ff_index: int, dest: Path, codec_args: tuple[str, ...]
+    video: str | Path,
+    ff_index: int,
+    dest: Path,
+    codec_args: tuple[str, ...],
+    *,
+    cancelled=None,
 ) -> bool:
     """ffmpeg-extract the embedded subtitle stream at ``ff_index`` to ``dest``. Fail-soft:
     logs and returns False on any ffmpeg/tool-missing error — a missing lookahead index is a
@@ -69,12 +73,20 @@ def extract_embedded_track(
 
     exe = find_tool("ffmpeg") or "ffmpeg"  # GUI-launched mpv has a minimal PATH without Homebrew
     dest.parent.mkdir(parents=True, exist_ok=True)
+    from saitenka.app.procutil import run_cancellable
+
     try:
-        subprocess.run(
-            [exe, "-y", "-i", str(video), "-map", f"0:{ff_index}", *codec_args, str(dest)],
-            check=True,
-            capture_output=True,
-        )
+        with tempfile.TemporaryDirectory(dir=dest.parent) as directory:
+            staged = Path(directory) / dest.name
+            run_cancellable(
+                [exe, "-y", "-i", str(video), "-map", f"0:{ff_index}", *codec_args, str(staged)],
+                check=True,
+                capture_output=True,
+                cancelled=cancelled,
+            )
+            if cancelled is not None and cancelled():
+                return False
+            staged.replace(dest)
     except (OSError, subprocess.SubprocessError) as e:
         log.warning("embedded sub-track extraction failed: %s", e)
         return False
@@ -110,40 +122,3 @@ def resolve_track_fonts(ipc, get: PropertyGet, geometry: NativeSubtitleGeometry)
         log.warning("could not resolve the track's font sources: %s", error)
         return
     geometry.set_fonts(environment)
-
-
-def build_sub_index_for_current_track(
-    ipc, get: PropertyGet, load: Callable[[Path], None], geometry: NativeSubtitleGeometry | None
-) -> None:
-    """Populate the episode's cue index from whichever subtitle track mpv currently has selected.
-    External/jimaku tracks (added via ``sub-add``, ``sub_file=`` or the jimaku fetch) already sit on
-    disk — read the path straight off track-list's ``external-filename``. An embedded track is
-    extracted once via ffmpeg and cached. Either way the result feeds the same
-    ``sub_index.load_index`` parser that already powers Alt+←/→/↓ nav, so prefetch lookahead
-    (app/features/tooltip/prefetch.py's ``upcoming_cue_texts``) gets real upcoming lines regardless of subtitle
-    source. Fail-soft throughout: no selected track / no video path / extraction failure just
-    leaves the index unset."""
-    track = _selected_sub_track(ipc)
-    if geometry is not None:
-        geometry.set_source(None, live=True)
-        # Before the source, which reads it: an external artifact reaches `set_source` through
-        # `load` and carries no codec of its own.
-        geometry.set_track_codec(str((track or {}).get("codec") or ""))
-        resolve_track_fonts(ipc, get, geometry)
-    artifact = subtitle_artifact.resolve(track, media_path=get("path"))
-    if isinstance(artifact, subtitle_artifact.ArtifactUnavailable):
-        log.debug("no subtitle artifact for the current track: %s", artifact.value)
-        return
-    if isinstance(artifact, subtitle_artifact.ExternalArtifact):
-        load(Path(artifact.path))
-        return
-    video_path = Path(artifact.media_path)
-    suffix, codec_args = subtitle_artifact.extract_spec(artifact.codec)
-    dest = embedded_subs_cache_dir() / embedded_subs_cache_key(
-        video_path, artifact.ff_index, suffix
-    )
-    if not dest.exists() and not extract_embedded_track(
-        video_path, artifact.ff_index, dest, codec_args
-    ):
-        return
-    load(dest)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from saitenka.app.runtime import CueCommandState
 from saitenka.app.subtitle_geometry_diagnostics import cue_digest
 from saitenka.app.subtitle_render import DrawRequest, SubtitleTarget
 from saitenka.app.token_cache import cue_key
+from saitenka.app.track_preparation import TrackPreparation
 from saitenka.runtime import events, playback
 
 if TYPE_CHECKING:
@@ -83,6 +85,7 @@ class CueOwners:
     acquisition: SubtitleAcquisitionController
     translation: TranslationController
     colored_track: ColoredTrackController
+    cancel_mining: Callable[[], None]
 
 
 class CueCoordinator:
@@ -95,6 +98,47 @@ class CueCoordinator:
         self._settled_hooks: list[Callable[[], None]] = []
         self._settling = False
         self._cue_start_ms: int | None = None
+        self._track_preparation = TrackPreparation(
+            owners.ipc,
+            self._track_properties,
+            self._adopt_track,
+            self._track_failed,
+        )
+
+    def _track_failed(self, properties: dict) -> None:
+        sid = properties.get("sid")
+        track = next(
+            (
+                t
+                for t in properties.get("track-list") or []
+                if isinstance(t, dict) and t.get("id") == sid
+            ),
+            None,
+        )
+        if track is not None:
+            subtitle_modes.on_primary_changed(self._o.track_commands.ports(), sid, prepared=track)
+
+    def _adopt_track(self, prepared) -> None:
+        self._o.colored_track.source_prepared(prepared)
+        self._o.navigation.load_index(prepared.path, prepared=prepared)
+        state = self._o.tracks.current
+        if prepared.sid not in {state.jp_sid, state.en_sid}:
+            subtitle_modes.on_primary_changed(
+                self._o.track_commands.ports(), prepared.sid, prepared=prepared.track
+            )
+
+    def _track_properties(self) -> dict:
+        from saitenka.app.subtitle_fonts import FONT_OPTIONS
+
+        state = self._o.playback.state
+        names = ("path", "sid", "track-list", *(f"options/{name}" for name in FONT_OPTIONS))
+        return deepcopy(
+            {
+                "_epoch": state.connection.epoch,
+                "_geometry": self._o.presentation.native is not None,
+                **{name: state.value(name) for name in names if state.observes(name)},
+            }
+        )
 
     def on_settled(self, hook: Callable[[], None]) -> None:
         """Run `hook` after a cue observation has been reconciled — the cue-driven boundary for
@@ -470,15 +514,8 @@ class CueCoordinator:
         presentation.pipeline.activate(presentation.target(), sid, draw=presentation.draw)
 
     def rebuild_sub_index(self) -> None:
-        from saitenka.app.embedded_subs import build_sub_index_for_current_track
-
-        o = self._o
-        build_sub_index_for_current_track(
-            o.ipc,
-            o.playback.query,
-            o.navigation.load_index,
-            o.presentation.native,
-        )
+        if self._o.playback.observing:
+            self._track_preparation.request()
 
     def clear_identity(self) -> None:
         self._o.annotation.retire_cue()
@@ -486,14 +523,20 @@ class CueCoordinator:
 
     def retire(self, reason: str) -> None:
         if reason in {
-            "profile",
             "connection-lost",
             playback.RetireReason.SOURCE.value,
             playback.RetireReason.CONNECTION.value,
             playback.RetireReason.TRACK.value,
-            playback.RetireReason.ROLE.value,
         }:
+            self._track_preparation.cancel()
+            self._o.track_commands.navigation.current.sub_index = None
             self._o.preview.hide()
+            if reason in {
+                "connection-lost",
+                playback.RetireReason.CONNECTION.value,
+                playback.RetireReason.SOURCE.value,
+            }:
+                self._o.cancel_mining()
         o = self._o
         transient = reason == playback.RetireReason.CUE_TEXT.value and self._mid_seek_transient()
         if o.presentation.layout is not None:
@@ -554,6 +597,7 @@ class CueCoordinator:
 
     def rebind_episode(self) -> None:
         o = self._o
+        o.cancel_mining()
         o.preview.hide()
         o.presentation.color_telemetry.retire("episode-changed")
         o.picker.close()

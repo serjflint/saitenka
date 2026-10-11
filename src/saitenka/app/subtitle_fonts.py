@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -68,8 +69,7 @@ FONT_OPTIONS = (
     "osd-font",
 )
 
-#: Wall-clock bound on the two attachment subprocesses. They run on the reader thread at every track
-#: load, so an unreachable network share or a wedged ffmpeg would hold the session there indefinitely.
+#: Wall-clock bound on the two attachment subprocesses during track preparation.
 #: Generous against the 0.12s a 19-attachment 1080p container costs: this is a deadlock stop, not a
 #: budget. Expiring costs the attachment faces, which the environment check then refuses rather than
 #: measuring in substitutes.
@@ -351,7 +351,9 @@ def _osd_installed_families(
     return frozenset(passed - failed)
 
 
-def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes], ...]:
+def container_fonts(
+    video: Path, *, cache_dir: Path, cancelled=None
+) -> tuple[tuple[str, bytes], ...]:
     """The container's font attachments, dumped once per video and cached beside it.
 
     Fail-soft like the subtitle extraction next door: a missing ffmpeg or an unreadable container
@@ -366,8 +368,19 @@ def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes],
         return ()
     target = cache_dir / sanitize_filename(f"{video.stem}-{size}-fonts")
     manifest = target / "manifest.json"
-    if not manifest.exists() and not _dump_container_fonts(video, target, manifest):
-        return ()
+    if not manifest.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=target.parent) as directory:
+            staged = Path(directory)
+            staged_manifest = staged / "manifest.json"
+            if not _dump_container_fonts(video, staged, staged_manifest, cancelled=cancelled):
+                return ()
+            target.mkdir(parents=True, exist_ok=True)
+            if cancelled is not None and cancelled():
+                return ()
+            for name in json.loads(staged_manifest.read_text(encoding="utf-8")):
+                (staged / name).replace(target / name)
+            staged_manifest.replace(manifest)
     try:
         names = json.loads(manifest.read_text(encoding="utf-8"))
         return tuple((name, (target / name).read_bytes()) for name in names)
@@ -376,8 +389,10 @@ def container_fonts(video: Path, *, cache_dir: Path) -> tuple[tuple[str, bytes],
         return ()
 
 
-def _attachment_streams(exe: str, video: Path) -> list[dict]:
-    probe = subprocess.run(
+def _attachment_streams(exe: str, video: Path, *, cancelled=None) -> list[dict]:
+    from saitenka.app.procutil import run_cancellable
+
+    probe = run_cancellable(
         [
             exe,
             "-v",
@@ -392,6 +407,7 @@ def _attachment_streams(exe: str, video: Path) -> list[dict]:
         check=True,
         capture_output=True,
         timeout=DUMP_TIMEOUT_S,
+        cancelled=cancelled,
     )
     streams = json.loads(probe.stdout or b"{}").get("streams")
     return streams if isinstance(streams, list) else []
@@ -414,11 +430,11 @@ def _font_attachments(streams: list[dict]) -> list[tuple[int, str]]:
     return wanted
 
 
-def _dump_container_fonts(video: Path, target: Path, manifest: Path) -> bool:
+def _dump_container_fonts(video: Path, target: Path, manifest: Path, *, cancelled=None) -> bool:
     from saitenka.mpvio.discover import find_tool
 
     try:
-        streams = _attachment_streams(find_tool("ffprobe") or "ffprobe", video)
+        streams = _attachment_streams(find_tool("ffprobe") or "ffprobe", video, cancelled=cancelled)
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         log.warning("could not list %s's attachments: %s", video.name, error)
         return False
@@ -431,7 +447,9 @@ def _dump_container_fonts(video: Path, target: Path, manifest: Path) -> bool:
     ]
     try:
         if dumps:
-            subprocess.run(
+            from saitenka.app.procutil import run_cancellable
+
+            run_cancellable(
                 [
                     find_tool("ffmpeg") or "ffmpeg",
                     "-y",
@@ -451,6 +469,7 @@ def _dump_container_fonts(video: Path, target: Path, manifest: Path) -> bool:
                 check=True,
                 capture_output=True,
                 timeout=DUMP_TIMEOUT_S,
+                cancelled=cancelled,
             )
     except (OSError, subprocess.SubprocessError) as error:
         log.warning("could not dump %s's font attachments: %s", video.name, error)
@@ -465,6 +484,7 @@ def resolve(
     settings: Mapping[str, object],
     video: Path | None,
     cache_dir: Path,
+    cancelled=None,
 ) -> FontEnvironment:
     """Assemble the same font set mpv's subtitle renderer holds for this track."""
     embedded = settings.get("embeddedfonts") is True
@@ -478,7 +498,11 @@ def resolve(
         fontconfig_config=_existing_path(expand, "~~/fonts.conf"),
         font_provider=_font_provider(settings.get("sub-font-provider")),
     )
-    attachments = container_fonts(video, cache_dir=cache_dir) if embedded and video else ()
+    attachments = (
+        container_fonts(video, cache_dir=cache_dir, cancelled=cancelled)
+        if embedded and video
+        else ()
+    )
     osd_fonts_dir = _fonts_dir(expand, settings.get("osd-fonts-dir"))
     shares_dir = osd_fonts_dir == setup.fonts_dir
     osd_setup = FontSetup(

@@ -63,6 +63,7 @@ class SubtitleTrackCoordinator:
     translation_visible: Callable[[], bool]
     rebuild_index: Callable[[], None]
     install_cue: Callable[[str], None]
+    selection_verified: Callable[[list[dict], int], None] = lambda _tracks, _sid: None
 
     def ports(self) -> subtitle_modes.TrackPorts:
         return subtitle_modes.TrackPorts(
@@ -78,6 +79,7 @@ class SubtitleTrackCoordinator:
             sample_cue=self.sample_cue,
             clear_cue=self.clear_cue,
             redraw_cue=self.redraw_cue,
+            selection_verified=self.selection_verified,
         )
 
     def current(self) -> SubtitleTrackState:
@@ -150,8 +152,8 @@ class SubtitleNavigationCoordinator:
             geometry_hint=geometry_hint,
         )
 
-    def load_index(self, path) -> None:
-        subnav.load_sub_index(self.ports(), path)
+    def load_index(self, path, *, prepared=None) -> None:
+        subnav.load_sub_index(self.ports(), path, prepared=prepared)
 
     def reconcile(self, text: str, *, confirmed: bool = True) -> None:
         subnav.reconcile_sub_text(self.ports(), text, confirmed=confirmed)

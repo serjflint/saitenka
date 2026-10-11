@@ -13,6 +13,8 @@ from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from saitenka.app.features.mining.scratch import ScratchArtifacts
+
 LANE = "mining-operation"
 
 
@@ -68,6 +70,9 @@ class MiningOperationRequest:
     plan: object | None = None
     prepared: miner.PreparedCapture | None = None
     journal: MiningActionJournal | None = None
+    base: str = ""
+    animated: bool | None = None
+    artifacts: ScratchArtifacts | None = None
 
 
 _ACTION_NAMES = tuple(field.name for field in fields(miner.MiningApply))
@@ -96,6 +101,14 @@ def _recording_apply(journal: MiningActionJournal) -> miner.MiningApply:
 def run_operation(request: object, cancelled: threading.Event) -> object:
     if not isinstance(request, MiningOperationRequest):
         raise TypeError("invalid mining operation request")
+    release = request.artifacts.retain() if request.artifacts is not None else lambda: None
+    try:
+        return _run_operation(request, cancelled)
+    finally:
+        release()
+
+
+def _run_operation(request: MiningOperationRequest, cancelled: threading.Event) -> object:
     if cancelled.is_set() or request.cancelled.is_set():
         return MiningOutcome(())
     shared_journal = request.journal is not None
@@ -123,13 +136,18 @@ def run_operation(request: object, cancelled: threading.Event) -> object:
                 transaction, request.token, force=request.force, card=request.card
             )
         return outcome(plan)
-    assert request.prepared is not None and request.plan is not None
+    assert request.plan is not None
+    prepared = request.prepared or miner.prepare_capture(
+        transaction, request.base, animated=request.animated
+    )
+    if is_cancelled():
+        return outcome()
     if request.kind is OperationKind.BULK:
         assert isinstance(request.plan, miner.BulkMinePlan)
-        miner.commit_bulk(transaction, request.plan, request.prepared)
+        miner.commit_bulk(transaction, request.plan, prepared)
     else:
         assert isinstance(request.plan, miner.TokenMinePlan)
-        miner.commit_token(transaction, request.plan, request.prepared)
+        miner.commit_token(transaction, request.plan, prepared)
     return outcome()
 
 

@@ -53,7 +53,15 @@ def _captured_prefetch_items(r: TestSession, monkeypatch) -> list[prefetch.Prefe
     items: list[prefetch.PrefetchItem] = []
 
     def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
-        items.extend(item for _priority, item in jobs if isinstance(item, prefetch.PrefetchItem))
+        for _priority, item in jobs:
+            if isinstance(item, prefetch.CandidateScan):
+                items.extend(
+                    candidate
+                    for _, candidate in prefetch.candidate_jobs(item.ports, item.head, item.gen)
+                    if isinstance(candidate, prefetch.PrefetchItem)
+                )
+            elif isinstance(item, prefetch.PrefetchItem):
+                items.append(item)
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
@@ -491,9 +499,50 @@ def test_mine_current_video_forces_the_animated_clip(monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(r.graph.mining, "mine_index", lambda _index, **k: captured.update(k))
     r.command(bindings.MINE_VIDEO_MSG)
-    assert captured == {
-        "animated": True
-    }  # the video-mine shortcut forces a motion clip for this mine
+    assert captured["animated"] is True
+    assert captured["encounter"].cue.tokens[0].surface == "本命"
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_mine_command_uses_one_observed_encounter_without_property_queries(monkeypatch):
+    ipc = FakeIPC()
+    ipc.props.update(
+        {
+            "path": "/video.mkv",
+            "time-pos": 5.0,
+            "sub-start": 4.0,
+            "sub-end": 6.0,
+            "sub-text": "本命",
+            "pause": False,
+        }
+    )
+    reader = _reader_with_word(ipc)
+    _enable_mining(reader)
+    reader.graph.tooltip.select(0)
+    reader.graph.playback.install_seed(dict(ipc.props))
+    admitted = []
+    from saitenka.app.features.mining import miner
+
+    monkeypatch.setattr(
+        miner,
+        "preflight_token",
+        lambda transaction, _token, **_kwargs: admitted.append(transaction.encounter),
+    )
+    ipc.commands.clear()
+
+    reader.command(bindings.MINE_MSG)
+    await_ready(
+        lambda: not reader.graph.mining.operation_pending, "mine did not finish", pump=reader.pump
+    )
+
+    assert len(admitted) == 1
+    assert (admitted[0].media_path, admitted[0].playhead, admitted[0].span) == (
+        "/video.mkv",
+        5.0,
+        miner.Timespan(4.0, 6.0),
+    )
+    assert not [command for command in ipc.commands if command[0] == "get_property"]
 
 
 def test_mine_keybinds_register_even_when_anki_absent(make_session):
@@ -529,7 +578,8 @@ def test_mine_video_key_registers_and_routes_to_the_video_mine(monkeypatch):
         lambda _index, **kwargs: calls.append(kwargs),
     )
     reader.command(MINE_VIDEO_MSG)
-    assert calls == [{"animated": True}]
+    assert len(calls) == 1 and calls[0]["animated"] is True
+    assert calls[0]["encounter"].cue.tokens[0].surface == "本命"
 
 
 def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
@@ -1747,6 +1797,7 @@ def test_prefetch_worker_warms_cache_then_close_joins():
         await_ready(
             lambda: key in r.graph.tooltip.surface_state().panel_cache,
             "the prefetch never warmed the panel",
+            pump=r.pump,
         )
         assert (
             key in r.graph.tooltip.surface_state().panel_cache
@@ -3319,28 +3370,13 @@ def test_entry_for_does_not_mutate_cached_entry_jlpt_pill_dedup(make_session):
     assert len(jlpt_pills_2) == 1, f"second call: {len(jlpt_pills_2)} JLPT pills, want 1"
 
 
-def test_prefetch_worker_receives_mined_flag_not_calls_card_for(monkeypatch):
-    """_update_prefetch must pass the mined flag from the main thread so that prefetch workers
-    never call _is_mined → card_for → jamdict from a worker thread."""
+def test_prepared_prefetch_items_carry_the_mined_flag(monkeypatch):
     ipc = FakeIPC()
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.graph.playback.install_seed({"sub-text": "本命"})
-    is_mined_calls_from_workers: list[str] = []
-
-    original_is_mined = r.graph.tooltip.is_mined
-
-    def tracked_is_mined(tok):
-        import threading
-
-        if threading.current_thread().name.startswith("saitenka-job-speculative-prefetch"):
-            is_mined_calls_from_workers.append(tok.surface)
-        return original_is_mined(tok)
-
-    monkeypatch.setattr(r.graph.tooltip, "is_mined", tracked_is_mined)
     items = _captured_prefetch_items(r, monkeypatch)
     assert items, "nothing was queued"
-    # Each queued item must carry the main-thread-evaluated mined flag (typed since Stage 8b)
     assert isinstance(items[0].mined, bool), f"queue item lacks the mined flag: {items[0]}"
 
 

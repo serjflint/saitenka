@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -153,7 +155,8 @@ def test_reobserving_the_latest_values_emits_nothing(
     for name, data in dict(observations).items():
         projected = projection.observe(state, name, data)
         assert projected.deltas == ()
-        assert projected.state == state
+        assert replace(projected.state, sid_observations=state.sid_observations) == state
+        assert projected.state.sid_observations == state.sid_observations + (name == "sid")
 
 
 def test_secondary_text_change_carries_the_new_value() -> None:

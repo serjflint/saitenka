@@ -38,6 +38,7 @@ from saitenka.app import (
     episode_reslot,
     logsetup,
     session_stats,
+    subtitle_fonts,
     subtitle_modes,
 )
 from saitenka.app.bindings import PROFILE_CYCLE_MSG
@@ -180,13 +181,17 @@ def _adopt_selected_subtitle(
     itself lands in that gap and keeps its cues with no geometry source at all.
     """
     native = presentation.native
+    state = ports().tracks()
+    known = sid in {state.jp_sid, state.en_sid}
     if native is None:
         presentation.invalidate_geometry()
         subtitle_modes.on_primary_changed(ports(), sid)
+        if known and sid is not None:
+            ports().rebuild_index()
         return
     native.set_source(None, live=True)
     subtitle_modes.on_primary_changed(ports(), sid)
-    if native.source_path is None and sid is not None:
+    if known and sid is not None:
         ports().rebuild_index()
 
 
@@ -430,6 +435,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             ipc,
             apply_playback_delta,
             PlaybackStartup(
+                prepare_track=lambda: cue_ref.get().rebuild_sub_index(),
                 reconcile_cue=lambda text: navigation_ref.get().reconcile(text),
                 refresh_render_space=lambda: presentation_ref.get().refresh_osd(),
                 observe_authored_subtitle=lambda reply: (
@@ -573,6 +579,9 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         navigation=navigation,
         playback=playback_observation,
         property_value=playback_observation.query,
+        selection_verified=lambda tracks, sid: playback_observation.install_seed(
+            {"track-list": tracks, "sid": sid}
+        ),
         notifications=notifications,
         invalidate=analysis_commands.invalidate,
         translation_visible=lambda: translation_ref.get().active(translation_observation.current()),
@@ -581,7 +590,10 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     )
     colored_track = ColoredTrackController(
         ColoredTrackPorts(
-            query=playback_observation.query,
+            selection_revision=lambda: (
+                playback_observation.state.connection.epoch,
+                playback_observation.state.sid_observations,
+            ),
             value=playback_observation.value,
             cue_text=lambda: playback_observation.cue.text,
             annotation_inputs=lambda: cue_ref.get().annotation_inputs(),
@@ -848,6 +860,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 acquisition=subtitle_acquisition,
                 translation=translation_controller,
                 colored_track=colored_track,
+                cancel_mining=mining_controller.cancel_operation,
             )
         )
     )
@@ -860,6 +873,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     def subtitle_selection_changed(sid: object) -> None:
         subtitle_presentation.refresh.retire()
         _adopt_selected_subtitle(subtitle_presentation, track_commands.ports, sid)
+        colored_track.request()
 
     def subtitle_timing_changed() -> None:
         subtitle_presentation.geometry_changed("sub-delay")
@@ -868,6 +882,8 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
 
     def geometry_input_changed(property_name: str) -> None:
         subtitle_presentation.geometry_changed(property_name)
+        if property_name in {f"options/{name}" for name in subtitle_fonts.FONT_OPTIONS}:
+            cue_coordinator.rebuild_sub_index()
 
     def pause_changed(*, paused: bool) -> None:
         log.debug("mpv pause -> %s", paused)
@@ -893,10 +909,12 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     playback_projection = playback_projection_ref.bind(
         PlaybackProjection(
             PlaybackApplication(
+                media_path_changed=lambda _path: cue_coordinator.retire("source"),
                 retire_cue=cue_coordinator.retire,
                 probe_authored_subtitle=authored_subtitle_probe.resolve,
                 observe_cue=cue_coordinator.observe,
                 subtitle_selection_changed=subtitle_selection_changed,
+                subtitle_tracks_changed=cue_coordinator.rebuild_sub_index,
                 subtitle_timing_changed=subtitle_timing_changed,
                 geometry_input_changed=geometry_input_changed,
                 render_space_changed=render_space_changed,
@@ -1085,7 +1103,7 @@ def _assemble_stateless_commands(
                 tracks=owners.tracks,
                 tooltip=owners.tooltip,
                 store=owners.history.ensure_backlog,
-                property_value=owners.playback.query,
+                property_value=owners.playback.value,
                 number_property=owners.playback.number,
                 sequence_property=owners.playback.sequence,
                 secondary_text=owners.translation_observation.secondary_text,
