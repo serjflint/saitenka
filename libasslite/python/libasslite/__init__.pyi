@@ -5,6 +5,8 @@ from os import PathLike
 
 type StrPath = str | PathLike[str]
 
+class RendererRecreationRequired(RuntimeError): ...
+
 class AssImageLayer:
     @property
     def width(self) -> int: ...
