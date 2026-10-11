@@ -1,12 +1,10 @@
 """Coloring: data loaders, N+1 algorithm, and the SubMiner priority model."""
 
-from pathlib import Path
-
 import dicthelp
 import pytest
 from saitenka_dict import FreqDict
 from saitenka_tokenize.japanese import tokenize
-from saitenka_wordstate import FUNCTION_POS, Scorer, mark_n_plus_one
+from saitenka_wordstate import Scorer, mark_n_plus_one
 from saitenka_wordstate.known import KnownForm, KnownWords
 
 from saitenka.app.scoring import Coloring, Palette
@@ -107,19 +105,6 @@ def test_priority_n_plus_one_over_known_and_base(jlpt):
     assert by["読む"].tag.startswith("n+1")
     assert by["読む"].color == PAL.n_plus_one
     assert by["は"].color == PAL.base  # function word stays base
-
-
-def test_function_words_never_colored_by_freq(jlpt):
-    zip_path = next(iter(sorted(Path("../tools/freq").glob("*.zip"))), None)
-    if zip_path is None:
-        pytest.skip("freq zips are user-supplied (not shipped in-repo) — none present")
-    fq = dicthelp.load_freqdict(str(zip_path))
-    sc = Coloring(Scorer(known=KnownWords.from_set([]), freq=fq, jlpt=jlpt))
-    toks = tokenize("私は本を読む")
-    styles = sc.score_line(toks)
-    for t, s in zip(toks, styles, strict=True):
-        if t.pos in FUNCTION_POS:
-            assert s.color == PAL.base
 
 
 def test_jlpt_underline_is_additive(jlpt):

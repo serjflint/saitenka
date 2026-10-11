@@ -2,7 +2,7 @@
 
 import pytest
 import util
-from util import RecordingRasterProvider, keybind_registry
+from util import keybind_registry
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.bindings import ANNOTATION_MSG
@@ -12,7 +12,7 @@ from saitenka.app.session.factory import (
     SessionInfrastructure,
     SessionServices,
 )
-from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
+from saitenka.app.subtitle_render import NullRenderer
 
 
 class FakeIPC(util.FakeIPC):
@@ -41,31 +41,6 @@ def test_full_annotations_remain_the_default(make_session):
 
     assert reader.graph.annotation.view.mode == "full"
     assert ReaderOptions().keys.annotation_key == "Alt+a"
-
-
-def test_hover_mode_retains_scores_but_hides_them_from_render(monkeypatch, make_session):
-    reader = make_session(
-        FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
-    )
-    reader.graph.playback.install_seed({"sub-text": "猫"})
-    reader.graph.subtitle_presentation.cue.replace_tokenized(lines=[[object()]])
-    reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object()])
-    reader.graph.subtitle_presentation.cue.replace_tokenized(styles=["scored"])
-    reader.graph.tooltip.select(0)
-    monkeypatch.setattr(reader.graph.overlay, "show", lambda *_args, **_kwargs: None)
-    provider = RecordingRasterProvider(size=(10, 10))
-    reader.graph.subtitle_presentation.renderer = SubtitleRenderer(provider)
-
-    reader.graph.subtitle_presentation.draw()
-    reader.graph.tooltip.set_annotation_hover(revealed=True)
-    reader.graph.tooltip.set_annotation_hover(revealed=False)
-
-    assert reader.graph.subtitle_presentation.cue.current.styles == ["scored"]
-    assert [(request.styles, request.hover) for request in provider.requests] == [
-        (None, None),
-        (["scored"], 0),
-        (None, None),
-    ]
 
 
 def test_hover_mode_still_scores_each_new_cue(monkeypatch, make_session):

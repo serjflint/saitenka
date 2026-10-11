@@ -1,18 +1,18 @@
 """Acceptance coverage for FSRS maturity colors and their presentation boundary."""
 
+import dicthelp
 import pytest
-import util
 from saitenka_dict import FreqDict
 from saitenka_tokenize.japanese import Token
 from saitenka_wordstate import Scorer
 from saitenka_wordstate.fsrs import KnownSnap
 from saitenka_wordstate.known import KnownWords
-from util import RecordingRasterProvider
+from util import FakeIPC, RecordingRasterProvider
 
 import saitenka.app.features.profiles.dependencies as reader_deps
 from saitenka.app.config import ReaderOptions, TooltipOptions
 from saitenka.app.scoring import Coloring, Palette
-from saitenka.app.session.factory import SessionServices
+from saitenka.app.session.factory import SessionInfrastructure, SessionServices
 from saitenka.app.subtitle_render import SubtitleRenderer
 
 
@@ -98,11 +98,9 @@ def test_config_loads_fsrs_copy_and_controls_maturity_colors(tmp_path, monkeypat
     )
 
 
-class _IPC(util.FakeIPC):
-    pass
-
-
-def test_hover_visibility_reuses_the_learning_style(monkeypatch, make_session):
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_hover_visibility_reuses_the_learning_style(make_session):
     scorer = Coloring(
         Scorer(
             known=KnownWords.from_set([]),
@@ -112,28 +110,35 @@ def test_hover_visibility_reuses_the_learning_style(monkeypatch, make_session):
             enable_jlpt=False,
         )
     )
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    provider = RecordingRasterProvider(size=(10, 10))
     reader = make_session(
-        _IPC(),
+        ipc,
         services=SessionServices(
             scorer=scorer,
+            dictionaries=dicthelp.load_set(),
         ),
+        infrastructure=SessionInfrastructure(renderer=SubtitleRenderer(provider)),
         options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),
     )
-    reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[_token()])
-    reader.graph.subtitle_presentation.cue.replace_tokenized(lines=[[object()]])
-    reader.graph.subtitle_presentation.cue.replace_tokenized(
-        styles=scorer.score_line(reader.graph.subtitle_presentation.cue.current.tokens)
-    )
+    reader.graph.presentation.refresh_osd()
+    ipc.props["sub-text"] = "本"
+    reader.graph.playback.observe("sub-text", "本")
+    reader.pump()
     reader.graph.tooltip.select(0)
-    monkeypatch.setattr(reader.graph.overlay, "show", lambda *_args, **_kwargs: None)
-    provider = RecordingRasterProvider(size=(10, 10))
-    reader.graph.subtitle_presentation.renderer = SubtitleRenderer(provider)
+    assert provider.requests[-1].styles is None
+    provider.requests.clear()
 
-    reader.graph.subtitle_presentation.draw()
-    reader.graph.tooltip.set_annotation_hover(revealed=True)
+    for revealed in (True, False, True):
+        reader.graph.tooltip.set_annotation_hover(revealed=revealed)
 
-    assert [request.styles for request in provider.requests] == [
-        None,
-        reader.graph.subtitle_presentation.cue.current.styles,
+    assert [(request.hover, request.styles is None) for request in provider.requests] == [
+        (0, False),
+        (None, True),
+        (0, False),
     ]
-    assert reader.graph.subtitle_presentation.cue.current.styles[0].tag == "learning"
+    assert [
+        [(style.color, style.tag) for style in request.styles]
+        for request in (provider.requests[0], provider.requests[2])
+    ] == [[(scorer.palette.learning, "learning")]] * 2
