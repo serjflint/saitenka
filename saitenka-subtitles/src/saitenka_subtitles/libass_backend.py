@@ -448,12 +448,12 @@ class LibassGeometryBackend:
     def _renderer(self, request: GeometryRequest) -> tuple[NativeRenderer, float]:
         """This request's renderer, pointed at this request's document, and what building cost.
 
-        Keyed on `renderer_key()` — the font environment — not `cache_key()`, which is the
-        SNAPSHOT's identity and hashes the timestamp, the palette and the document. Those change
-        every cue, so the renderer cache could never hit: it rebuilt libass, rescanned the font
-        directory and discarded the glyph cache once per cue. One live session built a renderer for
-        16 of 18 renders at 1.4–3.0ms each, against renders of 0.7–4.5ms, with the cache sitting
-        pinned at its bound evicting entries nothing could reuse.
+        Keyed on `renderer_key()` — the font environment and track features — not `cache_key()`,
+        which is the SNAPSHOT's identity and hashes the timestamp, the palette and the document.
+        Those change every cue, so the renderer cache could never hit: it rebuilt libass, rescanned
+        the font directory and discarded the glyph cache once per cue. One live session built a
+        renderer for 16 of 18 renders at 1.4–3.0ms each, against renders of 0.7–4.5ms, with the cache
+        sitting pinned at its bound evicting entries nothing could reuse.
 
         The document is swapped on the way out rather than left to the caller: a cached renderer
         still holding the previous cue's track would hand back that cue's boxes, silently, which is
