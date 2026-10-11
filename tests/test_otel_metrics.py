@@ -3,10 +3,55 @@
 from __future__ import annotations
 
 import pytest
+from opentelemetry import trace
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from saitenka import otel_metrics
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("detached", [False, True])
+def test_deferred_work_keeps_its_tracer_while_worker_roots_use_the_current_provider(
+    monkeypatch, enabled, detached
+):
+    from telemetry_helpers import enable_span_gate
+
+    providers = [TracerProvider(), TracerProvider()]
+    exports = [InMemorySpanExporter(), InMemorySpanExporter()]
+    for provider, export in zip(providers, exports, strict=True):
+        provider.add_span_processor(SimpleSpanProcessor(export))
+    current = [providers[0]]
+    monkeypatch.setattr(trace, "get_tracer_provider", lambda: current[0])
+    monkeypatch.setattr(otel_metrics, "_trace_module", trace)
+    monkeypatch.setattr(otel_metrics, "_trace_available", True)
+    enable_span_gate(monkeypatch)
+    otel_metrics.span_gate.set(value=enabled)
+
+    def work():
+        with otel_metrics.traced("deferred"):
+            operation = otel_metrics.DeferredSpan("deferred-operation")
+            operation.finish()
+
+    callback = otel_metrics.bind_context(work, clear_span=detached)
+    current[0] = providers[1]
+    otel_metrics.span_gate.set(value=True)
+    try:
+        with otel_metrics.traced("current"):
+            callback()
+        expected = ["deferred-operation", "deferred"]
+        assert [s.name for s in exports[0].get_finished_spans()] == (
+            expected if enabled and not detached else []
+        )
+        assert [s.name for s in exports[1].get_finished_spans()] == (
+            (expected if detached else []) + ["current"]
+        )
+    finally:
+        for provider in providers:
+            provider.shutdown()
 
 
 @pytest.fixture

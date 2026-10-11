@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- Deferred background work keeps its original diagnostic tracer, preventing older requests from
+  appearing in later reports.
 - `libasslite` now refuses to reuse a renderer when track features change, raising
   `RendererRecreationRequired` while leaving the current document usable.
 - Switching subtitle tracks no longer crashes Saitenka when libass bracket matching changes. Native

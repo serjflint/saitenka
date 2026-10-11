@@ -18,7 +18,7 @@ from saitenka_subtitles import (
     authored_ass_rows_at,
     prepare_ass_hit_map_frame,
 )
-from saitenka_subtitles.geometry import FontSetup, PaintQualification
+from saitenka_subtitles.geometry import FontProvider, FontSetup, PaintQualification
 from saitenka_subtitles.libass_backend import LibassGeometryBackend
 from saitenka_subtitles.whole_cue import WholeCue, compose, osd_payload, osd_template
 from test_ass_geometry import ASS
@@ -134,7 +134,12 @@ def test_rapid_indexed_seeks_land_on_the_prepared_cue_with_subtitle_delay(
     ],
 )
 def test_osd_expansion_matches_whole_authored_cue(frame, margins, raw):
-    source = ASS.decode().replace("猫を見る", raw).encode()
+    source = ASS.decode().replace("猫を見る", raw).replace("Arial", "Noto Sans JP Thin").encode()
+    fonts = FontSetup(
+        default_font=str(Path(__file__).parents[1] / "src/saitenka/assets/fonts/NotoSansJP.ttf"),
+        default_family="Noto Sans JP Thin",
+        font_provider=FontProvider.NONE,
+    )
     track = SubtitleTrackId("expansion")
     rows, text = authored_ass_rows_at(source, track, 1500)
     prepared = prepare_ass_hit_map_frame(
@@ -159,6 +164,8 @@ def test_osd_expansion_matches_whole_authored_cue(frame, margins, raw):
         coloring="whole-cue-osd",
         whole_cue=cue,
         paint_qualification=prepared.paint_qualification,
+        font_setup=fonts,
+        osd_font_setup=fonts,
     )
     backend = LibassGeometryBackend()
     try:

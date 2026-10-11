@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -311,6 +311,9 @@ span_gate = ActiveGate()
 # None means unresolved; False memoizes an unavailable optional SDK.
 _trace_available: bool | None = None
 _trace_module: ModuleType | None = None
+_trace_binding: ContextVar[tuple[ModuleType | None, Any] | None] = ContextVar(
+    "saitenka_trace_binding", default=None
+)
 
 
 def _resolve_trace_module() -> ModuleType | None:
@@ -329,6 +332,9 @@ def _resolve_trace_module() -> ModuleType | None:
         return None
     if _trace_available is False:
         return None
+    binding = _trace_binding.get()
+    if binding is not None:
+        return binding[0]
     if _trace_module is None:
         try:
             import opentelemetry.trace as _trace
@@ -339,6 +345,11 @@ def _resolve_trace_module() -> ModuleType | None:
         if _trace_available is None:
             _trace_available = True
     return _trace_module
+
+
+def _current_tracer(trace):
+    binding = _trace_binding.get()
+    return binding[1] if binding is not None else trace.get_tracer("saitenka.overlay")
 
 
 class SpanSetter:
@@ -384,7 +395,7 @@ def traced(name: str, **attributes: str) -> Generator[SpanSetter]:
         yield _NOOP_SPAN
         return
     inherited = _causal_attributes(trace)
-    with trace.get_tracer("saitenka.overlay").start_as_current_span(name) as span:
+    with _current_tracer(trace).start_as_current_span(name) as span:
         # otel_export._span_to_ctf_event reads this back for the CTF event's "tid" — without it,
         # every independently-started span (no parent) gets a random trace_id, and using THAT for
         # tid scatters unrelated spans across a different synthetic "thread" row each, defeating the
@@ -464,6 +475,13 @@ def _causal_attributes(trace) -> dict:
 def bind_context(callback, *, clear_span: bool = False):
     """Capture submission context; each invocation enters its own copy, including on FT workers."""
     captured = copy_context()
+    if clear_span:
+        captured.run(_trace_binding.set, None)
+    else:
+        # Deferred work must not enter a later diagnostic session.
+        trace = _resolve_trace_module()
+        tracer = _current_tracer(trace) if trace is not None else None
+        captured.run(_trace_binding.set, (trace, tracer))
 
     def invoke(*args, **kwargs):
         def run():
@@ -500,9 +518,7 @@ class DeferredSpan:
         if trace is None:
             self._span: Any | None = None
             return
-        span = trace.get_tracer("saitenka.overlay").start_span(
-            name, attributes={"timing": "operation-lifetime"}
-        )
+        span = _current_tracer(trace).start_span(name, attributes={"timing": "operation-lifetime"})
         span.set_attribute("thread.id", threading.get_native_id())  # the SUBMITTING thread
         for k, v in {**_causal_attributes(trace), **attributes}.items():
             span.set_attribute(k, v)
