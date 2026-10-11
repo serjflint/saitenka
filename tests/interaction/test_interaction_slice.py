@@ -13,7 +13,10 @@ feature's events reach the others by broadcast, and each has to leave the others
 
 from __future__ import annotations
 
+from dataclasses import asdict
+
 import pytest
+from dirty_equals import IsPartialDict
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
@@ -33,6 +36,7 @@ from saitenka.runtime.events import (
     HoverPauseReleased,
     HoverScrolled,
     HoverWordForgotten,
+    HoverWordRead,
     HoverWordResolved,
     PickerClosed,
     PickerListed,
@@ -621,37 +625,34 @@ def test_the_same_claim_events_decide_the_same_slot_with_or_without_a_reactor(re
     assert local.current == routed.current
 
 
-# --- the slot's eighth feature ------------------------------------------------------------------
-
-
-def test_the_hovered_word_slice_declares_and_hands_nothing_back(request) -> None:
-    """It observes nothing: the lookup has already answered by the time this is told. So there is
-    no outbox, and a caller waiting on one would be waiting on a decision nobody makes."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = HoveredWordStore(ipc)
-
-    assert store.dispatch(HoverWordResolved("answer")) is None
-    assert store.current.meta == "answer"
-
-
-def test_the_kanji_cycle_restarts_on_a_new_word_and_survives_a_revision(request) -> None:
+@pytest.mark.parametrize(
+    ("event", "expected"),
+    [
+        (HoverWordRead("ねこちゃん"), {"meta": "cat", "reading": "ねこちゃん", "kanji": 3}),
+        (
+            HoverWordResolved("cat-mined", revised=True),
+            {"meta": "cat-mined", "reading": "ねこ", "kanji": 3},
+        ),
+        (HoverWordResolved("dog"), {"meta": "dog", "kanji": 0}),
+        (HoverWordForgotten(), {"meta": None, "reading": "", "kanji": 0}),
+    ],
+    ids=["panel-reading", "mining-revision", "replacement", "retirement"],
+)
+def test_hovered_word_transitions_preserve_or_retire_the_complete_answer(request, event, expected):
     ipc = FakeIPC()
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     store = HoveredWordStore(ipc)
     store.dispatch(HoverWordResolved("cat"))
-    store.dispatch(HoverKanjiAdvanced())
-    store.dispatch(HoverKanjiAdvanced())
+    store.dispatch(HoverWordRead("ねこ"))
+    for _ in range(3):
+        store.dispatch(HoverKanjiAdvanced())
+    assert (store.current.meta, store.current.reading, store.current.kanji) == ("cat", "ねこ", 3)
 
-    store.dispatch(HoverWordResolved("cat-mined", revised=True))
-    assert store.current.kanji == 2
+    store.dispatch(event)
 
-    store.dispatch(HoverWordResolved("dog"))
-    assert store.current.kanji == 0
+    assert asdict(store.current) == IsPartialDict(expected)
 
 
 def test_the_hovered_word_is_untouched_by_the_slot_s_other_features(request) -> None:
@@ -666,29 +667,6 @@ def test_the_hovered_word_is_untouched_by_the_slot_s_other_features(request) -> 
     hover.dispatch(HoverObserved(HoverObservation(hover=-1, word=0)))
 
     assert word.current.meta == "cat"
-
-
-def test_the_same_word_events_decide_the_same_slice_with_or_without_a_reactor(request) -> None:
-    stream = (
-        HoverWordResolved("cat"),
-        HoverKanjiAdvanced(),
-        HoverWordResolved("cat-mined", revised=True),
-        HoverWordForgotten(),
-        HoverKanjiAdvanced(),
-        HoverWordResolved("dog"),
-    )
-    local = HoveredWordStore(FakeIPC())
-
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    routed = HoveredWordStore(ipc)
-
-    for event in stream:
-        local.dispatch(event)
-        routed.dispatch(event)
-    assert local.current == routed.current
 
 
 # --- the slot's ninth feature -------------------------------------------------------------------
