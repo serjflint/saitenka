@@ -56,16 +56,12 @@ def _bindings():
 
 
 def test_every_stateless_policy_is_registered_or_named_as_residue() -> None:
-    """The seam only exists if the next feature has to use it.
-
-    `docs/contributing/runtime.md` declared the effect-interpreter invariant with nothing
-    implementing it, and that is how a declared architecture and the true one come apart. This is
-    the implementation: an unregistered policy is a failure unless it is on a list that only
-    shrinks.
-    """
+    """Every discovered policy and every declared command must be wired."""
     registered = {binding.command_type for binding in _bindings()}
 
     assert _policy_types() == registered
+    expected = {(command_type, command) for command_type in registered for command in command_type}
+    assert {(type(row.command), row.command) for row in STATELESS_COMMANDS} == expected
 
 
 def test_the_command_graph_refuses_a_command_no_feature_owns() -> None:
@@ -78,12 +74,6 @@ def test_the_command_graph_rejects_duplicate_command_types() -> None:
     binding = _bindings()[0]
     with pytest.raises(ValueError, match="already registered"):
         StatelessCommandGraph((binding, binding), ())
-
-
-def test_the_command_graph_closes_every_installed_policy() -> None:
-    graph = StatelessCommandGraph(_bindings(), STATELESS_COMMANDS)
-
-    assert graph.command_types == {binding.command_type for binding in _bindings()}
 
 
 def test_the_command_graph_rejects_an_installed_policy_without_a_message() -> None:

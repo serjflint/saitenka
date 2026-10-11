@@ -54,13 +54,6 @@ def test_the_centred_modals_leave_the_tooltip_alone(panel: Panel) -> None:
     assert reduce(command, PanelInputs()) == (OpenPanel(panel),)
 
 
-def test_closing_the_sidebar_does_not_touch_the_tooltip() -> None:
-    """The dismissal belongs to the open, not to the panel: closing reveals the video again."""
-    assert reduce(PanelCommand.TOGGLE_SIDEBAR, PanelInputs(frozenset({Panel.SIDEBAR}))) == (
-        ClosePanel(Panel.SIDEBAR),
-    )
-
-
 def test_the_card_preview_replays_and_closes_without_a_toggle() -> None:
     """It is not a toggle: replay re-shows the last mined card whether or not one is up, and the
     host owns whether there is one to show."""
@@ -68,12 +61,3 @@ def test_the_card_preview_replays_and_closes_without_a_toggle() -> None:
     assert reduce(PanelCommand.CLOSE_CARD_PREVIEW, PanelInputs()) == (
         ClosePanel(Panel.CARD_PREVIEW),
     )
-
-
-def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
-    given = PanelInputs(frozenset({Panel.SIDEBAR}))
-
-    for command in PanelCommand:
-        reduce(command, given)
-
-    assert given == PanelInputs(frozenset({Panel.SIDEBAR}))

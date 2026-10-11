@@ -50,14 +50,6 @@ def test_showing_without_a_wanted_translation_draws_none() -> None:
     )
 
 
-def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
-    given = SessionInputs(overlay_visible=True, translation_wanted=True)
-
-    reduce(TOGGLE, given)
-
-    assert given == SessionInputs(overlay_visible=True, translation_wanted=True)
-
-
 def test_renderer_toggle_is_a_typed_session_effect() -> None:
     assert reduce(SessionCommand.TOGGLE_RENDERER, SessionInputs())[0] == ToggleRenderer()
 

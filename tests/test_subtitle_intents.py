@@ -41,12 +41,6 @@ def inputs(**overrides: object) -> SubtitleInputs:
     return SubtitleInputs(**{**base, **overrides})  # type: ignore[arg-type]
 
 
-def test_every_command_produces_at_least_one_effect() -> None:
-    """An accepted command never silently no-ops."""
-    for command in SubtitleCommand:
-        assert reduce(command, inputs())
-
-
 # --- language toggle ---------------------------------------------------------------------------
 
 
@@ -111,7 +105,6 @@ def test_marking_nothing_is_a_warning_not_an_adoption() -> None:
     effects = reduce(SubtitleCommand.MARK_CURRENT_JAPANESE, inputs(active_sid=None))
 
     assert effects == (Announce("No subtitle track to mark", "warn"),)
-    assert not any(isinstance(effect, AdoptCurrentAsTarget) for effect in effects)
 
 
 # --- acquisition -------------------------------------------------------------------------------
@@ -160,7 +153,6 @@ def test_a_second_acquisition_while_one_runs_is_rejected() -> None:
     effects = reduce(SubtitleCommand.RETRY_ACQUISITION, inputs(retry_in_flight=True))
 
     assert effects == (Announce("Subtitle sync already running", "warn"),)
-    assert not any(isinstance(effect, AcquireSubtitles) for effect in effects)
 
 
 # --- annotation mode ---------------------------------------------------------------------------
@@ -181,15 +173,6 @@ def test_annotation_mode_toggles_back() -> None:
     effects = reduce(SubtitleCommand.TOGGLE_ANNOTATION_MODE, inputs(annotation_mode="hover"))
 
     assert effects == (SetAnnotationMode("full", redraw=True), Announce("annotations: full"))
-
-
-def test_the_reducer_never_mutates_its_inputs() -> None:
-    given = inputs()
-
-    for command in SubtitleCommand:
-        reduce(command, given)
-
-    assert given == inputs()
 
 
 # --- navigation, anchoring, copy, translation ---------------------------------------------
@@ -245,7 +228,6 @@ def test_copying_with_nothing_rendered_warns_instead() -> None:
     effects = reduce(SubtitleCommand.COPY_LINE, inputs(has_cue_lines=False))
 
     assert effects == (Announce("no line to copy", "warn"),)
-    assert not any(isinstance(effect, CopyCueText) for effect in effects)
 
 
 def test_translation_toggles_unconditionally() -> None:

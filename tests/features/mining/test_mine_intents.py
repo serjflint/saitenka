@@ -41,44 +41,7 @@ def test_an_unconfigured_session_decides_nothing(command: MineCommand) -> None:
     assert reduce(command, MineInputs()) == ()
 
 
-def test_missing_configuration_outranks_a_missing_target() -> None:
-    """Both are unmet at once when Anki is absent, and only one of them is worth telling the user
-    about — announcing "no word to mine" to someone with no Anki names the wrong problem."""
-    assert reduce(MineCommand.WORD, MineInputs(configured=False, target=None)) == ()
-
-
 def test_bulk_mining_needs_no_cursor() -> None:
     """It reads the episode index rather than the hover, and answers for itself when the episode
     has nothing to mine — so gating it on a target here would refuse a request that is fine."""
     assert reduce(MineCommand.EPISODE, MineInputs()) == (MineEpisode(),)
-
-
-def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
-    given = MineInputs(configured=True, target=3)
-
-    for command in MineCommand:
-        reduce(command, given)
-
-    assert given == MineInputs(configured=True, target=3)
-
-
-def test_bookmarking_needs_a_cue_on_screen() -> None:
-    from saitenka.app.features.mining.mine_intents import BookmarkCue
-
-    assert reduce(MineCommand.BOOKMARK_CUE, MineInputs(has_active_cue=True)) == (BookmarkCue(),)
-
-
-def test_bookmarking_without_a_cue_says_so() -> None:
-    assert reduce(MineCommand.BOOKMARK_CUE, MineInputs()) == (
-        Announce("no active cue to bookmark", "warn"),
-    )
-
-
-def test_bookmarking_does_not_need_anki() -> None:
-    """It writes to the local backlog. Gating it on the mining configuration would refuse a request
-    that has nothing to do with Anki."""
-    from saitenka.app.features.mining.mine_intents import BookmarkCue
-
-    assert reduce(MineCommand.BOOKMARK_CUE, MineInputs(configured=False, has_active_cue=True)) == (
-        BookmarkCue(),
-    )

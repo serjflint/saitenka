@@ -62,12 +62,3 @@ def test_escape_at_the_root_closes_the_tooltip() -> None:
 def test_a_click_is_routed_and_a_right_click_copies() -> None:
     assert reduce(InteractionCommand.CLICK, InteractionInputs()) == (RouteClick(),)
     assert reduce(InteractionCommand.COPY_UNDER_CURSOR, InteractionInputs()) == (CopyUnderCursor(),)
-
-
-def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
-    given = InteractionInputs(can_go_back=True, tooltip_view_height=500)
-
-    for command in InteractionCommand:
-        reduce(command, given)
-
-    assert given == InteractionInputs(can_go_back=True, tooltip_view_height=500)

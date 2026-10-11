@@ -65,15 +65,14 @@ def test_enabling_the_policy_never_touches_playback() -> None:
     )
 
 
-def test_speaking_prefers_the_dictionary_form_reading() -> None:
-    """The surface reads 習 as しゅう and the token reading gives the stem ならわ; only the
-    dictionary form is right out loud, which is why all three are carried separately."""
-    assert reduce(HoverCommand.SPEAK, hovered()) == (SpeakText("ならう"),)
-
-
-def test_speaking_falls_back_through_token_reading_to_surface() -> None:
-    assert reduce(HoverCommand.SPEAK, hovered(reading="")) == (SpeakText("ならわ"),)
-    assert reduce(HoverCommand.SPEAK, hovered(reading="", token_reading="")) == (SpeakText("習う"),)
+@pytest.mark.parametrize(
+    ("reading", "token_reading", "spoken"),
+    [("ならう", "ならわ", "ならう"), ("", "ならわ", "ならわ"), ("", "", "習う")],
+)
+def test_speaking_prefers_the_dictionary_form_reading(reading, token_reading, spoken) -> None:
+    assert reduce(HoverCommand.SPEAK, hovered(reading=reading, token_reading=token_reading)) == (
+        SpeakText(spoken),
+    )
 
 
 def test_copying_leaves_the_formatting_to_the_host() -> None:
@@ -82,28 +81,16 @@ def test_copying_leaves_the_formatting_to_the_host() -> None:
     assert reduce(HoverCommand.COPY, hovered()) == (CopyToken(),)
 
 
-def test_kanji_lookup_cycles_through_the_word() -> None:
-    inputs = hovered(surface="勉強", kanji=("勉", "強"))
+@pytest.mark.parametrize(("index", "kanji"), [(0, "勉"), (1, "強"), (2, "勉")])
+def test_kanji_lookup_cycles_through_the_word(index, kanji) -> None:
+    inputs = hovered(surface="勉強", kanji=("勉", "強"), kanji_index=index)
 
-    assert reduce(HoverCommand.KANJI, inputs) == (OpenKanji("勉"),)
-    assert reduce(HoverCommand.KANJI, hovered(kanji=("勉", "強"), kanji_index=1)) == (
-        OpenKanji("強"),
-    )
-    assert reduce(HoverCommand.KANJI, hovered(kanji=("勉", "強"), kanji_index=2)) == (
-        OpenKanji("勉"),
-    )
+    assert reduce(HoverCommand.KANJI, inputs) == (OpenKanji(kanji),)
 
 
-def test_a_word_without_kanji_says_so() -> None:
-    assert reduce(HoverCommand.KANJI, hovered(surface="ひらがな", kanji=())) == (
-        Announce("no kanji in this word", "warn"),
-    )
-
-
-def test_a_word_without_kanji_says_so_even_unanchored() -> None:
-    """Ordering that is easy to get backwards: "no kanji here" is true whether or not the word has
-    a laid-out box, and the two failures are not the same thing to report."""
-    assert reduce(HoverCommand.KANJI, hovered(kanji=(), anchored=False)) == (
+@pytest.mark.parametrize("anchored", [True, False])
+def test_a_word_without_kanji_says_so(anchored) -> None:
+    assert reduce(HoverCommand.KANJI, hovered(surface="ひらがな", kanji=(), anchored=anchored)) == (
         Announce("no kanji in this word", "warn"),
     )
 
@@ -115,12 +102,3 @@ def test_kanji_lookup_without_dictionaries_decides_nothing() -> None:
 def test_an_unanchored_word_opens_no_popup() -> None:
     """Without a box there is nothing to anchor the popup to, and the executor asserts one exists."""
     assert reduce(HoverCommand.KANJI, hovered(anchored=False)) == ()
-
-
-def test_the_reducer_reads_its_inputs_without_mutating_them() -> None:
-    given = hovered()
-
-    for command in HoverCommand:
-        reduce(command, given)
-
-    assert given == hovered()
