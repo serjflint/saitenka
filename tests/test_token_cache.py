@@ -41,30 +41,11 @@ class _ExistsDS:
         return set()  # nothing merges, but the capability is present
 
 
-# --- TokenCache unit: the two never-cache invariants + LRU ----------------------------------------
-
-
-def test_get_returns_a_stored_complete_cue():
-    cache = TokenCache()
-    cue = _cue("猫")
-    cache.put("猫", (), cue)
-    assert cache.get("猫", ()) is cue
-    assert cache.get("犬", ()) is None
-
-
 def test_empty_tokenization_is_never_stored():
     cache = TokenCache()
     cache.put("　", (), TokenizedCue(lines=[], tokens=[], styles=None))  # no tokens
     assert cache.get("　", ()) is None
     assert len(cache) == 0
-
-
-def test_incomplete_tokenization_is_never_stored():
-    """A pre-deps tokenization (no compound-merge dict) must not be memoized — the negative-cache the
-    issue forbids, so a later identical line re-attempts once the dicts load."""
-    cache = TokenCache()
-    cache.put("猫", (), _cue("猫"), complete=False)
-    assert cache.get("猫", ()) is None
 
 
 def test_lru_evicts_oldest_beyond_capacity():

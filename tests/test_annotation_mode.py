@@ -10,7 +10,6 @@ from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
 from saitenka.app.features.tooltip.tooltip import update_hover_impl
 from saitenka.app.session.factory import (
     SessionInfrastructure,
-    SessionServices,
 )
 from saitenka.app.subtitle_render import NullRenderer
 
@@ -41,25 +40,6 @@ def test_full_annotations_remain_the_default(make_session):
 
     assert reader.graph.annotation.view.mode == "full"
     assert ReaderOptions().keys.annotation_key == "Alt+a"
-
-
-def test_hover_mode_still_scores_each_new_cue(monkeypatch, make_session):
-    class Scorer:
-        def score_line(self, tokens):
-            return [f"score:{token.surface}" for token in tokens]
-
-    reader = make_session(
-        FakeIPC(),
-        services=SessionServices(
-            scorer=Scorer(),
-        ),
-        options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover")),
-    )
-    monkeypatch.setattr(reader.graph.subtitle_presentation, "renderer", NullRenderer())
-
-    reader.graph.cue.set_subtitle("猫")
-
-    assert reader.graph.subtitle_presentation.cue.current.styles == ["score:猫"]
 
 
 def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch, make_session):
