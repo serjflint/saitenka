@@ -10,6 +10,7 @@ from saitenka_subtitles import (
     FontSetup,
     GeometryPaletteEntry,
     GeometryRequest,
+    RendererState,
     SubtitleEventId,
     SubtitleFrameId,
     SubtitleTrackId,
@@ -169,6 +170,13 @@ def test_identical_font_bytes_share_identity_across_requests():
 
     assert first.cache_key() == second.cache_key()
     assert first.renderer_key() == second.renderer_key()
+
+
+def test_track_feature_change_gets_a_fresh_renderer():
+    baseline = request()
+    bracket_matching = replace(baseline, renderer_state=RendererState(features=((1, True),)))
+
+    assert baseline.renderer_key() != bracket_matching.renderer_key()
 
 
 @pytest.mark.parametrize(
