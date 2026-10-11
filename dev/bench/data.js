@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791721084165,
+  "lastUpdate": 1791732796812,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18455,6 +18455,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.294004,
             "range": "3 replicas; min 1.04445; max 1.7343; MAD 0.249558; worst 1.7343",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a9e2aaa8bdaaa4fc5e445131ca55c8ae1a7eaf91",
+          "message": "Merge pull request #555 from serjflint/fix/main-thread-responsiveness\n\nfix: keep session input responsive during background work",
+          "timestamp": "2026-10-11T18:31:11+03:00",
+          "tree_id": "21dc0aac2983f412666701525d780bd0a282128a",
+          "url": "https://github.com/serjflint/saitenka/commit/a9e2aaa8bdaaa4fc5e445131ca55c8ae1a7eaf91"
+        },
+        "date": 1791732795820,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.677402,
+            "range": "3 replicas; min 6.24859; max 7.077; MAD 0.399602",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.893336,
+            "range": "3 replicas; min 8.53757; max 9.97347; MAD 0.080134; worst 9.97347",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.923579,
+            "range": "3 replicas; min 19.1681; max 22.419; MAD 0.495413",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.194894,
+            "range": "3 replicas; min 19.2564; max 22.8691; MAD 0.674215; worst 22.8691",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.259254,
+            "range": "3 replicas; min 14.7799; max 17.8621; MAD 0.479396",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.125835,
+            "range": "3 replicas; min 0.09305; max 0.133762; MAD 0.007927; worst 0.133762",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 47.149697,
+            "range": "3 replicas; min 44.7261; max 47.2076; MAD 0.057914; worst 47.2076",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.011183,
+            "range": "3 replicas; min 2.8885; max 4.10266; MAD 0.122686; worst 4.10266",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.128825,
+            "range": "3 replicas; min 1.06511; max 3.37854; MAD 0.063714; worst 3.37854",
             "unit": "ms"
           }
         ]
