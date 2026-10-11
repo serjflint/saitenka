@@ -1389,36 +1389,58 @@ def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch, make_
     assert anki.stored == []
 
 
-def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session):
-    """Per-stacked-entry ✓ state tracks deck membership by expression (Anki's dedup key): mining 退く
-    flips every 退く reading-block, since a second reading would be a duplicate expression."""
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("mined", [False, True])
+@pytest.mark.parametrize("work", ["INLINE", "DEFERRED"])
+def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session, mined, work):
     import dicthelp
-    from saitenka_tokenize.japanese import Token
-    from util import FakeIPC
+    from driver import Driver
+    from util import FakeIPC, await_ready, session_gateway
 
-    from saitenka.app.features.tooltip import tooltip_panel
+    from saitenka.app.session.factory import SessionInfrastructure, TooltipWorkMode
+    from saitenka.app.subtitle_raster import PillowRasterProvider
+    from saitenka.app.subtitle_render import SubtitleRenderer
 
-    d = _make_dict(
-        tmp_path / "gm.zip",
-        "Multi",
-        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    dictionary = dicthelp.load_set(
+        [
+            _make_dict(
+                tmp_path / "gm.zip",
+                "Multi",
+                [
+                    ["退く", "しりぞく", ["to retreat"]],
+                    ["退く", "のく", ["to step aside"]],
+                ],
+            )
+        ]
     )
-    ds = dicthelp.load_set([d])
-    r = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
-    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    assert (
-        tooltip_panel.group_mined_of(
-            tok, r.graph.mining.index_snapshot(), r.graph.profile.profile.dict_set
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    gateway = session_gateway(ipc)
+    reader = make_session(
+        ipc,
+        services=SessionServices(dictionaries=dictionary),
+        infrastructure=SessionInfrastructure(
+            renderer=SubtitleRenderer(PillowRasterProvider()),
+            tooltip_work=TooltipWorkMode[work],
+        ),
+    )
+    try:
+        if mined:
+            reader.graph.mining.record_mined_expression("退く")
+        reader.graph.presentation.refresh_osd()
+        reader.graph.playback.observe("sub-text", "退いた")
+        reader.pump()
+        ui = Driver(reader).move_to_word(0)
+        await_ready(
+            lambda: ui.tip_shown, "grouped tooltip did not open", pump=reader.pump, timeout=1.0
         )
-        == ()
-    )  # nothing mined yet → no per-group flags
-    r.graph.mining.record_mined_expression("退く")
-    assert tooltip_panel.group_mined_of(
-        tok, r.graph.mining.index_snapshot(), r.graph.profile.profile.dict_set
-    ) == (
-        True,
-        True,
-    )  # both entries share expression 退く
+
+        flags = reader.graph.tooltip.observation().metadata.group_mined
+        assert tuple(flags or (False, False)) == (mined, mined)
+    finally:
+        reader.close()
+        gateway.close()
 
 
 def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path, make_session):
