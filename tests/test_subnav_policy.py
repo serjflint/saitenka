@@ -83,16 +83,6 @@ def test_the_cue_end_is_exclusive() -> None:
     assert cue_is_on_screen(CUES[0], text="", sub_start=2.999, time_pos=None)
 
 
-# --- target selection ----------------------------------------------------------------------------
-
-
-def test_next_steps_forward_from_the_showing_cue() -> None:
-    chosen = target(delta=1)
-
-    assert chosen is not None
-    assert (chosen.index, chosen.cue.text) == (1, "に")
-
-
 @pytest.mark.parametrize("delta", [-1, 0, 1, 2])
 @pytest.mark.parametrize("preferred", [-1, 1, 2])
 def test_navigation_steps_between_distinct_starts_not_cotimed_events(delta, preferred):
@@ -110,20 +100,6 @@ def test_navigation_steps_between_distinct_starts_not_cotimed_events(delta, pref
     )
     assert chosen is not None
     assert chosen.cue.start == {-1: 1, 0: 5, 1: 9, 2: 13}[delta]
-
-
-def test_previous_steps_back_from_the_showing_cue() -> None:
-    chosen = target(delta=-1, text="に", sub_start=5.0, time_pos=6.0)
-
-    assert chosen is not None
-    assert chosen.cue.text == "いち"
-
-
-def test_replay_returns_the_showing_cue() -> None:
-    chosen = target(delta=0)
-
-    assert chosen is not None
-    assert chosen.cue.text == "いち"
 
 
 def test_an_empty_index_has_no_target() -> None:

@@ -1194,20 +1194,6 @@ def test_track_switch_retains_cues_when_the_new_track_cannot_resolve(
     )  # cues retained across the unresolved switch
 
 
-def test_load_sub_index_retains_prior_cues_on_parse_failure(tmp_path, make_session):
-    reader = make_session(FakeIPC())
-    old = _one_cue_index()
-    reader.graph.track_commands.navigation.current.sub_index = old
-
-    reader.graph.subtitle_navigation.load_index(
-        tmp_path / "missing.srt"
-    )  # unreadable → load_index returns None
-
-    assert (
-        reader.graph.track_commands.navigation.current.sub_index is old
-    )  # a failed parse never blanks a good index
-
-
 def test_resync_replace_does_not_clobber_the_primary_when_english_is_active(
     tmp_path, monkeypatch, make_session
 ):

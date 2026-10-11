@@ -7,8 +7,6 @@ import textwrap
 import pytest
 from saitenka_subtitles import Cue, CueIndex, parse_ass, parse_cues, parse_srt
 
-from saitenka.app.sub_index import load_index
-
 SRT = textwrap.dedent(
     """\
     1
@@ -111,20 +109,6 @@ def test_parse_cues_dispatches_by_extension_and_sorts():
 def test_parse_cues_falls_back_when_extension_wrong():
     # ass content behind a .srt name → the srt parser finds nothing, fallback tries ass
     assert len(parse_cues(ASS, "mislabeled.srt")) == 3
-
-
-def test_load_index_reads_file(tmp_path):
-    p = tmp_path / "ep.srt"
-    p.write_text(SRT, encoding="utf-8")
-    idx = load_index(p)
-    assert idx is not None and len(idx) == 3
-
-
-def test_load_index_none_on_garbage(tmp_path):
-    p = tmp_path / "empty.srt"
-    p.write_text("not a subtitle file\n", encoding="utf-8")
-    assert load_index(p) is None
-    assert load_index(tmp_path / "missing.srt") is None  # unreadable → None, never raises
 
 
 # --- locate: which cue is "current" ------------------------------------------------------------

@@ -811,7 +811,10 @@ def test_sub_nav_without_index_only_seeks(monkeypatch, make_session):
     assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
 
 
-def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("transient", ["", "   "])
+def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch, transient):
     """After a nav render, an empty sub-text within the settle window is ignored (no blank flash);
     a non-empty mpv value (source of truth) reconciles and disarms the guard."""
     r, ipc = _reader_with_index(monkeypatch)
@@ -819,7 +822,7 @@ def test_settle_guard_swallows_transient_empty_then_reconciles(monkeypatch):
     ipc.props["sub-start"] = 1.0
     r.command(_msg_for(ipc, "Alt+RIGHT"))
     assert r.graph.playback.cue.text == "に"  # rendered target
-    r.graph.subtitle_navigation.reconcile("")  # mpv's mid-seek blank
+    r.graph.subtitle_navigation.reconcile(transient)  # mpv's mid-seek blank
     assert r.graph.playback.cue.text == "に"  # swallowed — overlay didn't flash to nothing
     r.graph.subtitle_navigation.reconcile("に")  # mpv settled on the matching cue
     assert r.graph.playback.cue.text == "に"
@@ -908,15 +911,6 @@ def test_a_blank_outside_the_settle_window_still_retires_the_cue(monkeypatch):
     assert _writes(ipc) != writes_before  # surfaces were torn down
 
 
-def test_settle_guard_expires_and_adopts_empty(monkeypatch):
-    """Outside the settle window an empty sub-text is honoured (a real gap between cues clears it)."""
-    r, _ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("に")
-    r.graph.subtitle_navigation.retire_settle()  # window already closed
-    r.graph.subtitle_navigation.reconcile("")
-    assert r.graph.playback.cue.text == ""
-
-
 # --- The settle timer retires exactly once for every terminal trigger. -------------------------
 
 _SETTLE = "subtitle:navigation-settle"
@@ -933,6 +927,8 @@ def _navigated(monkeypatch):
     return r, ipc
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_a_reconcile_cancels_the_settle_timer_exactly_once(monkeypatch):
     r, ipc = _navigated(monkeypatch)
 
@@ -943,8 +939,11 @@ def test_a_reconcile_cancels_the_settle_timer_exactly_once(monkeypatch):
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
     assert not r.graph.track_commands.navigation.current.sub_settle.open
+    assert r.graph.playback.cue.text == "よん"
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_a_source_replacement_cancels_the_settle_timer_exactly_once(monkeypatch):
     r, ipc = _navigated(monkeypatch)
 
@@ -952,6 +951,8 @@ def test_a_source_replacement_cancels_the_settle_timer_exactly_once(monkeypatch)
     r.graph.cue.replace_source("/media/third.srt", reason="test")
 
     assert ipc.timer_calls(_SETTLE) == ["schedule", "cancel"]
+    assert not r.graph.track_commands.navigation.current.sub_settle.open
+    assert _SETTLE not in ipc.timers
 
 
 def test_close_cancels_the_settle_timer(monkeypatch):
@@ -975,13 +976,18 @@ def test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open(monk
     assert r.graph.track_commands.navigation.current.sub_settle.open
 
 
-def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch):
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("observed", ["", "いち"])
+def test_the_matching_due_closes_the_window_without_a_cancel(monkeypatch, observed):
     """A fired deadline is already spent; cancelling it would be the second retirement."""
     r, ipc = _navigated(monkeypatch)
 
     assert ipc.fire_runtime_timer(_SETTLE)
 
     assert not r.graph.track_commands.navigation.current.sub_settle.open
+    r.graph.subtitle_navigation.reconcile(observed)
+    assert r.graph.playback.cue.text == observed
     assert ipc.timer_calls(_SETTLE) == ["schedule"]
 
 
@@ -1042,50 +1048,6 @@ def test_settle_guard_swallows_mpv_reporting_the_pre_nav_cue(monkeypatch):
         and r.graph.track_commands.navigation.current.nav_idx == 1
         and not r.graph.annotation.view.retired
     )  # the settled cue is interactive without losing the chaining hint
-
-
-def test_the_settle_deadline_retires_the_window_exactly_once(monkeypatch):
-    """The window closes on its named due event, not on a wall clock the reconcile polls."""
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("いち")
-    ipc.props["sub-start"] = 1.0
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.graph.track_commands.navigation.current.sub_settle.open
-    assert "subtitle:navigation-settle" in ipc.timers
-
-    assert ipc.fire_runtime_timer("subtitle:navigation-settle")
-
-    assert r.graph.track_commands.navigation.current.sub_settle.open is False
-    r.graph.subtitle_navigation.reconcile(
-        ""
-    )  # no longer guarded: a real gap now clears the overlay
-    assert r.graph.playback.cue.text == ""
-
-
-def test_a_superseded_navigation_deadline_cannot_close_the_current_window(monkeypatch):
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("いち")
-    ipc.props["sub-start"] = 1.0
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-    stale = r.graph.track_commands.navigation.current.sub_settle.identity
-    r.command(_msg_for(ipc, "Alt+RIGHT"))  # a second nav opens its own window
-
-    r.graph.subtitle_navigation.settle_due(stale)
-
-    assert r.graph.track_commands.navigation.current.sub_settle.open
-
-
-def test_replacing_the_subtitle_source_retires_the_settle_window(monkeypatch):
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("いち")
-    ipc.props["sub-start"] = 1.0
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.graph.track_commands.navigation.current.sub_settle.open
-
-    r.graph.cue.replace_source("/media/next.mkv", reason="test")
-
-    assert r.graph.track_commands.navigation.current.sub_settle.open is False
-    assert "subtitle:navigation-settle" not in ipc.timers
 
 
 def test_settle_guard_reinstalls_retired_identity_for_same_text(make_session):
