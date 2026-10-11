@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 from functools import partial
 from typing import TYPE_CHECKING
@@ -16,7 +15,7 @@ from saitenka.app.features.preview.preparation import (
     run_preparation,
 )
 from saitenka.app.interaction.surfaces import SurfaceSpec
-from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
+from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, configure_lane
 
 if TYPE_CHECKING:
@@ -29,9 +28,6 @@ if TYPE_CHECKING:
     from saitenka.mpvio.ipc import MpvIPC
     from saitenka.runtime.card_preview import CardPreview
     from saitenka.runtime.interaction_slice import PreviewStore
-
-
-log = logging.getLogger(__name__)
 
 
 class PreviewController:
@@ -187,10 +183,7 @@ class PreviewController:
             self.cancel()
             return
         self._inflight = request
-        if self._submit is None:
-            self._run_inline(request)
-            return
-        accepted = self._submit(
+        accepted = self._submit is not None and self._submit(
             owner=Owner.INTERACTION,
             identity=request.sequence,
             lane=LANE,
@@ -205,25 +198,12 @@ class PreviewController:
                 ),
             )
 
-    def _run_inline(self, request: PreviewRequest) -> None:
-        result = None
-        outcome = EffectOutcome.SUCCEEDED
-        error = None
-        try:
-            result = run_preparation(request, threading.Event())
-        except Exception:
-            log.exception("preview preparation failed")
-            outcome = EffectOutcome.FAILED
-            error = EffectError.INTERNAL
-        self._finished(
-            request,
-            EffectFinished(
-                EffectId(0), Owner.INTERACTION, request.sequence, outcome, result, error
-            ),
-        )
-
     def _finished(self, request: PreviewRequest, completion: EffectFinished) -> None:
-        from saitenka.app.features.preview.miner_ui import PreparedPreview, show_preview
+        from saitenka.app.features.preview.miner_ui import (
+            PreparedPreview,
+            hide_preview,
+            show_preview,
+        )
 
         if self._inflight is not request:
             return
@@ -240,6 +220,7 @@ class PreviewController:
             ):
                 show_preview(request.ports(), prepared.data, prepared.audio)
             else:
+                hide_preview(request.ports())
                 request.toast(request.fallback, "warn")
         finally:
             self._pump()

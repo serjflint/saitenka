@@ -84,7 +84,6 @@ class PreviewCommandEndpoint:
                 video,
             ),
             video_path=lambda: video,
-            toast=self.toast,
             current=lambda: (
                 self.playback.state.media == state.media
                 and self.playback.state.value("path") == video

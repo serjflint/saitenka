@@ -75,7 +75,6 @@ class CardSource:
     lines: list[list[Token]]
     provenance: Callable[[object], str]
     video_path: Callable[[], object]
-    toast: Callable[[str, str], None]
     current: Callable[[], bool] = lambda: True
 
 

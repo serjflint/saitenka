@@ -62,7 +62,7 @@ class Surface:
         pass
 
 
-def source(*, note_info=None, toast=lambda *_args: None):
+def source(*, note_info=None):
     return CardSource(
         "deck",
         "model",
@@ -73,7 +73,6 @@ def source(*, note_info=None, toast=lambda *_args: None):
         [],
         lambda _video: "scene",
         lambda: "Show.mkv",
-        toast,
     )
 
 
@@ -359,6 +358,27 @@ def test_sidebar_preview_does_not_require_a_subtitle_destination(tmp_path, monke
     assert session.graph.preview.state.content.expression == "猫"
 
 
+@pytest.mark.parametrize("complete_before_seek", [False, True])
+def test_failed_sidebar_preview_dismisses_the_previous_card(
+    tmp_path, monkeypatch, *, complete_before_seek
+):
+    session, ipc = sidebar_session(tmp_path, monkeypatch)
+    request_existing(session.graph.preview, ipc, ident=41)
+    ipc.deliver(ipc.prepare_next())
+    assert session.graph.preview.state.content.expression == "41"
+    monkeypatch.setattr(ReadAnki, "notes_info", lambda *_args: [])
+    open_sidebar_preview(session)
+    prepared = ipc.prepare_next()
+    if complete_before_seek:
+        ipc.deliver(prepared)
+
+    observe_cue(session, ipc)
+    if not complete_before_seek:
+        ipc.deliver(prepared)
+
+    assert session.graph.preview.state.content is None
+
+
 def test_sidebar_preview_is_cancelled_by_an_unrelated_settled_cue(tmp_path, monkeypatch):
     session, ipc = sidebar_session(tmp_path, monkeypatch)
     open_sidebar_preview(session)
@@ -505,20 +525,22 @@ def test_failed_preparation_toasts_without_showing_a_preview():
     assert toasts == [("already have 猫", "warn")]
 
 
-def test_headless_preparation_failure_degrades_without_a_terminal_error():
+def test_missing_runtime_warns_without_reading_anki():
     ipc = FakeIPC()
     preview = PreviewController(ipc)
     toasts = []
+    lookups = []
 
-    def unavailable(_id):
-        raise OSError("Anki unavailable")
+    def note_info(ident):
+        lookups.append(ident)
 
     request_existing(
         preview,
         ipc,
-        captured=source(note_info=unavailable),
+        captured=source(note_info=note_info),
         toast=lambda *args: toasts.append(args),
     )
 
     assert preview.state.content is None
     assert toasts == [("already have 猫", "warn")]
+    assert lookups == []
