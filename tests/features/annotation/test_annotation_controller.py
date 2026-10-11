@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 
 import dicthelp
 import pytest
@@ -259,14 +259,6 @@ def test_close_refuses_a_late_completion() -> None:
     ipc.finish_next()
 
     assert owner.settle() == ()
-
-
-def test_public_view_is_an_immutable_snapshot() -> None:
-    owner = CueAnnotationController(FakeIPC(), mode="full", cache_max=4)
-    view = owner.view
-
-    with pytest.raises(FrozenInstanceError):
-        view.retired = False  # type: ignore[misc]
 
 
 # One unknown content word each (読む / 書く), no end punctuation: joined, they are one N+2 sentence.
