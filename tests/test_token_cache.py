@@ -9,17 +9,20 @@ loading) draws PLAIN at cue time and upgrades in place once deps land.
 from __future__ import annotations
 
 import threading
+from concurrent.futures import Future
 from itertools import starmap
 
+import dicthelp
 import pytest
 from saitenka_subtitles import CueIndex
 from saitenka_subtitles.model import Cue
 from saitenka_tokenize.japanese import Token
-from session_builder import TestSession, build_session
-from util import FakeIPC, RecordingRasterProvider
+from session_builder import build_session
+from util import FakeIPC, RecordingRasterProvider, await_ready
 
-from saitenka.app.session.factory import SessionServices
-from saitenka.app.subtitle_render import NullRenderer, SubtitleRenderer
+from saitenka.app.features.profiles.dependencies import DependencyBundle
+from saitenka.app.session.factory import SessionInfrastructure, SessionServices
+from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.token_cache import TokenCache, TokenizedCue, event_lines
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
@@ -82,16 +85,6 @@ def test_event_lines_splits_only_a_frame_the_index_proves(index, norm, expected)
     assert event_lines(norm, index) == expected
 
 
-# --- controller seam: plain-then-upgrade + cache hit ----------------------------------------------
-
-
-def _reader(dict_set=None) -> TestSession:
-    reader = build_session(FakeIPC(), services=SessionServices(dictionaries=dict_set))
-    reader.graph.screen.osd = (1920, 1080)
-    reader.graph.subtitle_presentation.renderer = NullRenderer()
-    return reader
-
-
 class _InlineAnnotationIPC(FakeIPC):
     def __init__(self) -> None:
         super().__init__()
@@ -119,76 +112,51 @@ class _InlineAnnotationIPC(FakeIPC):
         return True
 
 
-def test_cue_while_dicts_load_draws_plain_then_upgrades_on_deps_ready():
-    """A cue renders plain at cue time on a miss while dicts load, then upgrades in place."""
-    reader = _reader(dict_set=None)  # dicts still loading
-
-    reader.graph.cue.set_subtitle("猫を見る")
-
-    assert reader.graph.annotation.view.pending_text == "猫を見る"  # renderer draws plain while set
-    assert (
-        reader.graph.subtitle_presentation.cue.current.tokens
-    )  # tokens ARE populated (fast) for hover/mining — only the DRAW is plain
-
-    reader.graph.profile.profile.replace_dictionary_set(
-        _ExistsDS()
-    )  # deps land → reader_deps re-renders the on-screen cue
-    reader.graph.cue.set_subtitle("猫を見る")
-
-    assert reader.graph.annotation.view.pending_text is None  # now annotated in place
-
-
-def test_upgrade_re_attempts_rather_than_serving_the_incomplete_result(monkeypatch):
-    """DoD (b) negative control: the pre-deps miss is not cached, so the deps-ready call re-tokenizes
-    (a MISS) instead of serving the stale, unannotated result. Would fail if the miss were cached."""
-    reader = _reader(dict_set=None)
-    reader.graph.cue.set_subtitle("本を読む")
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_cue_while_dicts_load_draws_plain_then_upgrades_on_deps_ready(monkeypatch):
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1920, "h": 1080}
+    provider = RecordingRasterProvider()
+    reader = build_session(
+        ipc, infrastructure=SessionInfrastructure(renderer=SubtitleRenderer(provider))
+    )
+    reader.graph.presentation.refresh_osd()
+    text = "猫を見る"
+    reader.graph.playback.observe("sub-text", text)
+    reader.pump()
+    assert provider.styles[-1] == "plain"
+    assert "".join(t.surface for t in reader.graph.subtitle_presentation.cue.current.tokens) == text
 
     calls: list[str] = []
     real = reader.graph.profile.profile.tokenizer.tokenize
     monkeypatch.setattr(
         reader.graph.profile.profile.tokenizer,
         "tokenize",
-        lambda ln: calls.append(ln) or real(ln),
+        lambda line: calls.append(line) or real(line),
+    )
+    deps = Future()
+    reader.graph.profile.load({}, prebuilt=deps)
+
+    deps.set_result(
+        DependencyBundle(reader.graph.profile.identity, dictionaries=dicthelp.load_set())
+    )
+    ipc.fire_runtime_timer("lifecycle:deps-ready")
+    await_ready(
+        lambda: provider.styles[-1] == "styled",
+        "ready dependencies did not upgrade the cue",
+        pump=reader.pump,
+        timeout=2,
     )
 
-    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
-    reader.graph.cue.set_subtitle("本を読む")
-
-    assert calls == ["本を読む"]  # re-attempted (a cached miss would have skipped tokenize)
-
-
-def test_repeated_line_is_a_cache_hit_and_skips_tokenization(monkeypatch):
-    reader = _reader(dict_set=_ExistsDS())
-    reader.graph.cue.set_subtitle("水を飲む")  # miss → tokenized + cached, annotated (dicts ready)
-    assert reader.graph.annotation.view.pending_text is None
-
-    monkeypatch.setattr(
-        reader.graph.profile.profile.tokenizer,
-        "tokenize",
-        lambda _ln: (_ for _ in ()).throw(AssertionError("re-tokenized a cached line")),
-    )
-    reader.graph.cue.set_subtitle("水を飲む")  # hit → no tokenize
-
-    assert (
-        reader.graph.annotation.view.pending_text is None
-        and reader.graph.subtitle_presentation.cue.current.tokens
-    )
-
-
-# --- renderer: plain vs annotated follows the owner's pending state -------------------------------
-
-
-def test_renderer_draws_plain_while_a_cue_is_pending():
-    reader = _reader(dict_set=None)
-    provider = RecordingRasterProvider()
-    reader.graph.subtitle_presentation.renderer = SubtitleRenderer(provider)
-
-    reader.graph.cue.set_subtitle("猫")
-    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
-    reader.graph.cue.set_subtitle("猫")
-
-    assert provider.styles == ["plain", "styled"]
+    assert "".join(t.surface for t in reader.graph.subtitle_presentation.cue.current.tokens) == text
+    assert [line for line in calls if line] == [text]
+    reader.graph.playback.observe("sub-text", "")
+    reader.graph.playback.observe("sub-text", text)
+    reader.pump()
+    assert provider.styles[-1] == "styled"
+    assert "".join(t.surface for t in reader.graph.subtitle_presentation.cue.current.tokens) == text
+    assert [line for line in calls if line] == [text]
 
 
 @pytest.mark.timeout(5)
