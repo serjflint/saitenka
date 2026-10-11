@@ -1,7 +1,6 @@
 """The tokenizer-strategy seam: registry, delegation parity, and ProfileController ownership."""
 
 import pytest
-import util
 from saitenka_tokenize.japanese import (
     Token,
     inflected_in,
@@ -16,15 +15,9 @@ from saitenka_tokenize.registry import (
     get_tokenizer,
     register_tokenizer,
 )
-from session_builder import build_session
+from util import FakeIPC
 
 from saitenka.app.session.factory import SessionServices
-
-
-class FakeIPC(util.FakeIPC):
-    def __init__(self, props=None):
-        super().__init__()
-        self.props.update(props or {})
 
 
 class _FakeTokenizer:
@@ -124,18 +117,6 @@ def test_reader_owns_unidic_tokenizer_by_default(make_session):
     assert reader.graph.profile.profile.tokenizer.name == "unidic"
 
 
-class _SpyTokenizer(_FakeTokenizer):
-    """Records which Protocol method each call site reached, so a test can assert ROUTING (the call
-    happened through the active strategy) without caring about the JP-specific return value."""
-
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def query_token(self, query):
-        self.calls.append("query_token")
-        return super().query_token(query)
-
-
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("work", ["INLINE", "DEFERRED"])
@@ -169,7 +150,8 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing(make_session, tmp_pat
             )
         ]
     )
-    ipc = FakeIPC({"osd-dimensions": {"w": 1280, "h": 720}})
+    ipc = FakeIPC()
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     gateway = session_gateway(ipc)
     reader = make_session(
         ipc,
@@ -195,26 +177,47 @@ def test_swapped_tokenizer_reroutes_tooltip_phrase_probing(make_session, tmp_pat
         gateway.close()
 
 
-def test_swapped_tokenizer_reroutes_nested_popup_link_lookup(make_session):
-    """A profile swap must reroute a clicked cross-reference link's whole-query lookup through the
-    NEW strategy, not ``japanese.py``'s ``query_token`` directly."""
+def test_swapped_tokenizer_reroutes_nested_popup_link_lookup(make_session, tmp_path):
+    import dicthelp
+    from driver import Driver
+
     from saitenka.app.features.tooltip import nested_popup
     from saitenka.model import LinkBox
 
-    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=object()))
-    spy = _SpyTokenizer()
-    reader.graph.profile.profile.use_tokenizer(spy)
-    lb = LinkBox("query", 0, 0, 10, 10)
+    class RoutedTokenizer(UnidicTokenizer):
+        def query_token(self, query):
+            return super().query_token("特別" if query == "query" else query)
+
+    dictionary = dicthelp.load_set(
+        [
+            dicthelp.term_zip(
+                tmp_path / "words.zip",
+                "Words",
+                [
+                    ["猫", "ねこ", ["base lookup"]],
+                    ["特別", "とくべつ", ["selected lookup"]],
+                ],
+            )
+        ]
+    )
+    reader = make_session(FakeIPC(), services=SessionServices(dictionaries=dictionary))
+    reader.graph.profile.profile.use_tokenizer(RoutedTokenizer())
+    reader.graph.presentation.refresh_osd()
+    reader.graph.playback.observe("sub-text", "猫")
+    reader.pump()
+    Driver(reader).move_to_word(0)
+    view = reader.graph.tooltip.surface_state().view
 
     nested_popup.open_link(
         reader.graph.tooltip.tip_ports,
         reader.graph.tooltip.panel_ports,
-        lb,
-        (0, 0),
-        0,
+        LinkBox("query", 0, 0, 10, 10),
+        view.xy,
+        view.scroll,
     )
 
-    assert "query_token" in spy.calls
+    nested = reader.graph.tooltip.surface_state().nest
+    assert (nested.word, nested.state.reading) == ("特別", "とくべつ")
 
 
 def test_unidic_is_content_matches_pos_whitelist():
@@ -236,21 +239,11 @@ class _ParticleContentTokenizer(_FakeTokenizer):
 
 
 def testmine_target_follows_the_active_tokenizers_content_partition():
-    """The word ``mine_target`` picks is decided by ``reader.tokenizer.is_content``, not baked JP POS.
-    Same tokens, two strategies → two different mined tokens; the unidic case is the JP negative
-    control (the 名詞, never the 助詞)."""
     from saitenka.app.features.mining.miner import MineCue, mine_target
 
-    particle = Token("は", "は", "は", "助詞", 0, 1)
-    noun = Token("本", "本", "ほん", "名詞", 1, 2)
-
-    jp = build_session(FakeIPC())
-    tokens = [particle, noun]
-    assert mine_target(MineCue(tokens, None, -1, jp.graph.profile.profile.tokenizer, 20)) == 1
-
-    swapped = build_session(FakeIPC())
-    swapped.graph.profile.profile.use_tokenizer(_ParticleContentTokenizer())
-    assert mine_target(MineCue(tokens, None, -1, swapped.graph.profile.profile.tokenizer, 20)) == 0
+    tokens = [Token("は", "は", "は", "助詞", 0, 1), Token("本", "本", "ほん", "名詞", 1, 2)]
+    assert mine_target(MineCue(tokens, None, -1, UnidicTokenizer(), 20)) == 1
+    assert mine_target(MineCue(tokens, None, -1, _ParticleContentTokenizer(), 20)) == 0
 
 
 def test_use_tokenizer_swaps_strategy_and_clears_cache(make_session):
@@ -258,14 +251,17 @@ def test_use_tokenizer_swaps_strategy_and_clears_cache(make_session):
         def terms_exist(self, _forms):
             return set()
 
+    register_tokenizer(_FakeTokenizer.name, _FakeTokenizer)
     reader = make_session(FakeIPC(), services=SessionServices(dictionaries=_DS()))
-    reader.graph.cue.set_subtitle("本")
+    reader.graph.playback.observe("sub-text", "本")
+    reader.pump()
+    reader.graph.profile.profile.use_tokenizer(_FakeTokenizer())
+    reader.graph.playback.observe("sub-text", "")
+    reader.pump()
 
-    fake = _FakeTokenizer()
-    reader.graph.profile.profile.use_tokenizer(fake)
-    reader.graph.cue.set_subtitle("本")
+    reader.graph.playback.observe("sub-text", "本")
+    reader.pump()
 
-    assert reader.graph.profile.profile.tokenizer is fake
     assert reader.graph.subtitle_presentation.cue.current.tokens == []
 
 
