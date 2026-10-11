@@ -744,7 +744,7 @@ def _replace_target_track(
     log.info("%s", status)
 
 
-def select_colored_copy_async(ports, path, *, title, lang, previous, current, on_selected):
+def select_colored_copy(ports, path, *, title, lang, previous, current, on_selected):
     def verified(completion):
         tracks = completion.result if completion.outcome is EffectOutcome.SUCCEEDED else None
         tracks = tracks if isinstance(tracks, list) else []
@@ -812,19 +812,6 @@ def _adopt_colored_copy(ports, path, tracks, previous):
         setup_secondary(ports, primary_sid=sid)
     ports.rebuild_index()
     return sid
-
-
-def select_colored_copy(
-    ports: TrackPorts, path: Path, *, title: str, lang: str, previous: object = None
-) -> int | None:
-    """Make a colored copy the Japanese track, as quietly as an ordinary ``sid`` change.
-
-    Not announced and no ``sub-delay`` reset: to the user this is the track they already had. The
-    origin stays loaded — discovery hides it while the copy is — so standing the copy down is only a
-    ``sub-remove``.
-    """
-    _send(ports.ipc, "add-colored", "sub-add", str(path), "select", title, lang)
-    return _adopt_colored_copy(ports, path, loaded_sub_tracks(ports.ipc), previous)
 
 
 def remove_colored_copies(ports: TrackPorts, sids: list[int]) -> None:

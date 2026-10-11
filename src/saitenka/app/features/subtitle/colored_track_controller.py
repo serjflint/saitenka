@@ -275,7 +275,7 @@ class ColoredTrackController:
                     now_revision == revision + 1 and self._ports.value("sid") == verified_sid
                 )
 
-            subtitle_modes.select_colored_copy_async(
+            subtitle_modes.select_colored_copy(
                 self._ports.track_ports(),
                 ready.path,
                 title=ready.source.title,

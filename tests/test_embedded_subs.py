@@ -1,178 +1,87 @@
-"""Prefetch lookahead needs the episode's cue index regardless of subtitle source: external/jimaku
-files already had a path, embedded (baked-in) tracks need extracting first. A FakeIPC serves
-track-list/path like test_subselect.py's, and the loader is a list's `append` — the function takes
-the four facts, so there is no host to stand in for."""
+"""Authored subtitle extraction and indexing through the track-preparation worker."""
 
 from __future__ import annotations
 
-import util
+import subprocess
+import threading
+from pathlib import Path
+
+import pytest
+from util import FakeIPC
 
 from saitenka.app import embedded_subs as es
-
-
-class FakeIPC(util.FakeIPC):
-    def __init__(self, tracks=None, path=None):
-        super().__init__()
-        self.props["track-list"] = tracks or []
-        self.props["path"] = path
-        util.bare_gateway(self)
-
-
-def build(ipc) -> list:
-    """Run the index build against `ipc`, returning the paths it asked the loader for."""
-    loaded: list = []
-
-    def get(prop):
-        return ipc.command("get_property", prop).get("data")
-
-    es.build_sub_index_for_current_track(ipc, get, loaded.append, None)
-    return loaded
-
-
-EXTERNAL = {
-    "id": 1,
-    "type": "sub",
-    "selected": True,
-    "main-selection": 0,
-    "external": True,
-    "external-filename": "/tmp/fetched.ja.srt",
-}
-EMBEDDED_JA = {
-    "id": 9,
-    "type": "sub",
-    "selected": True,
-    "main-selection": 0,
-    "external": False,
-    "ff-index": 10,
-    "codec": "subrip",
-}
-EMBEDDED_JA_ASS = {**EMBEDDED_JA, "codec": "ass"}
-EMBEDDED_EN_SECONDARY = {
-    "id": 1,
-    "type": "sub",
-    "selected": True,
-    "main-selection": 1,  # secondary selection — must NOT win over main-selection 0
-    "external": False,
-    "ff-index": 2,
-}
+from saitenka.app.track_preparation import TrackRequest, prepare_track
 
 
 def test_no_selected_track_leaves_index_unset():
-    loaded = build(FakeIPC(tracks=[]))
-    assert loaded == []
+    request = TrackRequest(FakeIPC(), {"track-list": [], "_geometry": False}, 0, threading.Event())
+    assert prepare_track(request, threading.Event()) is None
 
 
-def test_external_track_loads_straight_from_track_list_path():
-    loaded = build(FakeIPC(tracks=[EXTERNAL]))
-    assert loaded == [es.Path("/tmp/fetched.ja.srt")]
-
-
-def test_embedded_track_extracts_via_ffmpeg_then_loads_the_cache_path(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("codec", "cached"),
+    [
+        ("external", False),
+        *[(c, warm) for c in ("ass", "ssa", "subrip", "webvtt") for warm in (False, True)],
+    ],
+)
+def test_preparation_preserves_the_authored_format_and_reuses_cached_extraction(
+    tmp_path, monkeypatch, codec, cached
+):
     video = tmp_path / "ep.mkv"
     video.write_bytes(b"x")
-    monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: tmp_path / "cache")
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: cache)
+    suffix = ".ass" if codec in {"ass", "ssa"} else ".srt"
+    content = (
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,本を読む\n"
+        if suffix == ".ass"
+        else "1\n00:00:01,000 --> 00:00:02,000\n本を読む\n"
+    )
+    path = (
+        tmp_path / "external.srt"
+        if codec == "external"
+        else cache / es.embedded_subs_cache_key(video, 10, suffix)
+    )
+    if codec == "external" or cached:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
-    calls = []
-
-    def fake_extract(video_arg, ff_index, dest, codec_args):
-        calls.append((video_arg, ff_index, dest, codec_args))
+    def extract(video_arg, ff_index, dest, codec_args, **_kwargs):
+        assert codec != "external" and not cached
+        assert (Path(video_arg), ff_index, dest) == (video, 10, path)
+        assert codec_args == ("-c:s", "srt" if codec == "webvtt" else "copy")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
+        dest.write_text(content, encoding="utf-8")
         return True
 
-    monkeypatch.setattr(es, "extract_embedded_track", fake_extract)
+    monkeypatch.setattr(es, "extract_embedded_track", extract)
+    primary = {"id": 9, "type": "sub", "selected": True, "main-selection": 0}
+    primary.update(
+        {"external": True, "external-filename": str(path)}
+        if codec == "external"
+        else {"ff-index": 10, "codec": codec}
+    )
+    secondary = {"id": 1, "type": "sub", "selected": True, "main-selection": 1}
+    request = TrackRequest(
+        FakeIPC(),
+        {"path": str(video), "track-list": [secondary, primary], "_geometry": False},
+        0,
+        threading.Event(),
+    )
 
-    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
+    result = prepare_track(request, threading.Event())
 
-    assert len(calls) == 1
-    assert calls[0][0] == video
-    assert calls[0][1] == 10
-    assert loaded == [calls[0][2]]
-
-
-def test_an_embedded_ass_track_is_extracted_as_ass_not_transcoded(tmp_path, monkeypatch):
-    """The extracted file is native geometry's authored source, so a transcode to .srt would leave
-    the whole episode noninteractive — hover boxes and scanning gone, mpv still drawing."""
-    video = tmp_path / "ep.mkv"
-    video.write_bytes(b"x")
-    monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: tmp_path / "cache")
-
-    calls = []
-
-    def fake_extract(video_arg, ff_index, dest, codec_args):
-        calls.append((video_arg, ff_index, dest, codec_args))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text("[Events]\n")
-        return True
-
-    monkeypatch.setattr(es, "extract_embedded_track", fake_extract)
-
-    loaded = build(FakeIPC(tracks=[EMBEDDED_JA_ASS], path=str(video)))
-
-    assert calls[0][3] == ("-c:s", "copy")
-    assert loaded[0].suffix == ".ass"
-
-
-def test_an_embedded_subrip_track_still_extracts_as_srt(tmp_path, monkeypatch):
-    """The negative control: only ASS/SSA change format, and the cache key follows the format — a
-    key that stayed `.srt` would serve an SRT-named ASS body, which `set_source` rejects."""
-    video = tmp_path / "ep.mkv"
-    video.write_bytes(b"x")
-    monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: tmp_path / "cache")
-
-    calls = []
-
-    def fake_extract(video_arg, ff_index, dest, codec_args):
-        calls.append((video_arg, ff_index, dest, codec_args))
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
-        return True
-
-    monkeypatch.setattr(es, "extract_embedded_track", fake_extract)
-
-    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
-
-    assert calls[0][3] == ("-c:s", "copy")
-    assert loaded[0].suffix == ".srt"
-
-
-def test_embedded_track_reuses_cached_extraction_without_re_extracting(tmp_path, monkeypatch):
-    video = tmp_path / "ep.mkv"
-    video.write_bytes(b"x")
-    cache_dir = tmp_path / "cache"
-    monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: cache_dir)
-    dest = cache_dir / es.embedded_subs_cache_key(video, 10, ".srt")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text("1\n00:00:01,000 --> 00:00:02,000\nhi\n")
-
-    def boom(*_a, **_kw):
-        raise AssertionError("should not re-extract when the cache already has this track")
-
-    monkeypatch.setattr(es, "extract_embedded_track", boom)
-
-    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
-    assert loaded == [dest]
-
-
-def test_embedded_extraction_failure_leaves_index_unset(tmp_path, monkeypatch):
-    video = tmp_path / "ep.mkv"
-    video.write_bytes(b"x")
-    monkeypatch.setattr(es, "embedded_subs_cache_dir", lambda: tmp_path / "cache")
-    monkeypatch.setattr(es, "extract_embedded_track", lambda *_a, **_kw: False)
-
-    loaded = build(FakeIPC(tracks=[EMBEDDED_JA], path=str(video)))
-    assert loaded == []
-
-
-def test_primary_selection_wins_over_secondary():
-    ipc = FakeIPC(tracks=[EMBEDDED_EN_SECONDARY, EMBEDDED_JA], path="/v/ep.mkv")
-    assert es._selected_sub_track(ipc) is EMBEDDED_JA
+    assert result is not None
+    assert result.path == path
+    assert result.sid == 9
+    assert result.index.cues[0].text == "本を読む"
+    assert result.source.raw == content.encode("utf-8")
 
 
 def test_failed_extraction_does_not_publish_a_partial_cache(tmp_path, monkeypatch):
-    import subprocess
-    from pathlib import Path
-
     dest = tmp_path / "cache" / "track.ass"
 
     def partial(command, **_kwargs):
@@ -185,40 +94,31 @@ def test_failed_extraction_does_not_publish_a_partial_cache(tmp_path, monkeypatc
     assert list(dest.parent.iterdir()) == []
 
 
-# --- the ffmpeg extraction argv itself (the tests above monkeypatch extract_embedded_track away) ---
-
-
 def test_extract_embedded_track_builds_ffmpeg_argv(tmp_path, monkeypatch):
     calls = {}
 
     def extract(cmd, **_kw):
-        from pathlib import Path
-
         calls["cmd"] = cmd
         Path(cmd[-1]).write_text("complete subtitle", encoding="utf-8")
 
-    monkeypatch.setattr(
-        "saitenka.app.embedded_subs.subprocess.run",
-        extract,
-    )
-    # pin the binary so the assertion doesn't depend on the host's ffmpeg path (find_tool resolves it)
+    monkeypatch.setattr(es.subprocess, "run", extract)
     monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
     dest = tmp_path / "out" / "track.srt"
     assert es.extract_embedded_track("/v/ep.mkv", 10, dest, ("-c:s", "srt")) is True
     cmd = calls["cmd"]
     assert cmd[0] == "ffmpeg" and "/v/ep.mkv" in cmd
-    assert cmd[cmd.index("-map") + 1] == "0:10"  # mpv ff-index maps straight onto ffmpeg -map 0:<n>
+    assert cmd[cmd.index("-map") + 1] == "0:10"
     assert cmd[cmd.index("-c:s") + 1] == "srt"
     assert cmd[-1] != str(dest)
     assert dest.read_text() == "complete subtitle"
-    assert dest.parent.is_dir()  # destination dir created before the run
+    assert dest.parent.is_dir()
 
 
 def test_extract_embedded_track_failsoft_on_ffmpeg_error(tmp_path, monkeypatch):
     def boom(*_a, **_kw):
         raise es.subprocess.CalledProcessError(1, "ffmpeg")
 
-    monkeypatch.setattr("saitenka.app.embedded_subs.subprocess.run", boom)
+    monkeypatch.setattr(es.subprocess, "run", boom)
     monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
     assert es.extract_embedded_track("/v/ep.mkv", 3, tmp_path / "o.srt", ("-c:s", "srt")) is False
 
@@ -232,6 +132,4 @@ def test_cache_key_changes_with_track_and_is_stable_for_same_file(tmp_path):
     assert k1 == k2
     assert k1 != k3
     assert k1.endswith(".srt")
-    # The format is part of the key: a re-extraction that changes format must not read back the
-    # stale file under the old one.
     assert es.embedded_subs_cache_key(video, 10, ".ass") != k1
