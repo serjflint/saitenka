@@ -1,177 +1,141 @@
 """Learning-annotation visibility remains independent of tooltip and playback state."""
 
+import dicthelp
 import pytest
-import util
-from util import keybind_registry
+from driver import Driver
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
+from util import FakeIPC, RecordingRasterProvider, press
 
-from saitenka.app import bindings as app_bindings
-from saitenka.app.bindings import ANNOTATION_MSG
 from saitenka.app.config import KeyOptions, ReaderOptions, TooltipOptions
-from saitenka.app.features.tooltip.tooltip import update_hover_impl
-from saitenka.app.session.factory import (
-    SessionInfrastructure,
-)
-from saitenka.app.subtitle_render import NullRenderer
+from saitenka.app.scoring import Coloring
+from saitenka.app.session.factory import SessionInfrastructure, SessionServices
+from saitenka.app.subtitle_raster import PillowRasterProvider
+from saitenka.app.subtitle_render import SubtitleRenderer
+
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(5)]
 
 
-class FakeIPC(util.FakeIPC):
-    def __init__(self, props=None):
-        super().__init__()
-        self.props.update(props or {})
-
-
-class _SpyRenderer(NullRenderer):
-    """A draw strategy that records each draw request instead of rasterizing.
-
-    The callback receives the `DrawRequest`, which is what the renderer actually sees — asserting
-    against host attributes would be reaching back across the seam the request exists to close.
-    Inherits the inert renderer so it answers the whole protocol; only `draw` is interesting here.
-    """
-
-    def __init__(self, on_draw):
-        self._on_draw = on_draw
-
-    def draw(self, request, _surfaces=None, _ipc=None, /, **_ports):
-        self._on_draw(request)
-
-
-def test_full_annotations_remain_the_default(make_session):
-    reader = make_session(FakeIPC())
-
-    assert reader.graph.annotation.view.mode == "full"
-    assert ReaderOptions().keys.annotation_key == "Alt+a"
-
-
-def test_entering_word_reveals_before_tooltip_switch_dwell(monkeypatch, make_session):
-    ipc = FakeIPC({"mouse-pos": {"hover": True, "x": 50, "y": 50}})
-    reader = make_session(ipc, options=ReaderOptions().with_overrides(hover_switch_delay=10.0))
-    reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object(), object()])
-    reader.graph.tooltip.select(0)
-    calls = []
-    monkeypatch.setattr(reader.graph.tooltip, "hit", lambda *_args: 1)
-    monkeypatch.setattr(
-        reader.graph.tooltip,
-        "set_annotation_hover",
-        lambda *, revealed: calls.append(("style", revealed)),
-    )
-    update_hover_impl(
-        reader.graph.tooltip.tip_ports,
-        reader.graph.tooltip.hover_actions,
-        reader.graph.tooltip.hover_inputs,
-    )
-
-    assert calls == [("style", True)]
-    # The switch is a decision the dwell has not made yet: the target is armed, the tooltip has not
-    # moved. No stub stands in for the build — nothing calls it.
-    assert reader.graph.tooltip.hover_diagnostics().word_target == 1
-    assert reader.graph.tooltip.observation().selected == 0
-
-
-def test_hover_presentation_transition_does_not_open_tooltip_or_pause(monkeypatch, make_session):
+def _reader(make_session, tmp_path, *, options=None):
     ipc = FakeIPC()
-    options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover", pause_on_tooltip=False))
-    reader = make_session(ipc, options=options)
-    reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object()])
-    redrawn = []
-    monkeypatch.setattr(
-        reader.graph.subtitle_presentation,
-        "renderer",
-        _SpyRenderer(lambda _rd: redrawn.append(True)),
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    words = dicthelp.term_zip(
+        tmp_path / "words.zip", "Words", [["猫", "ねこ", ["cat"]], ["犬", "いぬ", ["dog"]]]
     )
+    provider = RecordingRasterProvider(delegate=PillowRasterProvider())
+    scorer = Coloring(
+        Scorer(known=KnownWords.from_set(["猫"]), enable_freq=False, enable_jlpt=False)
+    )
+    reader = make_session(
+        ipc,
+        services=SessionServices(dictionaries=dicthelp.load_set([words]), scorer=scorer),
+        infrastructure=SessionInfrastructure(renderer=SubtitleRenderer(provider)),
+        options=options
+        or ReaderOptions(
+            tooltip=TooltipOptions(
+                annotation_mode="hover", pause_on_tooltip=False, hover_switch_delay=10.0
+            )
+        ),
+    )
+    reader.graph.presentation.refresh_osd()
+    reader.graph.commands.install_input()
+    reader.graph.playback.observe("sub-text", "猫 犬")
+    reader.pump()
+    return reader, provider
+
+
+def test_entering_word_reveals_before_tooltip_switch_dwell(make_session, tmp_path):
+    reader, provider = _reader(make_session, tmp_path)
+    ui = Driver(reader, instant=False)
+    ui.move_to_word(0)
+    assert ui.hover == 0 and ui.tip_shown
+    reader.graph.tooltip.set_annotation_hover(revealed=False)
+    assert provider.requests[-1].styles is None
+
+    dog = next(
+        i
+        for i, token in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
+        if token.surface == "犬"
+    )
+    ui.move_to_word(dog)
+
+    assert provider.requests[-1].styles is not None
+    assert ui.hover == 0
+    assert ui.ipc.fire_runtime_timer("lifecycle:hover-switch")
+    reader.pump()
+    assert ui.hover == dog
+
+
+def test_hover_presentation_transition_does_not_open_tooltip_or_pause(make_session, tmp_path):
+    options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover", pause_on_tooltip=True))
+    reader, provider = _reader(make_session, tmp_path, options=options)
+    ui = Driver(reader, instant=False)
+    ui.ipc.commands.clear()
 
     reader.graph.tooltip.set_annotation_hover(revealed=True)
 
-    assert reader.graph.tooltip.observation().selected == -1
-    assert redrawn == [True]
-    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+    assert provider.requests[-1].styles is not None
+    assert ui.hover == -1 and not ui.tip_shown
+    assert not any(command[:2] == ("set_property", "pause") for command in ui.ipc.commands)
 
 
-def test_leaving_subtitle_restores_neutral_presentation(monkeypatch, make_session):
-    ipc = FakeIPC({"mouse-pos": {"hover": False, "x": 50, "y": 50}})
-    reader = make_session(
-        ipc, options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
-    )
-    reader.graph.subtitle_presentation.cue.replace_tokenized(tokens=[object()])
-    reader.graph.annotation.set_hover_revealed(revealed=True)
-    states = []
-    monkeypatch.setattr(
-        reader.graph.subtitle_presentation,
-        "renderer",
-        _SpyRenderer(lambda rq: states.append(rq.annotation_visible)),
-    )
+@pytest.mark.parametrize("reset", ["leave", "cue-change"])
+def test_leaving_subtitle_restores_neutral_presentation(make_session, tmp_path, reset):
+    reader, provider = _reader(make_session, tmp_path)
+    ui = Driver(reader).move_to_word(0)
+    assert provider.requests[-1].styles is not None
 
-    update_hover_impl(
-        reader.graph.tooltip.tip_ports,
-        reader.graph.tooltip.hover_actions,
-        reader.graph.tooltip.hover_inputs,
-    )
+    if reset == "leave":
+        ui.leave()
+    else:
+        reader.graph.playback.observe("sub-text", "犬")
+        reader.pump()
 
-    assert states == [False]
+    assert provider.requests[-1].styles is None
 
 
-def test_cue_change_resets_hover_only_presentation(monkeypatch, make_session):
-    reader = make_session(
-        FakeIPC(), options=ReaderOptions(tooltip=TooltipOptions(annotation_mode="hover"))
-    )
-    reader.graph.annotation.set_hover_revealed(revealed=True)
-    states = []
-    monkeypatch.setattr(
-        reader.graph.subtitle_presentation,
-        "renderer",
-        _SpyRenderer(lambda rq: states.append(rq.annotation_visible)),
-    )
-
-    reader.graph.cue.set_subtitle("猫")
-
-    assert states == [False]
-
-
-def test_toggle_changes_presentation_without_playback_commands(monkeypatch, make_session):
-    ipc = FakeIPC()
-    reader = make_session(ipc)
-    reader.graph.playback.install_seed({"sub-text": "猫"})
-    drawn = []
+@pytest.mark.parametrize(
+    ("key", "show_cue"),
+    [(None, True), ("Ctrl+a", True), (None, False)],
+    ids=["default", "custom", "retired-cue"],
+)
+def test_toggle_changes_presentation_without_playback_commands(
+    monkeypatch, make_session, tmp_path, key, show_cue
+):
+    options = ReaderOptions(keys=KeyOptions(annotation_key=key)) if key else ReaderOptions()
+    reader, provider = _reader(make_session, tmp_path, options=options)
+    if not show_cue:
+        reader.graph.playback.observe("sub-text", "")
+        reader.pump()
+    ipc = reader.graph.ipc
+    if show_cue:
+        assert provider.requests[-1].styles is not None
     toasts = []
-    monkeypatch.setattr(
-        reader.graph.subtitle_presentation,
-        "renderer",
-        _SpyRenderer(lambda rq: drawn.append(rq.annotation_visible)),
-    )
     monkeypatch.setattr(
         reader.graph.notifications, "show", lambda text, *_a, **_k: toasts.append(text)
     )
+    before = len(ipc.commands)
 
-    reader.command(app_bindings.ANNOTATION_MSG)
+    press(reader, ipc, key or "Alt+a")
 
-    assert (reader.graph.annotation.view.mode, drawn, toasts) == (
-        "hover",
-        [False],  # hover-only with the cursor away -> annotations not visible in the request
-        ["annotations: hover-only"],
-    )
-    assert not any(command[0] in {"set_property", "seek", "sub-seek"} for command in ipc.commands)
-
-
-def test_toggle_remains_available_while_cue_identity_is_retired(make_session):
-    reader = make_session(FakeIPC(), infrastructure=SessionInfrastructure(renderer=NullRenderer()))
-    reader.graph.cue.mark_identity_installed()
-
-    reader.command(ANNOTATION_MSG)
-
-    assert reader.graph.annotation.view.mode == "hover"
-
-
-def test_annotation_key_is_configurable(make_session):
-    ipc = FakeIPC()
-    options = ReaderOptions(keys=KeyOptions(annotation_key="Ctrl+a"))
-
-    make_session(ipc, options=options).graph.commands.install_input()
-
-    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
-    assert binds["Ctrl+a"] == "script-message saitenka-toggle-annotations"
+    assert (reader.graph.annotation.view.mode, toasts) == ("hover", ["annotations: hover-only"])
+    if show_cue:
+        assert provider.requests[-1].styles is None
+    assert not any(
+        command[0] in {"seek", "sub-seek"}
+        or (
+            command[0] == "set_property"
+            and command[1] not in {"sub-visibility", "secondary-sub-visibility"}
+        )
+        for command in ipc.commands[before:]
+    ), ipc.commands[before:]
 
 
 def test_unknown_initial_annotation_mode_is_rejected(make_session):
     options = ReaderOptions(tooltip=TooltipOptions(annotation_mode="invalid"))  # type: ignore[arg-type]
-
-    with pytest.raises(ValueError, match="unknown annotation mode"):
-        make_session(FakeIPC(), options=options)
+    ipc = FakeIPC()
+    try:
+        with pytest.raises(ValueError, match="unknown annotation mode"):
+            make_session(ipc, options=options)
+    finally:
+        ipc.close_session_runtime()

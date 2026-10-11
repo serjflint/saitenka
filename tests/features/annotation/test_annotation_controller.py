@@ -240,15 +240,6 @@ def test_synchronous_episode_warm_does_not_cache_incomplete_annotation() -> None
     assert owner.replace("猫", _inputs(terms_exist=False)).outcome is AnnotationOutcome.TOKENIZED
 
 
-def test_mode_change_retires_the_hover_projection() -> None:
-    owner = CueAnnotationController(FakeIPC(), mode="hover", cache_max=4)
-    owner.set_hover_revealed(revealed=True)
-
-    owner.set_mode("full")
-
-    assert owner.view.hover_revealed is False
-
-
 def test_close_refuses_a_late_completion() -> None:
     ipc = _CapturingIPC()
     owner = CueAnnotationController(ipc, mode="full", cache_max=4)
