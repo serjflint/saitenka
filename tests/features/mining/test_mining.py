@@ -1153,6 +1153,8 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     assert _select_bulk_targets(r) == [0, 4]  # は/犬/dup-猫 all filtered out
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_bulk_mine_counts_and_toasts(monkeypatch, make_session):
     from util import FakeIPC
 
@@ -1174,8 +1176,8 @@ def test_bulk_mine_counts_and_toasts(monkeypatch, make_session):
     )  # skip the view refresh
     r.graph.stateless_commands.run(mine_intents.MineCommand.EPISODE)
     _await_mining(r)
-    assert len(anki.added) >= 1, (toasts, ipc.runtime_outcomes)
-    assert any("mined" in t for t in toasts)
+    assert sorted(note["fields"]["Expression"] for note in anki.added) == ["本", "読む"]
+    assert "mined 2 · 0 dup" in toasts
 
 
 def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_session):
