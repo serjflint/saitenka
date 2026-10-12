@@ -3596,56 +3596,35 @@ def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> Non
     result.close()
 
 
-def test_the_subtitle_clock_is_the_video_time_less_the_delay():
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    video_time, sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(12.5, 0.5, None)
-
-    assert (video_time, sub_delay, subtitle_time) == (12.5, 0.5, 12.0)
-    assert timestamp_ms == 12_000  # the ms key the geometry cache is keyed on
-
-
-def test_a_missing_delay_reads_as_no_offset():
-    """mpv answers None for `sub-delay` before a track resolves; that is zero, not unavailable."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    assert _subtitle_clock(4.0, None, None) == (4.0, 0.0, 4.0, 4_000)
+@pytest.mark.parametrize(
+    ("time_pos", "delay", "cue_start", "expected"),
+    [
+        pytest.param(12.5, 0.5, None, (12.5, 0.5, 12.0, 12_000), id="delay-adjusted"),
+        pytest.param(4.0, None, None, (4.0, 0.0, 4.0, 4_000), id="missing-delay"),
+        pytest.param(None, 0.25, 8.0, (8.25, 0.25, 8.0, 8_000), id="cue-start-fallback"),
+        pytest.param(5.0, 5.0, None, (5.0, 5.0, 0.0, 0), id="file-start"),
+    ],
+)
+def test_subtitle_clock_resolves_available_timing(time_pos, delay, cue_start, expected):
+    assert native_subtitles._subtitle_clock(time_pos, delay, cue_start) == expected
 
 
-def test_a_missing_time_pos_falls_back_to_the_cue_start():
-    """`sub-start` is the cue's own time, so the video time is reconstructed by re-adding the delay."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    assert _subtitle_clock(None, 0.25, 8.0) == (8.25, 0.25, 8.0, 8_000)
-
-
-def test_a_clock_with_neither_a_position_nor_a_cue_start_is_unavailable():
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    with pytest.raises(ValueError, match="unavailable"):
-        _subtitle_clock(None, 0.0, None)
-
-
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-def test_a_non_finite_clock_is_rejected_rather_than_cached(bad: float):
-    """A NaN timestamp would key a cache entry nothing can ever match again."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    with pytest.raises(ValueError, match="finite"):
-        _subtitle_clock(bad, 0.0, None)
-    with pytest.raises(ValueError, match="finite"):
-        _subtitle_clock(1.0, bad, None)
-
-
-def test_a_delay_that_runs_the_clock_before_the_file_starts_is_rejected():
-    """A large positive `sub-delay` near the start puts the subtitle clock behind 0:00, which no cue
-    can occupy — better a raised timing error than a negative cache key."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    with pytest.raises(ValueError, match="non-negative"):
-        _subtitle_clock(1.0, 5.0, None)
-
-    assert _subtitle_clock(5.0, 5.0, None)[2] == 0.0  # exactly zero is fine
+@pytest.mark.parametrize(
+    ("time_pos", "delay", "reason"),
+    [
+        pytest.param(None, 0.0, "unavailable", id="no-position-or-cue"),
+        pytest.param(float("nan"), 0.0, "finite", id="nan-position"),
+        pytest.param(float("inf"), 0.0, "finite", id="positive-infinite-position"),
+        pytest.param(float("-inf"), 0.0, "finite", id="negative-infinite-position"),
+        pytest.param(1.0, float("nan"), "finite", id="nan-delay"),
+        pytest.param(1.0, float("inf"), "finite", id="positive-infinite-delay"),
+        pytest.param(1.0, float("-inf"), "finite", id="negative-infinite-delay"),
+        pytest.param(1.0, 5.0, "non-negative", id="before-file-start"),
+    ],
+)
+def test_subtitle_clock_rejects_invalid_timing(time_pos, delay, reason):
+    with pytest.raises(ValueError, match=reason):
+        native_subtitles._subtitle_clock(time_pos, delay, None)
 
 
 def _snapshot(pairs, active=None):
@@ -3674,53 +3653,31 @@ def _snapshot(pairs, active=None):
     )
 
 
-def _valid(snapshot, token_count: int) -> bool:
-    from saitenka.app.native_subtitles import NativeSubtitleGeometry
-
-    return NativeSubtitleGeometry._snapshot_identities_are_valid(snapshot, token_count)
-
-
-def test_geometry_matching_the_tokenized_cue_is_installable():
-    assert _valid(_snapshot([(0, 0), (0, 1), (1, 2)]), token_count=3)
-
-
-def test_a_live_cue_with_no_paintable_tokens_is_installable():
-    """A cue that is on screen but tokenized to nothing paintable (punctuation only) is a real
-    state, not a malformed snapshot — every guard vacuously holds. It cannot be expressed as a frame
-    with no events: `SubtitleFrameId` rejects that, so an on-screen cue always lists one."""
-    assert _valid(_snapshot([], active=[(0, 0)]), token_count=0)
-
-
-def test_a_repeated_token_index_is_rejected():
-    """Two boxes for one token: whichever lands second wins the hit test, so a click on that word
-    can resolve to geometry the other box drew."""
-    assert not _valid(_snapshot([(0, 0), (1, 0)]), token_count=2)
-
-
-def test_a_repeated_event_and_token_pair_is_rejected():
-    assert not _valid(_snapshot([(0, 0), (0, 0)]), token_count=2)
-
-
-def test_geometry_for_an_event_the_frame_no_longer_lists_is_rejected():
-    """The overlapping-cue case: the snapshot carries boxes for a cue that has since ended, and
-    painting them puts hit regions over words that are no longer on screen."""
-    stale = _snapshot([(0, 0), (1, 1)], active=[(0, 0)])
-
-    assert not _valid(stale, token_count=2)
-
-
-@pytest.mark.parametrize("index", [-1, 2, 99])
-def test_a_token_index_outside_the_cue_is_rejected(index: int):
-    """The snapshot and the tokenizer disagree about how many tokens this cue has — the exact shape
-    a mid-flight cue change produces, and the one that would index past `reader.tokens`."""
-    assert not _valid(_snapshot([(0, index)]), token_count=2)
-
-
-def test_the_bound_is_the_token_count_not_the_box_count():
-    """Two boxes against a one-token cue is out of range, even though the indices are unique and the
-    events are live — the count that matters is the cue's, not the snapshot's."""
-    assert _valid(_snapshot([(0, 0), (0, 1)]), token_count=2)
-    assert not _valid(_snapshot([(0, 0), (0, 1)]), token_count=1)
+@pytest.mark.parametrize(
+    ("pairs", "active", "token_count", "expected"),
+    [
+        pytest.param([(0, 0), (0, 1), (1, 2)], None, 3, True, id="matching-cue"),
+        pytest.param([], [(0, 0)], 0, True, id="no-paintable-tokens"),
+        pytest.param([(0, 0), (1, 0)], None, 2, False, id="repeated-token"),
+        pytest.param([(0, 0), (0, 0)], None, 2, False, id="repeated-event-token-pair"),
+        pytest.param([(0, 0), (1, 1)], [(0, 0)], 2, False, id="ended-event"),
+        pytest.param([(0, -1)], None, 2, False, id="negative-index"),
+        pytest.param([(0, 2)], None, 2, False, id="index-at-cue-end"),
+        pytest.param([(0, 99)], None, 2, False, id="index-past-cue-end"),
+        pytest.param([(0, 0), (0, 1)], None, 2, True, id="two-tokens"),
+        pytest.param([(0, 0), (0, 1)], None, 1, False, id="same-boxes-one-token"),
+    ],
+)
+def test_geometry_identities_must_match_the_active_tokenized_cue(
+    pairs, active, token_count, expected
+):
+    snapshot = _snapshot(pairs, active=active)
+    assert (
+        native_subtitles.NativeSubtitleGeometry._snapshot_identities_are_valid(
+            snapshot, token_count
+        )
+        == expected
+    )
 
 
 def _visibility(reply):
