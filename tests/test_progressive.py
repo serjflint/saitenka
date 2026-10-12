@@ -33,9 +33,13 @@ def test_reader_starts_without_deps(make_session):
 
 
 @pytest.mark.timeout(5)
-def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop(make_session) -> None:
+def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop(
+    request, make_session
+) -> None:
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    assert ipc.commands == []
     reader = make_session(ipc)
     try:
         reader.entry.runtime.prepare_cue("猫")
@@ -45,7 +49,6 @@ def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop(make_
         ] == ["猫"]
     finally:
         reader.close()
-        gateway.close()
 
 
 @pytest.mark.parametrize("has_scorer", [False, True])
