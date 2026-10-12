@@ -44,7 +44,12 @@ def test_mining_built_when_anki_up(monkeypatch):
     )
     assert anki == "ANKI"
     assert mine_conf.deck == "Saitenka::Mining" and mine_conf.model == "Lapis"
-    assert mine_conf.normalize_audio is False  # off unless [mine].normalize_audio is set
+    assert (
+        mine_conf.normalize_audio,
+        mine_conf.animated.enabled,
+        mine_conf.animated.height,
+        mine_conf.animated.fmt,
+    ) == (False, False, 480, "webp")
 
 
 def test_mining_threads_normalize_audio_flag(monkeypatch):
@@ -69,17 +74,6 @@ def test_mining_threads_animated_screenshot_and_quality_knobs(monkeypatch):
     assert (
         mine_conf.animated.height == 720 and mine_conf.animated.fps == 15
     )  # storage↔quality levers
-
-
-def test_mining_animated_screenshot_off_by_default(monkeypatch):
-    import saitenka.app.anki as anki_mod
-
-    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
-    _, _, mine_conf, _ = reader_deps.build_reader_deps(
-        {"mine": {"deck": "D", "model": "Lapis"}}, color=False
-    )
-    assert mine_conf.animated.enabled is False
-    assert mine_conf.animated.height == 480 and mine_conf.animated.fmt == "webp"
 
 
 def test_mining_reads_field_map_and_card_kind_from_config(monkeypatch):
