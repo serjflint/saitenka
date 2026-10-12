@@ -618,27 +618,9 @@ def test_second_only_cycle_keeps_an_untagged_primary(request):
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------
 
 
-def test_cycle_reverts_atomically_when_the_new_tokenizer_is_unknown(request):
-    """The new tokenizer is resolved BEFORE any state is swapped, so a profile naming an unregistered
-    tokenizer keeps the old profile fully intact — no half-applied identity."""
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _BROKEN])
-
-    reader.command(
-        app_bindings.PROFILE_CYCLE_MSG
-    )  # _BROKEN.tokenizer 'nonexistent' is not registered
-
-    assert reader.graph.profile.profile.profile is DEFAULT_PROFILE  # unchanged
-    assert (
-        reader.graph.profile.profile.tokenizer.name == "unidic"
-        and reader.graph.profile.profile.langs.main == "jp"
-    )
-    assert (
-        reader.graph.profile.profile.profile_index == 0
-    )  # cursor did not advance past the failed switch
-
-
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
+@pytest.mark.parametrize("failure", ["tokenizer", "dictionary"])
+def test_failed_profile_preflight_preserves_the_reading_identity(request, failure):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     reader = _headless(request, profile=DEFAULT_PROFILE)
     original_dicts = object()
@@ -647,14 +629,26 @@ def test_cycle_reverts_atomically_when_dictionary_rescope_fails(request):
     def fail_scope(_profile):
         raise RuntimeError("broken dictionary")
 
-    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR], fail_scope)
+    target = _BROKEN if failure == "tokenizer" else _FR
+    scope = fail_scope if failure == "dictionary" else None
+    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, target], scope)
 
     reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.graph.profile.profile.profile is DEFAULT_PROFILE
-    assert reader.graph.profile.profile.tokenizer.name == "unidic"
-    assert reader.graph.profile.profile.dict_set is original_dicts
-    assert reader.graph.profile.profile.profile_index == 0
+    active = reader.graph.profile.profile
+    assert (
+        active.profile,
+        active.tokenizer.name,
+        active.langs.main,
+        active.dict_set,
+        active.profile_index,
+    ) == (
+        DEFAULT_PROFILE,
+        "unidic",
+        "jp",
+        original_dicts,
+        0,
+    )
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
