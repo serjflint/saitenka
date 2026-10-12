@@ -48,19 +48,20 @@ def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop(make_
         gateway.close()
 
 
-def test_apply_deps_injects_and_stops_loading(make_session):
+@pytest.mark.parametrize("has_scorer", [False, True])
+def test_apply_deps_injects_and_stops_loading(make_session, has_scorer):
+    from saitenka.app.overlay_ids import OverlayId
+
     ipc = FakeIPC()
     r = make_session(ipc)
     r.graph.profile.begin_loading()
+    scorer = object() if has_scorer else None
 
-    class _Scorer:  # stand-in; not exercised here (no active subtitle)
-        pass
-
-    scorer = _Scorer()
     r.graph.profile.accept(DependencyBundle(r.graph.profile.identity, scorer=scorer))
+
     assert r.graph.profile.scorer is scorer
     assert r.graph.profile.loading is False
-    assert any(c and c[0] == "overlay-remove" for c in ipc.commands)  # spinner cleared
+    assert ("overlay-remove", OverlayId.LOADING) in ipc.commands
 
 
 def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch, make_session):

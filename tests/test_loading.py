@@ -265,19 +265,6 @@ def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
     assert ipc.commands.count(("show-text", "", 1)) == 2
 
 
-def test_apply_deps_stops_the_spinner(make_session):
-    from util import FakeIPC
-
-    from saitenka.app.features.profiles.dependencies import DependencyBundle
-    from saitenka.app.overlay_ids import OverlayId
-
-    r = make_session(FakeIPC())
-    r.graph.profile.begin_loading()
-    r.graph.profile.accept(DependencyBundle(r.graph.profile.identity))
-    assert r.graph.profile.loading is False
-    assert ("overlay-remove", OverlayId.LOADING) in r.graph.ipc.commands
-
-
 def test_load_deps_async_uses_a_custom_build(make_session):
     """#16: `run` passes its own CLI-flag-aware builder; load_deps_async must call THAT (not the
     config-only build_reader_deps) and publish its result for the poll loop to inject."""
