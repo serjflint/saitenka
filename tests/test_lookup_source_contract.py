@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 import dicthelp
+import pytest
 from saitenka_dict import (
     Capability,
     Definition,
@@ -35,7 +36,7 @@ from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import DictionarySet
 from saitenka.app.source_adapter import DictionarySourceAdapter, SourceAdapterOptions
-from saitenka.model import Style
+from saitenka.model import Span, Style
 from saitenka.render.sc_adapter import walk
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -216,28 +217,33 @@ def test_overlay_lookup_accepts_the_caller_inflected_form(tmp_path):
     archive = _dictionary(tmp_path / "core.zip", "Core", ["to read"])
     current = dicthelp.load_set([archive])
     adapter = DictionarySourceAdapter(Translator(SqliteDictionaryStore(current.dicts[0].db.path)))
-    unknown = Token("missing", "missing", "よむ", "動詞", 0, 7)
+    unknown = Token("missing", "missing", "", "動詞", 0, 7)
 
     entry = adapter.entry_for(unknown, inflected="読む")
 
     assert entry.reading == "よむ"
 
 
-def test_production_source_preserves_french_deinflection_and_chain(tmp_path):
-    archive = _dictionary(
+@pytest.mark.parametrize(
+    ("surface", "base", "gloss"),
+    [("parapluies", "parapluie", "umbrella"), ("chats", "chat", "cat")],
+)
+def test_production_source_preserves_french_deinflection_and_chain(tmp_path, surface, base, gloss):
+    archive = dicthelp.term_zip(
         tmp_path / "french.zip",
         "French",
-        ["umbrella"],
-        term="parapluie",
-        reading="",
+        [
+            [surface, "", ["plural form"]],
+            [base, "", [gloss]],
+        ],
     )
     current = dicthelp.load_set([archive])
     current.language = "fr"
-    token = Token("parapluies", "parapluies", "", "NOUN", 0, 10)
+    token = Token(surface, surface, "", "NOUN", 0, len(surface))
 
     entry = current.entry_for(token)
 
-    assert "parapluie" in json.dumps(entry.headword, ensure_ascii=False)
+    assert (entry.headword, entry.defs[0].content[0]) == ([base], gloss)
     assert entry.inflection_chain
 
 
@@ -268,7 +274,8 @@ def test_production_source_preserves_configured_priority_and_card_provenance(tmp
     assert card.idseq == "1456360"
 
 
-def test_adapter_search_deduplicates_headword_identity_and_honors_limit():
+@pytest.mark.parametrize(("limit", "expected"), [(1, {"読む"}), (2, {"読む", "読者"})])
+def test_adapter_search_deduplicates_headword_identity_and_honors_limit(limit, expected):
     class Source:
         capabilities = frozenset({Capability.TERM_LOOKUP, Capability.SEARCH})
 
@@ -286,9 +293,15 @@ def test_adapter_search_deduplicates_headword_identity_and_honors_limit():
             extra = TermEntry((Headword("読者", "どくしゃ"),), (Definition(("reader",)),))
             return TermResult((duplicate, duplicate, extra), 1, 0)
 
-    result = DictionarySourceAdapter(Source()).search("読", limit=1)
+    result = DictionarySourceAdapter(Source()).search("読", limit=limit)
 
-    assert result.defs[0].dict_name == "検索 “読” · 1件"
+    assert result.defs[0].dict_name == f"検索 “読” · {len(expected)}件"
+    assert {
+        segment.href
+        for block in walk(result.defs[0].content, Style(size=26))
+        for segment in block.flow
+        if isinstance(segment, Span) and segment.href
+    } == expected
 
 
 def test_card_sequence_comes_from_the_definition_that_supplies_the_gloss():
