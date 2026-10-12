@@ -242,8 +242,11 @@ def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeyp
     assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
 
 
+@pytest.mark.parametrize(
+    ("has_command", "connected_at", "since_ipc"), [(False, 1.0, 1000.0), (True, None, None)]
+)
 def test_owned_startup_hint_clears_after_the_first_completed_turn(
-    request, make_session, diagnostic_trace, monkeypatch
+    request, make_session, diagnostic_trace, monkeypatch, has_command, connected_at, since_ipc
 ):
     from types import SimpleNamespace
 
@@ -251,56 +254,39 @@ def test_owned_startup_hint_clears_after_the_first_completed_turn(
     from saitenka.app.session.routes import install_session_reactor
 
     ipc = FakeIPC()
-    ipc.connected_at = 1.0
+    ipc.connected_at = connected_at
     monkeypatch.setattr(controller, "time", SimpleNamespace(monotonic=lambda: 2.0))
     ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
     gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
-    install_session_reactor(gateway)
-    r = make_session(ipc)
-    request.addfinalizer(r.close)  # LIFO: the reader goes down before its gateway
-    r.start()
-    assert ("show-text", "", 1) not in ipc.commands
-
-    assert r.pump() is True
-    assert ("show-text", "", 1) in ipc.commands
-
-    before = ipc.commands.count(("show-text", "", 1))
-    r.pump()
-    assert ipc.commands.count(("show-text", "", 1)) == before
-    events, analysis = diagnostic_trace()
-    ready = [event for event in events if event["name"] == "startup.interactive_ready"]
-    assert len(ready) == 1 and ready[0]["args"]["since_ipc_ms"] == 1000.0
-    assert any(row["name"] == "startup.interactive_ready" for row in analysis["startup"])
-
-
-def test_first_batch_command_dispatches_before_readiness_clears_the_hint(
-    monkeypatch, request, make_session
-):
-    from saitenka.app.session.routes import install_session_reactor
-
-    ipc = FakeIPC()
-    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
+    request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
     reader = make_session(ipc)
-    request.addfinalizer(reader.close)  # LIFO: the reader goes down before its gateway
+    request.addfinalizer(reader.close)
     reader.start()
     clear = ("show-text", "", 1)
+    assert clear not in ipc.commands
     observed = []
     monkeypatch.setattr(
         reader.graph.picker,
         "open",
         lambda *_args, **_kwargs: observed.append(clear in ipc.commands),
     )
-    ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
+    if has_command:
+        ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
 
     assert reader.pump() is True
-    assert observed == [False]
-    assert clear in ipc.commands
+    assert observed == ([False] if has_command else [])
+    assert ipc.commands.count(clear) == 1
+
+    reader.pump()
+    assert ipc.commands.count(clear) == 1
+    events, analysis = diagnostic_trace()
+    ready = [event for event in events if event["name"] == "startup.interactive_ready"]
+    assert len(ready) == 1 and ready[0]["args"].get("since_ipc_ms") == since_ipc
+    assert any(row["name"] == "startup.interactive_ready" for row in analysis["startup"])
 
 
+@pytest.mark.timeout(5)
 def test_unanswered_async_clear_does_not_delay_the_next_poll(request, make_session):
     from saitenka.app.session.routes import install_session_reactor
 
@@ -312,7 +298,7 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request, make_sessi
         def command_async(self, *args, expected_connection_epoch=None):
             del expected_connection_epoch
             request = IPCRequest(len(self.requests), 0, Future())
-            self.commands.append(args)
+            self.command(*args)
             self.requests.append(request)
             return request
 
