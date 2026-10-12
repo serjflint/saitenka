@@ -218,28 +218,20 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, make_
         gateway.close()
 
 
-def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(monkeypatch):
-    """`[perf].prefetch_workers` > 0 pins the count on both builds (a RAM/coverage knob); 0 auto-sizes
-    — min(8, cores-2) free-threaded (render parallelizes), 2 on a GIL build (extra workers only contend)."""
-
+@pytest.mark.parametrize(
+    ("free_threaded", "configured", "expected"),
+    [(True, 3, 3), (False, 3, 3), (False, 0, 2), (True, 0, 4)],
+)
+def test_prefetch_worker_count_honors_explicit_config_else_auto_by_build(
+    monkeypatch, free_threaded, configured, expected
+):
     from saitenka_tokenize.registry import UnidicTokenizer
 
     from saitenka.app.features.tooltip import prefetch
 
-    def count(configured: int) -> int:
-        return prefetch.prefetch_worker_count(UnidicTokenizer(), configured)
+    monkeypatch.setattr(prefetch, "gil_disabled", lambda: free_threaded)
 
-    # explicit override wins regardless of build
-    monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert count(3) == 3
-    monkeypatch.setattr(prefetch, "gil_disabled", lambda: False)
-    assert count(3) == 3
-
-    # auto (0): GIL build stays at the low default
-    assert count(0) == prefetch._AUTO_WORKERS_GIL
-    # auto (0): free-threaded uses the flat free-threaded default (no cpu-count arithmetic)
-    monkeypatch.setattr(prefetch, "gil_disabled", lambda: True)
-    assert count(0) == prefetch._AUTO_WORKERS_FREE_THREADED
+    assert prefetch.prefetch_worker_count(UnidicTokenizer(), configured) == expected
 
 
 @pytest.mark.parametrize(
