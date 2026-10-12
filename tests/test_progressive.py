@@ -329,45 +329,51 @@ def test_unanswered_async_clear_does_not_delay_the_next_poll(request, make_sessi
     assert reader.pump() is True
 
 
-def test_load_deps_async_marks_loading(monkeypatch, make_session):
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("has_scorer", [False, True])
+def test_a_finished_dep_build_is_injected_by_its_own_deadline(
+    monkeypatch, make_session, has_scorer
+):
     import saitenka.app.features.profiles.dependencies as rd
+    from saitenka.app.lifecycle_timers import LifecycleTimerKind, LifecycleTimers
 
-    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
-    r = make_session(FakeIPC())
-    r.graph.profile.load({})
-    assert r.graph.profile.loading is True  # spinner shows until the deps-ready deadline injects
-
-
-def test_a_finished_dep_build_is_injected_by_its_own_deadline(monkeypatch, make_session):
-    """The build thread hands the value over and *arms* the injection; a tick used to discover it by
-    looking. The due event runs on the session turn, which is what makes the hand-off safe."""
-    import saitenka.app.features.profiles.dependencies as rd
-
-    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
+    build = Future()
+    armed = threading.Event()
+    resume = threading.Event()
+    finished = threading.Event()
+    scorer = object() if has_scorer else None
+    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: build.result(timeout=2))
     ipc = FakeIPC()
     r = make_session(ipc)
-    r.graph.profile.load({})
-    await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed the injection")
+    schedule = LifecycleTimers.schedule
 
-    assert r.graph.profile.scorer is None  # arming is not applying
-    assert ipc.fire_runtime_timer("lifecycle:deps-ready")
-    assert r.graph.profile.loading is False
+    def pause_after_arming(timers, kind, *args, **kwargs):
+        accepted = schedule(timers, kind, *args, **kwargs)
+        if kind is LifecycleTimerKind.DEPS_READY and not armed.is_set():
+            try:
+                armed.set()
+                resume.wait()
+            finally:
+                finished.set()
+        return accepted
 
-    assert not ipc.fire_runtime_timer("lifecycle:deps-ready")  # one build, one injection
+    monkeypatch.setattr(LifecycleTimers, "schedule", pause_after_arming)
+    try:
+        r.graph.profile.load({})
+        assert r.graph.profile.loading is True
+        build.set_result((scorer, None, None, None))
+        assert armed.wait(1)
+        assert (r.graph.profile.scorer, r.graph.profile.loading) == (None, True)
 
+        assert ipc.fire_runtime_timer("lifecycle:deps-ready")
 
-def test_the_value_is_published_before_the_injection_is_armed(monkeypatch, make_session):
-    """Ordering, and the whole hand-off: arming first would let the due event fire against a
-    dependency owner with no published bundle, and the session would sit loading forever."""
-    import saitenka.app.features.profiles.dependencies as rd
-
-    monkeypatch.setattr(rd, "build_reader_deps", lambda _cfg, **_k: (None, None, None, None))
-    ipc = FakeIPC()
-    r = make_session(ipc)
-    r.graph.profile.load({})
-    await_ready(lambda: "lifecycle:deps-ready" in ipc.timers, "the build never armed deps-ready")
-
-    assert r.graph.profile.ready
+        assert (r.graph.profile.scorer, r.graph.profile.loading) == (scorer, False)
+        assert not ipc.fire_runtime_timer("lifecycle:deps-ready")
+    finally:
+        if not build.done():
+            build.set_result((scorer, None, None, None))
+        resume.set()
+        assert finished.wait(1)
 
 
 @pytest.mark.timeout(5)
