@@ -22,25 +22,19 @@ from saitenka.app.subtitle_render import NullRenderer
 from saitenka.mpvio.ipc import IPCRequest
 
 
-def test_reader_starts_without_deps(make_session):
-    r = make_session(FakeIPC())
-    assert (
-        r.graph.profile.scorer is None
-        and r.graph.profile.profile.dict_set is None
-        and not r.graph.mining.configured
-    )
-
-
 @pytest.mark.timeout(5)
-def test_demo_annotation_drives_its_broker_terminal_before_the_reader_loop(
-    request, make_session
-) -> None:
+def test_demo_prepares_a_cue_before_dependencies_arrive(request, make_session) -> None:
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
     request.addfinalizer(gateway.close)
     assert ipc.commands == []
     reader = make_session(ipc)
     try:
+        assert (
+            reader.graph.profile.scorer is None
+            and reader.graph.profile.profile.dict_set is None
+            and not reader.graph.mining.configured
+        )
         reader.entry.runtime.prepare_cue("猫")
 
         assert [
@@ -185,14 +179,9 @@ def test_reader_close_cancels_accepted_interaction_jobs(make_session, diagnostic
     assert analysis["interaction_latency"]["tooltip_request"]["outcomes"] == {"cancelled": 1}
 
 
+@pytest.mark.timeout(5)
 def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, make_session):
-    """Regression: the banner announced from run() BEFORE async deps spawned prefetch workers, so it
-    always said '0 prefetch worker(s)'. It must now fire from apply_deps with the live count, exactly
-    once (a later re-inject must not re-announce).
-
-    Read off the record, not the terminal: which stream a user-facing line reaches is logsetup's
-    (tests/test_logsetup.py), and a SessionController built without `configure_logging` has no handler at all.
-    """
+    """Regression: startup logged zero before prefetch workers existed."""
     caplog.set_level(logging.INFO, logger=CONSOLE_LOGGER_NAME)
     dictionaries = object()
     ipc = FakeIPC()
@@ -209,7 +198,7 @@ def test_runtime_banner_reports_real_worker_count_after_async_deps(caplog, make_
         r.graph.profile.accept(
             DependencyBundle(r.graph.profile.identity, dictionaries=dictionaries)
         )
-        assert "3 prefetch worker(s)" in caplog.text  # real count, not 0
+        assert "3 prefetch worker(s)" in caplog.text
         caplog.clear()
         r.graph.profile.accept(DependencyBundle(r.graph.profile.identity))
         assert "prefetch worker(s)" not in caplog.text
