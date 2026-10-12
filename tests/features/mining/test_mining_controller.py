@@ -199,15 +199,16 @@ def test_profile_switch_refuses_an_old_mining_completion(tmp_path, monkeypatch) 
 
     identity = MiningIdentity("b", 1)
     controller.select_mining_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
+    journal = call["request"].journal
+    assert journal is not None
+    journal.record("mark_mined", ("old",))
     call["on_finished"](
         EffectFinished(
             EffectId(2),
             Owner.SESSION,
             call["identity"],
             EffectOutcome.SUCCEEDED,
-            result=mining_operation.MiningOutcome(
-                (mining_operation.MiningAction("mark_mined", ("old",)),)
-            ),
+            result=mining_operation.MiningOutcome(()),
         )
     )
 
