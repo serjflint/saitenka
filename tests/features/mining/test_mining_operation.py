@@ -33,25 +33,19 @@ def test_journal_preserves_callback_names_payloads_and_order(monkeypatch, revers
     for action in expected:
         getattr(callbacks, action.name)(*action.args)
 
-    assert journal.drain() == expected
-    assert journal.drain() == ()
-    assert {action.name for action in expected} == {name for name, _ in layout}
-
-
-def test_outcome_dispatches_by_name_in_journal_order():
+    actions = journal.drain()
     received = []
 
     def capture(name):
         return lambda *args: received.append((name, args))
 
-    callbacks = miner.MiningApply(
+    receiver = miner.MiningApply(
         **{field.name: capture(field.name) for field in fields(miner.MiningApply)}
     )
-    actions = tuple(
-        mining_operation.MiningAction(field.name, (field.name,))
-        for field in reversed(fields(miner.MiningApply))
-    )
 
-    mining_operation.apply_outcome(mining_operation.MiningOutcome(actions), callbacks)
+    mining_operation.apply_outcome(mining_operation.MiningOutcome(actions[::-1]), receiver)
 
-    assert received == [(action.name, action.args) for action in actions]
+    assert actions == expected
+    assert journal.drain() == ()
+    assert {action.name for action in expected} == {name for name, _ in layout}
+    assert received == [(action.name, action.args) for action in reversed(expected)]
