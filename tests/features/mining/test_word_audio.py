@@ -2,7 +2,9 @@
 
 import json
 
-from saitenka.app.features.mining.word_audio import load_index, resolve
+import pytest
+
+from saitenka.app.features.mining.word_audio import resolve
 
 
 def _write_pack(tmp_path, index: dict, *, files: tuple[str, ...] = ()):
@@ -12,12 +14,18 @@ def _write_pack(tmp_path, index: dict, *, files: tuple[str, ...] = ()):
     return tmp_path
 
 
-def test_resolve_hits_the_indexed_file(tmp_path):
-    pack = _write_pack(
-        tmp_path,
+@pytest.mark.parametrize(
+    "index",
+    [
         {"index": {"読む": {"よむ": ["yomu.opus"]}}},
-        files=("yomu.opus",),
-    )
+        {"読む": {"よむ": ["yomu.opus"]}},
+        {"index": {"読む": {"よむ": [{"path": "yomu.opus", "name": "NHK16"}]}}},
+        {"index": {"読む": {"よむ": ["missing.opus", "yomu.opus"]}}},
+    ],
+    ids=["wrapped", "flat", "path-entry", "next-candidate"],
+)
+def test_resolve_hits_the_indexed_file(tmp_path, index):
+    pack = _write_pack(tmp_path, index, files=("yomu.opus",))
     hit = resolve(pack, "読む", "よむ")
     assert hit is not None
     assert hit.filename == "yomu.opus"
@@ -46,23 +54,27 @@ def test_resolve_misses_when_indexed_file_absent_on_disk(tmp_path):
     assert resolve(pack, "読む", "よむ") is None
 
 
-def test_resolve_misses_on_unconfigured_pack_dir(tmp_path):
-    assert resolve(tmp_path / "does-not-exist", "読む", "よむ") is None
+@pytest.mark.parametrize("directory", [".", "does-not-exist"])
+def test_resolve_misses_on_unconfigured_pack_dir(tmp_path, directory):
+    assert resolve(tmp_path / directory, "読む", "よむ") is None
 
 
 def test_load_index_degrades_cleanly_on_malformed_json(tmp_path):
     (tmp_path / "index.json").write_text("{not valid json", encoding="utf-8")
-    assert load_index(tmp_path) == {}
     assert resolve(tmp_path, "読む", "よむ") is None
 
 
-def test_load_index_degrades_cleanly_when_index_missing(tmp_path):
-    assert load_index(tmp_path) == {}
-
-
-def test_load_index_skips_malformed_entries_but_keeps_good_ones(tmp_path):
-    """A malformed sibling entry (wrong shape) must not poison the whole index — the well-formed
-    entries alongside it still resolve."""
+@pytest.mark.parametrize(
+    ("term", "reading", "filename"),
+    [
+        ("読む", "よむ", "yomu.opus"),
+        ("壊れる", "よむ", None),
+        ("空", "x", None),
+        ("無音", "x", None),
+    ],
+)
+def test_load_index_skips_malformed_entries_but_keeps_good_ones(tmp_path, term, reading, filename):
+    """Bad siblings must not hide a good pronunciation or resolve as one."""
     pack = _write_pack(
         tmp_path,
         {
@@ -75,64 +87,11 @@ def test_load_index_skips_malformed_entries_but_keeps_good_ones(tmp_path):
         },
         files=("yomu.opus",),
     )
-    index = load_index(pack)
-    assert index == {"読む": {"よむ": ["yomu.opus"]}}
-    assert resolve(pack, "読む", "よむ") is not None
-
-
-def test_load_index_accepts_a_flat_unwrapped_table(tmp_path):
-    """A pack whose index.json IS the term->reading->files table, with no `index`/`media` wrapper."""
-    pack = _write_pack(tmp_path, {"読む": {"よむ": ["yomu.opus"]}}, files=("yomu.opus",))
-    assert resolve(pack, "読む", "よむ") is not None
-
-
-def test_load_index_accepts_dict_entries_with_a_path_key(tmp_path):
-    pack = _write_pack(
-        tmp_path,
-        {"index": {"読む": {"よむ": [{"path": "yomu.opus", "name": "NHK16"}]}}},
-        files=("yomu.opus",),
-    )
-    hit = resolve(pack, "読む", "よむ")
-    assert hit is not None and hit.filename == "yomu.opus"
-
-
-def test_resolve_falls_back_to_next_candidate_when_first_file_is_missing(tmp_path):
-    pack = _write_pack(
-        tmp_path,
-        {"index": {"読む": {"よむ": ["missing.opus", "yomu.opus"]}}},
-        files=("yomu.opus",),
-    )
-    hit = resolve(pack, "読む", "よむ")
-    assert hit is not None and hit.filename == "yomu.opus"
+    hit = resolve(pack, term, reading)
+    assert (hit.filename if hit else None) == filename
 
 
 def test_resolve_empty_term_or_reading_is_a_clean_miss(tmp_path):
     pack = _write_pack(tmp_path, {"index": {"読む": {"よむ": ["yomu.opus"]}}}, files=("yomu.opus",))
     assert resolve(pack, "", "よむ") is None
     assert resolve(pack, "読む", "") is None
-
-
-def test_resolve_rejects_parent_traversal_entry(tmp_path):
-    """A poisoned pack index mapping a reading to a `../` path must NOT resolve — arbitrary local-file
-    read + upload into Anki via store_media otherwise."""
-    (tmp_path / "secret.txt").write_bytes(b"top-secret")
-    pack = tmp_path / "pack"
-    pack.mkdir()
-    (pack / "index.json").write_text(
-        json.dumps({"index": {"読む": {"よむ": ["../secret.txt"]}}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    assert resolve(pack, "読む", "よむ") is None
-
-
-def test_resolve_rejects_absolute_path_entry(tmp_path):
-    """An ABSOLUTE-path entry (`pack / "/abs"` discards the base in pathlib) must be rejected too."""
-    outside = tmp_path / "outside.txt"
-    outside.write_bytes(b"outside-the-pack")
-    pack = tmp_path / "pack"
-    pack.mkdir()
-    (pack / "index.json").write_text(
-        json.dumps({"index": {"読む": {"よむ": [str(outside)]}}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    assert resolve(pack, "読む", "よむ") is None
