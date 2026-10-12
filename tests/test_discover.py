@@ -5,17 +5,18 @@ run on any OS; ``_is_exe`` is exercised against real temp files."""
 from __future__ import annotations
 
 import os
+import shutil
 
 import pytest
 
 from saitenka.mpvio import discover as d
 
 
-def _script(path, exit_code: int) -> str:
-    """Write an executable POSIX script that exits with *exit_code*, return its path."""
+def _tool(path, exit_code: int) -> str:
+    executable = shutil.which("true" if exit_code == 0 else "false", path=os.defpath)
+    assert executable is not None
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"#!/bin/sh\nexit {exit_code}\n")
-    path.chmod(0o755)
+    path.symlink_to(executable)
     return str(path)
 
 
@@ -88,16 +89,18 @@ def test_registry_probe_is_noop_when_nothing_matches(monkeypatch):
     assert d._windows_registry_mpv() is None
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX exec-probe scripts")
+@pytest.mark.skipif(os.name == "nt", reason="POSIX true/false executables")
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 @pytest.mark.usefixtures("_clear_probe_cache")
 class TestFindToolHealthProbe:
     """find_tool skips a present-but-broken binary that shadows a working one — the live MacPorts
     ffprobe SIGABRT that blocked every sub-resync (dangling dylib → aborts, but which() still found it)."""
 
     def test_broken_path_hit_falls_through_to_a_healthy_bin_dir_copy(self, tmp_path, monkeypatch):
-        broken = _script(tmp_path / "path" / "ffprobe", 1)  # on PATH, aborts on exec
+        broken = _tool(tmp_path / "path" / "ffprobe", 1)
         healthy_dir = tmp_path / "brew"
-        healthy = _script(healthy_dir / "ffprobe", 0)  # in a bin dir, runs
+        healthy = _tool(healthy_dir / "ffprobe", 0)  # in a bin dir, runs
         monkeypatch.setattr(d.shutil, "which", lambda _n: broken)
         monkeypatch.setattr(d, "_BIN_DIRS", [healthy_dir])
         assert d.find_tool("ffprobe") == healthy
@@ -105,7 +108,7 @@ class TestFindToolHealthProbe:
     def test_lone_candidate_is_returned_unprobed(self, tmp_path, monkeypatch):
         """A single (even broken) candidate is returned as-is — probing can't conjure a working copy,
         and the single-install common case must not pay a spawn or change behaviour."""
-        only = _script(tmp_path / "ffprobe", 1)
+        only = _tool(tmp_path / "ffprobe", 1)
         monkeypatch.setattr(d.shutil, "which", lambda _n: only)
         monkeypatch.setattr(d, "_BIN_DIRS", [])
         assert d.find_tool("ffprobe") == only
@@ -113,9 +116,9 @@ class TestFindToolHealthProbe:
     def test_tool_without_a_version_flag_is_not_probed(self, tmp_path, monkeypatch):
         """Only ffmpeg/ffprobe have a registered probe flag; an unknown tool keeps first-hit-wins even
         with multiple candidates (no probe flag ⇒ we can't distinguish broken from a bad-flag exit)."""
-        path_hit = _script(tmp_path / "path" / "alass", 1)
+        path_hit = _tool(tmp_path / "path" / "alass", 1)
         other_dir = tmp_path / "other"
-        _script(other_dir / "alass", 0)
+        _tool(other_dir / "alass", 0)
         monkeypatch.setattr(d.shutil, "which", lambda _n: path_hit)
         monkeypatch.setattr(d, "_BIN_DIRS", [other_dir])
         assert d.find_tool("alass") == path_hit  # PATH hit wins, unprobed
@@ -123,13 +126,13 @@ class TestFindToolHealthProbe:
     def test_find_healthy_tool_flags_a_lone_broken_binary(self, tmp_path, monkeypatch):
         """The doctor case: a lone (unprobed by find_tool) ffprobe that aborts on exec resolves to a
         path but healthy=False — so doctor flags the #100 SIGABRT that find_tool alone returns as ok."""
-        broken = _script(tmp_path / "ffprobe", 1)
+        broken = _tool(tmp_path / "ffprobe", 1)
         monkeypatch.setattr(d.shutil, "which", lambda _n: broken)
         monkeypatch.setattr(d, "_BIN_DIRS", [])
         assert d.find_healthy_tool("ffprobe") == (broken, False)
 
     def test_find_healthy_tool_confirms_a_working_binary(self, tmp_path, monkeypatch):
-        healthy = _script(tmp_path / "ffprobe", 0)
+        healthy = _tool(tmp_path / "ffprobe", 0)
         monkeypatch.setattr(d.shutil, "which", lambda _n: healthy)
         monkeypatch.setattr(d, "_BIN_DIRS", [])
         assert d.find_healthy_tool("ffprobe") == (healthy, True)
@@ -137,7 +140,7 @@ class TestFindToolHealthProbe:
     def test_find_healthy_tool_trusts_a_found_tool_with_no_probe_flag(self, tmp_path, monkeypatch):
         """No registered probe flag (alass) ⇒ found is trusted (can't distinguish broken from a
         bad-flag exit), so healthy mirrors presence."""
-        alass = _script(
+        alass = _tool(
             tmp_path / "alass", 1
         )  # would fail a probe, but there's no flag to probe with
         monkeypatch.setattr(d.shutil, "which", lambda _n: alass)

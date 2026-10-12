@@ -202,10 +202,20 @@ def test_launched_process_serves_the_ipc_socket(tmp_path):
         Path(sock).unlink(missing_ok=True)
 
 
-def _fake_mpv(tmp_path: Path, body: str) -> Path:
-    exe = tmp_path / "mpv"
-    exe.write_text(f"#!/bin/sh\n{body}\n")
+def _fake_mpv(tmp_path: Path, monkeypatch, *, returncode=0, stdout="", stderr="") -> Path:
+    exe = tmp_path / "mpv.exe"
+    exe.touch()
     exe.chmod(0o755)
+
+    def run(argv, **kwargs):
+        assert argv == [str(exe), "--version"]
+        assert kwargs.get("capture_output") and (
+            kwargs.get("encoding") or kwargs.get("text") or kwargs.get("universal_newlines")
+        )
+        assert not kwargs.get("check")
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+    monkeypatch.setattr(subprocess, "run", run)
     return exe
 
 
@@ -222,10 +232,12 @@ def _launch_native(mpv_path: Path, tmp_path: Path):
     )
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the fake mpv is a shell script")
-def test_an_mpv_that_cannot_run_is_not_reported_as_too_old(tmp_path):
+def test_an_mpv_that_cannot_run_is_not_reported_as_too_old(tmp_path, monkeypatch):
     broken = _fake_mpv(
-        tmp_path, "echo 'dyld: Library not loaded: libunibreak.7.dylib' >&2\nexit 134"
+        tmp_path,
+        monkeypatch,
+        returncode=134,
+        stderr="dyld: Library not loaded: libunibreak.7.dylib\n",
     )
 
     with pytest.raises(MpvLaunchError) as refused:
@@ -236,9 +248,8 @@ def test_an_mpv_that_cannot_run_is_not_reported_as_too_old(tmp_path):
     assert "needs mpv" not in str(refused.value)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="the fake mpv is a shell script")
-def test_an_old_mpv_is_refused_with_the_version_it_reported(tmp_path):
-    old = _fake_mpv(tmp_path, "echo 'mpv v0.37.0 Copyright'")
+def test_an_old_mpv_is_refused_with_the_version_it_reported(tmp_path, monkeypatch):
+    old = _fake_mpv(tmp_path, monkeypatch, stdout="mpv v0.37.0 Copyright\n")
 
     with pytest.raises(MpvLaunchError, match=r"needs mpv ≥ 0\.40, found 0\.37"):
         _launch_native(old, tmp_path)
