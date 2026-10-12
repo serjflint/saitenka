@@ -229,40 +229,21 @@ def test_known_falls_back_when_ankiconnect_raises(monkeypatch, error):
     assert scorer.score_line([token])[0].tag == "base"
 
 
-def test_run_path_language_is_threaded_not_re_resolved(monkeypatch):
-    # Regression: the run path rebuilds a minimal effective_cfg WITHOUT the [profiles.*] table, so
-    # build_reader_deps must use the explicitly-passed language — re-resolving from that cfg would
-    # wrongly return the JP default and silently no-op second-language deinflection (French tooltips
-    # showed only the "non-lemma" redirect, never the base word).
-    seen = {}
+@pytest.mark.parametrize("source", ["run", "attach"])
+def test_dependency_dictionary_uses_the_selected_language(tmp_path, source):
+    import dicthelp
+    from saitenka_tokenize.japanese import Token
 
-    def _spy(_db, _d, _f, _p, language="jp"):
-        seen["language"] = language
-        return None, None
+    archive = dicthelp.term_zip(tmp_path / "d.zip", "X", [["present", "", ["definition"]]])
+    dicthelp.db().import_zip(archive, imported_at=dicthelp.AT)
+    cfg = {"dicts": ["X"]}
+    if source == "attach":
+        cfg.update(active_profile="fr", profiles={"fr": {"language": "fr", "tokenizer": "latin"}})
 
-    monkeypatch.setattr(reader_deps, "_build_dict_set", _spy)
-    eff = {
-        "dicts": ["X"],
-        "freq": [],
-        "pitch": [],
-    }  # no active_profile / profiles → would resolve JP
-    reader_deps.build_reader_deps(eff, color=False, mine=False, language="fr")
-    assert seen["language"] == "fr"
+    _, _, _, dictionaries = reader_deps.build_reader_deps(
+        cfg, color=False, mine=False, language="fr" if source == "run" else None
+    )
 
-
-def test_attach_path_resolves_language_from_the_profile_when_unset(monkeypatch):
-    # attach passes the full cfg and no explicit language, so it must resolve from the active profile.
-    seen = {}
-
-    def _spy(_db, _d, _f, _p, language="jp"):
-        seen["language"] = language
-        return None, None
-
-    monkeypatch.setattr(reader_deps, "_build_dict_set", _spy)
-    cfg = {
-        "dicts": ["X"],
-        "active_profile": "fr",
-        "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}},
-    }
-    reader_deps.build_reader_deps(cfg, color=False, mine=False)
-    assert seen["language"] == "fr"
+    token = Token("missing", "missing", "", "WORD", 0, 7)
+    entry = dictionaries.entry_for(token)
+    assert (dictionaries.language, entry.defs[0].content[0]) == ("fr", "(not found in dictionary)")
