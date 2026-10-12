@@ -342,7 +342,6 @@ def test_clip_audio_keeps_normal_probing_for_nonlocal_matroska(monkeypatch, tmp_
     assert "-probesize" not in calls["cmd"] and "-analyzeduration" not in calls["cmd"]
 
 
-@pytest.mark.integration
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize(
     ("failure", "message"),

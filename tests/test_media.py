@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import base64
 
+import pytest
 from saitenka_card import AnimatedClip
 
 from saitenka.app import media
-
-
-def test_speak_cmd_macos(monkeypatch):
-    monkeypatch.setattr(media.sys, "platform", "darwin")
-    assert media._speak_cmd("猫", voice="Kyoko") == ["say", "-v", "Kyoko", "猫"]
 
 
 def test_speak_cmd_windows_carries_utf8_as_base64_and_picks_ja_voice(monkeypatch):
@@ -25,11 +21,6 @@ def test_speak_cmd_windows_carries_utf8_as_base64_and_picks_ja_voice(monkeypatch
     assert "FromBase64String" in ps and "System.Speech" in ps
     assert "ja-JP" in ps  # selects an installed Japanese voice
     assert "[Console]::In" not in ps  # no fragile stdin path
-
-
-def test_speak_cmd_linux(monkeypatch):
-    monkeypatch.setattr(media.sys, "platform", "linux")
-    assert media._speak_cmd("猫") == ["espeak", "-v", "ja", "猫"]
 
 
 def test_tts_available_windows_needs_ja_voice(monkeypatch):
@@ -80,12 +71,19 @@ def test_play_cmd_falls_back_to_ffplay_without_mpv(monkeypatch):
     assert media._play_cmd("/tmp/a.m4a")[0] == "ffplay"
 
 
-def test_speak_spawns_the_command(monkeypatch):
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        ("darwin", ["say", "-v", "Kyoko", "猫"]),
+        ("linux", ["espeak", "-v", "ja", "猫"]),
+    ],
+)
+def test_speak_spawns_the_command(monkeypatch, platform, expected):
     calls: list = []
-    monkeypatch.setattr(media.sys, "platform", "darwin")
+    monkeypatch.setattr(media.sys, "platform", platform)
     monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **_k: calls.append(cmd))
-    media.speak("ねこ", voice="Kyoko")
-    assert calls == [["say", "-v", "Kyoko", "ねこ"]]
+    media.speak("猫", voice="Kyoko")
+    assert calls == [expected]
 
 
 # --- animated screenshot (#92): encoder probe + ffmpeg command --------------------------------------
@@ -128,9 +126,16 @@ def test_ffmpeg_encoder_available_false_when_ffmpeg_missing(monkeypatch):
     media._ffmpeg_encoder_available.cache_clear()
 
 
-def test_animated_screenshot_builds_ffmpeg_over_the_capped_span(monkeypatch):
+@pytest.mark.parametrize(
+    ("encoder", "available"),
+    [
+        ("libwebp_anim", {"libwebp_anim", "libwebp", "gif"}),
+        ("libwebp", {"libwebp", "gif"}),
+    ],
+)
+def test_animated_screenshot_builds_ffmpeg_over_the_capped_span(monkeypatch, encoder, available):
     monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
-    monkeypatch.setattr(media, "_ffmpeg_encoder_available", lambda _enc: True)
+    monkeypatch.setattr(media, "_ffmpeg_encoder_available", lambda enc: enc in available)
     calls: dict = {}
     monkeypatch.setattr(media.subprocess, "run", lambda cmd, **_k: calls.__setitem__("cmd", cmd))
     out = media.animated_screenshot(
@@ -142,27 +147,10 @@ def test_animated_screenshot_builds_ffmpeg_over_the_capped_span(monkeypatch):
     assert out == media.Path("/out.webp")
     cmd = calls["cmd"]
     assert cmd[0] == "ffmpeg"
-    assert "libwebp_anim" in cmd and "-loop" in cmd and "-an" in cmd and "-sn" in cmd
+    assert encoder in cmd and "-loop" in cmd and "-an" in cmd and "-sn" in cmd
     assert cmd[cmd.index("-vf") + 1] == "fps=12,scale=-2:480"  # the quality↔storage levers
     assert "9.500" in cmd  # padded start (10 - 0.5)
     assert "13.500" in cmd  # end capped at start + max_secs (9.5 + 4.0), not the full 20.5
-
-
-def test_resolve_animated_encoder_prefers_webp_then_falls_back_to_gif(monkeypatch):
-    have: set = set()
-    monkeypatch.setattr(media, "_ffmpeg_encoder_available", lambda enc: enc in have)
-    have = {"libwebp_anim", "gif"}
-    assert media.resolve_animated_encoder("webp") == ("libwebp_anim", "webp")  # WebP preferred
-    have = {"libwebp", "gif"}
-    assert media.resolve_animated_encoder("webp") == ("libwebp", "webp")  # 2nd-choice WebP encoder
-    have = {"gif"}  # the Homebrew-ffmpeg case: no libwebp → universal GIF fallback
-    assert media.resolve_animated_encoder("webp") == ("gif", "gif")
-    have = set()  # no ffmpeg encoders at all → caller keeps the still
-    assert media.resolve_animated_encoder("webp") is None
-    have = {"gif", "libwebp_anim"}
-    assert (
-        media.resolve_animated_encoder("av1") is None
-    )  # explicit unsupported format, no gif fallback
 
 
 def test_animated_screenshot_returns_none_without_any_encoder(monkeypatch):
@@ -189,8 +177,11 @@ def test_animated_screenshot_falls_back_to_gif_when_ffmpeg_lacks_webp(monkeypatc
 
 def test_animated_screenshot_unknown_format_is_none(monkeypatch):
     monkeypatch.setattr(media, "_ffmpeg_encoder_available", lambda _enc: True)
+    calls = []
+    monkeypatch.setattr(media.subprocess, "run", lambda cmd, **_kwargs: calls.append(cmd))
     # av1/mp4 needs a <video> template, out of scope → no encode, caller falls back to the still
     out = media.animated_screenshot(
         "/v.mkv", media.Timespan(0, 3), "/o.mp4", AnimatedClip(fmt="av1")
     )
     assert out is None
+    assert calls == []
