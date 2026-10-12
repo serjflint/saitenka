@@ -1022,30 +1022,6 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_sess
     assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
 
 
-def test_mine_token_duplicate_shows_existing(monkeypatch, make_session):
-    from util import FakeIPC
-
-    ipc = FakeIPC()
-    anki = _FakeAnki(existing=[42])
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.graph.cue.set_subtitle("本を読む")
-    previewed = []
-    monkeypatch.setattr(
-        PreviewController,
-        "present_existing",
-        lambda _owner, _ports, _source, _toast, nid, _card, status, **_options: previewed.append(
-            (nid, status)
-        ),
-    )
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert anki.added == []  # dedupe: nothing added
-    assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r.graph.mining.index_snapshot()
-    assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
-
-
 def test_preview_replay_key_is_tooltip_scoped():
     """`p` (replay preview) is bound only while a tooltip is up, so global `p` keeps mpv's pause
     (the Windows collision). It must NOT be a global startup binding."""
@@ -1083,17 +1059,24 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch, make_session):
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch, make_session):
-    """Mining an in-deck word shows "✓ in deck" and adds nothing, but stashes the token; the preview's
-    ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
+    """An existing card can be explicitly mined again after a capture-free refusal."""
     from util import FakeIPC
 
     ipc = FakeIPC()
-    anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
+    anki = _FakeAnki(existing=[42])
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(PreviewController, "present_existing", _discard_preview)
+    previewed = []
+    monkeypatch.setattr(
+        PreviewController,
+        "present_existing",
+        lambda _owner, _ports, _source, _toast, nid, _card, status, **_options: previewed.append(
+            (nid, status)
+        ),
+    )
     dup_status = []
     monkeypatch.setattr(
         PreviewController,
@@ -1104,16 +1087,20 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch, make
     )
     tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
 
-    r.graph.mining.mine_token(tok)  # already in deck → nothing added, token remembered
+    r.graph.mining.mine_token(tok)
     _await_mining(r)
     assert anki.added == []
-    assert r.graph.preview.panel.dup_tok is tok
+    assert previewed == [(42, "exists")]
+    assert "読む" in r.graph.mining.index_snapshot()
+    assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
 
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     r.graph.preview_commands.ports().add_duplicate()
     _await_mining(r)
     assert len(anki.added) == 1
+    assert anki.added[0]["fields"]["Expression"] == "読む"
     assert anki.added[0]["options"]["allowDuplicate"] is True
-    assert dup_status == ["duplicate"]  # the new card's preview says "• duplicate" (accurate now)
+    assert dup_status == ["duplicate"]
 
 
 def test_select_bulk_targets_dedupes_skips_known_and_caps():
