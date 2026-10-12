@@ -874,8 +874,12 @@ def test_an_anki_add_finishing_after_source_retirement_keeps_its_original_link(
         anki.release.set()
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):
-    from util import FakeIPC, await_ready, drain_for
+    from util import FakeIPC, await_ready
+
+    from saitenka.app.features.mining import mining_operation
 
     class BlockingAnki(_FakeAnki):
         def __init__(self) -> None:
@@ -890,25 +894,43 @@ def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):
             self.check_finished.set()
             return True
 
+    commit_finished = threading.Event()
+    real_run = mining_operation.run_operation
+
+    def complete_commit(request, cancelled):
+        result = real_run(request, cancelled)
+        if request.stage is mining_operation.OperationStage.COMMIT:
+            commit_finished.set()
+        return result
+
+    monkeypatch.setattr(mining_operation, "run_operation", complete_commit)
+
     ipc = FakeIPC()
     anki = BlockingAnki()
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
     tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    await_ready(anki.check_started.is_set, "Anki health check did not start", pump=r.pump)
+    try:
+        r.graph.mining.mine_token(tok)
+        await_ready(anki.check_started.is_set, "Anki health check did not start", pump=r.pump)
 
-    r.close()
-    anki.release_check.set()
-    await_ready(anki.check_finished.is_set, "Anki health check did not finish")
-    drain_for(lambda: None)
+        r.close()
+        anki.release_check.set()
+        await_ready(anki.check_finished.is_set, "Anki health check did not finish")
+        await_ready(commit_finished.is_set, "commit worker did not finish")
 
-    assert anki.added == []
+        assert anki.added == []
+    finally:
+        anki.release_check.set()
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make_session):
-    from util import FakeIPC, await_ready, drain_for
+    from util import FakeIPC, await_ready
+
+    from saitenka.app.features.mining import mining_operation
 
     class BlockingSecondCheckAnki(_FakeAnki):
         def __init__(self) -> None:
@@ -916,12 +938,14 @@ def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make
             self.checks = 0
             self.second_check_started = threading.Event()
             self.release_second_check = threading.Event()
+            self.second_check_finished = threading.Event()
 
         def can_add(self, _note):
             self.checks += 1
             if self.checks == 2:
                 self.second_check_started.set()
                 assert self.release_second_check.wait(5), "test did not release Anki health check"
+                self.second_check_finished.set()
             return True
 
     class RecordingHistory:
@@ -932,6 +956,24 @@ def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make
             self.counts.append(count)
 
     ipc = FakeIPC()
+    commit_consumed = threading.Event()
+    real_submit = ipc.submit_runtime_job
+
+    def submit(**job):
+        if (
+            job["lane"] == mining_operation.LANE
+            and job["request"].stage is mining_operation.OperationStage.COMMIT
+        ):
+            callback = job["on_finished"]
+
+            def finished(completion):
+                callback(completion)
+                commit_consumed.set()
+
+            job["on_finished"] = finished
+        return real_submit(**job)
+
+    monkeypatch.setattr(ipc, "submit_runtime_job", submit)
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = BlockingSecondCheckAnki()
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
@@ -940,22 +982,30 @@ def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make
     monkeypatch.setattr(r.graph.tooltip, "mark_mined", lambda *_args: None)
     history = RecordingHistory()
     r.graph.history.replace_recorder(history)
+    try:
+        r.graph.mining.bulk_mine()
+        await_ready(
+            anki.second_check_started.is_set,
+            "second Anki health check did not start",
+            pump=r.pump,
+        )
 
-    r.graph.mining.bulk_mine()
-    await_ready(
-        anki.second_check_started.is_set,
-        "second Anki health check did not start",
-        pump=r.pump,
-    )
+        r.graph.mining.invalidate()
+        anki.release_second_check.set()
+        await_ready(
+            anki.second_check_finished.is_set,
+            "second Anki health check did not finish",
+            pump=r.pump,
+        )
+        await_ready(commit_consumed.is_set, "bulk commit terminal was not consumed", pump=r.pump)
+        r.graph.history.replace_recorder(None)
 
-    r.graph.mining.invalidate()
-    anki.release_second_check.set()
-    drain_for(r.pump)
-    r.graph.history.replace_recorder(None)
-
-    assert history.counts == [1]
-    assert r.graph.mining.store.by_note_id(1) is not None
-    assert len(anki.added) == 1
+        assert history.counts == [1]
+        assert r.graph.mining.store.by_note_id(1) is not None
+        assert len(anki.added) == 1
+    finally:
+        anki.release_second_check.set()
+        r.graph.history.replace_recorder(None)
 
 
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_session):
