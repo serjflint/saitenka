@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 import util
 from util import keybind_registry
 
@@ -233,8 +234,16 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(
     reader.close()
 
 
-def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(
-    tmp_path, monkeypatch, make_session
+@pytest.mark.parametrize(
+    ("language", "primary", "secondary", "expected"),
+    [
+        ("jp", "日本語", "english", ("日本語", "english")),
+        ("en", "English line", "日本語", ("日本語", "English line")),
+        ("jp", "日本語", "", ("日本語", "")),
+    ],
+)
+def test_a_bookmark_stores_the_cue_by_language_not_by_position(
+    tmp_path, monkeypatch, make_session, language, primary, secondary, expected
 ):
     video = tmp_path / "Show - 02.mkv"
     ipc = _IPC(
@@ -242,13 +251,13 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(
             "path": str(video),
             "sub-start": 1.0,
             "sub-end": 2.0,
-            "secondary-sub-text": "日本語",
+            "secondary-sub-text": secondary,
             "track-list": [],
         }
     )
     reader = make_session(ipc)
-    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
-    reader.graph.playback.install_seed({"sub-text": "English line"})
+    reader.graph.track_commands.declare(SubtitleLanguageChanged(language))
+    reader.graph.playback.install_seed({"sub-text": primary})
     store = BacklogStore(tmp_path / "reader.sqlite")
     reader.graph.history.replace_backlog(store)
     monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
@@ -256,7 +265,7 @@ def test_english_mode_capture_keeps_japanese_and_english_fields_distinct(
     reader.command(app_bindings.BOOKMARK_MSG)
 
     entry = store.entries_for_path(video)[0]
-    assert (entry.jp_text, entry.en_text) == ("日本語", "English line")
+    assert (entry.jp_text, entry.en_text) == expected
     reader.close()
 
 
@@ -281,24 +290,3 @@ def test_bookmark_key_is_configurable(make_session):
     reader.graph.commands.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"
-
-
-def test_a_bookmark_stores_the_cue_by_language_not_by_position():
-    """With English primary the roles swap, so filing them by position would record an English line
-    as the card's Japanese side — invisible until the card is reviewed."""
-    from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
-
-    from saitenka.app.backlog import _cue_languages
-
-    assert _cue_languages("日本語", "english", MAIN_LANG) == ("日本語", "english")
-    assert _cue_languages("english", "日本語", SECOND_LANG) == ("日本語", "english")
-
-
-def test_a_bookmark_with_no_secondary_track_still_records_the_primary():
-    """mpv answers empty for `secondary-sub-text` when no second track is loaded — the common case,
-    and it must not lose the line the user actually bookmarked."""
-    from saitenka_tokenize.languages import MAIN_LANG
-
-    from saitenka.app.backlog import _cue_languages
-
-    assert _cue_languages("日本語", "", MAIN_LANG) == ("日本語", "")
