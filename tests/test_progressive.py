@@ -67,13 +67,35 @@ def test_apply_deps_injects_and_stops_loading(make_session, has_scorer):
     assert ("overlay-remove", OverlayId.LOADING) in ipc.commands
 
 
-def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch, make_session):
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("transient_failure", [False, True])
+def test_mined_seed_result_publishes_from_the_runtime_lane(
+    monkeypatch, make_session, transient_failure
+):
+    from saitenka.app.features.mining.mining_controller import SeedStatus
+
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
-    monkeypatch.setattr(mined_seed_lane, "mined_expressions", lambda _anki, _cfg: {"猫"})
+    attempts = 0
+
+    def fetch(_anki, _cfg):
+        nonlocal attempts
+        attempts += 1
+        return None if transient_failure and attempts == 1 else {"猫"}
+
+    monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
     r = make_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
     try:
+        generation = r.graph.mining.index_snapshot().generation
         r.graph.mining.request_seed()
+        if transient_failure:
+            await_ready(
+                lambda: r.graph.mining.index_snapshot().seed_status is SeedStatus.DEGRADED,
+                "the failed seed never settled",
+                pump=r.pump,
+            )
+            assert r.graph.mining.index_snapshot().values == set()
+            assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
         await_ready(
             lambda: bool(r.graph.mining.index_snapshot()),
             "mined seed never published",
@@ -82,8 +104,9 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch, make_ses
 
         snapshot = r.graph.mining.index_snapshot()
         assert snapshot.values == {"猫"}
-        assert snapshot.generation == 1
-        assert r.graph.mining.seed_lane.inflight is False
+        assert snapshot.generation > generation
+        assert snapshot.seed_status is SeedStatus.READY
+        assert attempts == (2 if transient_failure else 1)
     finally:
         r.close()
         gateway.close()
@@ -147,44 +170,6 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch, m
         assert r.graph.mining.index_snapshot() == current
     finally:
         release.set()
-        r.close()
-        gateway.close()
-
-
-def test_mined_seed_retries_after_a_transient_failure(monkeypatch, make_session):
-    ipc = FakeIPC()
-    gateway = session_gateway(ipc)
-    r = make_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
-    attempts = 0
-
-    def fetch(_anki, _cfg):
-        nonlocal attempts
-        attempts += 1
-        if attempts == 1:
-            return None
-        return {"猫"}
-
-    monkeypatch.setattr(mined_seed_lane, "mined_expressions", fetch)
-    try:
-        r.graph.mining.request_seed()
-        await_ready(
-            lambda: not r.graph.mining.seed_lane.inflight,
-            "the failed seed never settled",
-            pump=r.pump,
-        )
-        assert r.graph.mining.index_snapshot().values == set()
-
-        # The backoff is a named deadline now, so firing it *is* the retry — and asserting it was
-        # armed proves the failure path scheduled one rather than silently giving up.
-        assert ipc.fire_runtime_timer("lifecycle:mined-seed-retry")
-        await_ready(
-            lambda: bool(r.graph.mining.index_snapshot()),
-            "mined seed never published",
-            pump=r.pump,
-        )
-
-        assert attempts == 2 and r.graph.mining.index_snapshot().values == {"猫"}
-    finally:
         r.close()
         gateway.close()
 
