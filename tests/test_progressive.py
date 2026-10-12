@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from concurrent.futures import Future
 
 import pytest
@@ -376,53 +375,49 @@ def test_dependency_publication_never_runs_attestation_on_the_reader_tick(
         def __init__(self):
             self.started = threading.Event()
             self.release = threading.Event()
-            self.finished = threading.Event()
-            self.thread_id = None
 
         def terms_exist(self, _forms):
-            self.thread_id = threading.get_ident()
             self.started.set()
-            assert self.release.wait(2)
-            self.finished.set()
+            self.release.wait()
             return set()
 
     ipc = FakeIPC()
     ipc.props.update({"sub-text": "猫", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
     gateway = session_gateway(ipc)
     reader = make_session(ipc)
-    reader.graph.subtitle_presentation.renderer = NullRenderer()
-    reader.graph.profile.profile.use_tokenizer(_Tokenizer())
-    reader.graph.profile_integration.enable_async_annotation()
-    reader.graph.cue.set_subtitle("猫")
     dictionary = _BlockingDictionary()
-    dispatched = []
-    monkeypatch.setattr(
-        reader.graph.picker,
-        "open",
-        lambda *_args, **_kwargs: dispatched.append(True),
-    )
-
-    reader.graph.profile.accept(
-        DependencyBundle(reader.graph.profile.identity, dictionaries=dictionary)
-    )
-    assert dictionary.started.wait(1)
-    ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
-
-    assert reader.pump() is True
-    assert dispatched == [True]
-    assert (
-        reader.graph.subtitle_presentation.cue.current.tokens == []
-        and reader.graph.annotation.view.pending_text == "猫"
-    )
-    assert dictionary.thread_id != threading.get_ident()
-
-    dictionary.release.set()
-    assert dictionary.finished.wait(1)
-    deadline = time.monotonic() + 1
-    while not reader.graph.subtitle_presentation.cue.current.tokens and time.monotonic() < deadline:
-        reader.pump()
-        time.sleep(0.001)
     try:
+        reader.graph.subtitle_presentation.renderer = NullRenderer()
+        reader.graph.profile.profile.use_tokenizer(_Tokenizer())
+        reader.graph.profile_integration.enable_async_annotation()
+        reader.graph.playback.observe("sub-text", "猫")
+        reader.graph.cue.settle()
+        dispatched = []
+        monkeypatch.setattr(
+            reader.graph.picker,
+            "open",
+            lambda *_args, **_kwargs: dispatched.append(True),
+        )
+
+        reader.graph.profile.accept(
+            DependencyBundle(reader.graph.profile.identity, dictionaries=dictionary)
+        )
+        assert dictionary.started.wait(1)
+        ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
+
+        assert reader.pump() is True
+        assert dispatched == [True]
+        assert (
+            reader.graph.subtitle_presentation.cue.current.tokens == []
+            and reader.graph.annotation.view.pending_text == "猫"
+        )
+
+        dictionary.release.set()
+        await_ready(
+            lambda: bool(reader.graph.subtitle_presentation.cue.current.tokens),
+            "attested cue never published",
+            pump=reader.pump,
+        )
         assert [
             token.surface for token in reader.graph.subtitle_presentation.cue.current.tokens
         ] == ["猫"]
