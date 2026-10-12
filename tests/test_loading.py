@@ -88,14 +88,17 @@ def test_ready_startup_hint_empties_the_osd_text():
 def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness(make_session):
     from util import FakeIPC
 
+    from saitenka.app.overlay_ids import OverlayId
+
     ipc = FakeIPC()
     _install(ipc)
     r = make_session(ipc)
     ipc.drain_events()
     # plain path -> no dict/tokenize deps needed to raster a cue
     r.graph.track_commands.declare(SubtitleLanguageChanged("en"))
-    r.graph.cue.set_subtitle("hello")
-    assert r.graph.subtitle_presentation.renderer.logged_first
+    r.graph.playback.observe("sub-text", "hello")
+    r.graph.cue.settle()
+    assert any(command[:2] == ("overlay-add", OverlayId.SUB) for command in ipc.commands)
     assert ("show-text", "", 1) not in ipc.commands
 
     r.pump()
