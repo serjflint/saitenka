@@ -133,20 +133,17 @@ def test_mining_validation_drops_field_absent_from_note_type(monkeypatch):
 
 
 def test_color_builds_scorer_even_without_known(monkeypatch):
-    import saitenka_wordstate as wordstate_mod
-    import saitenka_wordstate.known as wl
+    from saitenka_dict import JlptDict
+    from saitenka_tokenize.japanese import Token
 
     import saitenka.app.dict_meta as dm
 
-    monkeypatch.setattr(
-        wl.KnownWords, "from_set", staticmethod(lambda words: f"known:{len(words)}")
-    )
-    monkeypatch.setattr(dm, "load_jlpt", lambda _db: "JLPT")
-    monkeypatch.setattr(
-        wordstate_mod, "Scorer", lambda known, jlpt, **_kw: {"known": known, "jlpt": jlpt}
-    )
+    monkeypatch.setattr(dm, "load_jlpt", lambda _db: JlptDict({"本": "N5"}))
+
     scorer, _, _, _ = reader_deps.build_reader_deps({}, color=True)
-    assert scorer.scorer == {"known": "known:0", "jlpt": "JLPT"}
+
+    token = Token("本", "本", "ほん", "名詞", 0, 1)
+    assert scorer.score_line([token])[0].tag == "base/jlpt-N5"
 
 
 def test_dict_set_built_from_db_titles_and_warns_on_missing(tmp_path, capsys):
