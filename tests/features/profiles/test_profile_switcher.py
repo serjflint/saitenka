@@ -149,60 +149,44 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_pressing_the_key_cycles_the_reading_identity(monkeypatch, make_session):
-    """Two configured profiles → the key flips tokenizer AND language, and wraps back. Driven through
-    the REAL keybind dispatch (press → _handle → the command table → cycle_profile), so it proves the wire, not
-    just the method. Provider gating follows ``reader.langs.main`` (the D5 capability gate)."""
+@pytest.mark.parametrize(
+    ("count", "initial", "expected"), [(2, 0, 1), (2, 1, 0), (3, 1, 2), (3, 2, 0)]
+)
+def test_pressing_the_key_cycles_the_reading_identity(
+    monkeypatch, make_session, count, initial, expected
+):
     import saitenka.app.subtitle_providers as prov
 
     monkeypatch.setattr(prov, "_REGISTRY", {})
     register_provider(_stub_provider("jimaku", frozenset({"jp"})))
-    register_provider(_stub_provider("universal", frozenset()))  # language-agnostic
+    register_provider(_stub_provider("universal", frozenset()))
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
     flags = (("jimaku", True), ("universal", True))
-
+    english = Profile(name="en", langs=ReaderLanguages(main="en", second="jp"), tokenizer="latin")
+    profiles = (DEFAULT_PROFILE, _FR, english)[:count]
     ipc = FakeIPC()
     options = ReaderOptions()
     reader = make_session(
         ipc,
         infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         options=options,
-        identity=SessionIdentity(
-            profile=DEFAULT_PROFILE,
-        ),
+        identity=SessionIdentity(profile=profiles[initial]),
     )
-    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR])
+    reader.graph.profile.profile.configure_cycle(profiles)
     reader.graph.screen.osd = (1280, 720)
     reader.graph.commands.install_input()
-    assert (
-        reader.graph.profile.profile.tokenizer.name == "unidic"
-        and reader.graph.profile.profile.langs.main == "jp"
-    )
-    assert enabled_providers_for(reader.graph.profile.profile.langs.main, flags) == (
-        "jimaku",
-        "universal",
-    )
 
-    press(reader, ipc, options.keys.profile_cycle_key)  # → fr
+    press(reader, ipc, options.keys.profile_cycle_key)
 
-    assert (
-        reader.graph.profile.profile.tokenizer.name == "latin"
-        and reader.graph.profile.profile.langs.main == "fr"
+    selected = profiles[expected]
+    active = reader.graph.profile.profile
+    assert (active.profile, active.tokenizer.name, active.langs) == (
+        selected,
+        selected.tokenizer,
+        selected.langs,
     )
-    assert reader.graph.profile.profile.profile is _FR
-    assert enabled_providers_for(reader.graph.profile.profile.langs.main, flags) == (
-        "universal",
-    )  # jp-only dropped
-
-    press(reader, ipc, options.keys.profile_cycle_key)  # wraps → back to the JP default
-
-    assert (
-        reader.graph.profile.profile.tokenizer.name == "unidic"
-        and reader.graph.profile.profile.langs.main == "jp"
-    )
-    assert enabled_providers_for(reader.graph.profile.profile.langs.main, flags) == (
-        "jimaku",
-        "universal",
+    assert enabled_providers_for(active.langs.main, flags) == (
+        ("jimaku", "universal") if selected.langs.main == "jp" else ("universal",)
     )
 
 
