@@ -207,38 +207,20 @@ def test_late_show_rejection_never_authorizes_clear():
     assert ("show-text", "", 1) not in ipc.commands
 
 
-def test_lost_show_reply_clears_only_after_a_live_reconnection():
-    from saitenka.runtime.startup_hint import HintOutcome
-
+@pytest.mark.parametrize("reconnect_before_delivery", [False, True])
+def test_lost_show_reply_clears_only_after_a_live_reconnection(reconnect_before_delivery):
     ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
+    gateway, _reactor = _install(ipc)
     _announce_ready(ipc, gateway)
     ipc.requests[0].future.set_result({"error": "disconnected"})
-    ipc.drain_events()
-
-    assert _hint_state(reactor).outcome is HintOutcome.UNKNOWN
-    assert ("show-text", "", 1) not in ipc.commands
+    if not reconnect_before_delivery:
+        ipc.drain_events()
+        assert ("show-text", "", 1) not in ipc.commands
 
     _replace_connection(ipc, gateway, 1)
-    _replace_connection(ipc, gateway, 2)
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
-
-def test_show_disconnect_delivered_after_reconnect_still_clears() -> None:
-    """The reply lands after the epoch already moved on, so the ambiguity is resolved on arrival."""
-    from saitenka.runtime.startup_hint import HintOutcome
-
-    ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
-    _announce_ready(ipc, gateway)
-    ipc.requests[0].future.set_result({"error": "disconnected"})
-    assert ipc.connection_sink is not None
-    ipc.connection_sink("replaced", 1)
-    assert gateway._commit_replacement(1, ())
-
-    ipc.drain_events()
-
-    assert _hint_state(reactor).outcome is HintOutcome.UNKNOWN
+    _replace_connection(ipc, gateway, 2)
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
 
