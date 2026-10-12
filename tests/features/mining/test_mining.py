@@ -282,21 +282,15 @@ def test_mine_config_from_wires_word_audio_pack_when_enabled(tmp_path):
     assert cfg.word_audio_field == "Pronunciation"
 
 
-def test_mine_config_from_leaves_word_audio_off_by_default():
+@pytest.mark.parametrize("config", [{"deck": "X"}, {"word_audio_pack_dir": "."}])
+def test_mine_config_from_leaves_word_audio_off_by_default(config):
     from saitenka.app.mining_config import mine_config_from
 
-    cfg = mine_config_from({"deck": "X"})
+    cfg = mine_config_from(config)
     assert cfg.word_audio_pack is None
     assert (
         cfg.word_audio_field == "WordAudio"
     )  # default field name still set (inert without a pack)
-
-
-def test_mine_config_from_ignores_pack_dir_when_word_audio_disabled(tmp_path):
-    from saitenka.app.mining_config import mine_config_from
-
-    cfg = mine_config_from({"word_audio_pack_dir": str(tmp_path)})  # enabled defaults False
-    assert cfg.word_audio_pack is None
 
 
 def test_timespan_padding():
