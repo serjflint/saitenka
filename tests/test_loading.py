@@ -7,20 +7,17 @@ from concurrent.futures import Future
 import pytest
 from util import await_ready, bare_gateway
 
-from saitenka.app.loading import SPINNER, loading_image
+from saitenka.app.loading import loading_image
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.runtime.events import SubtitleLanguageChanged
 
 
-def test_loading_image_renders_a_visible_frame():
-    img = loading_image("loading dictionaries", 0)
-    assert img.width > 30 and img.getextrema()[3][1] > 0  # visible (non-transparent) pixels
-
-
-def test_frames_cycle_through_spinner_glyphs():
-    a = loading_image("x", 0).tobytes()
-    b = loading_image("x", 1).tobytes()
-    assert a != b or len(SPINNER) == 1  # different frame → different glyph → different bitmap
+@pytest.mark.parametrize("text", ["loading dictionaries", "x"])
+def test_frames_cycle_through_spinner_glyphs(text):
+    a = loading_image(text, 0)
+    b = loading_image(text, 1)
+    assert a.width > 30 and a.getextrema()[3][1] > 0
+    assert a.tobytes() != b.tobytes()
 
 
 # --- the controller lifecycle: the spinner actually shows while loading, and stops when deps land ---
