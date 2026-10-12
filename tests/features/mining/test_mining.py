@@ -189,24 +189,6 @@ def test_build_note_card_format_fans_one_entity_into_two_fields():
     assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
 
 
-def test_expression_field_resolves_from_card_format():
-    from saitenka.app.anki import dedupe
-
-    # dedup must key off the field that actually holds {expression} under card_format, not fields["expression"]
-    cfg = MineConfig(card_format={"Word": "{expression}", "Note": "{glossary}"})
-    assert cfg.expression_field() == "Word"
-
-    queries = []
-
-    class _A:
-        def find_notes(self, q):
-            queries.append(q)
-            return []
-
-    dedupe(_A(), cfg, "読む")
-    assert queries and "Word:読む" in queries[0]  # queried the {expression} field, not Expression
-
-
 def test_dedupe_allows_add_when_card_format_has_no_expression_field():
     from saitenka.app.anki import dedupe
 
@@ -228,11 +210,19 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch, mak
     from util import FakeIPC
 
     ipc = FakeIPC()
-    anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
+    queries = []
+
+    class QueryAnki(_FakeAnki):
+        def find_notes(self, query):
+            queries.append(query)
+            return super().find_notes(query)
+
+    anki = QueryAnki(existing=[7])
     r = make_session(
         ipc,
         services=SessionServices(
-            anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
+            anki=anki,
+            mining=MineConfig(card_format={"Word": "{expression}", "Note": "{glossary}"}),
         ),
     )
     r.graph.cue.set_subtitle("本を読む")
@@ -241,6 +231,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch, mak
     r.graph.mining.mine_token(tok)
     _await_mining(r)
     assert anki.added == [] and "読む" in r.graph.mining.index_snapshot()
+    assert queries and '"Word:読む"' in queries[0]
 
 
 def test_build_note_card_format_uses_passed_markers():
@@ -351,49 +342,36 @@ def test_clip_audio_keeps_normal_probing_for_nonlocal_matroska(monkeypatch, tmp_
     assert "-probesize" not in calls["cmd"] and "-analyzeduration" not in calls["cmd"]
 
 
-def test_clip_audio_rejects_success_without_output(monkeypatch, tmp_path):
-    monkeypatch.setattr("saitenka.app.media.subprocess.run", lambda *_a, **_kw: None)
-    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
-    with pytest.raises(AudioOutputMissingError, match="without creating an output file"):
-        clip_audio("/v.mkv", Timespan(10, 12), tmp_path / "out.m4a")
-
-
-def test_audio_capture_failures_have_distinct_visible_diagnostics():
-    messages = [
-        miner._capture_failure_message(None, subprocess.TimeoutExpired("ffmpeg", 120))[0],
-        miner._capture_failure_message(None, subprocess.CalledProcessError(1, "ffmpeg"))[0],
-        miner._capture_failure_message(None, AudioOutputMissingError("missing"))[0],
-    ]
-    assert messages == [
-        "audio extraction timed out — image only",
-        "audio ffmpeg failed — image only",
-        "ffmpeg produced no audio — image only",
-    ]
-
-
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 @pytest.mark.parametrize(
     ("failure", "message"),
     [
         (subprocess.TimeoutExpired("ffmpeg", 120), "audio extraction timed out — image only"),
         (subprocess.CalledProcessError(1, "ffmpeg"), "audio ffmpeg failed — image only"),
+        (AudioOutputMissingError("missing"), "ffmpeg produced no audio — image only"),
     ],
 )
 def test_capture_media_reports_audio_subprocess_failure(
     monkeypatch, failure, message, diagnostic_trace
 ):
     r = _capture_reader(animated_enabled=False)
-    _stub_capture(monkeypatch, animated_result=None)
-    monkeypatch.setattr(
-        miner, "clip_audio", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure)
-    )
+    monkeypatch.setattr(miner, "screenshot", lambda *_args: None)
+
+    def run(*_args, **_kwargs):
+        if not isinstance(failure, AudioOutputMissingError):
+            raise failure
+
     toasts = []
     monkeypatch.setattr(
         r.graph.notifications,
         "show",
         lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind)),
     )
-
-    picture, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
+    with monkeypatch.context() as capture_process:
+        capture_process.setattr("saitenka.app.media.subprocess.run", run)
+        capture_process.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
+        picture, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
 
     assert picture.endswith(".jpg") and audio == ""
     assert toasts == [(message, "warn")]
@@ -648,6 +626,8 @@ def test_mine_token_adds_note_with_fields(monkeypatch, make_session):
     assert "<b>読む</b>" in note["fields"]["Sentence"]
     assert "saitenka::mined" in note["tags"]
     assert shown == ["読む"]
+    assert "WordAudio" not in note["fields"]
+    assert anki.stored == []
 
 
 def _capture_reader(*, animated_enabled: bool):
@@ -1214,18 +1194,6 @@ def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_s
     assert toasts == [("bulk failed: connection lost", "err")]
 
 
-def _make_dict(path, title, entries):
-    """Minimal Yomitan v3 dict zip (mirrors test_dictionary._make_dict)."""
-    import json
-    import zipfile
-
-    with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
-        bank = [[t, r, "", "", 0, g, i + 1, ""] for i, (t, r, g) in enumerate(entries)]
-        zf.writestr("term_bank_1.json", json.dumps(bank, ensure_ascii=False))
-    return str(path)
-
-
 def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_session):
     """The per-entry ⊕ arrives as a 'mine:<i>' LinkBox; _mine_link mines cards_for(tok)[i] — clicking
     the しりぞく block (index 1) mines that reading/gloss, not the default のく."""
@@ -1236,7 +1204,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_
     from saitenka.app.features.tooltip import tooltip
     from saitenka.model import LinkBox
 
-    d = _make_dict(
+    d = dicthelp.term_zip(
         tmp_path / "tk.zip",
         "Multi",
         [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
@@ -1270,7 +1238,7 @@ def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path, 
     import dicthelp
     from util import FakeIPC
 
-    d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
+    d = dicthelp.term_zip(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
     pz = dicthelp.meta_zip(
         tmp_path / "p.zip",
         "Pitch",
@@ -1400,23 +1368,6 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(
     assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
 
 
-def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch, make_session):
-    """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
-    from util import FakeIPC
-
-    ipc = FakeIPC()
-    anki = _FakeAnki()
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert "WordAudio" not in anki.added[0]["fields"]
-    assert anki.stored == []
-
-
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("mined", [False, True])
@@ -1432,7 +1383,7 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session, mine
 
     dictionary = dicthelp.load_set(
         [
-            _make_dict(
+            dicthelp.term_zip(
                 tmp_path / "gm.zip",
                 "Multi",
                 [
@@ -1477,7 +1428,7 @@ def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path, make_session)
     import dicthelp
     from util import FakeIPC
 
-    d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
+    d = dicthelp.term_zip(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
     ds = dicthelp.load_set([d])
     ipc = FakeIPC()
     ipc.props["path"] = "/x/Show - 01.mkv"
@@ -1504,7 +1455,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     from saitenka.app.config import DictDbOptions
     from saitenka.app.dictdb import DictionaryDb
 
-    d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
+    d = dicthelp.term_zip(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
     db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
     ds = dicthelp.load_set([d], on=db)
     ipc = FakeIPC()
