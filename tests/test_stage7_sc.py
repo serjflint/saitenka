@@ -314,12 +314,13 @@ def test_link_query_resolves_internal_targets():
 
 
 def test_link_target_stamped_on_spans():
-    # R4b: an internal <a> keeps its blue/underline styling AND carries its target term for clicking.
+    from saitenka.render.sc_adapter import _NAMED
+
     node = {"tag": "a", "href": "?query=見る", "content": "見る"}
     spans = [s for b in walk(node, BASE) for s in b.flow if hasattr(s, "href")]
     linked = [s for s in spans if s.href]
     assert linked and all(s.href == "見る" for s in linked)
-    assert all(s.style.underline for s in linked)  # still styled as a link
+    assert all(s.style.underline and s.style.color == _NAMED["blue"] for s in linked)
 
 
 def test_external_link_is_muted_and_not_underlined():
@@ -334,23 +335,14 @@ def test_external_link_is_muted_and_not_underlined():
     assert all(s.style.color == _LINK_EXTERNAL for s in spans)  # muted gray
 
 
-def test_internal_link_stays_blue_and_underlined():
-    from saitenka.render.sc_adapter import _NAMED
-
-    node = {"tag": "a", "href": "?query=見る", "content": "見る"}
-    spans = [s for b in walk(node, BASE) for s in b.flow if getattr(s, "href", None)]
-    assert spans and all(s.style.underline and s.style.color == _NAMED["blue"] for s in spans)
-
-
 def test_img_becomes_opaque_box():
     node = {"tag": "img", "path": "x.png"}
     blocks = walk(node, BASE)
     assert any(isinstance(x, ImgBox) for b in blocks for x in b.flow)
 
 
-def test_table_renders_rows_as_lines_with_separated_cells():
-    # A table is no longer flattened to a blob: each row is a line (\n) and cells are │-separated, so
-    # the grid structure survives. Header cells are bold.
+@pytest.mark.parametrize("with_header", [True, False])
+def test_table_renders_rows_as_lines_with_separated_cells(with_header):
     node = {
         "tag": "table",
         "content": [
@@ -364,26 +356,15 @@ def test_table_renders_rows_as_lines_with_separated_cells():
             },
         ],
     }
-    text = "".join(s.text for b in walk(node, BASE) for s in b.flow if hasattr(s, "text"))
-    assert text == "語 │ 訓\n生 │ い"  # rows split by \n, cells by │, no trailing separator/newline
-    header = next(s for b in walk(node, BASE) for s in b.flow if getattr(s, "text", "") == "語")
-    assert header.style.weight == 700  # th cells are bold
-
-
-def test_table_without_the_fix_would_be_a_blob():
-    # Negative control: the fix is non-vacuous — the SAME cells run together into one blob if rows and
-    # cells aren't separated. Proves the assertion above tests real structure, not incidental text.
-    node = {
-        "tag": "table",
-        "content": [
-            {
-                "tag": "tr",
-                "content": [{"tag": "td", "content": "生"}, {"tag": "td", "content": "い"}],
-            }
-        ],
-    }
-    text = "".join(s.text for b in walk(node, BASE) for s in b.flow if hasattr(s, "text"))
-    assert "│" in text and text != "生い"
+    if not with_header:
+        node["content"] = node["content"][1:]
+    blocks = walk(node, BASE)
+    text = "".join(s.text for b in blocks for s in b.flow if hasattr(s, "text"))
+    expected = "語 │ 訓\n生 │ い" if with_header else "生 │ い"
+    assert text == expected
+    if with_header:
+        header = next(s for b in blocks for s in b.flow if getattr(s, "text", "") == "語")
+        assert header.style.weight == 700
 
 
 def test_sc_ruby_golden():
