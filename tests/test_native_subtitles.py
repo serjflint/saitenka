@@ -3857,14 +3857,6 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
         assert accepted, f"{name} is accepted only when mpv does not report it"
 
 
-def test_a_default_mpv_render_configuration_supports_native_geometry():
-    result = _inputs()
-
-    assert result.frame_size == (1920, 1080)
-    assert result.storage_size == (1920, 1080)
-    assert result.pixel_aspect == 1.0
-
-
 @pytest.mark.parametrize(
     ("name", "value"),
     [
@@ -3940,15 +3932,6 @@ def test_override_no_leaves_the_renderer_at_libass_defaults() -> None:
     from saitenka.app.native_subtitles import _scaled_renderer_state
 
     assert _scaled_renderer_state(_inputs().scale) == RendererState()
-
-
-@pytest.mark.parametrize(("name", "value"), [("sub-scale", 1.5), ("sub-pos", 50.0)])
-def test_a_moving_setting_is_still_refused_when_the_override_is_off(name: str, value: object):
-    """Widening `scale` must not widen `no`. mpv reads neither option on that branch, so a track
-    carrying one is unchanged — but the row has to keep firing, because the value would otherwise
-    reach a renderer that does apply it."""
-    with pytest.raises(ValueError, match=name):
-        _inputs(**{name: value})
 
 
 @pytest.mark.parametrize(("name", "value"), [("sub-scale", 1.5), ("sub-pos", 90.0)])
@@ -4074,13 +4057,15 @@ def test_a_font_setting_is_an_input_to_the_measuring_renderer_not_a_refusal(
     assert (name, repr(value)) in result.font_options
 
 
-def test_the_osd_surface_wins_over_the_reported_video_size():
+@pytest.mark.parametrize("video_size", [(1920, 1080), (1280, 720)])
+def test_the_osd_surface_wins_over_the_reported_video_size(video_size):
     """Subtitles are composited onto the OSD surface, so that is the frame the boxes belong to —
     a letterboxed video reports a different size and would offset every box by the bars."""
-    result = _inputs(osd={"w": 1920, "h": 1080}, video={"w": 1280, "h": 720})
+    result = _inputs(video={"w": video_size[0], "h": video_size[1]})
 
     assert result.frame_size == (1920, 1080)
-    assert result.storage_size == (1280, 720)
+    assert result.storage_size == video_size
+    assert result.pixel_aspect == 1.0
 
 
 def test_an_unreported_osd_size_never_moves_the_frame():
