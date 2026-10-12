@@ -10,7 +10,7 @@ from concurrent.futures import Future
 import pytest
 from saitenka_card import MineConfig
 from saitenka_tokenize.japanese import Token
-from util import FakeIPC, await_ready, bare_gateway, drain_for, session_gateway
+from util import FakeIPC, await_ready, bare_gateway, session_gateway
 
 import saitenka.app.features.mining.mined_seed as mined_seed_lane
 from saitenka.app.bindings import SUB_PICKER_MSG
@@ -89,6 +89,7 @@ def test_mined_seed_result_publishes_from_the_runtime_lane(monkeypatch, make_ses
         gateway.close()
 
 
+@pytest.mark.timeout(5)
 def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch, make_session):
     ipc = FakeIPC()
     gateway = session_gateway(ipc)
@@ -96,11 +97,27 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch, m
     new_anki = object()
     old_started = threading.Event()
     release = threading.Event()
+    old_finished = threading.Event()
+    submit = ipc.submit_runtime_job
+
+    def submit_seed(**job):
+        if job["lane"] == "mined-seed" and job["request"].anki is old_anki:
+            finish = job["on_finished"]
+
+            def finish_old(completion):
+                assert completion.result == {"古い"}
+                finish(completion)
+                old_finished.set()
+
+            job["on_finished"] = finish_old
+        return submit(**job)
+
+    monkeypatch.setattr(ipc, "submit_runtime_job", submit_seed)
 
     def fetch(anki, _cfg):
         if anki is old_anki:
             old_started.set()
-            release.wait(1)
+            release.wait()
             return {"古い"}
         return {"新しい"}
 
@@ -125,12 +142,11 @@ def test_mined_seed_result_from_replaced_dependencies_is_rejected(monkeypatch, m
         current = r.graph.mining.index_snapshot()
         assert current.values == {"新しい"}
         release.set()
-        # Not a wait: drain repeatedly to give a late result the chance to arrive, then prove it
-        # did not. A deadline helper would return on the first pass and assert nothing.
-        drain_for(r.pump)
+        await_ready(old_finished.is_set, "old seed completion was not consumed", pump=r.pump)
 
         assert r.graph.mining.index_snapshot() == current
     finally:
+        release.set()
         r.close()
         gateway.close()
 
