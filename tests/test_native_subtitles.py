@@ -3774,19 +3774,13 @@ def test_a_span_whose_boxes_are_gone_highlights_nothing():
     assert focus_rect([_box(0, 0, 100)], 0, (5, 9)) is None
 
 
-def test_the_subtitle_sits_centred_above_the_bottom_margin():
+@pytest.mark.parametrize(
+    ("osd", "expected"), [((1920, 1080), (760, 940)), ((3024, 1898), (1312, 1758))]
+)
+def test_the_subtitle_sits_centred_above_the_bottom_margin(osd, expected):
     from saitenka.app.subtitle_render import place_subtitle
 
-    assert place_subtitle((400, 80), (1920, 1080), 60) == ((1920 - 400) // 2, 1080 - 80 - 60)
-
-
-def test_the_placement_tracks_the_video_size_not_a_fixed_resolution():
-    from saitenka.app.subtitle_render import place_subtitle
-
-    hd = place_subtitle((400, 80), (1920, 1080), 60)
-    retina = place_subtitle((400, 80), (3024, 1898), 60)
-
-    assert retina[0] > hd[0] and retina[1] > hd[1]
+    assert place_subtitle((400, 80), osd, 60) == expected
 
 
 _SUPPORTED_SETTINGS = {
