@@ -58,18 +58,6 @@ def _install(ipc):
     return gateway, install_session_reactor(gateway)
 
 
-def _hint_state(reactor):
-    from saitenka.app.session.routes import STARTUP_HINT
-    from saitenka.runtime.startup_hint import StartupHintState
-    from saitenka.runtime.state import OwnerSlice
-
-    slot = reactor.snapshot.state.session
-    assert isinstance(slot, OwnerSlice)  # the owner slot is a slice, not one feature's state
-    state = slot.get(STARTUP_HINT)
-    assert isinstance(state, StartupHintState)
-    return state
-
-
 def _announce_ready(ipc, gateway) -> None:
     from saitenka.runtime import StartupReady
 
@@ -178,32 +166,28 @@ class _AsyncIPC:
 
 
 def test_late_show_acceptance_after_ready_clears_exactly_once():
-    from saitenka.runtime.startup_hint import HintOutcome
-
     ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
+    gateway, _reactor = _install(ipc)
     _announce_ready(ipc, gateway)
-    assert _hint_state(reactor).outcome is HintOutcome.PENDING
     assert ipc.commands == [("show-text", "saitenka starting...", 30000)]
 
     ipc.requests[0].future.set_result({"error": "success"})
     ipc.drain_events()
     _announce_ready(ipc, gateway)
 
-    assert _hint_state(reactor).outcome is HintOutcome.ACCEPTED
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
 
 def test_late_show_rejection_never_authorizes_clear():
-    from saitenka.runtime.startup_hint import HintOutcome
-
     ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
+    gateway, _reactor = _install(ipc)
     _announce_ready(ipc, gateway)
     ipc.requests[0].future.set_result({"error": "property unavailable"})
     ipc.drain_events()
+    assert ("show-text", "", 1) not in ipc.commands
 
-    assert _hint_state(reactor).outcome is HintOutcome.REJECTED
+    _replace_connection(ipc, gateway, 1)
+
     assert ("show-text", "", 1) not in ipc.commands
 
 
