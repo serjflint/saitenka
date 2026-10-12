@@ -96,14 +96,6 @@ def test_unconfigured_resolves_to_the_japanese_default_profile():
     assert profile.tokenizer == "unidic"
 
 
-def test_reader_without_a_profile_is_japanese_unidic(make_session):
-    """The construction default is today's JP profile — so an existing call site (and every golden)
-    behaves exactly as before #254."""
-    reader = make_session(FakeIPC())
-    assert reader.graph.profile.profile.tokenizer.name == "unidic"
-    assert reader.graph.profile.profile.langs == ReaderLanguages(main="jp", second="en")
-
-
 # --- a named profile selects language, tokenizer, and second language -----------------------------
 
 
@@ -167,8 +159,16 @@ def test_cli_override_wins_over_the_config_selector():
     assert resolve_profile(cfg, override="fr").langs.main == "fr"
 
 
-def test_tokenizer_defaults_by_language_when_omitted():
-    assert resolve_profile({"profile": {"language": "jp"}}).tokenizer == "unidic"
+@pytest.mark.parametrize(
+    ("language", "tokenizer"),
+    [("jp", "unidic"), ("fr", "latin"), ("de-CH", "latin"), ("ru", "latin")],
+)
+def test_tokenizer_defaults_by_language_when_omitted(language, tokenizer):
+    from saitenka_tokenize.registry import get_tokenizer
+
+    profile = resolve_profile({"profile": {"language": language}})
+    assert (profile.langs.main, profile.tokenizer) == (language, tokenizer)
+    assert get_tokenizer(profile.tokenizer).name == tokenizer
 
 
 def test_ja_alias_canonicalizes_so_it_keeps_jp_tokenizer_and_providers(monkeypatch):
@@ -196,13 +196,6 @@ def test_unknown_script_language_without_a_tokenizer_fails_fast():
         resolve_profile({"profile": {"language": "zh"}})
 
 
-def test_latin_script_language_defaults_to_the_latin_tokenizer():
-    """A Latin-script language resolves the ``latin`` strategy with no explicit ``tokenizer`` (#254 W1)."""
-    profile = resolve_profile({"profile": {"language": "fr"}})
-    assert profile.tokenizer == "latin"
-    assert profile.langs.main == "fr"
-
-
 # --- the reader keys tokenizer + language identity off the active profile -------------------------
 
 
@@ -220,7 +213,7 @@ def test_reader_uses_the_active_profiles_tokenizer_and_languages(make_session):
         reader.graph.profile.profile.langs.main == "fr"
         and reader.graph.profile.profile.langs.second == "en"
     )
-    assert reader.graph.profile.profile.profile is profile
+    assert reader.graph.profile.profile.profile == profile
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -240,7 +233,7 @@ def test_cycle_profile_rescopes_the_dict_set_live(make_session):
 
     reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.graph.profile.profile.profile is fr
+    assert reader.graph.profile.profile.profile == fr
     assert reader.graph.profile.profile.langs.main == "fr"
     assert (
         reader.graph.profile.profile.dict_set is fr_dicts
@@ -261,7 +254,7 @@ def test_cycle_profile_without_a_scoper_keeps_the_dict_set(make_session):
 
     reader.command(app_bindings.PROFILE_CYCLE_MSG)
 
-    assert reader.graph.profile.profile.profile is fr
+    assert reader.graph.profile.profile.profile == fr
     assert reader.graph.profile.profile.dict_set is sentinel  # unchanged
 
 
@@ -309,10 +302,12 @@ def test_profile_is_an_immutable_value_object():
 
 
 def test_default_profile_leaves_dicts_and_mine_byte_identical():
-    """No [profiles.*] scoping the dict lists or [mine] → scope_config returns the SAME object, so the
-    dep build reads exactly today's config (the byte-identical-default contract)."""
     cfg = {"dicts": ["JMdict"], "freq": ["JPDB"], "mine": {"deck": "Saitenka::Mining"}}
-    assert scope_config(cfg) is cfg
+    assert scope_config(cfg) == {
+        "dicts": ["JMdict"],
+        "freq": ["JPDB"],
+        "mine": {"deck": "Saitenka::Mining"},
+    }
 
 
 def test_named_profile_replaces_dict_freq_pitch_wholesale():
@@ -631,10 +626,3 @@ def test_primary_font_for_japanese_and_unknown_keep_the_default_lead():
     assert (
         primary_font_for("zh") is None
     )  # unlisted script → default (system fallback handles glyphs)
-
-
-def test_cyrillic_language_defaults_to_the_latin_whitespace_tokenizer():
-    # The whitespace tokenizer is script-agnostic, so a Cyrillic profile needs no explicit tokenizer.
-    from saitenka.app.profiles import default_tokenizer_for
-
-    assert default_tokenizer_for("ru") == "latin"

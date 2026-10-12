@@ -115,6 +115,8 @@ def test_unidic_merge_dict_compounds_matches_module_function():
 def test_reader_owns_unidic_tokenizer_by_default(make_session):
     reader = make_session(FakeIPC())
     assert reader.graph.profile.profile.tokenizer.name == "unidic"
+    langs = reader.graph.profile.profile.langs
+    assert (langs.main, langs.second) == ("jp", "en")
 
 
 @pytest.mark.integration
