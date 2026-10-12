@@ -85,16 +85,6 @@ def _replace_connection(ipc, gateway, epoch: int) -> None:
     ipc.drain_events()
 
 
-def test_show_startup_hint_posts_mpv_osd_text():
-    from util import FakeIPC
-
-    from saitenka.runtime.startup_hint import STARTUP_HINT
-
-    ipc = FakeIPC()
-    _install(ipc)
-    assert ("show-text", STARTUP_HINT, 30000) in ipc.commands
-
-
 def test_show_startup_hint_skipped_for_screenshot(request):
     # A screenshot capture must not carry the breadcrumb, so it never touches mpv's OSD -- but the
     # session still gets its reactor, which is not the hint's to withhold.
@@ -113,10 +103,15 @@ def test_show_startup_hint_skipped_for_screenshot(request):
 def test_ready_startup_hint_empties_the_osd_text():
     from util import FakeIPC
 
+    from saitenka.runtime.startup_hint import STARTUP_HINT
+
     ipc = FakeIPC()
     gateway, _reactor = _install(ipc)
+    assert ("show-text", STARTUP_HINT, 30000) in ipc.commands
     ipc.drain_events()
+
     _announce_ready(ipc, gateway)
+
     assert ("show-text", "", 1) in ipc.commands
 
 
