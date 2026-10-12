@@ -494,6 +494,18 @@ class _FakeAnki:
         return name
 
 
+class _HeldAddAnki(_FakeAnki):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def add_note(self, note):
+        self.entered.set()
+        assert self.release.wait(5), "test did not release delayed Anki add"
+        return super().add_note(note)
+
+
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 @pytest.mark.parametrize("replace_source", [False, True])
@@ -767,19 +779,10 @@ def test_prepare_capture_skips_mpv_without_a_media_marker(make_session):
     assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_session):
     from util import FakeIPC, await_ready
-
-    class DelayedAnki(_FakeAnki):
-        def __init__(self) -> None:
-            super().__init__()
-            self.entered = threading.Event()
-            self.release = threading.Event()
-
-        def add_note(self, note):
-            self.entered.set()
-            assert self.release.wait(5), "test did not release delayed Anki add"
-            return super().add_note(note)
 
     ipc = FakeIPC()
     ipc.props.update(
@@ -790,40 +793,42 @@ def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_sessio
             "sub-end": 22.0,
         }
     )
-    anki = DelayedAnki()
+    anki = _HeldAddAnki()
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
     monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
     tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    try:
+        r.graph.mining.mine_token(tok)
 
-    r.graph.mining.mine_token(tok)
+        await_ready(anki.entered.is_set, "Anki add did not start", pump=r.pump)
+        assert r.graph.mining.operation_pending
+        r.graph.mining.mine_token(tok)
+        from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec
 
-    await_ready(anki.entered.is_set, "Anki add did not start", pump=r.pump)
-    assert r.graph.mining.operation_pending
-    r.graph.mining.mine_token(tok)
-    from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec
+        switched = MiningIdentity("other", 1)
+        r.graph.mining.select_mining_spec(MiningSpec(switched, {"deck": "Other", "model": "Lapis"}))
+        ipc.set_prop("time-pos", 99.0)
+        ipc.set_prop("sub-start", 98.0)
+        ipc.set_prop("sub-end", 100.0)
+        anki.release.set()
+        _await_mining(r)
 
-    switched = MiningIdentity("other", 1)
-    r.graph.mining.select_mining_spec(MiningSpec(switched, {"deck": "Other", "model": "Lapis"}))
-    ipc.set_prop("time-pos", 99.0)
-    ipc.set_prop("sub-start", 98.0)
-    ipc.set_prop("sub-end", 100.0)
-    anki.release.set()
-    _await_mining(r)
-
-    assert len(anki.added) == 1
-    assert "読む" not in r.graph.mining.index_snapshot()
-    assert anki.added[0]["fields"]["MiscInfo"].endswith("· 00:21")
-    link = r.graph.mining.store.by_note_id(1)
-    assert link is not None
-    assert (link.video_path, link.cue_start, link.cue_end) == (
-        "/x/Show - 01.mkv",
-        20.0,
-        22.0,
-    )
-    assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
-    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+        assert len(anki.added) == 1
+        assert "読む" not in r.graph.mining.index_snapshot()
+        assert anki.added[0]["fields"]["MiscInfo"].endswith("· 00:21")
+        link = r.graph.mining.store.by_note_id(1)
+        assert link is not None
+        assert (link.video_path, link.cue_start, link.cue_end) == (
+            "/x/Show - 01.mkv",
+            20.0,
+            22.0,
+        )
+        assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
+        assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+    finally:
+        anki.release.set()
 
 
 @pytest.mark.integration
@@ -833,17 +838,7 @@ def test_an_anki_add_finishing_after_source_retirement_keeps_its_original_link(
 ):
     from util import FakeIPC, await_ready
 
-    class HeldAnki(_FakeAnki):
-        def __init__(self):
-            super().__init__()
-            self.entered, self.release = threading.Event(), threading.Event()
-
-        def add_note(self, note):
-            self.entered.set()
-            assert self.release.wait(5)
-            return super().add_note(note)
-
-    ipc, anki = FakeIPC(), HeldAnki()
+    ipc, anki = FakeIPC(), _HeldAddAnki()
     ipc.props.update({"path": "/old.mkv", "sub-start": 1, "sub-end": 2, "time-pos": 1})
     reader = make_session(
         ipc,
