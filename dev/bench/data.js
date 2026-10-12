@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791732796812,
+  "lastUpdate": 1791813610497,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -20867,6 +20867,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 9.281536,
             "range": "3 replicas; min 8.14694; max 9.49043; MAD 0.208896",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "a9e2aaa8bdaaa4fc5e445131ca55c8ae1a7eaf91",
+          "message": "Merge pull request #555 from serjflint/fix/main-thread-responsiveness\n\nfix: keep session input responsive during background work",
+          "timestamp": "2026-10-11T15:31:11Z",
+          "url": "https://github.com/serjflint/saitenka/commit/a9e2aaa8bdaaa4fc5e445131ca55c8ae1a7eaf91"
+        },
+        "date": 1791813609468,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 21.4163,
+            "range": "3 replicas; min 17.9844; max 21.9027; MAD 0.486442; worst 21.9027",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 28.734917,
+            "range": "3 replicas; min 28.3909; max 33.1324; MAD 0.344013; worst 33.1324",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 9.293824,
+            "range": "3 replicas; min 8.75725; max 9.30611; MAD 0.012288",
             "unit": "MB"
           }
         ]
