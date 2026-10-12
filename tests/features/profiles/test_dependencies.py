@@ -213,45 +213,23 @@ def test_anki_launch_is_fire_and_forget_off_the_critical_path(monkeypatch):
     assert anki == "ANKI" and mine_conf is not None
 
 
-def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
-    import saitenka_wordstate as wordstate_mod
+@pytest.mark.parametrize("error", [ConnectionError, anki_mod._AnkiRetryable])
+def test_known_falls_back_when_ankiconnect_raises(monkeypatch, error):
     import saitenka_wordstate.known as wl
+    from saitenka_tokenize.japanese import Token
 
     import saitenka.app.dict_meta as dm
 
     def boom(*_a, **_k):
-        raise ConnectionError("down")
-
-    # cache-first path: empty cache → miss → the blocking refresh_known_cache raises (Anki down)
-    monkeypatch.setattr(wl, "refresh_known_cache", boom)
-    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
-    monkeypatch.setattr(dm, "load_jlpt", lambda _db: "JLPT")
-    monkeypatch.setattr(wordstate_mod, "Scorer", lambda known, **_kw: {"known": known})
-    scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
-    assert scorer.scorer == {"known": "empty-known"}  # degraded, not crashed
-
-
-def test_known_falls_back_on_ankiretryable_not_just_oserror(monkeypatch):
-    # Regression: an expected-down Anki raises `_AnkiRetryable` (an AnkiError, NOT an OSError). The
-    # cache-miss catch used to omit AnkiError, so it escaped to the top-level dep loader and surfaced as
-    # a full startup traceback. It must degrade to the fallback set exactly like a connection error.
-    import saitenka_wordstate as wordstate_mod
-    import saitenka_wordstate.known as wl
-
-    import saitenka.app.dict_meta as dm
-    from saitenka.app.anki import _AnkiRetryable
-
-    def boom(*_a, **_k):
-        raise _AnkiRetryable("AnkiConnect unreachable at http://127.0.0.1:8765")
+        raise error("AnkiConnect down")
 
     monkeypatch.setattr(wl, "refresh_known_cache", boom)
-    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
-    monkeypatch.setattr(dm, "load_jlpt", lambda _db: "JLPT")
-    monkeypatch.setattr(wordstate_mod, "Scorer", lambda known, **_kw: {"known": known})
+    monkeypatch.setattr(dm, "load_jlpt", lambda _db: None)
 
     scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
 
-    assert scorer.scorer == {"known": "empty-known"}  # caught, degraded — no traceback escapes
+    token = Token("unseen", "unseen", "", "名詞", 0, 6)
+    assert scorer.score_line([token])[0].tag == "base"
 
 
 def test_run_path_language_is_threaded_not_re_resolved(monkeypatch):
