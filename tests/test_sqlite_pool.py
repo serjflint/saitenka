@@ -17,7 +17,7 @@ from textwrap import dedent
 
 import pytest
 
-from saitenka.sqlite_pool import ThreadLocalConnections, close_when_collected, open_wal
+from saitenka.sqlite_pool import ThreadLocalConnections, open_wal
 
 
 class Owner:
@@ -41,24 +41,16 @@ def _is_closed(connection: sqlite3.Connection) -> bool:
     return False
 
 
-def test_each_thread_gets_its_own_connection(tmp_path):
-    owner = Owner(tmp_path / "c.sqlite")
-    assert _open_on_a_new_thread(owner.conns) is not owner.conns.get()
-
-
+@pytest.mark.timeout(5)
 def test_close_reaches_a_connection_another_thread_opened(tmp_path):
     owner = Owner(tmp_path / "c.sqlite")
     worker_connection = _open_on_a_new_thread(owner.conns)
+    main_connection = owner.conns.get()
+    assert worker_connection is not main_connection
     owner.conns.close()
     assert _is_closed(worker_connection)
-
-
-def test_close_leaves_the_pool_usable(tmp_path):
-    owner = Owner(tmp_path / "c.sqlite")
-    first = owner.conns.get()
-    owner.conns.close()
+    assert _is_closed(main_connection)
     assert not _is_closed(owner.conns.get())
-    assert _is_closed(first)
 
 
 def test_dropping_the_owner_closes_every_connection(tmp_path):
@@ -67,19 +59,6 @@ def test_dropping_the_owner_closes_every_connection(tmp_path):
     del owner
     gc.collect()
     assert all(_is_closed(c) for c in connections)
-
-
-def test_dropping_a_single_connection_store_closes_it(tmp_path):
-    class Store:
-        def __init__(self):
-            self.con = sqlite3.connect(tmp_path / "s.sqlite")
-            close_when_collected(self, self.con)
-
-    store = Store()
-    connection = store.con
-    del store
-    gc.collect()
-    assert _is_closed(connection)
 
 
 @pytest.mark.parametrize(

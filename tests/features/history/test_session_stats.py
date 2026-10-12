@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -32,10 +33,16 @@ def test_recorder_aggregates_events_and_language_time():
     wall = iter((100.0, 110.0))
     writer = FakeWriter()
     recorder = SessionRecorder(
-        "/anime/Show 01.mkv",
+        "/anime/[Grp] Nippon Sangoku - 07 [1080p].mkv",
         clock=lambda: next(monotonic),
         wall_clock=lambda: next(wall),
         writer=writer,
+    )
+    initial = writer.snapshots[0]
+    assert (initial.title, initial.title_match, initial.episode) == (
+        "Nippon Sangoku",
+        "nippon sangoku",
+        7,
     )
 
     recorder.accrue(paused=False, language="jp")
@@ -49,7 +56,10 @@ def test_recorder_aggregates_events_and_language_time():
 
     assert result == replace(
         result,
-        media_name="Show 01.mkv",
+        media_name="[Grp] Nippon Sangoku - 07 [1080p].mkv",
+        title="Nippon Sangoku",
+        title_match="nippon sangoku",
+        episode=7,
         ended_at=110.0,
         completed=True,
         watch_seconds=8.0,
@@ -69,7 +79,15 @@ def test_recorder_aggregates_events_and_language_time():
 def test_async_writer_persists_distinct_and_incomplete_sessions(tmp_path):
     path = tmp_path / "sessions.sqlite"
     first = SessionSnapshot("first", "/a/01.mkv", "01.mkv", 1.0)
-    second = SessionSnapshot("second", "/a/02.mkv", "02.mkv", 2.0)
+    second = SessionSnapshot(
+        "second",
+        "/a/Show 12.mkv",
+        "Show 12.mkv",
+        2.0,
+        title="Show",
+        title_match="show",
+        episode=12,
+    )
     writer = AsyncSessionWriter(path)
     writer.submit(first)
     writer.submit(second)
@@ -84,19 +102,7 @@ def test_async_writer_persists_distinct_and_incomplete_sessions(tmp_path):
         ("second", True, 4),
         ("first", False, 0),
     ]
-
-
-def test_recorder_records_episode_identity():
-    writer = FakeWriter()
-    recorder = SessionRecorder(
-        "/anime/[Grp] Nippon Sangoku - 07 [1080p].mkv",
-        clock=lambda: 0.0,
-        wall_clock=lambda: 0.0,
-        writer=writer,
-    )
-
-    assert (recorder.snapshot.title, recorder.snapshot.episode) == ("Nippon Sangoku", 7)
-    assert recorder.snapshot.title_match == "nippon sangoku"
+    assert (rows[0].title, rows[0].title_match, rows[0].episode) == ("Show", "show", 12)
 
 
 def test_recorder_revision_updates_dedup_identity_without_counting_another_cue():
@@ -109,25 +115,9 @@ def test_recorder_revision_updates_dedup_identity_without_counting_another_cue()
     recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
 
     recorder.revise_cue(("jp", 3.0, 4.0, "字幕"))
+    recorder.record_cue(("jp", 3.0, 4.0, "字幕"))
 
     assert recorder.snapshot.cue_count == 1
-
-
-def test_episode_identity_round_trips_through_store(tmp_path):
-    path = tmp_path / "sessions.sqlite"
-    store = SessionStore(path)
-    store.save(
-        SessionSnapshot(
-            "s1", "/a/Show 12.mkv", "Show 12.mkv", 1.0, title="Show", title_match="show", episode=12
-        )
-    )
-    store.close()
-
-    reopened = SessionStore(path)
-    (row,) = reopened.recent()
-    reopened.close()
-
-    assert (row.title, row.title_match, row.episode) == ("Show", "show", 12)
 
 
 def test_store_migrates_pre_episode_schema(tmp_path):
@@ -172,10 +162,14 @@ def test_analysis_snapshot_reuses_shared_result_without_cues():
         unknown_lemmas=frozenset(("行く",)),
     )
 
-    assert analysis_snapshot(result) == (
-        '{"content_tokens":10,"known_token_coverage":0.8,"known_type_coverage":0.6,'
-        '"unique_kanji":2,"unique_lemmas":2,"unknown_lemmas":1}'
-    )
+    assert json.loads(analysis_snapshot(result)) == {
+        "content_tokens": 10,
+        "known_token_coverage": 0.8,
+        "known_type_coverage": 0.6,
+        "unique_kanji": 2,
+        "unique_lemmas": 2,
+        "unknown_lemmas": 1,
+    }
 
 
 def test_disabled_stats_does_not_touch_ipc():
@@ -192,33 +186,22 @@ def test_disabled_stats_does_not_touch_ipc():
 def test_history_owner_finish_retires_recorder_before_restart(monkeypatch):
     from saitenka.app import session_stats
 
+    def recorder(path):
+        return SessionRecorder(path, clock=lambda: 0.0, wall_clock=lambda: 0.0, writer=FakeWriter())
+
+    monkeypatch.setattr(session_stats, "SessionRecorder", recorder)
     owner = HistoryOwner(enabled=True)
-    old_recorder = object()
-    new_recorder = object()
-    owner.replace_recorder(old_recorder)
-    finished = []
-    started = []
-
-    def fake_finish(recorder, _analysis):
-        finished.append(recorder)
-        return "summary"
-
-    def fake_start(*, current, enabled, path, arm):
-        started.append((current, enabled, path(), arm))
-        return new_recorder
-
-    monkeypatch.setattr(session_stats, "finish", fake_finish)
-    monkeypatch.setattr(session_stats, "start", fake_start)
-
+    owner.start(path=lambda: "/a/01.mkv", arm=lambda _seconds: None)
+    old_recorder = owner.recorder
     result = owner.finish(None)
+    assert owner.recorder is None
     owner.start(path=lambda: "/a/02.mkv", arm=lambda _seconds: None)
 
-    assert result == "summary"
-    assert finished == [old_recorder]
-    assert [(current, enabled, path) for current, enabled, path, _arm in started] == [
-        (None, True, "/a/02.mkv")
-    ]
-    assert owner.recorder is new_recorder
+    assert old_recorder.writer.closed
+    assert owner.recorder.snapshot.media_path == "/a/02.mkv"
+    assert result == (
+        "0.0 min watched · 0 cues · 0 lookups · 0 captures · 0 cards · JP 0.0 min / EN 0.0 min"
+    )
 
 
 def test_stats_command_lists_complete_and_incomplete_sessions(tmp_path, monkeypatch, capsys):

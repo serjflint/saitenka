@@ -2,30 +2,46 @@
 
 import pytest
 
-from saitenka.app.features.mining.mined_store import MinedCard, MinedCardStore
+from saitenka.app.features.mining.mined_store import MinedCardStore
 
 
 def _store(tmp_path):
     return MinedCardStore(tmp_path / "mined.sqlite")
 
 
-def test_record_stamps_episode_key_and_cue_from_the_video_name(tmp_path):
-    store = _store(tmp_path)
+@pytest.mark.parametrize(
+    ("note_id", "expected"),
+    [(42, (42, 3, 12.5, 14.0, "本", "ほん", "Mining")), (999, None)],
+)
+def test_record_stamps_episode_key_and_cue_from_the_video_name(tmp_path, note_id, expected):
+    with _store(tmp_path) as store:
+        store.record(
+            note_id=42,
+            video_path=str(tmp_path / "[Grp] Show - 03 [1080p].mkv"),
+            cue_start=12.5,
+            cue_end=14.0,
+            expression="本",
+            reading="ほん",
+            deck="Mining",
+        )
+    with _store(tmp_path) as reopened:
+        card = reopened.by_note_id(note_id)
 
-    card = store.record(
-        note_id=42,
-        video_path=str(tmp_path / "[Grp] Show - 03 [1080p].mkv"),
-        cue_start=12.5,
-        cue_end=14.0,
-        expression="本",
-        reading="ほん",
-        deck="Mining",
-    )
-
-    assert isinstance(card, MinedCard)
-    assert (card.note_id, card.episode, card.cue_start, card.cue_end) == (42, 3, 12.5, 14.0)
-    assert (card.expression, card.reading, card.deck) == ("本", "ほん", "Mining")
-    assert card.title_match  # normalized title match-key is populated
+    assert (
+        (
+            card.note_id,
+            card.episode,
+            card.cue_start,
+            card.cue_end,
+            card.expression,
+            card.reading,
+            card.deck,
+        )
+        if card is not None
+        else None
+    ) == expected
+    if card is not None:
+        assert card.title_match
 
 
 def test_for_path_lists_only_this_episode_ordered_by_cue(tmp_path):
@@ -96,20 +112,6 @@ def test_re_mining_the_same_note_updates_in_place(tmp_path):
     cards = store.for_path(video)
 
     assert [(c.note_id, c.cue_start, c.expression) for c in cards] == [(9, 5.0, "新")]
-
-
-def test_by_note_id_round_trips_and_misses_return_none(tmp_path):
-    store = _store(tmp_path)
-    store.record(
-        note_id=55,
-        video_path=str(tmp_path / "Show - 01.mkv"),
-        cue_start=0.0,
-        cue_end=1.0,
-        expression="水",
-    )
-
-    assert store.by_note_id(55).expression == "水"
-    assert store.by_note_id(999) is None
 
 
 def test_card_lookup_raises_on_a_missing_row(tmp_path):

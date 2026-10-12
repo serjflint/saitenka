@@ -1,27 +1,7 @@
-"""Each real store is wired to the connection mechanism `tests/test_sqlite_pool.py` already proves.
+"""Shipped stores must close live connections when their owner dies.
 
-That file owns the mechanism — `ThreadLocalConnections.close()` reaching every thread, and
-`close_when_collected` firing on owner death. What it cannot say is whether any *shipped* store is
-connected to it. Six were not (#f70ca017: 224 connections open at suite end), and today deleting
-`close_when_collected(self, self._con)` from `backlog.py` passes the whole suite — the resulting
-`ResourceWarning` comes from a finalizer, so it is unraisable and fails nothing.
-
-So this is one assertion per store — wiring — not a second copy of the mechanism's tests.
-
-**The liveness check differs per store, and the difference is measured, not assumed.** All six record
-one connection at build, meaning two different things:
-
-* `DictionaryDb` / `RenderCache` / `MaskAtlas` — build opens a *transient* schema-init connection,
-  closed in its own `finally`. The registered one arrives lazily on first use, so the exercise must
-  reach `_conn()` and `len(opened) > at_build` is what proves it did. A bare `assert opened` would be
-  satisfied by the transient connection whether or not the store ever touches the pool.
-* `BacklogStore` / `MinedCardStore` / `SessionStore` — build opens *the* registered connection, and no
-  method opens another (measured: 1 → 1 across any exercise). Here `assert opened` is all there is; it
-  cannot fail, and the closed-ness check below is the row's real oracle.
-
-`opened` holding a reference is load-bearing: an unregistered connection whose owner dies would
-otherwise be dealloc'd by refcounting and closed as a side effect, hiding the very leak this looks for.
-Holding it keeps "close() was never called" observable.
+Holding connections past owner collection prevents refcounting from hiding missed registration.
+Pool mechanics live in test_sqlite_pool.py.
 """
 
 from __future__ import annotations
@@ -43,25 +23,19 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-#: Build opens a throwaway schema-init connection; the registered one is lazy.
-POOLED = "pooled"
-#: Build opens the registered connection itself; nothing opens another.
-EAGER = "eager"
-
 STORES = [
-    ("DictionaryDb", POOLED, lambda p: DictionaryDb.open(p), lambda s: s.stats()),
-    ("RenderCache", POOLED, lambda p: RenderCache.open(p, max_bytes=1 << 20), lambda s: s.stats()),
-    ("MaskAtlas", POOLED, lambda p: MaskAtlas.open(p), lambda s: s.count()),
-    ("BacklogStore", EAGER, BacklogStore, lambda s: s.all_media()),
-    ("MinedCardStore", EAGER, MinedCardStore, lambda s: s.by_note_id(1)),
-    ("SessionStore", EAGER, SessionStore, lambda s: s.recent()),
+    ("DictionaryDb", lambda p: DictionaryDb.open(p), lambda s: s.stats()),
+    ("RenderCache", lambda p: RenderCache.open(p, max_bytes=1 << 20), lambda s: s.stats()),
+    ("MaskAtlas", lambda p: MaskAtlas.open(p), lambda s: s.count()),
+    ("BacklogStore", BacklogStore, lambda s: s.all_media()),
+    ("MinedCardStore", MinedCardStore, lambda s: s.by_note_id(1)),
+    ("SessionStore", SessionStore, lambda s: s.recent()),
 ]
 
 
 @pytest.fixture
 def opened(monkeypatch: pytest.MonkeyPatch) -> list[sqlite3.Connection]:
-    """Every connection opened while the fixture is active. Function-scoped and auto-restored, so the
-    patch never outlives one test — nothing here for xdist or free-threading to race."""
+    """Hold every opened connection past owner collection."""
     seen: list[sqlite3.Connection] = []
     real = sqlite3.connect
 
@@ -82,25 +56,18 @@ def _is_closed(connection: sqlite3.Connection) -> bool:
     return False
 
 
-@pytest.mark.parametrize(
-    ("name", "kind", "build", "exercise"), STORES, ids=[store[0] for store in STORES]
-)
+@pytest.mark.parametrize(("name", "build", "exercise"), STORES, ids=[store[0] for store in STORES])
 def test_store_releases_every_connection_when_its_owner_dies(
     tmp_path: Path,
     opened: list[sqlite3.Connection],
     name: str,
-    kind: str,
     build: Callable[[Path], object],
     exercise: Callable[[object], object],
 ) -> None:
     store = build(tmp_path / f"{name}.sqlite")
-    at_build = len(opened)
     exercise(store)
 
-    if kind == POOLED:
-        assert len(opened) > at_build, "the exercise never reached the pooled connection"
-    else:
-        assert opened
+    assert any(not _is_closed(c) for c in opened), "exercise did not reach a live connection"
 
     del store
     gc.collect()
