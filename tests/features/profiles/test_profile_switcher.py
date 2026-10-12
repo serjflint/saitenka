@@ -503,48 +503,40 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_reconfigures_translation_when_only_the_second_language_changes(request):
-    register_tokenizer("latin", lambda: _TaggedTokenizer("new"))
-    reader = _headless(request, profile=_FR_SUBS, profiles=[_FR_SUBS, _FR_DE_SUBS])
-    reader.graph.ipc.props["track-list"] = [
-        {"type": "sub", "id": 6, "lang": "fr"},
-        {"type": "sub", "id": 7, "lang": "eng"},
-        {"type": "sub", "id": 8, "lang": "de"},
-    ]
-    reader.graph.profile_integration.select_subtitle_track("fr", "en")
-    reader.graph.profile.profile.use_tokenizer(_TaggedTokenizer("old"))
-    reader.graph.cue.set_subtitle("bonjour")
-
-    reader.command(app_bindings.PROFILE_CYCLE_MSG)
-
-    tracks = reader.graph.track_commands.current()
-    assert (
-        reader.graph.profile.profile.langs.second,
-        tracks.slang,
-        tracks.second_slang,
-        tracks.translation_sid,
-        reader.graph.subtitle_presentation.cue.current.tokens[0].lemma,
-    ) == ("de", "fr", "de", 8, "new")
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_alias_equivalent_primary_retokenizes_the_current_cue(request):
+@pytest.mark.parametrize(("slang", "translation_sid"), [("fr", 8), ("fra", None)])
+def test_cycle_reconfigures_translation_when_only_the_second_language_changes(
+    request, slang, translation_sid
+):
     old = Profile("fr", ReaderLanguages("fr", "en"), "oldtok", slang="fr")
-    new = Profile("fra", ReaderLanguages("fr", "de"), "newtok", slang="fra")
+    new = Profile("target", ReaderLanguages("fr", "de"), "newtok", slang=slang)
     register_tokenizer("oldtok", lambda: _TaggedTokenizer("old"))
     register_tokenizer("newtok", lambda: _TaggedTokenizer("new"))
     reader = _headless(request, profile=old, profiles=[old, new])
-    reader.graph.ipc.props["track-list"] = [{"type": "sub", "id": 6, "lang": "fra"}]
+    reader.graph.ipc.props["track-list"] = [{"type": "sub", "id": 6, "lang": slang}]
+    if translation_sid is not None:
+        reader.graph.ipc.props["track-list"].extend(
+            [
+                {"type": "sub", "id": 7, "lang": "eng"},
+                {"type": "sub", "id": translation_sid, "lang": "de"},
+            ]
+        )
     reader.graph.profile_integration.select_subtitle_track("fr", "en")
-    reader.graph.cue.set_subtitle("bonjour")
+    reader.graph.playback.observe("sub-text", "bonjour")
+    reader.pump()
 
     outcome = reader.graph.profile.profile.switch_to(1)
+    reader.pump()
 
+    tracks = reader.graph.track_commands.current()
     assert (
         outcome.status,
-        reader.graph.track_commands.current().primary_sid,
+        reader.graph.profile.profile.langs.second,
+        tracks.slang,
+        tracks.second_slang,
+        tracks.primary_sid,
+        tracks.translation_sid,
         reader.graph.subtitle_presentation.cue.current.tokens[0].lemma,
-    ) == (ProfileSwitchStatus.COMMITTED, 6, "new")
+    ) == (ProfileSwitchStatus.COMMITTED, "de", slang, "de", 6, translation_sid, "new")
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
