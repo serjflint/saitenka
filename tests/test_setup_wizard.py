@@ -55,16 +55,21 @@ def test_no_manager_available(monkeypatch):
 # --- inventory -------------------------------------------------------------------------------
 
 
-def test_inventory_reports_missing(monkeypatch):
-    monkeypatch.setattr(sw, "_present", lambda t: t == "mpv")
-    inv = sw.inventory()
-    assert inv["mpv"] is True
-    assert inv["ffmpeg"] is False
+def test_full_wizard_installs_only_missing_tools(monkeypatch, capsys):
+    monkeypatch.setattr(sw, "_present", lambda tool: tool != "ffmpeg")
+    monkeypatch.setattr(sw.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(sw.shutil, "which", lambda name: "/bin/brew" if name == "brew" else None)
+    installs = []
+    monkeypatch.setattr(sw, "_run_cmd", installs.append)
+    monkeypatch.setattr(sw, "ensure_mpv_path", lambda _confirm: None)
+    for name in ("_run_init", "_offer_anki", "_offer_import", "_offer_plugin"):
+        monkeypatch.setattr(sw, name, lambda _confirm: None)
+    monkeypatch.setattr(sw, "_run_doctor", lambda: SimpleNamespace(exit_code=0))
 
-
-def test_missing_tools_filters_present(monkeypatch):
-    monkeypatch.setattr(sw, "_present", lambda t: t in {"uv", "mpv"})
-    assert sw.missing_tools(["mpv", "ffmpeg", "uv"]) == ["ffmpeg"]
+    assert sw.run_setup(yes=True, dry_run=False) == 0
+    assert installs == [["brew", "install", "ffmpeg"]]
+    output = capsys.readouterr().out
+    assert f"{sw._OK} mpv" in output and f"{sw._FAIL} ffmpeg" in output
 
 
 def test_present_mpv_routes_through_find_mpv(monkeypatch):
