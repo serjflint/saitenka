@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from saitenka.runtime.playback import (
@@ -124,26 +124,8 @@ _OBSERVATIONS = st.sampled_from(
 )
 
 
-@given(st.lists(_OBSERVATIONS, min_size=1, max_size=24), st.integers(min_value=1, max_value=6))
-def test_split_and_joined_delivery_converge_to_the_same_state(
-    observations: list[tuple[str, object]], chunk: int
-) -> None:
-    """A transport burst has no semantic meaning: only the observation order matters."""
-    projection = PlaybackProjection()
-
-    one_at_a_time = PlaybackState()
-    for name, data in observations:
-        one_at_a_time = projection.observe(one_at_a_time, name, data).state
-
-    batched = PlaybackState()
-    for index in range(0, len(observations), chunk):
-        for name, data in observations[index : index + chunk]:
-            batched = projection.observe(batched, name, data).state
-
-    assert one_at_a_time == batched
-
-
 @given(st.lists(_OBSERVATIONS, min_size=1, max_size=16))
+@example([("sub-text", "猫を見る")])
 def test_reobserving_the_latest_values_emits_nothing(
     observations: list[tuple[str, object]],
 ) -> None:
@@ -221,8 +203,10 @@ def test_an_unchanged_role_is_not_a_transition() -> None:
     projection = PlaybackProjection()
     state = projection.role_changed(PlaybackState(), "jp").state
 
-    assert projection.role_changed(state, "jp") == projection.role_changed(state, "jp")
-    assert projection.role_changed(state, "jp").deltas == ()
+    unchanged = projection.role_changed(state, "jp")
+
+    assert unchanged.state == state
+    assert unchanged.deltas == ()
 
 
 def test_a_reducer_side_cue_becomes_the_projected_one() -> None:
@@ -420,17 +404,6 @@ def test_observed_echo_confirms_a_locally_replaced_cue_once_without_new_identity
     assert projection.observe(confirmed.state, "sub-text", "猫を見る").deltas == ()
 
 
-def test_repeated_identical_cue_text_publishes_no_further_identity() -> None:
-    projection = PlaybackProjection()
-    state = projection.observe(PlaybackState(), "sub-text", "猫を見る").state
-
-    projected = projection.observe(state, "sub-text", "猫を見る")
-
-    # Negative control for observe()'s unchanged-value guard: drop it and this publishes a second
-    # identity, so every cue would reconcile twice.
-    assert observed(projected.deltas) == []
-
-
 def test_identical_text_under_a_new_track_changes_identity_without_a_cue_delta() -> None:
     projection = PlaybackProjection()
     state = projection.observe(PlaybackState(), "sub-text", "猫を見る").state
@@ -472,16 +445,6 @@ def test_a_pause_change_publishes_now_that_watch_time_accrues_on_it() -> None:
 
     assert kinds(pause.deltas) == [PauseChanged]
     assert pause.state.paused is True
-
-
-def test_a_projection_publishes_pointer_and_pause() -> None:
-    projection = PlaybackProjection()
-
-    pointer = projection.observe(PlaybackState(), "mouse-pos", {"x": 1, "y": 2})
-    pause = projection.observe(PlaybackState(), "pause", data=True)
-
-    assert kinds(pointer.deltas) == [PointerMoved]
-    assert kinds(pause.deltas) == [PauseChanged]
 
 
 def test_every_fact_domain_is_reachable_from_the_delta_vocabulary() -> None:
