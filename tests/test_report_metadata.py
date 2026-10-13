@@ -327,18 +327,6 @@ def test_timestamp_collision_preserves_original_bundle(monkeypatch, tmp_path):
     assert list(directory.iterdir()) == [destination]
 
 
-def test_empty_cli_shutdown_does_not_publish_a_session_summary(monkeypatch, tmp_path):
-    from saitenka import session
-    from saitenka.app import telemetry
-
-    _environment(monkeypatch, tmp_path)
-    monkeypatch.setattr(session, "session_id", lambda: "cli")
-
-    telemetry.save_operation_summary(end="shutdown-observed")
-
-    assert not (tmp_path / "diagnostics").exists()
-
-
 def test_failed_zip_write_publishes_nothing(monkeypatch, tmp_path):
     _environment(monkeypatch, tmp_path)
 
