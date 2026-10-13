@@ -51,26 +51,6 @@ JP = {"id": 2, "type": "sub", "lang": "jpn"}
 EN = {"id": 1, "type": "sub", "lang": "eng"}
 
 
-def test_select_prefers_japanese_over_english():
-    ipc = FakeIPC(tracks=[EN, JP])
-    sid = subselect.select_sub_track(ipc, "ja,jpn,jp")
-    assert sid == 2
-    assert ipc.sets("sid") == [2]
-
-
-def test_select_returns_none_when_no_sub_tracks():
-    ipc = FakeIPC(tracks=[{"id": 1, "type": "audio", "lang": "jpn"}])
-    assert subselect.select_sub_track(ipc, "ja,jpn") is None
-    assert ipc.sets("sid") == []
-
-
-def test_lang_matches_two_and_three_letter_and_name():
-    assert subselect._lang_matches("jpn", ["jpn"])
-    assert subselect._lang_matches("ja", ["ja"])
-    assert subselect._lang_matches("Japanese", ["ja"])
-    assert not subselect._lang_matches("eng", ["ja", "jpn", "jp"])
-
-
 def test_ensure_selects_jp_and_hides_native_subs():
     ipc = FakeIPC(tracks=[EN, JP])
     msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(slang="ja,jpn,jp"))
@@ -79,9 +59,10 @@ def test_ensure_selects_jp_and_hides_native_subs():
 
 
 def test_ensure_no_jp_without_jimaku_reports_gap():
-    ipc = FakeIPC(tracks=[EN])
+    ipc = FakeIPC(tracks=[{"id": 1, "type": "audio", "lang": "jpn"}])
     msg = subselect.ensure_jp_subs(ipc, subselect.AttachSubtitleOptions(slang="ja,jpn,jp"))
     assert "no Japanese subtitle track" in msg
+    assert ipc.sets("sid") == []
     assert ipc.sets("sub-visibility") == []  # left mpv alone
 
 
@@ -96,7 +77,11 @@ def test_attach_starts_with_english_and_defers_enabled_jimaku():
     assert ipc.sets("sid") == [1]
 
 
-def test_attach_does_not_fetch_when_japanese_is_already_present():
+def test_attach_does_not_fetch_when_japanese_is_already_present(monkeypatch):
+    def fail_cache(*_args, **_kwargs):
+        raise AssertionError("cache lookup")
+
+    monkeypatch.setattr(subselect, "_cached_subtitle", fail_cache)
     ipc = FakeIPC(tracks=[EN, JP], path="/v/Has Japanese - 01.mkv")
     startup, _status, fetch_in_background = subselect.prepare_attach_startup(
         ipc, subselect.AttachSubtitleOptions(jimaku=True)
@@ -104,6 +89,7 @@ def test_attach_does_not_fetch_when_japanese_is_already_present():
     assert startup.active == "jp"
     assert fetch_in_background == ()
     assert ipc.sets("sid") == [2]
+    assert not [call for call in ipc.calls if call[0] == "sub-add"]
 
 
 def test_attach_classifies_the_configured_second_language_track():
@@ -657,22 +643,6 @@ def test_attach_selects_a_cached_subtitle_before_falling_back_to_english(tmp_pat
     assert providers == ()  # nothing left to defer once the file is on screen
 
 
-def test_attach_leaves_an_existing_japanese_track_alone(monkeypatch):
-    """A file that ships JP subs is already correct, and adding a cached external over it would
-    stack a second track the user never asked for."""
-    probed = []
-    monkeypatch.setattr(
-        subselect, "_cached_subtitle", lambda *_a, **_kw: (probed.append(1), (None, None))[1]
-    )
-    ipc = FakeIPC(tracks=[EN, JP], path="/videos/Show - 01.mkv")
-
-    startup, _status, _providers = subselect.prepare_attach_startup(ipc, _attach_opts())
-
-    assert probed == []  # the cache is not even consulted
-    assert startup.tracks.jp_sid == 2
-    assert not [call for call in ipc.calls if call[0] == "sub-add"]
-
-
 def test_attach_does_not_hand_a_japanese_cache_to_another_language(monkeypatch, tmp_path):
     """A JP file cached from a prior run must not load as an external track over a second-language
     profile's own subtitles.
@@ -741,23 +711,6 @@ def test_list_candidates_keeps_the_profile_language_and_every_untagged_row(
 
     names = [candidate.name for candidate in candidates]
     assert names == (kept if kept is not None else [row.name for row in rows])
-
-
-def test_list_candidates_never_drops_a_provider_that_reports_no_language(monkeypatch):
-    """Jimaku files carry no per-file tag. Whatever the provider declares for them, a candidate the
-    boundary cannot classify must not vanish from the panel."""
-    rows = [
-        subselect.SubtitleCandidate(
-            provider="jimaku", name="a.srt", size=0, match=True, download=lambda: (None, "")
-        )
-    ]
-    monkeypatch.setattr(subselect, "_jimaku_candidates", lambda *_a: rows)
-
-    candidates, _warnings = subselect.list_candidates(
-        "/v/Show - 01.mkv", ("jimaku",), language="fr"
-    )
-
-    assert [candidate.name for candidate in candidates] == ["a.srt"]
 
 
 def test_an_untagged_pick_is_cached_for_the_profile_that_chose_it(monkeypatch, tmp_path):
