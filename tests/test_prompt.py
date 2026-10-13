@@ -58,7 +58,8 @@ def test_text_non_tty_returns_default(monkeypatch):
 
 
 def test_select_empty_choices_returns_default(monkeypatch):
-    _isatty(monkeypatch, stdin=False, stdout=False)
+    _fallback(monkeypatch)
+    _answers(monkeypatch, "not-default")
     assert prompt.select("pick", [], default="d") == "d"
 
 

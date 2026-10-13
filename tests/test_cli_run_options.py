@@ -2,6 +2,8 @@
 
 from dataclasses import replace
 
+from dirty_equals import IsPartialDict
+
 from saitenka.app.commands.attach import _build_attach_options
 from saitenka.app.launch.run import RunFlags, _build_run_options
 
@@ -77,9 +79,7 @@ def test_run_options_read_mine_preview_toggle():
     )
 
 
-def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
-    # The RUN path rebuilds a synthetic effective_cfg dict from the CLI kwargs; the animated flag must
-    # survive it or it silently no-ops on `run` while working on `attach` (the both-seams trap).
+def test_run_threads_mining_config_into_dependency_build(monkeypatch):
     import saitenka.app.features.profiles.dependencies as reader_deps
     from saitenka.app.launch import run as cli_run
 
@@ -98,7 +98,15 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
             mine_all_key="Shift+m",
             mine_normalize_audio=False,
             mine_animated_screenshot=True,
-            raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
+            raw_mine={
+                "animated_height": 720,
+                "animated_format": "gif",
+                "preset": "Kiku",
+                "card_kind": "sentence",
+                "fields": {"expression": "Word"},
+                "card_format": {"Word": "{expression}"},
+                "deck": "IGNORED",
+            },
             known_cfg=None,
             known="",
             color=False,
@@ -107,11 +115,20 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
             pitch_titles=[],
         )
     )
-    assert captured["mine"]["animated_screenshot"] is True
-    # config-only quality knobs (no CLI flag) must survive the synthetic effective_cfg too
-    assert captured["mine"]["animated_height"] == 720
-    assert captured["mine"]["animated_format"] == "gif"
-    assert captured["mine"]["deck"] == "D"  # CLI-threaded value overrides the raw config
+    assert captured["mine"] == IsPartialDict(
+        {
+            "animated_height": 720,
+            "animated_format": "gif",
+            "preset": "Kiku",
+            "card_kind": "sentence",
+            "fields": {"expression": "Word"},
+            "card_format": {"Word": "{expression}"},
+            "deck": "D",
+            "model": "Lapis",
+            "normalize_audio": False,
+            "animated_screenshot": True,
+        }
+    )
 
 
 def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
@@ -124,73 +141,6 @@ def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
     assert (
         resolve_mine_model({"model": "Custom", "preset": "Kiku"}) == "Custom"
     )  # explicit model wins
-
-
-def test_run_threads_field_map_and_card_kind(monkeypatch):
-    # #101 field-map/card-kind have no CLI flag — they must ride through the RUN seam purely via the
-    # raw [mine] table (the both-seams trap), or they'd work on attach but silently no-op on run.
-    import saitenka.app.features.profiles.dependencies as reader_deps
-    from saitenka.app.launch import run as cli_run
-
-    captured: dict = {}
-    monkeypatch.setattr(
-        reader_deps,
-        "build_reader_deps",
-        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
-    )
-    cli_run._build_run_deps(
-        cli_run.RunDepsRequest(
-            mine=True,
-            mine_deck="D",
-            mine_model="Lapis",
-            mine_key="Ctrl+m",
-            mine_all_key="Shift+m",
-            mine_normalize_audio=False,
-            mine_animated_screenshot=False,
-            raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
-            known_cfg=None,
-            known="",
-            color=False,
-            dict_titles=[],
-            freq_titles=[],
-            pitch_titles=[],
-        )
-    )
-    assert captured["mine"]["preset"] == "Kiku"
-    assert captured["mine"]["card_kind"] == "sentence"
-    assert captured["mine"]["fields"] == {"expression": "Word"}
-
-
-def test_run_threads_card_format(monkeypatch):
-    # [mine.card_format] has no CLI flag — like fields/card_kind it must ride the RUN seam via raw [mine].
-    import saitenka.app.features.profiles.dependencies as reader_deps
-    from saitenka.app.launch import run as cli_run
-
-    captured: dict = {}
-    monkeypatch.setattr(
-        reader_deps,
-        "build_reader_deps",
-        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
-    )
-    cli_run._build_run_deps(
-        cli_run.RunDepsRequest(
-            mine=True,
-            mine_deck="D",
-            mine_model="Lapis",
-            mine_key="Ctrl+m",
-            mine_all_key="Shift+m",
-            mine_normalize_audio=False,
-            mine_animated_screenshot=False,
-            raw_mine={"card_format": {"Word": "{expression}"}},
-            known_cfg=None,
-            known="",
-            color=False,
-            dict_titles=[],
-            freq_titles=[],
-            pitch_titles=[],
-        )
-    )
-    assert captured["mine"]["card_format"] == {"Word": "{expression}"}
 
 
 def test_run_options_read_hover_pause_key():
