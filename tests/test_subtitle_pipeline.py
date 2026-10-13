@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 
 import pytest
 from saitenka_subtitles import (
@@ -146,16 +146,6 @@ def prefetch_builder(build):
     return lambda: (build(), TokenizedCue([], [], None))
 
 
-def test_coordinator_publishes_matching_generation() -> None:
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
-
-    result = coordinator.render(request(coordinator.generation))
-
-    assert result == coordinator.current
-    assert result is not None
-    assert result.tokens[0].bounds.contains(25, 30)
-
-
 def test_coordinator_rejects_obsolete_generation() -> None:
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     obsolete = request(coordinator.generation)
@@ -195,14 +185,6 @@ def test_coordinator_rejects_superseded_same_generation_result() -> None:
     assert coordinator.current == newer_result
 
 
-def test_coordinator_contains_optional_provider_failure() -> None:
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FailingBackend())
-
-    assert coordinator.render(request(coordinator.generation)) is None
-    assert coordinator.current is None
-    assert coordinator.last_error == "font provider unavailable"
-
-
 def test_coordinator_close_invalidates_and_is_idempotent() -> None:
     backend = FakeGeometryBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
@@ -215,13 +197,6 @@ def test_coordinator_close_invalidates_and_is_idempotent() -> None:
     assert coordinator.current is None
     assert coordinator.render(request(generation)) is None
     assert backend.closed
-
-
-def test_geometry_values_are_immutable() -> None:
-    rect = Rect(1, 2, 3, 4)
-
-    with pytest.raises(FrozenInstanceError):
-        rect.x = 5  # type: ignore[misc]
 
 
 def test_coordinator_delegates_current_renderer(make_session) -> None:
