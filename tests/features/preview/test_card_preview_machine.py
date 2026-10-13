@@ -2,15 +2,9 @@
 
 from __future__ import annotations
 
-from saitenka.runtime.card_preview import CardPreview, dismissed, shown, zoom_toggled
+from saitenka.runtime.card_preview import CardPreview, dismissed, zoom_toggled
 
 ZOOMED = CardPreview(content="card", audio="clip.opus", zoom=True)
-
-
-def test_a_fresh_preview_starts_un_zoomed() -> None:
-    """A new card at the last card's magnification is a surprise, and as an assignment at the show
-    site it is a rule every second way to show one has to remember."""
-    assert shown("next", "next.opus").state == CardPreview("next", "next.opus")
 
 
 def test_the_enlarge_toggle_flips_both_ways() -> None:

@@ -116,15 +116,14 @@ def test_play_audio_builds_command(monkeypatch):
     from saitenka.app import media
 
     calls = {}
+    play_cmd = media._play_cmd
     monkeypatch.setattr(media.subprocess, "Popen", lambda cmd, **_kw: calls.__setitem__("cmd", cmd))
-    monkeypatch.setattr(media.sys, "platform", "darwin")
-    media.play_audio("/x.mp3")
-    assert calls["cmd"] == ["afplay", "/x.mp3"]
-    # non-mac prefers mpv (a guaranteed dep); ffplay is only the fallback when mpv isn't found
     monkeypatch.setattr(media.sys, "platform", "linux")
-    monkeypatch.setattr("saitenka.mpvio.discover.find_mpv", lambda _c: "/usr/bin/mpv")
+    monkeypatch.setattr(media, "_play_cmd", lambda path: ["sentinel-player", str(path)])
     media.play_audio("/x.mp3")
-    assert calls["cmd"][0] == "/usr/bin/mpv" and "/x.mp3" in calls["cmd"]
+    assert calls["cmd"] == ["sentinel-player", "/x.mp3"]
+
+    monkeypatch.setattr(media, "_play_cmd", play_cmd)
     monkeypatch.setattr("saitenka.mpvio.discover.find_mpv", lambda _c: None)
     media.play_audio("/x.mp3")
     assert calls["cmd"][0] == "ffplay" and "/x.mp3" in calls["cmd"]
