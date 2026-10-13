@@ -721,15 +721,28 @@ def test_occurrence_accounting_keeps_repeated_text_and_final_cue_in_denominator(
         try:
             for cue in TIMELINE:
                 _show(result, ipc, cue)
+            _show(result, ipc, TIMELINE[0])
         finally:
             result.close()
         outcomes = [span["attrs"] for span in spans if span["name"] == "subtitle_color_outcome"]
+        targets = [span["attrs"] for span in spans if span["name"] == "subtitle_color_target"]
         snapshot = otel_metrics.snapshot()
 
-    assert len(outcomes) == len(TIMELINE)
-    assert len({outcome["occurrence"] for outcome in outcomes}) == len(TIMELINE)
+    expected = (*TIMELINE, TIMELINE[0])
+    assert len(outcomes) == len(expected)
+    assert len(targets) == len(outcomes)
+    assert [target["occurrence"] for target in targets] == [
+        outcome["occurrence"] for outcome in outcomes
+    ]
+    assert [target["cue_start_ms"] for target in targets] == [
+        outcome["cue_start_ms"] for outcome in outcomes
+    ]
+    assert [target["text_hash"] for target in targets] == [
+        outcome["text_hash"] for outcome in outcomes
+    ]
+    assert len({outcome["occurrence"] for outcome in outcomes}) == len(expected)
     assert [outcome["cue_start_ms"] for outcome in outcomes] == [
-        round(c.start * 1000) for c in TIMELINE
+        round(c.start * 1000) for c in expected
     ]
     assert all(outcome["color_status"] == "complete" for outcome in outcomes)
     assert all(outcome["acknowledged"] == outcome["permitted"] > 0 for outcome in outcomes)

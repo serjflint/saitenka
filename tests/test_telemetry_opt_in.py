@@ -34,6 +34,7 @@ def test_late_repeated_cue_identity_is_independent_of_telemetry(tmp_path, monkey
         )
         assert request.boxes
         if not tracing:
+            result.graph.subtitle_navigation.navigate(1)
             assert result.graph.subtitle_presentation.color_telemetry.current is None
             assert not ipc.fire_runtime_timer("subtitle:color-deadline")
     finally:

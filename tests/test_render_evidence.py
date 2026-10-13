@@ -107,6 +107,8 @@ def test_delayed_cue_decision_uses_subtitle_timestamp(monkeypatch, tmp_path):
         decisions = [row for row in rows if row.get("event") == "decision"]
         targets = [row for row in rows if row.get("event") == "subtitle_color_target"]
         assert decisions[-1]["cue_start_ms"] == targets[-1]["cue_start_ms"] == 1000
+        assert targets[-1]["text_hash"] == decisions[-1]["text_hash"]
+        assert targets[-1]["text_hash"] != "猫を見る"
     finally:
         session.close()
 
