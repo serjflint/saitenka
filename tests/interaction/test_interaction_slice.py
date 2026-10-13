@@ -53,7 +53,7 @@ from saitenka.runtime.events import (
     TipNavPopped,
     TipNavPushed,
 )
-from saitenka.runtime.help import HelpCommand, HelpState, OpenHelp, ShowHelpPage
+from saitenka.runtime.help import HelpCommand, HelpState, ShowHelpPage
 from saitenka.runtime.hover import (
     Arm,
     Dwell,
@@ -157,9 +157,6 @@ def test_a_scroll_stops_the_linger_being_pending() -> None:
     assert not reducer.reduce(state, HoverScrolled(nested=False)).hysteresis.tip_hide_pending
 
 
-# --- the store: the same stream, either side of the reactor --------------------------------------
-
-
 def test_the_same_stream_decides_the_same_hover_with_or_without_a_reactor(request) -> None:
     """The differential, and the reason the store exists in this shape. A session with a reactor
     keeps the slice in `SessionState.interaction`; one without keeps it here. Neither path may
@@ -175,14 +172,6 @@ def test_the_same_stream_decides_the_same_hover_with_or_without_a_reactor(reques
 
     assert [local.dispatch(e) for e in STREAM] == [routed.dispatch(e) for e in STREAM]
     assert local.current.hysteresis == routed.current.hysteresis
-
-
-def test_the_store_without_a_reactor_holds_the_slice_itself() -> None:
-    store = HoverStore(FakeIPC())
-
-    store.dispatch(HoverConfigured(DELAYS))
-
-    assert store.current.delays == DELAYS
 
 
 def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None:
@@ -224,30 +213,6 @@ def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it(make_session) -
         assert reader.graph.tooltip.hover_view().scan_target is None
     finally:
         reader.close()
-
-
-# --- the slot's second feature --------------------------------------------------------------------
-
-
-def test_help_and_hover_share_the_slot_without_reading_each_other(request) -> None:
-    """`help` joined by registering a reducer and an initial state — nothing in `hover` moved.
-
-    The proof is the broadcast: `SliceReducer` hands every event to every feature, so a hover
-    stream reaches `HelpReducer` and a help command reaches `HoverReducer`. If either decided
-    anything on the other's vocabulary, one of these two states would not survive the other's turn.
-    """
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    hover, help_ = HoverStore(ipc), HelpStore(ipc)
-
-    assert help_.dispatch(HelpCommand.TOGGLE) == (OpenHelp(),)
-    for event in STREAM:
-        hover.dispatch(event)
-
-    assert help_.current == HelpState(open=True)  # the hover stream left it alone
-    assert hover.current.delays == DELAYS  # …and the help command left the hover alone
 
 
 def test_a_help_turn_clears_the_hover_outbox_rather_than_leaving_it_standing() -> None:
@@ -309,9 +274,6 @@ def test_a_shrunk_document_is_folded_in_through_the_store(request) -> None:
     assert store.current == HelpState(open=True, page=0)
 
 
-# --- the slot's third feature ----------------------------------------------------------------------
-
-
 def test_the_three_features_of_the_slot_do_not_read_each_other(request) -> None:
     """The broadcast is what makes this reachable: every event reaches every reducer in the slot."""
     ipc = FakeIPC()
@@ -330,47 +292,15 @@ def test_the_three_features_of_the_slot_do_not_read_each_other(request) -> None:
     assert hover.current.delays == DELAYS
 
 
-def test_a_listing_for_the_picker_that_was_up_a_moment_ago_is_refused(request) -> None:
-    """The generation is the point of the machine, and the store is where a real listing meets it:
-    a result that comes back after a close-and-reopen must not repopulate the picker on screen."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = PickerStore(ipc)
-
-    store.dispatch(PickerOpened())
-    stale = store.current.generation
-    store.dispatch(PickerClosed())
-    store.dispatch(PickerOpened())
-
-    assert store.dispatch(PickerListed(stale, "old")) == ()
-    assert store.current.listing is None
-    assert store.dispatch(PickerListed(store.current.generation, "current")) != ()
-    assert store.current.listing == "current"
-
-
-def test_closing_a_picker_that_is_already_down_publishes_nothing(request) -> None:
-    """The caller removes an overlay on the decision, so a second close must not ask for a removal
-    at an id something else may since have drawn on."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = PickerStore(ipc)
-    store.dispatch(PickerOpened())
-
-    assert store.dispatch(PickerClosed()) != ()
-    assert store.dispatch(PickerClosed()) == ()
-
-
 def test_the_same_picker_events_decide_the_same_state_with_or_without_a_reactor(request) -> None:
     events = (
         PickerOpened(),
         PickerListed(1, "a"),
-        PickerScrolled(1, 10),
-        PickerScrolled(1, 10),
         PickerClosed(),
+        PickerClosed(),
+        PickerOpened(),
+        PickerListed(1, "stale"),
+        PickerListed(3, "current"),
         PickerScrolled(1, 10),
     )
     local = PickerStore(FakeIPC())
@@ -381,11 +311,29 @@ def test_the_same_picker_events_decide_the_same_state_with_or_without_a_reactor(
     install_session_reactor(gateway)
     routed = PickerStore(ipc)
 
-    assert [local.dispatch(e) for e in events] == [routed.dispatch(e) for e in events]
+    local_turns = []
+    local_states = []
+    for event in events:
+        local_turns.append(local.dispatch(event))
+        local_states.append(local.current)
+    routed_turns = []
+    routed_states = []
+    for event in events:
+        routed_turns.append(routed.dispatch(event))
+        routed_states.append(routed.current)
+
+    assert local_turns == routed_turns
+    assert local_states == routed_states
+    assert local_states[3] == local_states[2]
+    assert local_turns[3] == ()
+    assert local_turns[5] == ()
+    assert local_states[5].loading and local_states[5].listing is None
     assert local.current == routed.current
-
-
-# --- the slot's fourth feature ---------------------------------------------------------------------
+    assert (local.current.generation, local.current.listing, local.current.scroll) == (
+        3,
+        "current",
+        3,
+    )
 
 
 def test_a_manual_scroll_holds_auto_follow_until_the_active_row_is_visible_again(request) -> None:
@@ -479,50 +427,6 @@ def test_the_same_sidebar_events_decide_the_same_state_with_or_without_a_reactor
     assert local.current == routed.current
 
 
-# --- the slot's fifth feature -----------------------------------------------------------------
-
-
-def test_a_pop_with_nothing_stacked_hands_back_no_decision(request) -> None:
-    """Esc has to fall through to closing the tooltip, so "there is nothing to go back to" is an
-    answer the slice gives rather than a check the caller makes before asking."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = TipNavStore(ipc)
-
-    assert store.dispatch(TipNavPopped()) == ()
-    assert store.current.can_go_back is False
-
-
-def test_the_stack_round_trips_a_view_the_slice_never_reads(request) -> None:
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = TipNavStore(ipc)
-    captured = ("panel", "key", "reading")
-
-    store.dispatch(TipNavPushed(captured))
-    assert store.current.can_go_back is True
-
-    restored = store.dispatch(TipNavPopped())
-    assert [decision.view for decision in restored] == [captured]
-    assert store.current.can_go_back is False
-
-
-def test_clearing_leaves_nothing_to_restore(request) -> None:
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = TipNavStore(ipc)
-    store.dispatch(TipNavPushed("base"))
-
-    assert store.dispatch(TipNavCleared()) == ()
-    assert store.dispatch(TipNavPopped()) == ()
-
-
 def test_the_back_stack_is_untouched_by_the_slot_s_other_features(request) -> None:
     """Broadcast: a hover observation reaches this reducer too. It must leave the stack alone and
     still clear its own outbox, or the next drain replays a restore that was decided a turn ago."""
@@ -557,11 +461,15 @@ def test_the_same_nav_events_decide_the_same_stack_with_or_without_a_reactor(req
     install_session_reactor(gateway)
     routed = TipNavStore(ipc)
 
-    assert [local.dispatch(e) for e in stream] == [routed.dispatch(e) for e in stream]
+    local_turns = [local.dispatch(e) for e in stream]
+    routed_turns = [routed.dispatch(e) for e in stream]
+
+    assert local_turns == routed_turns
+    assert local_turns[0] == ()
+    assert [decision.view for decision in local_turns[3]] == ["first"]
+    assert local_turns[-1] == ()
     assert local.current == routed.current
-
-
-# --- the slot's sixth and seventh features ------------------------------------------------------
+    assert local.current.can_go_back is False
 
 
 def test_a_pulse_and_a_pause_claim_are_independent_of_each_other(request) -> None:
@@ -669,28 +577,6 @@ def test_the_hovered_word_is_untouched_by_the_slot_s_other_features(request) -> 
     assert word.current.meta == "cat"
 
 
-# --- the slot's ninth feature -------------------------------------------------------------------
-
-
-def test_the_preview_slice_and_its_panel_are_cut_by_lifetime(request) -> None:
-    """The slice says what is composed and at what magnification; the rects and the clip's live
-    process stay app-side, because a reducer can hold neither one paint's geometry nor a `Popen`."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = PreviewStore(ipc)
-
-    assert store.dispatch(PreviewShown("card", "clip.opus")) is None
-    assert store.current.open is True
-
-    store.dispatch(PreviewZoomToggled())
-    assert store.current.zoom is True
-
-    store.dispatch(PreviewShown("next", None))
-    assert store.current.zoom is False, "a new card does not inherit the last one's magnification"
-
-
 def test_the_same_preview_events_decide_the_same_slice_with_or_without_a_reactor(request) -> None:
     stream = (
         PreviewZoomToggled(),
@@ -712,3 +598,8 @@ def test_the_same_preview_events_decide_the_same_slice_with_or_without_a_reactor
         local.dispatch(event)
         routed.dispatch(event)
     assert local.current == routed.current
+    assert (local.current.content, local.current.audio, local.current.zoom) == (
+        "next",
+        None,
+        False,
+    )
