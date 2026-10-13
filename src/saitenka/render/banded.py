@@ -711,7 +711,8 @@ class WindowedPanel:
     ) -> np.ndarray:
         """Assemble the viewport as premul-BGRA by disjoint numpy row-copies of the visible bands over a
         bg fill — byte-identical to ``to_bgra_array(self._composite_bands(...))`` (bands opaque over the
-        same bg; proven in ``tests/test_banded_composite.py`` + the equivalence test)."""
+        same bg; proven by
+        ``tests/test_windowed_panel.py::test_viewport_bgra_equals_to_bgra_array_of_viewport``)."""
         from saitenka.bgra import to_bgra_array
 
         bg = self._bg_bgra
