@@ -154,22 +154,6 @@ def test_untracked_property_names_and_values_never_enter_evidence(monkeypatch, t
     assert payload["player_query_health"] == {"status": "unknown"}
 
 
-def test_ingress_history_eviction_keeps_lifetime_stage_counts(monkeypatch, tmp_path):
-    _setup(monkeypatch, tmp_path)
-    ipc = FakeIPC()
-    gateway = MpvGateway(ipc, SessionMailbox())
-    try:
-        for _ in range(20):
-            ipc.publish({"event": "property-change", "name": "osd-dimensions"})
-        ingress = _export()["player_query_health"]["owners"][0]["ingress"]
-    finally:
-        gateway.close()
-
-    assert ingress["counts"]["queued"] == 20
-    assert ingress["evicted"] == 12
-    assert [row["sequence"] for row in ingress["recent"]] == list(range(13, 21))
-
-
 def test_candidate_overflow_is_not_counted_as_buffered_or_queued(monkeypatch, tmp_path):
     _setup(monkeypatch, tmp_path)
     ipc, mailbox = FakeIPC(), SessionMailbox()
@@ -254,6 +238,7 @@ def test_concurrent_ingress_does_not_lose_counts_or_reuse_identity(monkeypatch, 
         gateway.close()
 
     assert ingress["counts"]["queued"] == 32
+    assert ingress["evicted"] == 24
     assert [row["sequence"] for row in ingress["recent"]] == list(range(25, 33))
 
 
