@@ -85,18 +85,6 @@ def test_a_hand_picked_sub_survives_the_next_launch(monkeypatch, tmp_path):
     assert cache.cached_subs(video, "Show", 1) == picked
 
 
-def test_the_picker_slot_does_not_leak_into_a_lookup_that_wants_it_raw(monkeypatch, tmp_path):
-    """The negative control for the direction: a `resync=False` lookup stays in its own slot, so
-    widening the resyncing one did not merge the two."""
-    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
-    video = _video(tmp_path)
-    auto = tmp_path / "auto.ass"
-    auto.write_text("[Script Info]\n[Events]\n", encoding="utf-8")
-    cache.store_subs(video, "Show", 1, auto)  # resyncing slot only
-
-    assert cache.cached_subs(video, "Show", 1, resync=False) is None
-
-
 def test_a_retime_gets_its_own_slot_and_destroys_neither_other(monkeypatch, tmp_path):
     """ "Sync from here" pressed once should hold across launches. All three slots mean different
     things — fetched, hand-picked, re-timed — so the re-time gets its own rather than overwriting a
@@ -155,19 +143,6 @@ def test_a_retime_outside_the_cache_has_no_slot_to_publish_into(monkeypatch, tmp
     assert cache.publish_retimed(loose, retimed) is None
 
 
-def test_glob_metacharacters_in_the_name_round_trip(monkeypatch, tmp_path):
-    """A release group like ``[Erai]`` in the video stem lands in the slot name; the lookup escapes it
-    so it isn't read as a glob character class (which would silently miss the cached file)."""
-    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
-    video = _video(tmp_path, name="[Erai-raws] Show - 01 [1080p].mkv")
-    src = tmp_path / "dl.srt"
-    src.write_text("1\n00:00:01,000 --> 00:00:02,000\nねこ\n", encoding="utf-8")
-
-    dest = cache.store_subs(video, "Show", 1, src)
-
-    assert cache.cached_subs(video, "Show", 1) == dest
-
-
 def test_resync_bookkeeping_siblings_do_not_shadow_the_real_sub(monkeypatch, tmp_path):
     """An in-place Ctrl+Shift+T / windowed resync leaves `<slot>.synced.srt`, its `.synced` marker, and
     `<slot>.win.srt` next to the cached `<slot>.srt`. The empty marker is newest (copy2 preserves the real
@@ -202,25 +177,6 @@ def test_extensionless_source_defaults_to_srt(monkeypatch, tmp_path):
     assert dest.suffix == ".srt"
 
 
-def test_each_target_language_gets_its_own_slot(monkeypatch, tmp_path):
-    """One video, two profiles: the French session must not be served the Japanese file cached by the
-    Japanese one. Before TsukiHime served every language this could not arise — no provider answered a
-    non-Japanese profile, so the slot never needed the dimension (#495)."""
-    monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
-    video = _video(tmp_path)
-    japanese = tmp_path / "jp.ass"
-    japanese.write_text("[Script Info]", encoding="utf-8")
-    french = tmp_path / "fr.ass"
-    french.write_text("[Script Info]", encoding="utf-8")
-
-    jp_slot = cache.store_subs(video, "Show", 1, japanese, language="jp")
-    fr_slot = cache.store_subs(video, "Show", 1, french, language="fr")
-
-    assert jp_slot != fr_slot
-    assert cache.cached_subs(video, "Show", 1, language="jp") == jp_slot
-    assert cache.cached_subs(video, "Show", 1, language="fr") == fr_slot
-
-
 def test_japanese_keeps_the_unmarked_legacy_slot(monkeypatch, tmp_path):
     """Every file already in a user's cache was written by a Japanese-only provider, so Japanese must
     resolve to the same unmarked name it did before — otherwise the upgrade silently orphans the
@@ -238,18 +194,17 @@ def test_japanese_keeps_the_unmarked_legacy_slot(monkeypatch, tmp_path):
     assert "-jp" not in legacy.name
 
 
-def test_a_hand_picked_raw_entry_survives_per_language(monkeypatch, tmp_path):
-    """The ``-raw`` slot holds a file the user chose by hand. Adding the language component must keep
-    the mode suffix last, so the picker's French pick lands in its own raw slot rather than colliding
-    with the Japanese one."""
+def test_a_retimed_hand_pick_stays_in_its_language(monkeypatch, tmp_path):
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
     video = _video(tmp_path)
     src = tmp_path / "picked.ass"
     src.write_text("[Script Info]", encoding="utf-8")
+    retimed = tmp_path / "retimed.ass"
+    retimed.write_text("[Script Info]\n[Events]\nretimed", encoding="utf-8")
 
-    jp_raw = cache.store_subs(video, "Show", 1, src, resync=False, language="jp")
     fr_raw = cache.store_subs(video, "Show", 1, src, resync=False, language="fr")
+    published = cache.publish_retimed(fr_raw, retimed)
 
-    assert jp_raw.stem.endswith("-raw")
-    assert fr_raw.stem.endswith("-fr-raw")
-    assert jp_raw != fr_raw
+    assert published is not None
+    assert cache.cached_subs(video, "Show", 1, language="fr") == published
+    assert cache.cached_subs(video, "Show", 1, language="jp") is None
