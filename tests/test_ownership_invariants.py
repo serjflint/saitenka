@@ -114,20 +114,6 @@ def test_every_slot_holds_at_least_one_feature(reactor):
     assert not empty, f"owner slots with no feature registered: {empty}"
 
 
-def test_every_claimed_payload_is_one_the_reactor_routes():
-    """`_CLAIMED` withholds a payload from the SessionController. A claim ahead of its route routes fine,
-    reduces nothing, and silently stops doing the thing the SessionController used to do — the failure the
-    migration plan names, stated as a test rather than as a paragraph."""
-    unroutable = [
-        payload.__name__
-        for payload in session_routes._CLAIMED
-        if session_routes.owner_of(object.__new__(payload)) is None
-        and payload not in session_routes.LIFETIME_EVENTS
-    ]
-
-    assert not unroutable, f"claimed from the SessionController but routed to nobody: {unroutable}"
-
-
 def test_owner_thread_events_bypass_reducers_without_being_claimed():
     """The session loop orders these payloads; the bounded session shell performs them."""
     forwarded = {event_types.FileLoaded, event_types.UserCommand}
