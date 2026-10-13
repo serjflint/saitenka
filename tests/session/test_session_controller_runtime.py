@@ -1,5 +1,5 @@
 import pytest
-from util import FakeIPC, bare_gateway
+from util import FakeIPC, bare_gateway, session_gateway
 
 from saitenka.app.bindings import SCROLL_UP_MSG
 from saitenka.app.config import ReaderOptions
@@ -233,10 +233,13 @@ def test_gateway_translates_adjacent_scroll_messages_into_one_command():
 
 def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch, make_session):
     ipc = FakeIPC()
+    gateway = session_gateway(ipc)
+    request.addfinalizer(gateway.close)
     reader = make_session(ipc)
     request.addfinalizer(reader.close)
     outcomes: list[CommandHandled] = []
     publish = ipc.publish_command_outcome
+    before = gateway.snapshot
 
     def capture(outcome: CommandHandled) -> None:
         outcomes.append(outcome)
@@ -262,6 +265,9 @@ def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch
             reason=CommandReason.COALESCED,
         ),
     ]
+    after = gateway.snapshot
+    assert after.command_outcomes - before.command_outcomes == 2
+    assert after.stale_outcomes == before.stale_outcomes
 
 
 def test_composition_threads_grouped_optional_services(request, make_session):

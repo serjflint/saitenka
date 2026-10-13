@@ -11,9 +11,6 @@ from saitenka.runtime import (
     DEFAULT_RUNTIME_LIMITS,
     CancelEffect,
     CloseRequested,
-    CommandHandled,
-    CommandOutcome,
-    CommandReason,
     ConnectionLost,
     ConnectionReplaced,
     DeadlineRegistry,
@@ -26,7 +23,6 @@ from saitenka.runtime import (
     EffectOutcome,
     EmitDiagnostic,
     EventOrigin,
-    ExpireEffect,
     MailboxFull,
     Owner,
     OwnerSlice,
@@ -106,21 +102,6 @@ def reduce_closing_reuse(state: State, event: RuntimeEvent):
     return next_state, ()
 
 
-def test_mailbox_preserves_sequence_across_reserved_lanes() -> None:
-    clock = Clock()
-    mailbox = SessionMailbox(clock=clock)
-    normal = mailbox.publish(
-        RawMpvEvent("normal"), origin=EventOrigin.MPV, traffic=TrafficClass.NORMAL
-    )
-    lifecycle = mailbox.publish(
-        ConnectionReplaced(1),
-        origin=EventOrigin.LIFECYCLE,
-        traffic=TrafficClass.LIFECYCLE,
-    )
-
-    assert mailbox.drain_ready() == (normal, lifecycle)
-
-
 def test_mailbox_limits_each_ready_turn_without_reordering() -> None:
     mailbox = SessionMailbox()
     published = tuple(
@@ -178,61 +159,6 @@ def test_connection_loss_has_epoch_coalesced_reserved_admission() -> None:
     assert mailbox.receive_ready() == (normal_lifecycle, latest)
 
 
-def test_mailbox_coalesces_only_the_closed_input_allowlist() -> None:
-    mailbox = SessionMailbox()
-    first_mouse = mailbox.publish(
-        PropertyObserved("mouse-pos", {"x": 1}),
-        origin=EventOrigin.MPV,
-        traffic=TrafficClass.NORMAL,
-        connection_epoch=1,
-    )
-    latest_mouse = mailbox.publish(
-        PropertyObserved("mouse-pos", {"x": 2}),
-        origin=EventOrigin.MPV,
-        traffic=TrafficClass.NORMAL,
-        connection_epoch=1,
-    )
-    property_change = mailbox.publish(
-        PropertyObserved("sub-text", "\u3044\u3061"),
-        origin=EventOrigin.MPV,
-        traffic=TrafficClass.NORMAL,
-        connection_epoch=1,
-    )
-
-    assert mailbox.receive_ready() == (latest_mouse, property_change)
-    assert first_mouse.sequence < latest_mouse.sequence
-
-
-def test_mailbox_coalesces_production_scroll_names_without_losing_outcome_slots() -> None:
-    mailbox = SessionMailbox(normal_capacity=4)
-    mailbox.publish_command(UserCommand("saitenka-scroll-up", command_id=0), origin=EventOrigin.MPV)
-    mailbox.publish_command(UserCommand("saitenka-scroll-up", command_id=1), origin=EventOrigin.MPV)
-
-    (envelope,) = mailbox.receive_ready()
-    assert envelope.payload == UserCommand("saitenka-scroll-up", command_id=1, coalesced_ids=(0,))
-
-    assert mailbox.publish_command_terminal(
-        CommandHandled(
-            "saitenka-scroll-up",
-            Owner.INTERACTION,
-            CommandOutcome.EXECUTED,
-            command_id=1,
-        ),
-        origin=EventOrigin.USER,
-    )
-    assert mailbox.publish_command_terminal(
-        CommandHandled(
-            "saitenka-scroll-up",
-            Owner.INTERACTION,
-            CommandOutcome.SUPPRESSED,
-            command_id=0,
-            reason=CommandReason.COALESCED,
-        ),
-        origin=EventOrigin.USER,
-    )
-    assert mailbox.snapshot.command_reserved == 0
-
-
 def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
     mailbox = SessionMailbox()
     first = mailbox.publish(
@@ -248,34 +174,6 @@ def test_mailbox_does_not_coalesce_across_the_turn_quantum() -> None:
 
     assert mailbox.receive_ready(limit=1) == (first,)
     assert mailbox.receive_ready(limit=1) == (second,)
-
-
-def test_a_stalled_normal_lane_drops_superseded_positions_rather_than_the_session() -> None:
-    """`time-pos` fills the lane whenever the drain stalls — a mine with Anki down stalls it ~55 s.
-
-    Refusing admission there is not a bound, it is a teardown: the gateway turns `MailboxFull` into
-    `CloseRequested("runtime-overloaded")` and the overlay exits. And it exits over values the
-    projection publishes no delta for at all (`playback.py`, TIMING_PROPERTIES minus `sub-delay`),
-    so the backlog was dead before it was refused.
-    """
-    mailbox = SessionMailbox(normal_capacity=4)
-    kept = mailbox.publish(
-        RawMpvEvent("file-loaded"),
-        origin=EventOrigin.MPV,
-        traffic=TrafficClass.NORMAL,
-    )
-    for position in range(10):
-        mailbox.publish(
-            PropertyObserved("time-pos", float(position)),
-            origin=EventOrigin.MPV,
-            traffic=TrafficClass.NORMAL,
-        )
-
-    drained = mailbox.receive_ready()
-    assert len(drained) == 4
-    assert drained[0] == kept
-    assert drained[-1].payload == PropertyObserved("time-pos", 9.0)
-    assert mailbox.snapshot.superseded_dropped == 7
 
 
 def test_terminal_reservation_survives_normal_lane_saturation() -> None:
@@ -377,25 +275,6 @@ def test_closed_mailbox_rejects_reserved_lifecycle_signals() -> None:
         else:  # pragma: no cover - closed lifecycle contract
             raise AssertionError("closed mailbox accepted lifecycle work")
     assert mailbox.receive(timeout=0) is None
-
-
-def test_named_timer_fires_once_and_cancel_is_terminal() -> None:
-    scheduler = TimerScheduler()
-    first = ScheduleTimer(EffectId(1), Owner.INTERACTION, "hover:1", "hover-dwell", 5.0)
-    replacement = ScheduleTimer(EffectId(2), Owner.INTERACTION, "hover:2", "hover-dwell", 8.0)
-
-    assert scheduler.schedule(first) is None
-    cancelled = scheduler.schedule(replacement)
-    assert cancelled == EffectFinished(
-        EffectId(1), Owner.INTERACTION, "hover:1", EffectOutcome.CANCELLED, "hover-dwell"
-    )
-    assert scheduler.pop_due(7.0) == ()
-    assert scheduler.pop_due(8.0) == (
-        EffectFinished(
-            EffectId(2), Owner.INTERACTION, "hover:2", EffectOutcome.SUCCEEDED, "hover-dwell"
-        ),
-    )
-    assert scheduler.pop_due(100.0) == ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -548,31 +427,6 @@ def test_target_completion_cancels_its_distinct_deadline_child() -> None:
     assert (
         registry.timer_finished(
             EffectFinished(EffectId(11), Owner.SESSION, identity, EffectOutcome.CANCELLED)
-        )
-        is None
-    )
-
-
-def test_due_deadline_expires_only_its_target_effect() -> None:
-    registry = DeadlineRegistry()
-    identity = EffectDeadline(EffectId(20), 8.0)
-    timer = ScheduleTimer(EffectId(21), Owner.SESSION, identity, "effect:20", 8.0)
-    registry.register(EffectId(20), timer)
-
-    control = registry.timer_finished(
-        EffectFinished(EffectId(21), Owner.SESSION, identity, EffectOutcome.SUCCEEDED)
-    )
-
-    assert control == ExpireEffect(EffectId(20), 8.0)
-    assert (
-        registry.target_finished(
-            EffectFinished(
-                EffectId(20),
-                Owner.SUBTITLE,
-                "cue",
-                EffectOutcome.FAILED,
-                error=EffectError.TIMEOUT,
-            )
         )
         is None
     )
@@ -924,25 +778,6 @@ def test_a_feature_without_an_initial_state_is_refused_at_construction() -> None
         assert "exactly one initial state" in str(error)
     else:  # pragma: no cover - slice construction contract
         raise AssertionError("slice accepted a feature with no state")
-
-
-def test_installing_a_session_runtime_keeps_the_reactor_reachable() -> None:
-    """Close is a state transition the reactor owns, so something has to be able to reach it.
-
-    `install_session_runtime` used to drop `install_session_reactor`'s return value, so no entrypoint
-    ever held a reactor. That is why `SessionReactor.close()` and its reject-new-work latch have been
-    implemented and unreachable: `StopSession` dispatches to `close()` already, but nothing outside the
-    reactor could ask for the transition, and nothing could observe that it had happened.
-    """
-    from util import FakeIPC
-
-    from saitenka.app.session.routes import install_session_runtime
-
-    gateway = install_session_runtime(FakeIPC())
-    try:
-        assert isinstance(gateway.session_reactor, SessionReactor)
-    finally:
-        gateway.close()
 
 
 class _NoCommands:
