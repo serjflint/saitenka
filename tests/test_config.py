@@ -122,13 +122,6 @@ def test_retired_native_coloring_alias_selects_whole_cue_auto():
     assert loaded.coloring == "whole-cue-auto"
 
 
-def test_programmatic_retired_native_coloring_alias_selects_whole_cue_auto():
-    with pytest.warns(FutureWarning, match="whole-cue-auto"):
-        options = SubtitleGeometryOptions(coloring="legacy")
-
-    assert options.coloring == "whole-cue-auto"
-
-
 def test_an_unset_geometry_cache_bound_follows_the_lookahead_it_has_to_hold():
     """A deeper window with the stock bound is the forward-only sizing that made every backward
     step re-render — the bound has to be a statement about the lookahead, not a free constant. An

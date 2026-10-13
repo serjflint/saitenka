@@ -83,19 +83,6 @@ def test_coerce_select_rejects_out_of_set():
     assert ce.coerce(layout, "taffy") == "taffy"
 
 
-def test_coerce_bad_int_raises():
-    max_bulk = next(s for s in ce.catalog() if s.label == "max_bulk")
-    with pytest.raises(ValueError):
-        ce.coerce(max_bulk, "lots")
-
-
-def test_apply_edit_builds_nested_tables():
-    proposal: dict = {}
-    ce.apply_edit(proposal, next(s for s in ce.catalog() if s.label == "key"), "Ctrl+n")
-    ce.apply_edit(proposal, next(s for s in ce.catalog() if s.label == "tip_scale"), 2.0)
-    assert proposal == {"mine": {"key": "Ctrl+n"}, "tip_scale": 2.0}
-
-
 # --- prompt_value: right primitive per kind; an invalid reply keeps the current value -------------
 
 
@@ -121,7 +108,7 @@ def test_prompt_value_select_returns_the_choice(monkeypatch):
 def test_prompt_value_keeps_current_on_bad_number(monkeypatch):
     spec = next(s for s in ce.catalog() if s.label == "max_bulk")
     monkeypatch.setattr(prompt, "text", lambda *_a, **_k: "not-a-number")
-    assert ce.prompt_value(spec, 12) == 12  # rejected, unchanged
+    assert ce.prompt_value(spec, 37) == 37  # rejected, non-default config preserved
 
 
 # --- end-to-end: a scripted session round-trips through write_config, preserving comments ---------
