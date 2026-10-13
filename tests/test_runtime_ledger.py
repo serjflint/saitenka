@@ -114,12 +114,18 @@ def test_a_cancel_for_an_effect_the_reactor_never_dispatched_is_not_retired() ->
     ledger = RuntimeLedger()
     sink = ControlSink(gateway, ledger)
     sink.reactor = reactor
+    foreign = gateway.mailbox.allocate_effect()
+    try:
+        assert gateway.mailbox.reserve_terminal(foreign)
 
-    sink(CancelEffect(EffectId(99), Owner.SESSION, "nobody's"))
-    gateway.close()
+        sink(CancelEffect(foreign, Owner.SESSION, "nobody's"))
 
-    assert ledger.counts["control:cancel:session"] == 1
-    assert reactor.snapshot.pending_effects == ()
+        assert ledger.counts["control:cancel:session"] == 1
+        assert reactor.snapshot.pending_effects == ()
+        assert gateway.mailbox.cancel_reservation(foreign)
+    finally:
+        gateway.mailbox.cancel_reservation(foreign)
+        gateway.close()
 
 
 def test_the_sink_survives_a_cancel_before_the_reactor_is_bound() -> None:
