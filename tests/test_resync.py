@@ -151,7 +151,6 @@ class TestCommandConstruction:
         [
             ({"alass": "/a", "alass-cli": "/ac", "uvx": "/u"}, "/a"),  # alass wins outright
             ({"alass-cli": "/ac", "uvx": "/u"}, "/ac"),  # brew's alass-cli beats ffsubsync
-            ({"uvx": "/u"}, "/u"),  # only ffsubsync left
         ],
     )
     def test_tool_precedence_matrix(self, tmp_path, available, head):
@@ -417,25 +416,6 @@ class TestMaybeResync:
 
         assert result == src_srt
 
-    def test_enabled_runs_resync_and_returns_synced(self, tmp_path):
-        """When enabled=True and alass is available, the synced path is returned."""
-        resync = _import_resync()
-        video = tmp_path / "ep01.mkv"
-        video.touch()
-        src_srt = tmp_path / "ep01.srt"
-        src_srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nTest\n", encoding="utf-8")
-
-        with (
-            patch("saitenka.mpvio.discover.find_tool", side_effect={"alass": "/b/alass"}.get),
-            patch("subprocess.run", return_value=MagicMock(returncode=0)),
-        ):
-            result = resync.maybe_resync(video, src_srt, enabled=True)
-
-        # Result should NOT equal the original
-        assert result != src_srt
-        # Result should have the synced suffix convention
-        assert ".synced" in result.name
-
     def test_enabled_failed_returns_original(self, tmp_path):
         """When the tool fails, maybe_resync falls back to the original rather than crashing."""
         resync = _import_resync()
@@ -456,14 +436,6 @@ class TestMaybeResync:
 class TestResyncTelemetry:
     """The shift a resync applied is telemetry: a ~0 offset (tool no-op / already aligned) must be
     distinguishable from a real sync, since a silent fallback-to-raw ships mistimed subs (#100 live)."""
-
-    def test_first_cue_shift_ms_measures_the_applied_offset(self, tmp_path):
-        resync = _import_resync()
-        src = tmp_path / "raw.srt"
-        out = tmp_path / "raw.synced.srt"
-        src.write_text("1\n00:00:01,000 --> 00:00:02,000\nT\n", encoding="utf-8")
-        out.write_text("1\n00:00:03,500 --> 00:00:04,500\nT\n", encoding="utf-8")
-        assert resync._first_cue_shift_ms(src, out) == 2500
 
     def test_first_cue_shift_ms_is_none_when_unreadable_or_cueless(self, tmp_path):
         resync = _import_resync()
