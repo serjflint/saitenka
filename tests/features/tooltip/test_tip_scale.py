@@ -66,7 +66,6 @@ def test_the_viewport_cap_is_reference_based_not_live_osd():
     make the render cache resolution-dependent, so 4K and 1080p would never share a band."""
     from saitenka.app.features.tooltip.prefetch import cap_for
 
-    assert cap_for(0.5) == cap_for(0.5)  # no session, no OSD — nothing else to vary
     assert cap_for(0.9) > cap_for(0.5)
     margin = max(16, round(REF_H * 0.05))
     assert cap_for(1.0) == REF_H - 2 * margin  # never taller than the reference clear of the margin

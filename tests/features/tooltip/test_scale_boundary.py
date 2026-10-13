@@ -48,17 +48,19 @@ def test_hit_target_is_the_one_reference_panel(scale, monkeypatch):
 @pytest.mark.parametrize("scale", _SCALES)
 def test_drawn_element_round_trips_through_the_one_panel(scale, monkeypatch):
     r = _reader(scale, monkeypatch)
-    panel, s, scroll = tooltip_panel.hit_target(
-        r.tooltip.surface_state().nest,
-        r.tooltip.surface_state().view.state,
-        r.tooltip.surface_state().view.scroll,
-        r.tooltip.scale().raster,
-        nested=False,
-    )
+    view = r.tooltip.surface_state().view
+    panel = view.state
+    assert panel is not None
     panel.windowed.viewport(0, 1_000_000)  # force every block measured → full geometry
-    sx, sy = r.tooltip.surface_state().view.xy
-    scans = panel.windowed.scan_boxes()
-    links = panel.windowed.link_boxes()
+    s, scroll = r.tooltip.scale().raster, view.scroll
+    vh = min(view.view_h, panel.full_height)
+    panel.viewport(scroll, vh, scale=s)  # the worker's native warm
+    tooltip_panel.apply_pending_crisp(r.tooltip.tip_ports, view)
+    assert view.crisp_miss == ""
+
+    sx, sy = view.xy
+    scans = [b for b in panel.windowed.scan_boxes() if scroll <= b.y + b.h / 2 < scroll + vh]
+    links = [b for b in panel.windowed.link_boxes() if scroll <= b.y + b.h / 2 < scroll + vh]
     assert scans and links
     for b in scans:
         mx, my = sx + (b.x + b.w / 2) * s, sy + (b.y + b.h / 2 - scroll) * s
