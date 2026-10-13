@@ -20,7 +20,7 @@ import util
 # Reuse the real controller fixture + the agreement oracle the state machine already proves has teeth
 # (its negative control, test_the_agreement_oracle_has_teeth) — Phase 4 is a scenario source, not a new
 # oracle, so it asserts through exactly that check.
-from test_tooltip_statemachine import _NAV_QUERY, _assert_agrees, _fresh_reader
+from features.tooltip.test_tooltip_statemachine import _NAV_QUERY, _assert_agrees, _fresh_reader
 
 from saitenka.app.features.tooltip import nested_popup, tooltip, tooltip_panel
 
