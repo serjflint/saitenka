@@ -32,6 +32,7 @@ def test_compressed_cache_round_trips_to_identical_pixels():
         a = np.asarray(plain.viewport(scroll, 260))
         b = np.asarray(packed.viewport(scroll, 260))
         assert np.array_equal(a, b)  # packed storage is lossless
+    assert plain.retained_nbytes > packed.retained_nbytes
 
 
 def test_lru_cap_bounds_retained_pixels_under_sustained_scroll():
