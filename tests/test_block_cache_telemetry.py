@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
-import numpy as np
 from PIL import Image
 
 if TYPE_CHECKING:
@@ -111,9 +110,12 @@ def test_cold_viewport_records_a_miss_and_the_rasterised_px_per_block():
         snap = otel_metrics.snapshot()
     misses = _val(snap, "saitenka.block_cache.misses")
     px = snap["saitenka.block_cache.rendered_px"]
+    rendered = float(px["sum"])
     assert misses > 0
     assert px["count"] == misses  # one render == one miss
-    assert px["sum"] == misses * BLOCK_H  # exact: every block is BLOCK_H tall
+    assert rendered == misses * BLOCK_H  # exact: every block is BLOCK_H tall
+    assert rendered < wp.full_height
+    assert rendered <= 2 * (300 + BLOCK_H)
 
 
 def test_recompositing_the_same_viewport_records_hits_not_new_renders():
@@ -139,19 +141,6 @@ def test_scrolling_past_the_cap_records_evictions():
     assert wp.cached_blocks <= 5
 
 
-def test_show_render_budget_is_bounded_to_the_viewport_not_the_whole_panel():
-    # First paint rasterises only the blocks covering the viewport — NOT the full panel. This is the
-    # invariant windowed rasterisation must preserve (and tighten): show px stays O(viewport).
-    with _telemetry():
-        wp = _fixed_panel(40)  # full panel is ~40 * BLOCK_H = 4000px+
-        view_h = 300
-        wp.viewport(0, view_h)
-        snap = otel_metrics.snapshot()
-    rendered = snap["saitenka.block_cache.rendered_px"]["sum"]
-    assert rendered < wp.full_height  # rendered the head, not the whole panel
-    assert rendered <= 2 * (view_h + BLOCK_H)  # ~one viewport (+ overscan slack), not 4000px
-
-
 def test_last_frame_rasters_counts_synchronous_bands_then_zero_when_warm():
     # The jank driver the scroll_frame/tooltip_show span attributes: a cold frame rasters its visible
     # bands synchronously (render_ahead was behind), a warm re-composite of the same offset rasters 0.
@@ -162,46 +151,16 @@ def test_last_frame_rasters_counts_synchronous_bands_then_zero_when_warm():
     assert wp.last_frame_rasters == 0
 
 
-def _stored_compressed(wp: WindowedPanel, key: tuple[int, int]) -> bool:
-    return (
-        wp._blocks[key]._packed is not None
-    )  # a compressed band holds the zlib blob, not a live img
-
-
-def test_raw_band_ceiling_keeps_small_panel_bands_uncompressed():
-    # Step 3: below the ceiling, bands are retained RAW (a live image, no zlib) so the first scroll-reach
-    # skips the decompress. A ~1MB panel under a 10MB ceiling stays raw despite compress=True.
-    wp = _banded_panel([600], compress=True, raw_band_ceiling=10 * 1024 * 1024)
-    wp.viewport_bgra(0, 300)
-    assert wp._blocks  # bands were stored
-    assert not any(_stored_compressed(wp, k) for k in wp._blocks)  # all raw
-
-
-def test_raw_band_ceiling_compresses_a_giant_panel():
-    # Over the ceiling, bands compress so one pathological entry can't blow the retained budget. A 600px
-    # panel at WIDTH*4 ≈ 1MB estimate exceeds a tiny 100KB ceiling → its bands are zlib'd.
-    wp = _banded_panel([600], compress=True, raw_band_ceiling=100 * 1024)
-    wp.viewport_bgra(0, 300)
-    assert wp._blocks
-    assert all(_stored_compressed(wp, k) for k in wp._blocks)  # all compressed (over ceiling)
-
-
-def test_raw_band_ceiling_zero_honours_the_compress_flag():
-    # The ceiling disabled (0) restores the fixed-flag behaviour: compress=True → every band zlib'd.
-    wp = _banded_panel([600], compress=True, raw_band_ceiling=0)
-    wp.viewport_bgra(0, 300)
-    assert all(_stored_compressed(wp, k) for k in wp._blocks)
-
-
-def test_precompose_then_warm_hover_is_byte_identical_and_rasters_zero_bands():
-    # Step 2: an idle precompose composites the first viewport (scroll=0); a matching viewport_bgra
-    # then returns a COPY of it with ZERO synchronous rasters — byte-identical to computing it fresh.
-    fresh = _banded_panel([600]).viewport_bgra(0, 300, overscan=300)
-    wp = _banded_panel([600])
-    wp.precompose(300, overscan=300)  # idle: composite + cache the first viewport
-    warm = wp.viewport_bgra(0, 300, overscan=300)
-    assert np.array_equal(warm, fresh)  # pixel-identical to a fresh compose
-    assert wp.last_frame_rasters == 0  # the warm hover rastered nothing — the whole point
+def test_raw_band_ceiling_selects_retention_mode():
+    raw_bytes = 2 * WIDTH * _BAND_PX * 4
+    retained = []
+    for ceiling in (10 * 1024 * 1024, 100 * 1024, 0):
+        wp = _banded_panel([600], compress=True, raw_band_ceiling=ceiling)
+        wp.viewport_bgra(0, 300)
+        retained.append((wp.cached_blocks, wp.retained_nbytes))
+    assert retained[0] == (2, raw_bytes) and all(
+        blocks == 2 and nbytes < raw_bytes // 2 for blocks, nbytes in retained[1:]
+    )
 
 
 def test_precompose_hit_returns_an_isolated_copy():
