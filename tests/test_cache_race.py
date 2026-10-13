@@ -1,115 +1,144 @@
-"""Deterministic concurrency regression for the entry-cache eviction race (the 942ca3c class).
-
-`Dictionary._entry_cache` is a bare `OrderedDict` shared by the main thread and every prefetch worker under
-the free-threaded build. Its check-then-act (`get(eid)` … `move_to_end(eid)`) races a concurrent
-`popitem()` eviction: a worker can evict `eid` in the window between another thread's `get` and its
-`move_to_end`, raising `KeyError` (and, worse, corrupting the link list). The fix guards the OrderedDict
-touches with `self._entry_lock`.
-
-Stress can't gate this: the window is sub-microsecond, so `pytest-run-parallel` / `PYTHON_GIL=0 pytest -n
-auto` (process-parallel) hit it ~0/200 — which is why it escaped to production. We make it DETERMINISTIC
-with `blanket`: its bytecode injector builds a copy of `_entry_from_row` with a rendezvous inserted at the
-hit-path `move_to_end` (no edit to the production source), forcing the cached lookup to pause there while a
-second thread evicts. blanket controls the *schedule*, so the logical TOCTOU reproduces regardless of the
-GIL — the gate needs no special build.
-
-Two tests, together self-certifying (the arm-2 "oracle-liveness" idea made permanent):
-  - the regression: under the lock the evictor blocks on `_entry_lock`, the race is impossible → no raise;
-  - the negative control: with the guard removed (a no-op lock ≈ pre-942ca3c) the SAME forced schedule
-    DOES raise `KeyError` — proving the regression isn't vacuously green and documenting why the lock exists.
-
-White-box on purpose: a race in a private cache has no public observation seam, so we drive
-`_entry_from_row` directly with fabricated rows (also sidestepping a sqlite cross-thread confound). Opt-in
-`grow` dependency group: `uv run --group grow pytest -q tests/test_cache_race.py`.
-"""
+"""Deterministic regression for concurrent decoded-entry eviction."""
 
 from __future__ import annotations
 
-import contextlib
 import threading
+from collections import OrderedDict
+from typing import override
 
 import dicthelp
 import pytest
-
-from saitenka.app.dictionary import Dictionary
-
-# blanket lives in the opt-in `grow` group; skip the whole module in the default env (collection-safe).
-blanket = pytest.importorskip("blanket")
-
-# Fabricated rows in the shape `_entry_from_row` decodes, which is the SELECT's column order:
-# (id, term, reading, glossary, tags, seq). Widening that query is invisible here until this
-# module runs, and it only runs with the opt-in `grow` group — #329 added `seq` and left these
-# five-wide, so both tests raised IndexError before reaching what they gate.
-ROW_OLD = (1, "古", "ふる", '["oldest — the eviction victim"]', "", 1000)
-ROW_NEW = (2, "新", "しん", '["a second, distinct entry"]', "", 1001)
+from saitenka_dict import SqliteDictionaryStore, TermQuery, Translator
+from saitenka_dict.store import TermRecord
 
 
-def _make_dict(tmp_path) -> Dictionary:
-    d = dicthelp.load_dict(dicthelp.term_zip(tmp_path / "d.zip", "D", [("x", "x", ["x"])]))
-    d._entry_cache_max = 1  # so inserting a 2nd distinct eid evicts the first (the race trigger)
-    return d
+class _PausedLru(OrderedDict[int, TermRecord]):
+    def __init__(
+        self,
+        entries: OrderedDict[int, TermRecord],
+        pause_key: int,
+        at_move: threading.Event,
+        eviction_attempted: threading.Event,
+        eviction_finished: threading.Event,
+        *,
+        guarded: bool,
+    ):
+        super().__init__(entries)
+        self._pause_key = pause_key
+        self._guarded = guarded
+        self._at_move = at_move
+        self._eviction_attempted = eviction_attempted
+        self._eviction_finished = eviction_finished
+
+    @override
+    def move_to_end(self, key: int, last: bool = True) -> None:
+        if key == self._pause_key and threading.current_thread().name == "cache-hit":
+            self._at_move.set()
+            assert self._eviction_attempted.wait(2), "eviction did not attempt the cache lock"
+            if not self._guarded:
+                assert self._eviction_finished.wait(2), "unguarded eviction did not finish"
+        super().move_to_end(key, last)
 
 
-def _force_eviction_race(d: Dictionary) -> dict[str, BaseException]:
-    """Force: thread A pauses at the hit-path move_to_end while thread B inserts a new eid and evicts A's.
-    Returns the captured exception (if any) from A. Assumes ``d`` is pre-warmed with ROW_OLD."""
-    a_at_move = threading.Event()  # A has done get(1)=hit, is about to move_to_end(1)
-    b_evicted = (
-        threading.Event()
-    )  # B has inserted 2 + evicted 1 (only reachable when A holds no lock)
+class _ObservedLock:
+    def __init__(self, lock: threading.Lock | None, eviction_attempted: threading.Event):
+        self._lock = lock
+        self._eviction_attempted = eviction_attempted
 
-    def rendezvous() -> None:
-        a_at_move.set()
-        b_evicted.wait(0.5)  # under the lock B is blocked → this times out and A proceeds safely
+    def __enter__(self) -> None:
+        if threading.current_thread().name == "cache-eviction":
+            self._eviction_attempted.set()
+        if self._lock is not None:
+            self._lock.acquire()
 
-    # A copy of _entry_from_row with a pause injected at the HIT-path move_to_end (first of the two
-    # occurrences, reached only by a cached lookup). Called directly — no patching of the production symbol.
-    loc = blanket.Location.text(Dictionary._entry_from_row, "self._entry_cache.move_to_end(eid)")
-    paused_entry_from_row = blanket.inject_call(rendezvous, loc)
-
-    err: dict[str, BaseException] = {}
-
-    def cached_lookup() -> None:  # A: get(1)=hit → rendezvous → move_to_end(1)
-        try:
-            paused_entry_from_row(d, ROW_OLD)
-        except BaseException as e:  # noqa: BLE001 — capture the race outcome
-            err["a"] = e
-
-    def evicting_lookup() -> None:  # B: get(2)=miss → insert 2 → popitem evicts 1
-        a_at_move.wait(5)
-        d._entry_from_row(ROW_NEW)
-        b_evicted.set()
-
-    ta = threading.Thread(target=cached_lookup)
-    tb = threading.Thread(target=evicting_lookup)
-    ta.start()
-    tb.start()
-    ta.join(10)
-    tb.join(10)
-    return err
+    def __exit__(self, *_exc_info: object) -> None:
+        if self._lock is not None:
+            self._lock.release()
 
 
-@pytest.mark.integration
-@pytest.mark.timeout(15)
-def test_entry_cache_survives_a_concurrent_eviction(tmp_path):
-    d = _make_dict(tmp_path)
-    d._entry_from_row(ROW_OLD)  # pre-warm → cache = {1}, the oldest
-    err = _force_eviction_race(d)
-    # The guarded cache serialises the touches, so the hit-path move_to_end never races the eviction.
-    assert "a" not in err, f"entry-cache eviction raced the hit-path move_to_end: {err.get('a')!r}"
-
-
-@pytest.mark.integration
-@pytest.mark.timeout(15)
-def test_the_entry_lock_is_load_bearing(tmp_path):
-    # Negative control: remove the guard (a no-op lock ≈ pre-942ca3c) on this throwaway instance. The SAME
-    # forced schedule must now raise — proving the regression above has teeth (it isn't vacuously green)
-    # and that _entry_lock is what prevents the race.
-    d = _make_dict(tmp_path)
-    d._entry_lock = contextlib.nullcontext()
-    d._entry_from_row(ROW_OLD)  # pre-warm
-    err = _force_eviction_race(d)
-    assert isinstance(err.get("a"), KeyError), (
-        f"expected the UNGUARDED cache to raise KeyError under the forced eviction, got {err.get('a')!r} — "
-        "the regression test may be vacuous / the injection point drifted"
+def _store_with_paused_hit(tmp_path, monkeypatch, *, guarded: bool):
+    db = dicthelp.db()
+    row = db.import_zip(
+        dicthelp.term_zip(
+            tmp_path / "race.zip",
+            "Race",
+            [("古", "ふる", ["old"]), ("新", "しん", ["new"])],
+        ),
+        imported_at=dicthelp.AT,
     )
+    store = SqliteDictionaryStore(db.path, entry_cache_max=1)
+    translator = Translator(store)
+    translator.lookup_terms(TermQuery("古"))
+    original = store._entry_caches[row.id]
+    at_move = threading.Event()
+    eviction_attempted = threading.Event()
+    eviction_finished = threading.Event()
+    monkeypatch.setattr(
+        store,
+        "_entry_lock",
+        _ObservedLock(store._entry_lock if guarded else None, eviction_attempted),
+    )
+    store._entry_caches[row.id] = _PausedLru(
+        original,
+        next(iter(original)),
+        at_move,
+        eviction_attempted,
+        eviction_finished,
+        guarded=guarded,
+    )
+    return store, translator, at_move, eviction_attempted, eviction_finished
+
+
+def _force_eviction_race(translator, at_move, eviction_attempted, eviction_finished):
+    errors: dict[str, BaseException] = {}
+
+    def lookup(label: str, term: str) -> None:
+        try:
+            if label == "eviction":
+                assert at_move.wait(2), "cached lookup did not reach move_to_end"
+            translator.lookup_terms(TermQuery(term))
+        except BaseException as error:  # noqa: BLE001 - thread failures must reach the test
+            errors[label] = error
+        finally:
+            if label == "eviction":
+                eviction_finished.set()
+
+    hit = threading.Thread(target=lookup, args=("hit", "古"), name="cache-hit")
+    eviction = threading.Thread(target=lookup, args=("eviction", "新"), name="cache-eviction")
+    hit.start()
+    eviction.start()
+    try:
+        hit.join(3)
+        eviction.join(3)
+    finally:
+        at_move.set()
+        eviction_attempted.set()
+        eviction_finished.set()
+        hit.join(1)
+        eviction.join(1)
+    assert not hit.is_alive() and not eviction.is_alive(), "forced cache race did not terminate"
+    return errors
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_entry_cache_survives_a_concurrent_eviction(tmp_path, monkeypatch):
+    store, translator, at_move, eviction_attempted, eviction_finished = _store_with_paused_hit(
+        tmp_path, monkeypatch, guarded=True
+    )
+
+    assert _force_eviction_race(translator, at_move, eviction_attempted, eviction_finished) == {}
+    assert store.decoded_entry_count() == 1
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_the_entry_lock_is_load_bearing(tmp_path, monkeypatch):
+    _store, translator, at_move, eviction_attempted, eviction_finished = _store_with_paused_hit(
+        tmp_path, monkeypatch, guarded=False
+    )
+
+    errors = _force_eviction_race(translator, at_move, eviction_attempted, eviction_finished)
+
+    assert set(errors) == {"hit"}
+    assert isinstance(errors.get("hit"), KeyError)

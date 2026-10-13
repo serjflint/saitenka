@@ -29,7 +29,7 @@ done
 # The oracle-catalog reference the skill points at, and the canonical oracle examples it cites (test -f is
 # grep-free — safe under the search-shim mock; see AGENTS.md "Tooling").
 test -f "$skill_dir/references/oracle-catalog.md" || { echo "MISSING: references/oracle-catalog.md"; fail=1; }
-for t in tests/features/tooltip/test_scale_boundary.py tests/features/tooltip/test_tooltip_statemachine.py tests/test_cache_race.py tests/test_cache_equivalence.py tests/test_crisp_scale_properties.py; do
+for t in tests/features/tooltip/test_scale_boundary.py tests/features/tooltip/test_tooltip_statemachine.py tests/test_cache_race.py tests/test_crisp_scale_properties.py; do
   test -f "$ROOT/$t" || { echo "MISSING oracle example: $t"; fail=1; }
 done
 test -f "$ROOT/tests/util.py" || { echo "MISSING: tests/util.py (PROFILES matrix)"; fail=1; }
