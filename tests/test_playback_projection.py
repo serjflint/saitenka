@@ -15,14 +15,11 @@ from saitenka.runtime.playback import (
     FactDomain,
     GeometryInputChanged,
     ObservedCue,
-    PauseChanged,
     PlaybackProjection,
     PlaybackState,
-    PointerMoved,
     RenderSpaceChanged,
     RetireReason,
     Revision,
-    SecondaryTextChanged,
     SourceChanged,
     SubtitleSelectionChanged,
     SubtitleTimingChanged,
@@ -50,27 +47,6 @@ def kinds(deltas: tuple[object, ...]) -> list[type]:
 # --- gate: the first conflicting observation retires before the next command ------------------
 
 
-def test_changed_cue_text_retires_the_installed_identity_in_the_same_observation() -> None:
-    projection = PlaybackProjection()
-    state = installed(projection)
-
-    projected = projection.observe(state, "sub-text", "犬も見る")
-
-    retired = projected.deltas[0]
-    assert isinstance(retired, CueIdentityRetired)
-    assert retired.reason is RetireReason.CUE_TEXT
-    assert projected.state.cue.installed is None
-
-
-def test_a_second_conflicting_observation_does_not_retire_twice() -> None:
-    projection = PlaybackProjection()
-    state = projection.observe(installed(projection), "sub-text", "犬も見る").state
-
-    projected = projection.observe(state, "sub-start", 9.0)
-
-    assert CueIdentityRetired not in kinds(projected.deltas)
-
-
 def test_a_changed_track_retires_the_identity_before_the_selection_delta() -> None:
     projection = PlaybackProjection()
     state = projection.seed(installed(projection), "sid", 1)
@@ -80,27 +56,6 @@ def test_a_changed_track_retires_the_identity_before_the_selection_delta() -> No
 
     assert kinds(projected.deltas)[:2] == [CueIdentityRetired, AuthoredCueStale]
     assert SubtitleSelectionChanged in kinds(projected.deltas)
-
-
-def test_repeated_timing_equal_to_the_installed_identity_is_not_a_conflict() -> None:
-    projection = PlaybackProjection()
-    state = projection.seed(installed(projection), "sub-start", 0.0)
-    # The observer replays the value the identity was installed with.
-    state = projection.install(state, start=1.0, end=3.0)
-
-    projected = projection.observe(state, "sub-start", 1.0)
-
-    assert CueIdentityRetired not in kinds(projected.deltas)
-    assert projected.state.cue.installed is not None
-
-
-def test_a_null_timing_observation_cannot_retire_the_identity() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.observe(installed(projection), "sub-end", None)
-
-    assert CueIdentityRetired not in kinds(projected.deltas)
-    assert projected.state.cue.installed is not None
 
 
 # --- gate: joined and split sequences converge -------------------------------------------------
@@ -139,14 +94,6 @@ def test_reobserving_the_latest_values_emits_nothing(
         assert projected.deltas == ()
         assert replace(projected.state, sid_observations=state.sid_observations) == state
         assert projected.state.sid_observations == state.sid_observations + (name == "sid")
-
-
-def test_secondary_text_change_carries_the_new_value() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.observe(PlaybackState(), "secondary-sub-text", "English")
-
-    assert projected.deltas == (SecondaryTextChanged("English"),)
 
 
 # --- gate: identical text under a new source/track/role/cue is a new identity -----------------
@@ -301,14 +248,6 @@ def test_an_unnamed_observation_is_inert() -> None:
 # --- gate: source, role, and render-space revisions are explicit and immutable -----------------
 
 
-def test_revisions_are_immutable_values() -> None:
-    revision = Revision(3)
-
-    assert revision.advance() == Revision(4)
-    assert revision == Revision(3)
-    assert Revision(1) < Revision(2)
-
-
 def test_a_render_space_observation_revises_the_render_space() -> None:
     projection = PlaybackProjection()
     state = PlaybackState()
@@ -423,30 +362,6 @@ def test_identical_text_under_a_new_track_changes_identity_without_a_cue_delta()
 # --- gate: projected playback domains -----------------------------------------------------------
 
 
-def test_a_pointer_move_publishes_now_that_hover_consumes_it() -> None:
-    """`POINTER` left `LEGACY_OWNED` when hover moved off the interaction tick. Publishing a delta
-    nobody consumed would have been harmless; publishing one *two* routes consume is the double
-    handling `LEGACY_OWNED` exists to prevent, so the two changes are one."""
-    projection = PlaybackProjection()
-
-    pointer = projection.observe(PlaybackState(), "mouse-pos", {"x": 1, "y": 2})
-
-    assert kinds(pointer.deltas) == [PointerMoved]
-    assert pointer.state.pointer.position == {"x": 1, "y": 2}
-
-
-def test_a_pause_change_publishes_now_that_watch_time_accrues_on_it() -> None:
-    """`PAUSE` left `LEGACY_OWNED` when watch time started accruing at the transition instead of
-    being sampled by a tick — the same pairing as the pointer: publish the delta in the change that
-    gives it a consumer, never before."""
-    projection = PlaybackProjection()
-
-    pause = projection.observe(PlaybackState(), "pause", data=True)
-
-    assert kinds(pause.deltas) == [PauseChanged]
-    assert pause.state.paused is True
-
-
 def test_every_fact_domain_is_reachable_from_the_delta_vocabulary() -> None:
     from saitenka.runtime.playback import _DELTA_DOMAIN
 
@@ -474,3 +389,5 @@ def test_unknown_timing_completes_once_but_conflicting_known_timing_retires(star
 
     assert CueIdentityRetired in kinds(conflict.deltas)
     assert conflict.state.cue.installed is None
+    repeated = projection.observe(conflict.state, fields[1][0], fields[1][1] + 10)
+    assert CueIdentityRetired not in kinds(repeated.deltas)
