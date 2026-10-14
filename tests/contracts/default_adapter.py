@@ -4,6 +4,7 @@ import json
 import sys
 from collections.abc import Callable
 
+import cli_adapter
 import config_adapter
 import playback_adapter
 import protocol as session_protocol
@@ -16,6 +17,7 @@ ADAPTERS: dict[str, Adapter] = {
         saitenka_session_adapter.execute,
     ),
     config_adapter.PROTOCOL: (config_adapter.CAPABILITY, config_adapter.evaluate),
+    cli_adapter.PROTOCOL: (cli_adapter.CAPABILITY, cli_adapter.evaluate),
     playback_adapter.PROTOCOL: (playback_adapter.CAPABILITY, playback_adapter.evaluate),
 }
 

@@ -59,3 +59,11 @@ uses integer source/track/cue revisions rather than implementation objects. The 
 track, source, connection, timing, and render-space behavior; reducer classes and Python type names are not
 part of the contract.
 
+## CLI v0 protocol
+
+`saitenka.cli/v0` uses capability `cli-v0`. Inventory scenarios return the actual run-help flags and
+registered commands; parser scenarios return only named bound arguments. Config scenarios materialize an
+isolated TOML file before parsing, so the corpus covers default precedence without reading a user's config.
+The open-ended all-command help check and the legacy wrapper process remain native tests because their sets
+and process boundary cannot be represented by a finite scenario list without weakening them.
+
