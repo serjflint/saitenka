@@ -128,6 +128,7 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
         reader.graph.profile.profile.tokenizer.name,
         reader.graph.profile.profile.langs.main,
         reader.graph.profile.profile.profile,
+        reader.graph.annotation.token_generation,
     )
 
     press(reader, ipc, key)
@@ -136,6 +137,7 @@ def test_cycle_is_a_noop_with_a_single_profile(request):
         reader.graph.profile.profile.tokenizer.name,
         reader.graph.profile.profile.langs.main,
         reader.graph.profile.profile.profile,
+        reader.graph.annotation.token_generation,
     ) == before
 
 

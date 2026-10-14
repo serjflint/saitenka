@@ -331,7 +331,14 @@ def test_ssl_context_is_usable():
             ("片田舎のおっさん、剣聖になる", 1),
         ),
         # bare number, incl. an underscore-delimited 'ep05' (the (?!\d) boundary, not \b, catches it).
-        ("[Erai-raws] Nippon Sangoku - 10 [1080p].mkv", ("Nippon Sangoku", 10)),
+        (
+            (
+                "[Erai-raws] Nippon Sangoku - 10 [1080p AMZN WEBRip HEVC EAC3]"
+                "[MultiSub][189B848D].mkv"
+            ),
+            ("Nippon Sangoku", 10),
+        ),
+        ("[SubsPlease] Sousou no Frieren - 28 (1080p) [ABCD].mkv", ("Sousou no Frieren", 28)),
         ("Show - 12.mkv", ("Show", 12)),
         ("Show_ep05_1080p.mkv", ("Show", 5)),
         # a resolution must not be mistaken for a season×episode, and no number → None.

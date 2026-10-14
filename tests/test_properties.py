@@ -2,18 +2,25 @@
 
 Properties pinned:
 - wrap never splits a ruby unit (a RubyBox is atomic across lines);
-- ``strip_inline_furigana`` is idempotent;
+- inline furigana stripping preserves kanji and surrounding grammar;
 - the deinflection chain on an arbitrary surface reaches the lemma or returns empty;
 - ``merge_inflected`` output concatenates back to its input surfaces.
 """
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from saitenka_deinflect import (  # noqa: TID251  # property tests exercise the GPL chain directly, not via the app chokepoint
     deinflect,
     inflection_chain,
 )
-from saitenka_tokenize.japanese import Token, has_kanji, merge_inflected, strip_inline_furigana
+from saitenka_tokenize.japanese import (
+    Token,
+    has_kanji,
+    merge_inflected,
+    strip_inline_furigana,
+    tokenize,
+)
 
 from saitenka.model import Span, Style
 from saitenka.render.flow import build_items, ruby, wrap_items
@@ -85,6 +92,19 @@ def test_strip_inline_furigana_is_a_subsequence_preserving_kanji(toks):
     assert [t.surface for t in toks if has_kanji(t.surface)] == [
         t.surface for t in out if has_kanji(t.surface)
     ]
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("龍門光英りゅうもんみつひでは―", ["龍門", "光英", "は", "―"]),
+        ("賀来泰明かくやすあきさえも", ["賀来", "泰明", "さえ", "も"]),
+        ("本を読む", ["本", "を", "読む"]),
+        ("更には", ["更に", "は"]),
+    ],
+)
+def test_tokenize_strips_inline_furigana_without_eating_grammar(text, expected):
+    assert [token.surface for token in tokenize(text)] == expected
 
 
 # --- kanji detection spans the supplementary planes (not just the BMP) ---------------------------
