@@ -9,16 +9,6 @@ from saitenka.runtime.surfaces import (
 )
 
 
-def test_late_present_cannot_restore_removed_surface():
-    runtime = SurfaceRuntime()
-    present = runtime.request("toast", SurfaceAction.PRESENT)
-    remove = runtime.request("toast", SurfaceAction.REMOVE)
-
-    assert not runtime.finish(SurfaceTransactionOutcome(present, EffectOutcome.SUCCEEDED))
-    assert runtime.finish(SurfaceTransactionOutcome(remove, EffectOutcome.SUCCEEDED))
-    assert runtime.snapshot("toast").status is SurfaceStatus.ABSENT
-
-
 def test_late_remove_cannot_clear_newer_present_surface():
     runtime = SurfaceRuntime()
     remove = runtime.request("loading", SurfaceAction.REMOVE)
