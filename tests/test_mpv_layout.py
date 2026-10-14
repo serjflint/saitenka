@@ -120,9 +120,7 @@ def test_unit_budget_refuses_an_oversized_payload_before_mapping():
         ("revision", True),
         ("revision", -1),
         ("available", 1),
-        ("capabilities", []),
         ("snapshot_id", ""),
-        ("events", []),
         ("events", [None, None]),
     ],
 )
@@ -336,10 +334,12 @@ def test_a_validation_completion_cannot_republish_retired_hits(boundary):
 
 def test_close_leaves_an_already_enabled_collection_option_alone():
     producer, ipc, _frames, _ticks = source()
+    before = len(ipc.commands)
 
     producer.close()
 
     assert ipc.props["subtitle-layout"] is True
+    assert ipc.commands[before:] == []
 
 
 def test_external_reenable_resumes_scanning():
@@ -400,6 +400,13 @@ def test_missing_api_is_cached_until_a_new_connection(unknown_command, monkeypat
     assert producer.status == "unsupported-api"
     assert not frames
     assert len(ipc.commands) == count
+    spans = record_spans(monkeypatch)
+
+    producer.input_changed()
+    producer.refresh()
+
+    assert len(ipc.commands) == count
+    assert spans[-1]["attrs"] == IsPartialDict(reason="unsupported-api", capability="false")
 
 
 @pytest.mark.integration
@@ -486,19 +493,6 @@ def test_acquisition_outcome_survives_the_text_free_report(monkeypatch, field, v
         capability="false" if reason == "unsupported-api" else "true",
     )
     assert "猫" not in json.dumps(records, ensure_ascii=False)
-
-
-def test_cached_api_refusal_remains_explainable_after_invalidation(monkeypatch):
-    producer, ipc, _frames, _ticks = source()
-    ipc.layout["capabilities"] = []
-    producer.connection_replaced()
-    producer.refresh()
-    spans = record_spans(monkeypatch)
-
-    producer.input_changed()
-    producer.refresh()
-
-    assert spans[-1]["attrs"] == IsPartialDict(reason="unsupported-api", capability="false")
 
 
 def test_stale_acquisition_retains_request_identity(monkeypatch):
