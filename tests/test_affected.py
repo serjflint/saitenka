@@ -74,22 +74,12 @@ def test_classify_routes_blindspots_to_full_source_to_graph_docs_ignored() -> No
     assert all("README" not in f for f in (*full, *overlay_py))
 
 
-def test_tools_are_outside_application_selection() -> None:
-    # Application-test selection ignores development tools; their focused tests and the pre-push gate
-    # own them. This also keeps session codemods and audit scripts out of the application inner loop.
+def test_tooling_is_outside_application_selection() -> None:
     a = _mod()
-    full, overlay_py, _ = a.classify(["tools/mutate/run.py"])
-    assert not full
-    assert not overlay_py
-
-
-def test_tool_test_edit_selects_the_changed_test() -> None:
-    a = _mod()
-    full, overlay_py, changed_tests = a.classify(["tool_tests/test_example.py"])
-
-    assert full == []
-    assert overlay_py == {"tool_tests/test_example.py"}
-    assert changed_tests == {"tool_tests/test_example.py"}
+    full, overlay_py, changed_tests = a.classify(
+        ["tools/mutate/run.py", "tool_tests/test_mutate.py", "vibe/session_codemod.py"]
+    )
+    assert (full, overlay_py, changed_tests) == ([], set(), set())
 
 
 def test_closure_excludes_conftest() -> None:
@@ -100,16 +90,13 @@ def test_closure_excludes_conftest() -> None:
     assert a.closure_tests({"src/saitenka/app/x.py"}, graph) == {"tests/test_x.py"}
 
 
-def test_closure_includes_nested_application_and_tool_tests() -> None:
+def test_closure_includes_nested_application_tests() -> None:
     a = _mod()
     graph = {
-        "tools/x.py": [
+        "src/saitenka/x.py": [
             "tests/features/mining/test_x.py",
             "tool_tests/test_x.py",
         ]
     }
 
-    assert a.closure_tests({"tools/x.py"}, graph) == {
-        "tests/features/mining/test_x.py",
-        "tool_tests/test_x.py",
-    }
+    assert a.closure_tests({"src/saitenka/x.py"}, graph) == {"tests/features/mining/test_x.py"}
