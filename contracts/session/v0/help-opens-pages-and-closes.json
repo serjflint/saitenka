@@ -8,6 +8,8 @@
   },
   "when": [
     {"action": "start"},
+    {"action": "command", "name": "saitenka-help-next"},
+    {"action": "command", "name": "saitenka-help-close"},
     {"action": "command", "name": "saitenka-toggle-help"},
     {"action": "command", "name": "saitenka-toggle-overlay"},
     {"action": "command", "name": "saitenka-help-next"},

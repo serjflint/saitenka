@@ -3,7 +3,7 @@
   "scenario_id": "cue-change-rejects-same-batch-command",
   "requires": ["session-v0"],
   "given": {
-    "capture": ["clipboard", "termination"],
+    "capture": ["clipboard", "notice", "termination"],
     "mpv_properties": {"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0}
   },
   "when": [
@@ -12,7 +12,8 @@
       "action": "emit_batch",
       "events": [
         {"event": "property-change", "name": "sub-text", "data": "new"},
-        {"event": "client-message", "args": ["saitenka-copy-line"]}
+        {"event": "client-message", "args": ["saitenka-copy-line"]},
+        {"event": "client-message", "args": ["saitenka-toggle-overlay"]}
       ]
     },
     {"action": "drain_until_quiescent", "max_steps": 8},
@@ -21,6 +22,7 @@
   "expect": {
     "mode": "contains_in_order",
     "observations": [
+      {"source": "mpv", "kind": "command", "value": ["notice", "Saitenka hidden"]},
       {"source": "clipboard", "kind": "write", "text": "new"},
       {"source": "adapter", "kind": "terminated"}
     ]

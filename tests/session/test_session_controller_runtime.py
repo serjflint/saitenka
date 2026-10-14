@@ -72,16 +72,6 @@ def test_command_policy_preserves_three_state_cue_eligibility(cue_state, expecte
     assert decision.rejection == expected
 
 
-def test_command_policy_keeps_cue_independent_command_eligible_after_retirement():
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-toggle-overlay"),
-        cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
-        help_open=False,
-    )
-
-    assert decision.intent is not None
-
-
 def test_a_failing_action_is_a_terminal_typed_outcome():
     def fail() -> None:
         raise RuntimeError("boom")

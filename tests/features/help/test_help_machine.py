@@ -28,13 +28,6 @@ def test_paging_clamps_at_both_ends(command: HelpCommand, page: int) -> None:
     assert decide(state, command, page_count=3) == HelpTurn(state)
 
 
-@pytest.mark.parametrize("command", [HelpCommand.NEXT, HelpCommand.PREVIOUS])
-def test_paging_a_closed_overlay_decides_nothing(command: HelpCommand) -> None:
-    """Help navigation stays eligible while the overlay is shut — the command policy admits it — so
-    the machine, not the key routing, is what makes it harmless."""
-    assert decide(CLOSED, command, page_count=3) == HelpTurn(CLOSED)
-
-
 def test_a_shrunk_document_pulls_the_stored_page_back_onto_it() -> None:
     """The correction is state, not drawing. Were it only in the render, the stored page would stay
     past the end and the next PREVIOUS would clamp *forward* — from a page never on screen."""
