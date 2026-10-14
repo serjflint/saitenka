@@ -93,6 +93,15 @@
       "mismatch": "the global binding section reported default priority instead of force"
     },
     {
+      "id": "session-global-binding-enablement",
+      "scenario_id": "input-registration-publishes-effective-bindings",
+      "path": "src/saitenka/app/session/command_runtime.py",
+      "find": "                \"enable-section\",",
+      "replace": "                \"disable-section\",",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[input-registration-publishes-effective-bindings]'",
+      "mismatch": "the required global section enablement observation disappeared"
+    },
+    {
       "id": "config-attach-layout",
       "scenario_id": "attach-overrides",
       "path": "src/saitenka/app/commands/attach.py",

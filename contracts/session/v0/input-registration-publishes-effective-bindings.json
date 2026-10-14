@@ -7,12 +7,12 @@
     "mpv_properties": {},
     "key_options": {
       "help_key": "Ctrl+h",
-      "hover_pause_key": "Alt+q",
-      "sub_prev_key": "Alt+a",
-      "sub_next_key": "Alt+d",
-      "sub_replay_key": "Alt+s"
+      "hover_pause_key": "Ctrl+q",
+      "sub_prev_key": "Ctrl+1",
+      "sub_next_key": "Ctrl+2",
+      "sub_replay_key": "Ctrl+3"
     },
-    "capture_binding_keys": ["Ctrl+h", "F1", "Alt+q", "Alt+a", "Alt+d", "Alt+s", "z", "Z", "x"]
+    "capture_binding_keys": ["Ctrl+h", "F1", "Ctrl+q", "Ctrl+1", "Ctrl+2", "Ctrl+3", "MBTN_LEFT", "WHEEL_UP", "z", "Z", "x"]
   },
   "when": [
     {"action": "start"}
@@ -20,14 +20,18 @@
   "expect": {
     "mode": "contains_in_order",
     "observations": [
-      {"source": "mpv", "kind": "binding-section", "name": "saitenka-global", "flags": "force"},
-      {"source": "mpv", "kind": "binding-section", "name": "saitenka-mouse", "flags": "force"},
+      {"source": "mpv", "kind": "binding-section-enabled", "name": "saitenka-global"},
+      {"source": "mpv", "kind": "binding-transport", "legacy_keybind_count": 0},
+      {"source": "mpv", "kind": "binding-section", "name": "saitenka-global", "flags": "force", "binding_count": 25, "unique_keys": true},
+      {"source": "mpv", "kind": "binding-section", "name": "saitenka-mouse", "flags": "force", "binding_count": 4, "unique_keys": true},
       {"source": "mpv", "kind": "binding", "key": "Ctrl+h", "section": "saitenka-global", "message": "saitenka-toggle-help", "status": "present"},
       {"source": "mpv", "kind": "binding", "key": "F1", "status": "absent"},
-      {"source": "mpv", "kind": "binding", "key": "Alt+q", "section": "saitenka-global", "message": "saitenka-toggle-hover-pause", "status": "present"},
-      {"source": "mpv", "kind": "binding", "key": "Alt+a", "section": "saitenka-global", "message": "saitenka-sub-prev", "status": "present"},
-      {"source": "mpv", "kind": "binding", "key": "Alt+d", "section": "saitenka-global", "message": "saitenka-sub-next", "status": "present"},
-      {"source": "mpv", "kind": "binding", "key": "Alt+s", "section": "saitenka-global", "message": "saitenka-sub-replay", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Ctrl+q", "section": "saitenka-global", "message": "saitenka-toggle-hover-pause", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Ctrl+1", "section": "saitenka-global", "message": "saitenka-sub-prev", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Ctrl+2", "section": "saitenka-global", "message": "saitenka-sub-next", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Ctrl+3", "section": "saitenka-global", "message": "saitenka-sub-replay", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "MBTN_LEFT", "section": "saitenka-mouse", "message": "saitenka-click", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "WHEEL_UP", "section": "saitenka-mouse", "message": "saitenka-scroll-up", "status": "present"},
       {"source": "mpv", "kind": "binding", "key": "z", "status": "absent"},
       {"source": "mpv", "kind": "binding", "key": "Z", "status": "absent"},
       {"source": "mpv", "kind": "binding", "key": "x", "status": "absent"},

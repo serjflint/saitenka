@@ -45,7 +45,8 @@ class SaitenkaSessionAdapter:
         self.ipc.props.update(given.get("mpv_properties", {}))
         self._capture = frozenset(given.get("capture", ["all"]))
         self._binding_keys = tuple(given.get("capture_binding_keys", ()))
-        self._binding_sections: dict[str, tuple[str | None, dict[str, str]]] = {}
+        self._binding_sections: dict[str, tuple[str | None, dict[str, str], bool]] = {}
+        self._legacy_bindings: dict[str, str] = {}
         self._bindings_reported = False
         self.gateway = session_gateway(self.ipc)
         options = ReaderOptions(keys=KeyOptions(**given.get("key_options", {}))).with_overrides(
@@ -76,14 +77,24 @@ class SaitenkaSessionAdapter:
             if normalized is None:
                 continue
             category, value = normalized
-            self._append(
-                category,
-                {"source": "mpv", "kind": "command", "value": value},
+            observation = (
+                value
+                if isinstance(value, dict)
+                else {"source": "mpv", "kind": "command", "value": value}
             )
+            self._append(category, observation)
         self._command_cursor = len(self.ipc.commands)
         if self._binding_keys and self._binding_sections and not self._bindings_reported:
             self._bindings_reported = True
-            for section, (flags, _bindings) in self._binding_sections.items():
+            self._append(
+                "binding",
+                {
+                    "source": "mpv",
+                    "kind": "binding-transport",
+                    "legacy_keybind_count": len(self._legacy_bindings),
+                },
+            )
+            for section, (flags, bindings, unique) in self._binding_sections.items():
                 self._append(
                     "binding",
                     {
@@ -91,13 +102,18 @@ class SaitenkaSessionAdapter:
                         "kind": "binding-section",
                         "name": section,
                         "flags": flags,
+                        "binding_count": len(bindings),
+                        "unique_keys": unique,
                     },
                 )
             all_bindings = {
                 key: (section, message)
-                for section, (_flags, bindings) in self._binding_sections.items()
+                for section, (_flags, bindings, _unique) in self._binding_sections.items()
                 for key, message in bindings.items()
             }
+            all_bindings.update(
+                {key: ("legacy-keybind", message) for key, message in self._legacy_bindings.items()}
+            )
             for key in self._binding_keys:
                 found = all_bindings.get(key)
                 observation = {"source": "mpv", "kind": "binding", "key": key}
@@ -127,17 +143,28 @@ class SaitenkaSessionAdapter:
             return "surface", [state, surface]
         if command and command[0] == "define-section":
             bindings = {}
+            keys = []
             for line in command[2].splitlines():
                 key, separator, action = line.partition(" ")
                 if separator and action.startswith("script-message "):
+                    keys.append(key)
                     bindings[key] = action.removeprefix("script-message ")
             self._binding_sections[command[1]] = (
                 command[3] if len(command) > 3 else None,
                 bindings,
+                len(keys) == len(set(keys)),
             )
             return None
         if command and command[0] == "enable-section":
-            return "binding", [command[0], command[1]]
+            return "binding", {
+                "source": "mpv",
+                "kind": "binding-section-enabled",
+                "name": command[1],
+            }
+        if command and command[0] == "keybind":
+            action = command[2] if len(command) > 2 else ""
+            self._legacy_bindings[command[1]] = action.removeprefix("script-message ")
+            return None
         if command and command[0] == "show-text":
             return "notice", ["notice", command[1]]
         if command and command[0] == "sub-seek":
