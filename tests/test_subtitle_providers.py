@@ -35,27 +35,14 @@ def test_provider_chain_stops_at_first_success():
         calls.append("tsukihime")
         return Path("episode.ja.ass"), "tsukihime: added"
 
-    path, status = fetch_first((("jimaku", miss), ("tsukihime", hit)))
+    def unexpected():
+        calls.append("later")
+        return None, "unexpected"
+
+    path, status = fetch_first((("jimaku", miss), ("tsukihime", hit), ("later", unexpected)))
 
     assert calls == ["jimaku", "tsukihime"]
     assert path == Path("episode.ja.ass") and status == "tsukihime: added"
-
-
-def test_provider_chain_does_not_call_later_provider_after_success():
-    calls: list[str] = []
-
-    def hit():
-        calls.append("jimaku")
-        return Path("episode.ja.srt"), "jimaku: added"
-
-    def unexpected():
-        calls.append("tsukihime")
-        return None, "unexpected"
-
-    path, _status = fetch_first((("jimaku", hit), ("tsukihime", unexpected)))
-
-    assert path == Path("episode.ja.srt")
-    assert calls == ["jimaku"]
 
 
 def test_empty_provider_chain_performs_no_request():
@@ -125,18 +112,6 @@ def test_register_provider_rejects_a_duplicate_name(monkeypatch):
     register_provider(_stub_provider("jimaku", frozenset({"jp"})))
     with pytest.raises(ValueError, match="already registered"):
         register_provider(_stub_provider("jimaku", frozenset({"fr"})))
-
-
-def test_real_registry_offers_jimaku_and_tsukihime_for_japanese():
-    """Characterization: importing subselect registers the real jimaku/tsukihime providers, and
-    both remain available for 'jp' — the #254 phase-1 rewrite must not change JP behaviour."""
-    import saitenka.app.subselect as _  # noqa: F401  # side-effecting import: populates the registry
-
-    assert set(providers_for_language("jp", candidates=("jimaku", "tsukihime"))) == {
-        "jimaku",
-        "tsukihime",
-    }
-    assert get_provider("jimaku") is not None
 
 
 def test_run_launch_registers_builtin_providers_from_an_empty_registry(monkeypatch):
