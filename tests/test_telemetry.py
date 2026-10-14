@@ -29,6 +29,7 @@ def test_enabled_stands_up_providers_and_creates_export_dir(tmp_path):
     export = tmp_path / "telemetry"
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(export)))
     assert telemetry.is_enabled() is True
+    assert bool(telemetry.span_gate) is True
     assert export.is_dir()
 
 
@@ -47,6 +48,7 @@ def test_shutdown_resets_state(tmp_path):
     assert telemetry.is_enabled() is True
     telemetry.shutdown()
     assert telemetry.is_enabled() is False
+    assert bool(telemetry.span_gate) is False
     telemetry.shutdown()  # a second call is a harmless no-op
 
 
@@ -73,20 +75,6 @@ def test_missing_extra_stays_disabled(monkeypatch, tmp_path):
 
     telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
     assert telemetry.is_enabled() is False
-
-
-def test_configure_turns_span_gate_on_so_traces_actually_get_captured(tmp_path):
-    """Regression: an earlier version left span_gate off by default, which meant enabling telemetry
-    produced logs + metrics but NEVER a trace file — nothing else in the codebase flips the gate.
-    Found via a real end-to-end `run --demo-word` session, not a unit test."""
-    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
-    assert bool(telemetry.span_gate) is True
-
-
-def test_shutdown_turns_span_gate_back_off(tmp_path):
-    telemetry.configure(TelemetryOptions(enabled=True, export_dir=str(tmp_path / "t")))
-    telemetry.shutdown()
-    assert bool(telemetry.span_gate) is False
 
 
 def test_end_to_end_span_reaches_the_ctf_trace_file(tmp_path):
