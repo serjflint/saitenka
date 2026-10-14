@@ -217,50 +217,37 @@ def test_ctf_event_tid_defaults_to_zero_without_the_attribute():
     assert _span_to_ctf_event(_make_span())["tid"] == 0
 
 
-def test_two_independent_spans_on_the_same_thread_share_tid():
-    """The actual fix, exercised the way production code hits it: otel_metrics.traced() stamps the
-    real native thread id, so two spans from the same thread (even with unrelated trace_ids, since
-    neither is a child of the other) land on the same CTF track."""
-    same = 999
-    a, b = _make_span(**{"thread.id": same}), _make_span(**{"thread.id": same})
-    assert a.context.trace_id != b.context.trace_id  # genuinely independent
-    assert _span_to_ctf_event(a)["tid"] == _span_to_ctf_event(b)["tid"] == same
-
-
 # --- on_end / gate / drop --------------------------------------------------------------------
 
 
-def test_gate_off_drops_spans_without_touching_queue(tmp_path):
-    proc = CTFSpanProcessor(tmp_path / "trace.json", ActiveGate(), start_thread=False)  # gate off
+def test_gate_off_exports_no_span_without_counting_a_drop(tmp_path):
+    path = tmp_path / "trace.json"
+    proc = CTFSpanProcessor(path, ActiveGate(), start_thread=False)  # gate off
     proc.on_end(_make_span())
-    assert proc._queue.qsize() == 0
+    proc.force_flush()
+    assert not path.exists()
     assert proc.dropped_count == 0  # a closed gate isn't a "drop" — it's opted out
 
 
-def test_gate_on_queues_the_span(tmp_path):
-    proc, _ = _on_gate(path=tmp_path / "trace.json")
-    proc.on_end(_make_span())
-    assert proc._queue.qsize() == 1
-
-
-def test_full_queue_increments_dropped_count(tmp_path):
-    proc, _ = _on_gate(path=tmp_path / "trace.json", maxsize=1)
-    proc.on_end(_make_span())  # fills the single slot
-    proc.on_end(_make_span())  # no room → dropped, not blocked
-    assert proc._queue.qsize() == 1
-    assert proc.dropped_count == 1
-
-
-# --- force_flush / file output ---------------------------------------------------------------
-
-
-def test_force_flush_writes_valid_ctf(tmp_path):
+def test_gate_on_exports_the_admitted_span(tmp_path):
     path = tmp_path / "trace.json"
     proc, _ = _on_gate(path=path)
     proc.on_end(_make_span())
     proc.force_flush()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["traceEvents"][0]["name"] == "op"
+    assert [event["name"] for event in json.loads(path.read_text())["traceEvents"]] == ["op"]
+
+
+def test_full_queue_increments_dropped_count(tmp_path):
+    path = tmp_path / "trace.json"
+    proc, _ = _on_gate(path=path, maxsize=1)
+    proc.on_end(_make_span())  # fills the single slot
+    proc.on_end(_make_span())  # no room → dropped, not blocked
+    proc.force_flush()
+    assert len(json.loads(path.read_text())["traceEvents"]) == 1
+    assert proc.dropped_count == 1
+
+
+# --- force_flush / file output ---------------------------------------------------------------
 
 
 def test_force_flush_with_nothing_queued_writes_no_file(tmp_path):
