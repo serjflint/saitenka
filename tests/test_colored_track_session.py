@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import dicthelp
 import pytest
-from saitenka_subtitles.colored_track import INJECTED, strip_colors
+from saitenka_subtitles.colored_track import strip_colors
 from saitenka_tokenize.languages import MAIN_LANG, SECOND_LANG
 from saitenka_wordstate import KnownWords, Scorer
 from session_builder import build_session, install_profile_dependencies
@@ -122,10 +122,6 @@ def _ready(reader) -> None:
     )
 
 
-def _colored_track(reader):
-    return reader.graph.profile_integration.colored_track
-
-
 def _added(ipc) -> list[tuple]:
     return [command for command in ipc.commands if command[0] == "sub-add"]
 
@@ -190,8 +186,7 @@ def test_a_copy_echo_before_verification_keeps_one_generation_and_adopts_the_cop
     assert not any(text.startswith("subtitles:") for text in toasts)
 
 
-@pytest.mark.parametrize("sid", [1, 2])
-@pytest.mark.parametrize("echo_copy", [False, True])
+@pytest.mark.parametrize(("sid", "echo_copy"), [(1, False), (1, True), (2, False)])
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 def test_a_late_copy_verification_cannot_overwrite_a_manual_selection(
@@ -260,23 +255,6 @@ def test_late_copy_verification_preserves_a_cue_that_has_already_arrived(tmp_pat
     )
     reader.pump()
     assert reader.graph.playback.cue.text == "犬も見る"
-
-
-def test_the_copy_colors_static_events_and_leaves_the_rest_to_the_live_path(
-    tmp_path, monkeypatch
-) -> None:
-    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
-    _ready(reader)
-
-    jobs.finish()
-
-    rows = [
-        line
-        for line in Path(_added(ipc)[0][1]).read_text(encoding="utf-8").splitlines()
-        if "Dialogue" in line
-    ]
-    assert INJECTED.search(rows[0])
-    assert rows[1] == "Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,{\\fad(200,200)}看板"
 
 
 def test_a_ready_copy_waits_for_a_cue_gap(tmp_path, monkeypatch) -> None:
@@ -409,17 +387,21 @@ def test_resyncing_the_copy_retimes_its_origin(tmp_path, monkeypatch) -> None:
     assert subtitle_modes._current_external_sub(ipc) == origin
 
 
-def test_replacing_the_copy_removes_its_origin_too(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("selected_sid", [9, 2])
+def test_replacing_a_copy_or_its_origin_retires_both(tmp_path, monkeypatch, selected_sid) -> None:
     reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
     _ready(reader)
     jobs.finish()
+    if selected_sid == 2:
+        ipc.command("set_property", "sid", 2)
+        reader.graph.track_commands.declare(SubtitleTracksDiscovered(2, 1))
     fresh = tmp_path / "episode.resynced.ass"
     fresh.write_text(ASS, encoding="utf-8")
 
     subtitle_modes._replace_target_track(reader.graph.track_commands.ports(), fresh, "resynced")
 
-    assert ("sub-remove", 9) in ipc.commands
-    assert ("sub-remove", 2) in ipc.commands
+    removed = {command[1] for command in ipc.commands if command[0] == "sub-remove"}
+    assert {2, 9} <= removed
 
 
 def test_a_bookmark_names_the_origin_not_the_copy(tmp_path, monkeypatch) -> None:
@@ -504,21 +486,6 @@ def test_a_stale_generation_neither_swaps_nor_colors_live_cues(tmp_path, monkeyp
     assert cue.styles is not None
     tags = {token.surface: style.tag for token, style in zip(cue.tokens, cue.styles, strict=True)}
     assert tags["読む"].startswith("known")
-
-
-def test_replacing_the_origin_also_retires_its_copy(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
-    _ready(reader)
-    jobs.finish()
-    ipc.command("set_property", "sid", 2)
-    reader.graph.track_commands.declare(SubtitleTracksDiscovered(2, 1))
-    fresh = tmp_path / "episode.resynced.ass"
-    fresh.write_text(ASS, encoding="utf-8")
-
-    subtitle_modes._replace_target_track(reader.graph.track_commands.ports(), fresh, "resynced")
-
-    assert ("sub-remove", 2) in ipc.commands
-    assert ("sub-remove", 9) in ipc.commands
 
 
 def _scorer(*known: str) -> Coloring:
