@@ -15,49 +15,47 @@ from saitenka.app.session.panel_intents import (
     reduce,
 )
 
-_TOGGLES = {
-    PanelCommand.TOGGLE_SIDEBAR: Panel.SIDEBAR,
-    PanelCommand.TOGGLE_ANALYSIS: Panel.ANALYSIS,
-    PanelCommand.TOGGLE_SUBTITLE_PICKER: Panel.SUBTITLE_PICKER,
-}
 
-
-@pytest.mark.parametrize(("command", "panel"), list(_TOGGLES.items()))
-def test_an_open_panel_closes(command: PanelCommand, panel: Panel) -> None:
-    assert reduce(command, PanelInputs(frozenset({panel}))) == (ClosePanel(panel),)
-
-
-@pytest.mark.parametrize(("command", "panel"), list(_TOGGLES.items()))
-def test_a_toggle_reads_only_its_own_panel(command: PanelCommand, panel: Panel) -> None:
-    """Every other panel being open must not change the answer — a toggle is about one surface."""
-    others = frozenset(_TOGGLES.values()) - {panel}
-
-    assert reduce(command, PanelInputs(others))[-1] == OpenPanel(panel)
-
-
-def test_opening_the_sidebar_dismisses_the_tooltip_first() -> None:
-    """Order matters: dismissing after the open leaves one frame of tooltip painted over the panel."""
-    assert reduce(PanelCommand.TOGGLE_SIDEBAR, PanelInputs()) == (
-        DismissHover(),
-        OpenPanel(Panel.SIDEBAR),
-    )
-
-
-@pytest.mark.parametrize("panel", [Panel.ANALYSIS, Panel.SUBTITLE_PICKER])
-def test_the_centred_modals_leave_the_tooltip_alone(panel: Panel) -> None:
-    """Pins today's behaviour, and it looks like an oversight rather than a decision — a tooltip
-    can float over either of these. Recorded here so changing it is a deliberate act with a
-    failing test, not something this migration did in passing.
-    """
-    command = next(c for c, p in _TOGGLES.items() if p is panel)
-
-    assert reduce(command, PanelInputs()) == (OpenPanel(panel),)
-
-
-def test_the_card_preview_replays_and_closes_without_a_toggle() -> None:
-    """It is not a toggle: replay re-shows the last mined card whether or not one is up, and the
-    host owns whether there is one to show."""
-    assert reduce(PanelCommand.REPLAY_CARD_PREVIEW, PanelInputs()) == (ReplayCardPreview(),)
-    assert reduce(PanelCommand.CLOSE_CARD_PREVIEW, PanelInputs()) == (
-        ClosePanel(Panel.CARD_PREVIEW),
-    )
+@pytest.mark.parametrize(
+    ("command", "open_panels", "expected"),
+    [
+        (
+            PanelCommand.TOGGLE_SIDEBAR,
+            frozenset(),
+            (DismissHover(), OpenPanel(Panel.SIDEBAR)),
+        ),
+        (
+            PanelCommand.TOGGLE_SIDEBAR,
+            frozenset({Panel.SIDEBAR}),
+            (ClosePanel(Panel.SIDEBAR),),
+        ),
+        (
+            PanelCommand.TOGGLE_ANALYSIS,
+            frozenset({Panel.SIDEBAR}),
+            (OpenPanel(Panel.ANALYSIS),),
+        ),
+        (
+            PanelCommand.TOGGLE_ANALYSIS,
+            frozenset({Panel.ANALYSIS}),
+            (ClosePanel(Panel.ANALYSIS),),
+        ),
+        (
+            PanelCommand.TOGGLE_SUBTITLE_PICKER,
+            frozenset({Panel.ANALYSIS}),
+            (OpenPanel(Panel.SUBTITLE_PICKER),),
+        ),
+        (
+            PanelCommand.TOGGLE_SUBTITLE_PICKER,
+            frozenset({Panel.SUBTITLE_PICKER}),
+            (ClosePanel(Panel.SUBTITLE_PICKER),),
+        ),
+        (PanelCommand.REPLAY_CARD_PREVIEW, frozenset(), (ReplayCardPreview(),)),
+        (
+            PanelCommand.CLOSE_CARD_PREVIEW,
+            frozenset(),
+            (ClosePanel(Panel.CARD_PREVIEW),),
+        ),
+    ],
+)
+def test_panel_command_matrix(command, open_panels, expected) -> None:
+    assert reduce(command, PanelInputs(open_panels)) == expected

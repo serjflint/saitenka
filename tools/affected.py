@@ -87,6 +87,8 @@ def classify(changed: list[str]) -> tuple[list[str], set[str], set[str]]:
         ):
             full.append(f)  # fixture injection / data goldens / runtime asset / file-loaded tool
         elif f.endswith(".py"):
+            if f.startswith("tests/") and not (ROOT / f).exists():
+                continue
             if f.startswith("src/") and _is_dynamic(f):
                 full.append(f)
             else:

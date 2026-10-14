@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import threading
 
 import pytest
 
@@ -36,9 +35,11 @@ def test_isolated_native_fault_reaches_the_report_bundle(monkeypatch, tmp_path):
         timeout=3,
         check=False,
     )
+    managed = crashlog.write_report("main-thread", "managed failure")
     members = report.collect(diagnostic_detail=True)
     assert result.returncode < 0
     assert "Fatal Python error" in members["crashes/faulthandler.log"]
+    assert f"crashes/{managed.name}" in members
     from test_diagnostic_findings import _load_findings
 
     bundle = report.build_report_bundle(
@@ -106,35 +107,42 @@ def test_excepthook_writes_report_but_ignores_keyboard_interrupt(monkeypatch, tm
     assert len(list(crashlog.crash_dir().glob("crash-*.log"))) == 1
 
 
-def test_install_is_idempotent_and_sets_hooks(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(crashlog, "_installed", False)
-    orig = sys.excepthook
-    try:
-        crashlog.install()
-        assert sys.excepthook is crashlog._excepthook
-        assert threading.excepthook is crashlog._thread_excepthook
-        crashlog.install()  # second call is a no-op (no raise)
-    finally:
-        sys.excepthook = orig
-        threading.excepthook = threading.__excepthook__
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_install_captures_uncaught_main_and_worker_failures(tmp_path):
+    import os
+    import subprocess
 
+    cache = tmp_path / "cache"
+    code = """
+import threading
+from saitenka.app import crashlog
 
-def test_report_bundle_includes_crash_logs(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    crashlog.write_report("main-thread", _tb())
-    import saitenka.app.doctor as doc
+crashlog.install()
+crashlog.install()
 
-    class _Rep:
-        def to_json(self):
-            return {"summary": {}, "checks": []}
+def fail_worker():
+    raise RuntimeError("worker-probe")
 
-    monkeypatch.setattr(doc, "run_checks", lambda *_a, **_k: _Rep())
-    from saitenka.app import report
+worker = threading.Thread(target=fail_worker, name="probe-thread")
+worker.start()
+worker.join()
+raise ValueError("main-probe")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        env={**os.environ, "SAITENKA_CACHE_DIR": str(cache)},
+        capture_output=True,
+        text=True,
+        timeout=3,
+        check=False,
+    )
 
-    monkeypatch.setattr(report, "_first_line", lambda *_c: "mpv v0.40.0")
-    members = report.collect(include_log=False, diagnostic_detail=True)
-    assert any(name.startswith("crashes/crash-") for name in members)
+    reports = [path.read_text(encoding="utf-8") for path in (cache / "crashes").glob("crash-*.log")]
+    assert result.returncode != 0
+    assert len(reports) == 2
+    assert any("worker-probe" in report and "thread: probe-thread" in report for report in reports)
+    assert any("main-probe" in report and "crash (main-thread)" in report for report in reports)
 
 
 def test_doctor_check_crashes(monkeypatch, tmp_path):

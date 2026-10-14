@@ -36,9 +36,6 @@ def _ast_grep_print_surface() -> set[str]:
 
 
 def test_print_allowlists_name_the_same_modules() -> None:
-    assert _ast_grep_print_surface() == _ruff_print_surface()
-
-
-def test_print_allowlist_is_not_empty() -> None:
-    """Negative control: a glob that matched nothing would make the assertion above vacuously true."""
-    assert len(_ruff_print_surface()) > 5
+    ruff_surface = _ruff_print_surface()
+    assert len(ruff_surface) > 5
+    assert _ast_grep_print_surface() == ruff_surface

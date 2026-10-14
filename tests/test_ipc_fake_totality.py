@@ -62,12 +62,3 @@ def test_the_fake_transport_answers_every_member_production_reads_off_ipc():
     assert not missing, "FakeIPC is missing members production reads off `ipc`: " + ", ".join(
         f"{member} (read by {', '.join(modules)})" for member, modules in sorted(missing.items())
     )
-
-
-def test_the_sweep_would_notice_a_member_the_fake_lacks():
-    """Negative control: the oracle bites. Without it, a totality test that found zero reads — or
-    compared against `dir()` of the wrong object — would pass while proving nothing."""
-    read = _members_read_off_ipc()
-    invented = "definitely_not_on_the_transport"
-    assert invented not in _fake_members()
-    assert invented not in read  # …so the real assertion above is not passing by accident

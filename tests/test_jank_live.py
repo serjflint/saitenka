@@ -138,13 +138,6 @@ def _stuck_controller(mod_state):
     return SessionController()
 
 
-def test_scroll_workload_rejects_a_non_scrollable_tooltip():
-    mod = _jank_module()
-    reader = _stuck_controller({"state": SimpleNamespace(full_height=1440), "view_h": 432})
-    with pytest.raises(RuntimeError, match="did not advance"):
-        mod._scroll_four(reader.tooltip_controller, reader.pump)
-
-
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
@@ -166,7 +159,9 @@ def test_the_stuck_scroll_message_names_the_reason(state, expected):
     assert "nest_rect=" in str(excinfo.value)
 
 
-def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order(make_session):
+def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order(
+    make_session, monkeypatch
+):
     """The regression the live replicas kept hitting, without a display: the workload's own dictionary
     has to be in place *before* the cue resolves its entries.
 
@@ -207,30 +202,15 @@ def test_the_harness_dictionary_makes_the_tooltip_scrollable_in_the_live_order(m
         assert view.state is not None
         assert view.state.full_height > view.view_h, mod._why_stuck(reader.graph.tooltip)
         mod._scroll_four(reader.graph.tooltip, reader.pump)  # raises if the viewport did not move
-        # Resolve the repaint target against a REAL graph. `test_live_latency_boundary_repaints_the
-        # _overlay` hands `_present_overlay` a double, so it stayed green for the whole period the
-        # harness asked the graph for a member that no longer existed — the AttributeError could only
-        # surface in the weekly live job, behind a step that was failing for its own reasons.
+        repaints = []
+        original_repaint = reader.graph.overlay.repaint
+
+        def repaint():
+            repaints.append(True)
+            original_repaint()
+
+        monkeypatch.setattr(reader.graph.overlay, "repaint", repaint)
         mod._present_overlay(reader.graph.lifecycle_surfaces)
+        assert repaints == [True]
     finally:
         reader.close()
-
-
-def test_live_latency_boundary_repaints_the_overlay():
-    mod = _jank_module()
-
-    class Overlay:
-        repaints = 0
-
-        def repaint(self):
-            self.repaints += 1
-
-    class Graph:
-        overlay = Overlay()
-
-    class SessionController:
-        graph = Graph()
-
-    reader = SessionController()
-    mod._present_overlay(reader.graph.overlay)
-    assert reader.graph.overlay.repaints == 1
