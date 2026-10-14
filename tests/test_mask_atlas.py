@@ -18,7 +18,7 @@ from saitenka.app.features.tooltip.preparation import (
     PersistentHeadCache,
     TooltipPreparationConfig,
 )
-from saitenka.mask_atlas import MaskAtlas, deserialize_core, serialize_core
+from saitenka.mask_atlas import MaskAtlas
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 
@@ -30,43 +30,11 @@ def _raw(core) -> bytes:
     return bytes(core)
 
 
-def test_serialize_core_round_trips_byte_identical():
-    core, _off = _font().getmask2(
-        "見", "L", None, None, None, 0, "ls", 0, (0.0, 0.0), stroke_filled=True
-    )
-    w, h, data = serialize_core(core)
-    core2 = deserialize_core(w, h, "L", data)
-    assert core2.size == core.size
-    assert _raw(core2) == _raw(core)  # a loaded mask is the same stencil → draws identically
-
-
 @pytest.fixture
 def _atlas_off():
     # Always restore the module globals so a failure never leaks the atlas into other tests.
     yield
-    fonts.set_mask_atlas(None, None)
-
-
-@pytest.mark.usefixtures("_atlas_off")
-def test_atlas_hit_reuses_mask_without_calling_getmask2(tmp_path, monkeypatch):
-    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
-    assert atlas is not None
-    font = _font()
-    gid = font._satk_font_id  # stamped by load()
-    fresh = fonts.glyph_mask(font, "見", "L", (0.0, 0.0))
-    atlas.put(gid, "見", "L", (0.0, 0.0), fresh)
-
-    mem: dict = {}
-    assert atlas.load_into(mem) == 1
-    fonts.set_mask_atlas(mem, None)
-    fonts._tls.masks = OrderedDict()  # drop the per-thread memo → force the atlas path
-
-    def _boom(*_a, **_k):
-        raise AssertionError("getmask2 was called — the atlas hit should have skipped it")
-
-    monkeypatch.setattr(font, "getmask2", _boom)
-    got = fonts.glyph_mask(font, "見", "L", (0.0, 0.0))
-    assert _raw(got[0]) == _raw(fresh[0]) and got[1] == fresh[1]  # byte-identical, from disk
+    fonts.set_mask_atlas(None)
 
 
 @pytest.mark.usefixtures("_atlas_off")
@@ -74,19 +42,16 @@ def test_write_back_persists_a_live_miss(tmp_path):
     atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
     assert atlas is not None
     font = _font("語")
-    fonts.set_mask_atlas(None, atlas)  # write-only
+    fonts.set_mask_atlas(atlas)
     fonts._tls.masks = OrderedDict()
     fonts.glyph_mask(font, "語", "L", (0.0, 0.0))  # a miss → written back
     assert atlas.count() == 1
-    mem: dict = {}
-    atlas.load_into(mem)
-    assert any(k[1] == "語" for k in mem)  # keyed by (font_id, text, mode, sx, sy)
+    assert atlas.get_one(font._satk_font_id, "語", "L", (0.0, 0.0)) is not None
 
 
 @pytest.mark.usefixtures("_atlas_off")
 def test_lazy_get_one_reuses_mask_without_bulk_load(tmp_path, monkeypatch):
-    # The runtime path: no load_into / no shared mem dict — glyph_mask reads the atlas per-glyph and
-    # must still skip getmask2 on a hit (byte-identical), so a session never bulk-loads the atlas.
+    # The runtime path reads the atlas per glyph and skips getmask2 on a hit.
     atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
     assert atlas is not None
     font = _font()
@@ -94,7 +59,7 @@ def test_lazy_get_one_reuses_mask_without_bulk_load(tmp_path, monkeypatch):
     fresh = fonts.glyph_mask(font, "見", "L", (0.0, 0.0))
     atlas.put(gid, "見", "L", (0.0, 0.0), fresh)
 
-    fonts.set_mask_atlas(None, atlas)  # lazy read source (no mem dict), also write-back
+    fonts.set_mask_atlas(atlas)
     fonts._tls.masks = OrderedDict()  # drop the per-thread memo → force the atlas path
 
     def _boom(*_a, **_k):
@@ -118,11 +83,7 @@ def test_get_one_miss_then_hit_round_trips(tmp_path):
 
 @pytest.mark.usefixtures("_atlas_off")
 def test_runtime_activation_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
-    # Regression: startup must wire the atlas as a LAZY per-glyph reader, NEVER bulk-load it into RAM.
-    # An 864 MB / 587k-mask `load_into` stalled startup ~9s (the "saitenka starting…" hang). Guard: the
-    # startup actor opens the atlas, points fonts at it for lazy reads + write-back, and never bulk-loads.
-    import saitenka.mask_atlas as mask_atlas_mod
-
+    # Regression: startup must use per-glyph reads; bulk loading a large atlas stalled startup.
     atlas_path = tmp_path / "mask-atlas.sqlite"  # a prebuilt atlas the session should read lazily
     seed = MaskAtlas.open(atlas_path)
     assert seed is not None
@@ -132,12 +93,7 @@ def test_runtime_activation_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
     )
     seed.close()
 
-    def _boom(*_a, **_k):
-        raise AssertionError("load_into was called — startup must NOT bulk-load the atlas into RAM")
-
-    monkeypatch.setattr(mask_atlas_mod.MaskAtlas, "load_into", _boom)
-
-    fonts.set_mask_atlas(None, None)  # start from a clean slate
+    fonts.set_mask_atlas(None)
     opened = mask_atlas_startup.open_mask_atlas(
         mask_atlas_startup.MaskAtlasRequest(enabled=True, path=atlas_path),
         threading.Event(),
@@ -158,8 +114,6 @@ def test_runtime_activation_is_lazy_never_bulk_loads(tmp_path, monkeypatch):
     )
     assert target.install_mask_atlas(opened)
 
-    assert fonts._ATLAS_MEM is None  # no bulk read dict loaded into RAM
-    assert fonts._ATLAS_WRITE is target.mask_atlas  # atlas = lazy read + write-back
     # and it actually reads lazily: the seeded glyph resolves through get_one, not getmask2
     fonts._tls.masks = OrderedDict()
 
@@ -231,16 +185,6 @@ def test_runtime_activation_opens_only_after_its_correlated_terminal(tmp_path):
     assert isinstance(
         mask_atlas_startup.finish(state, completion), mask_atlas_startup.OpenedMaskAtlas
     )
-
-
-def test_put_is_idempotent_no_duplicate_rows(tmp_path):
-    # INSERT OR IGNORE: putting the same key twice keeps ONE row (no duplicate, no error).
-    atlas = MaskAtlas.open(tmp_path / "atlas.sqlite")
-    assert atlas is not None
-    mask = _font().getmask2("見", "L", None, None, None, 0, "ls", 0, (0.0, 0.0), stroke_filled=True)
-    atlas.put("f:40:400", "見", "L", (0.0, 0.0), mask)
-    atlas.put("f:40:400", "見", "L", (0.0, 0.0), mask)  # same key again
-    assert atlas.count() == 1
 
 
 def test_put_counts_new_vs_already_cached(tmp_path):

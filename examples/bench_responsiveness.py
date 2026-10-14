@@ -883,14 +883,13 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     atlas = mask_atlas.MaskAtlas.open(atlas_path)
     if atlas is None:
         raise RuntimeError(f"failed to open mask atlas at {atlas_path}")
-    fonts.set_mask_atlas(None, atlas)
+    fonts.set_mask_atlas(atlas)
     cold_rasters, cold_ms = _atlas_render_pass(reader_a, corpus, cap, count_rasters=True)
     atlas.checkpoint()
 
-    # Phase B — WARM: fresh reader (empty panel cache) + the atlas bulk-loaded into RAM, atlas READ on.
-    mem: dict = {}
-    n_masks = atlas.load_into(mem)
-    fonts.set_mask_atlas(mem, None)
+    # Phase B — WARM: fresh reader (empty panel cache) + the production lazy atlas path.
+    n_masks = atlas.count()
+    fonts.set_mask_atlas(atlas)
     reader_b = create_session_controller(
         _fake_ipc(),
         services=SessionServices(
@@ -900,7 +899,7 @@ def run_mask_atlas(rt: dict, require_ft: bool = False, json_path: str | None = N
     )
     reader_b.graph.screen.osd = OSD
     warm_rasters, warm_ms = _atlas_render_pass(reader_b, corpus, cap, count_rasters=True)
-    fonts.set_mask_atlas(None, None)
+    fonts.set_mask_atlas(None)
 
     gil_rc = finalize_runtime(rt, require_ft)
     print(f"\nSaitenka overlay — MASK ATLAS A/B (#149 Tier-1)   ({tag})")

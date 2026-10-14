@@ -271,7 +271,7 @@ class PersistentHeadCache:
         from saitenka import fonts
 
         self._mask_atlas = opened.atlas
-        fonts.set_mask_atlas(None, opened.atlas)
+        fonts.set_mask_atlas(opened.atlas)
         log.info(
             "mask atlas: ready - lazy per-glyph reads (%d MB on disk)",
             opened.atlas.disk_bytes() // 1_000_000,
@@ -284,7 +284,7 @@ class PersistentHeadCache:
             return
         from saitenka import fonts
 
-        fonts.set_mask_atlas(None, None)
+        fonts.set_mask_atlas(None)
         self._mask_atlas = None
         atlas.close()
 

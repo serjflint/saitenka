@@ -80,33 +80,19 @@ def test_parallel_and_sequential_render_ahead_agree(monkeypatch):
 
 
 def test_precompose_first_viewport_matches_render_panel_crop():
-    # Step 2 end-to-end over REAL content: precompose's cached first viewport is byte-identical to the
-    # one-shot render_panel crop (and to a fresh viewport_bgra), so the warm-hover copy is exact.
-    from saitenka.bgra import to_bgra_array
-
-    entry = _entry(20)
-    ref = to_bgra_array(render_panel(entry, width=WIDTH).crop((0, 0, WIDTH, 260)))
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
-    wp.precompose(260, overscan=260)
-    warm = wp.viewport_bgra(0, 260, overscan=260)
-    assert wp.last_frame_rasters == 0  # served from the idle-composed cache
-    assert np.array_equal(warm, ref)  # pixel-identical to the one-shot crop
-
-
-def test_panel_precompose_head_warms_the_capped_first_viewport():
-    # Panel.precompose_head maps the show's cap to view_h = min(full_height, cap) and precomposes; a
-    # subsequent viewport at that cap is then a zero-raster cache hit (the prefetch-worker → warm-hover
-    # contract). A tall entry caps at `cap`; the copy the show reads is isolated.
     from saitenka.app.features.tooltip.popups import Panel
+    from saitenka.bgra import to_bgra_array
 
     entry = _entry(20)
     panel = Panel.from_rows(panel_rows(entry, WIDTH), WIDTH, "かける")
     cap = 260
-    panel.render_head(cap)  # measure the head (what the prefetch full path does before precompose)
+    panel.render_head(cap)
     panel.precompose_head(cap)
     vh = min(panel.full_height, cap)
-    panel.viewport(0, vh, overscan=vh)
-    assert panel.last_frame_rasters == 0  # served from the idle precompose
+    warm = panel.viewport(0, vh, overscan=vh)
+    ref = to_bgra_array(render_panel(entry, width=WIDTH).crop((0, 0, WIDTH, vh)))
+    assert panel.last_frame_rasters == 0
+    assert np.array_equal(warm, ref)
 
 
 def test_render_ahead_is_cancellable_between_blocks():
@@ -121,14 +107,6 @@ def test_render_ahead_is_cancellable_between_blocks():
 
     n = wp.render_ahead(0, 260, direction=1, max_blocks=8, should_cancel=cancel)
     assert n == 2  # stopped early — did not render all 8
-
-
-def test_skeleton_frame_is_always_a_full_atomic_frame():
-    entry = _entry(16)
-    wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
-    # even before ANY block is rendered, the frame is full-size (never a partial upload)
-    frame = wp.skeleton_frame(500, 260)
-    assert frame.size == (WIDTH, 260)
 
 
 def test_skeleton_converges_to_the_exact_viewport_once_filled():
@@ -149,7 +127,7 @@ def test_skeleton_draws_bands_only_where_blocks_are_missing():
     scroll = total // 2
     wp = WindowedPanel(panel_rows(entry, WIDTH), WIDTH)
     skel = np.asarray(wp.skeleton_frame(scroll, 260))  # nothing rendered at this offset yet
-    # the skeleton fill colour (214) appears (bands drawn) — the frame is not just background
+    assert skel.shape[:2] == (260, WIDTH)
     assert (skel[:, :, 0] == 214).any()
 
 
