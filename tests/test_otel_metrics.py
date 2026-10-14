@@ -189,8 +189,9 @@ def test_timed_is_a_noop_when_histogram_is_none():
 def test_timed_records_duration_and_attributes():
     with otel_metrics.timed(otel_metrics.dict_sql_duration_ms, dict="Jitendex"):
         pass
-    snap = otel_metrics.snapshot()
-    assert snap["saitenka.dict_sql.duration_ms"]["count"] == 1
+    hist = otel_metrics.snapshot()["saitenka.dict_sql.duration_ms"]
+    assert hist["count"] == 1
+    assert set(hist["by"]) == {"dict=Jitendex"}
 
 
 @pytest.mark.usefixtures("registered")
@@ -222,14 +223,6 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     with otel_metrics.traced("test-span"):
         ran = True
     assert ran
-
-
-@pytest.mark.usefixtures("registered")
-def test_traced_creates_a_real_span_when_telemetry_is_configured():
-    with otel_metrics.traced("my-span", foo="bar"):
-        pass
-    # the fixture's provider has no exporter attached — this just proves start_as_current_span
-    # didn't raise and the block ran; span content is covered end-to-end in test_telemetry.py.
 
 
 class _FakeSpan:
@@ -268,10 +261,12 @@ class _FakeTraceModule:
         return self.tracer
 
 
-def test_traced_stamps_cpu_ms_so_wall_vs_cpu_reveals_a_stall(monkeypatch):
+def test_traced_stamps_cpu_ms_and_native_thread_id(monkeypatch):
     """wall (the span dur) ≫ cpu_ms ⇒ the thread was descheduled (GIL contention / lock / I/O),
     not working — the one signal that told genuinely-CPU-bound freq load apart from GIL-stalled
     startup. A fake trace module keeps this off OTel's set-once global provider."""
+    import threading
+
     fake = _FakeTraceModule()
     from telemetry_helpers import enable_span_gate
 
@@ -283,25 +278,7 @@ def test_traced_stamps_cpu_ms_so_wall_vs_cpu_reveals_a_stall(monkeypatch):
     attrs = fake.tracer.spans[0].attributes
     assert "cpu_ms" in attrs
     assert isinstance(attrs["cpu_ms"], float)
-
-
-def test_traced_stamps_the_real_native_thread_id(monkeypatch):
-    """otel_export._span_to_ctf_event reads this attribute back for the CTF "tid" field — without
-    it, independently-started spans (no parent-child relationship, so different random trace_ids)
-    scatter across a different synthetic "thread" track each in Perfetto instead of grouping by the
-    actual Python thread that ran them. A fake trace module here keeps this deterministic — no
-    dependency on OTel's global-provider-set-once ordering across the test session."""
-    import threading
-
-    fake = _FakeTraceModule()
-    from telemetry_helpers import enable_span_gate
-
-    enable_span_gate(monkeypatch)
-    monkeypatch.setattr(otel_metrics, "_trace_available", True)
-    monkeypatch.setattr(otel_metrics, "_trace_module", fake)
-    with otel_metrics.traced("x"):
-        pass
-    assert fake.tracer.spans[0].attributes["thread.id"] == threading.get_native_id()
+    assert attrs["thread.id"] == threading.get_native_id()
 
 
 def test_instrumented_is_a_noop_when_histogram_is_none():
@@ -314,19 +291,29 @@ def test_instrumented_is_a_noop_when_histogram_is_none():
 
 
 @pytest.mark.usefixtures("registered")
-def test_instrumented_records_both_the_histogram_and_a_span():
+def test_instrumented_records_both_the_histogram_and_a_span(monkeypatch):
+    from telemetry_helpers import enable_span_gate
+
+    fake = _FakeTraceModule()
+    enable_span_gate(monkeypatch)
+    monkeypatch.setattr(otel_metrics, "_trace_available", True)
+    monkeypatch.setattr(otel_metrics, "_trace_module", fake)
     with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render", dict="X"):
         pass
-    snap = otel_metrics.snapshot()
-    assert snap["saitenka.render.duration_ms"]["count"] == 1
+    assert otel_metrics.snapshot()["saitenka.render.duration_ms"]["count"] == 1
+    assert len(fake.tracer.spans) == 1
 
 
 @pytest.mark.usefixtures("registered")
 def test_show_tooltip_histogram_records_with_a_kind_label():
     otel_metrics.show_tooltip_duration_ms.record(30.0, {"kind": "cold"})
     otel_metrics.show_tooltip_duration_ms.record(1.0, {"kind": "warm"})
-    snap = otel_metrics.snapshot()
-    assert snap["saitenka.show_tooltip.duration_ms"]["count"] == 2
+    hist = otel_metrics.snapshot()["saitenka.show_tooltip.duration_ms"]
+    assert hist["count"] == 2
+    assert hist["by"] == {
+        "kind=cold": {"count": 1, "max": 30.0},
+        "kind=warm": {"count": 1, "max": 1.0},
+    }
 
 
 @pytest.mark.usefixtures("registered")
