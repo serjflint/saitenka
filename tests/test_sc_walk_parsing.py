@@ -45,30 +45,20 @@ def test_link_query_non_str_href_is_none():
 # --- colour parsing (via inline_flow) -------------------------------------------------------------
 
 
-def test_color_hex6():
-    assert _span({"color": "#abcdef"}).style.color == (171, 205, 239, 255)
-
-
-def test_color_hex3_expands():
-    assert _span({"color": "#0af"}).style.color == (0, 170, 255, 255)
-
-
-def test_color_named():
-    assert _span({"color": "red"}).style.color == (200, 40, 40, 255)
-
-
-def test_color_rgb_function():
-    assert _span({"color": "rgb(10, 20, 30)"}).style.color == (10, 20, 30, 255)
-
-
-def test_color_bad_hex_inherits_base():
-    assert _span({"color": "#zzzzzz"}).style.color == _span({}).style.color  # unparseable → inherit
-
-
-def test_color_unknown_name_inherits_base():
-    assert (
-        _span({"color": "chartreuse"}).style.color == _span({}).style.color
-    )  # not named/#/rgb → inherit
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("#abcdef", (171, 205, 239, 255)),
+        ("#0af", (0, 170, 255, 255)),
+        ("red", (200, 40, 40, 255)),
+        ("rgb(10, 20, 30)", (10, 20, 30, 255)),
+        ("#zzzzzz", BASE.color),
+        ("chartreuse", BASE.color),
+    ],
+    ids=["hex6", "hex3", "named", "rgb", "bad-hex", "unknown-name"],
+)
+def test_color_values(value, expected):
+    assert _span({"color": value}).style.color == expected
 
 
 # --- size parsing (via inline_flow) ---------------------------------------------------------------
@@ -113,15 +103,10 @@ def _tagged(tag: str):
     return inline_flow({"tag": tag, "content": "あ"}, BASE)[0]
 
 
-def test_sup_tag_raises_and_shrinks():
-    span = _tagged("sup")
-    assert span.style.valign == 1  # raised
-    assert span.style.size == round(BASE.size * 0.72)  # small annotation
-
-
-def test_sub_tag_lowers_and_shrinks():
-    span = _tagged("sub")
-    assert span.style.valign == -1  # lowered
+@pytest.mark.parametrize(("tag", "valign"), [("sup", 1), ("sub", -1)])
+def test_script_tags_shift_and_shrink(tag, valign):
+    span = _tagged(tag)
+    assert span.style.valign == valign
     assert span.style.size == round(BASE.size * 0.72)
 
 
