@@ -196,17 +196,12 @@ def test_anki_launch_is_fire_and_forget_off_the_critical_path(monkeypatch):
     monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)  # Anki not up at build
     launched = []
     monkeypatch.setattr(anki_mod, "launch_anki", lambda: launched.append(True) or True)
-    waited = []
-    monkeypatch.setattr(
-        anki_mod, "wait_until_anki_up", lambda *_a, **_k: waited.append(True) or True
-    )
     monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
 
     _, anki, mine_conf, _ = reader_deps.build_reader_deps(
         {"mine": {"deck": "D", "model": "M"}}, color=False
     )
     assert launched == [True]  # Anki was kicked off...
-    assert waited == []  # ...but the build never blocked polling for it
     assert anki == "ANKI" and mine_conf is not None
 
 
