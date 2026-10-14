@@ -97,27 +97,9 @@ def test_unique_japanese_text_attachment_is_downloaded_and_decompressed(tmp_path
     assert path.name == "tsukihime-1-9.ass"
     assert opener.requests[0] == f"{search_url}?q=Show+1&limit=10"
     assert opener.requests[1:] == [detail_url, download_url]
-
-
-def test_every_request_carries_a_saitenka_user_agent(tmp_path):
-    """Cloudflare rule 1010 answers urllib's default ``Python-urllib/x.y`` UA with a 403, so an
-    unbranded request fails against the live API on search, detail, and download alike."""
-    opener = Opener(
-        [
-            Response(
-                _json(_search("[Group] Show - 01.mkv")), f"{tsukihime.API_BASE}/search/torrents"
-            ),
-            Response(_json(_detail(_attachment())), f"{tsukihime.API_BASE}/torrents/1"),
-            Response(lzma.compress(b"sub"), "https://storage.tsukihime.org/attach/00000009/9.xz"),
-        ]
-    )
-
-    tsukihime.TsukiHimeClient(opener=opener).fetch("Show", 1, tmp_path)
-
-    assert len(opener.headers) == 3
-    for headers in opener.headers:
-        assert headers["user-agent"] == tsukihime.USER_AGENT
-        assert not headers["user-agent"].lower().startswith("python-urllib")
+    agents = [headers["user-agent"] for headers in opener.headers]
+    assert agents == [tsukihime.USER_AGENT] * 3
+    assert not tsukihime.USER_AGENT.lower().startswith("python-urllib")
 
 
 @pytest.mark.parametrize(
@@ -319,16 +301,20 @@ def test_invalid_or_oversized_xz_is_non_destructive(payload, tmp_path):
     assert not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("base", ["http://api.tsukihime.org/v1", "file:///tmp/api"])
-def test_api_base_must_be_https(base):
-    with pytest.raises(tsukihime.TsukiHimeError, match="untrusted"):
-        tsukihime.TsukiHimeClient(api_base=base)
-
-
-@pytest.mark.parametrize("timeout", [0, -1, float("nan"), float("inf")])
-def test_timeout_must_be_finite_and_positive(timeout):
-    with pytest.raises(tsukihime.TsukiHimeError, match="timeout"):
-        tsukihime.TsukiHimeClient(timeout=timeout)
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        ({"api_base": "http://api.tsukihime.org/v1"}, "untrusted"),
+        ({"api_base": "file:///tmp/api"}, "untrusted"),
+        ({"timeout": 0}, "timeout"),
+        ({"timeout": -1}, "timeout"),
+        ({"timeout": float("nan")}, "timeout"),
+        ({"timeout": float("inf")}, "timeout"),
+    ],
+)
+def test_client_rejects_unsafe_transport_configuration(options, message):
+    with pytest.raises(tsukihime.TsukiHimeError, match=message):
+        tsukihime.TsukiHimeClient(**options)
 
 
 def test_network_errors_are_soft_provider_errors(tmp_path):
