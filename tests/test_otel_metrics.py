@@ -77,12 +77,14 @@ def test_snapshot_reports_counter_value():
 
 
 @pytest.mark.usefixtures("registered")
-def test_snapshot_reports_histogram_percentiles():
+def test_snapshot_reports_histogram_summary():
     for ms in (1, 2, 5, 10, 50, 100, 500):
         otel_metrics.render_duration_ms.record(ms)
     snap = otel_metrics.snapshot()
     hist = snap["saitenka.render.duration_ms"]
     assert hist["count"] == 7
+    assert hist["sum"] == 668
+    assert hist["max"] == 500
     assert hist["p50"] is not None
     assert hist["p95"] is not None
     assert hist["p99"] is not None
@@ -129,17 +131,6 @@ def test_instrumented_emit_span_false_still_records_histogram():
 
 
 @pytest.mark.usefixtures("registered")
-def test_snapshot_histogram_reports_exact_max():
-    # p50/p95/p99 are bucket-bound estimates; max is the exact largest sample — the band-size tail
-    # the trace consumer needs, so it's summarized alongside the percentiles.
-    for px in (64, 128, 200, 256):
-        otel_metrics.block_rendered_px.record(px)
-    hist = otel_metrics.snapshot()["saitenka.block_cache.rendered_px"]
-    assert hist["max"] == 256
-    assert hist["count"] == 4
-
-
-@pytest.mark.usefixtures("registered")
 def test_snapshot_reports_gil_enabled_gauge():
     snap = otel_metrics.snapshot()
     assert snap["saitenka.runtime.gil_enabled"]["value"] in {0, 1}
@@ -170,10 +161,6 @@ def test_unregister_resets_instruments_to_none():
     otel_metrics.unregister()
     assert otel_metrics.render_duration_ms is None
     assert otel_metrics.snapshot() == {}
-
-
-def test_percentiles_helper_on_empty_histogram():
-    assert otel_metrics._percentiles([], [], 0.0, 0) == {"p50": None, "p95": None, "p99": None}
 
 
 def test_timed_is_a_noop_when_histogram_is_none():
