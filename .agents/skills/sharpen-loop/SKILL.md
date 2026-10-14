@@ -19,6 +19,9 @@ Read `.agents/sharpen/SPEC.md` completely, then run one existing-test audit.
    target-grounded actionable lint finding, or a concrete brittleness/redundancy witness.
 3. Confirm the mapped tests are green. Edit only the selected existing test; missing behavior routes to
    Grow and production/tool changes route to `contribute`.
+   If several internal tests own the same user-visible proposition, stop the bounded audit and hand off a
+   priced portable-corpus migration. Sharpen records the duplicate family; it does not polish or migrate
+   every internal owner one at a time.
 4. Run focused affected tests and `sharpen_gate.py anticheat` for every assertion edit, then the relevant
    objective proof:
    - mutation: kill the named survivor and retain relevant prior kills;

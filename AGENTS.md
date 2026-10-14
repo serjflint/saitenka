@@ -187,6 +187,12 @@ when you touch them, never in a big-bang sweep. Tiers run via `poe test` (the fa
 assert); their exact flags and marker exclusions live in `[tool.poe.tasks]` (SSOT). Adequacy beyond the
 unit suite is its own contract: see **Mutation auditing** and **Fuzzing & symbolic checks** below.
 
+Permanent tests are compatibility assets. User-visible multi-component behavior belongs in the portable
+scenario corpus under `contracts/`; public package laws, real external boundaries, deterministic schedule
+controls, and composition-totality checks remain at their stable seams. A test of a reducer, controller,
+helper, or private state is temporary scaffolding unless it names the invariant owner and its retirement
+condition. The `write-test` skill owns the classification procedure.
+
 The rules below are the *invariants*; the step-by-step procedure for authoring one test — decision tree,
 recipes against the real fakes, when-not-to-test — is the **write-test skill** (`.agents/skills/write-test/`).
 Consult it when adding or rewriting a test.

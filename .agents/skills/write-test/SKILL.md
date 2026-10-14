@@ -26,6 +26,14 @@ Sharpen owns edits to existing assertions; adequacy coordinates still enter thro
 
 ## Decision tree (walk it before typing)
 
+0. **Where does the contract live?**
+   - User-visible behavior spanning components → add a row to the versioned corpus under `contracts/`;
+     expected answers stay outside the executable adapter request.
+   - Stable package/math law → test the public package seam, preferably as a property or conformance row.
+   - Real external boundary, deterministic interleaving, production-path parity, or composition totality →
+     keep the focused structural/boundary test that preserves that input or schedule class.
+   - Private reducer/controller/helper detail needed while implementing → temporary scaffold only; name the
+     permanent invariant owner and the condition that deletes this test.
 1. **What am I testing?**
    - Pure core (`sub_index`, `tokenize`, `scoring`, `render.flow`, `anki.build_note`,
      `fsrs`, deinflect behind the chokepoint) → fast default tier, construct real objects.
@@ -58,6 +66,9 @@ Sharpen owns edits to existing assertions; adequacy coordinates still enter thro
    an `@example` to an existing test over a near-duplicate new file — one row, every property inherits
    the corner. A *new* test is for a genuinely new scenario. (Adding an assertion is fine; *changing*
    an existing one is the Sharpen loop's job, not yours.)
+
+When fixing behavior already owned by a portable scenario, extend that scenario family and demonstrate the
+fault through its adapter. Do not add a second permanent test at an internal seam merely to localize failure.
 
 ## Recipes (canonical tests in-tree — read them, don't reinvent)
 
