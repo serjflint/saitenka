@@ -7,6 +7,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 from saitenka.app.dictdb import DictionaryDb
 
 BENCH_PATH = Path(__file__).resolve().parent.parent / "examples" / "bench_responsiveness.py"
@@ -40,28 +42,26 @@ def _make_db(path: Path, entries) -> DictionaryDb:
     return db
 
 
-def test_discover_pathological_returns_largest_glossaries(tmp_path):
+@pytest.mark.parametrize(
+    ("n", "expected"),
+    [(2, ["大", "中"]), (3, ["大", "中", "次"])],
+)
+def test_discover_pathological_returns_largest_glossaries(tmp_path, n, expected):
     db = _make_db(
         tmp_path / "d.sqlite",
         [
             ("小", "しょう", ["x"]),  # tiny payload
             ("大", "だい", ["long gloss " * 200]),  # the biggest payload
             ("中", "ちゅう", ["medium gloss " * 20]),  # middle
+            ("次", "じ", ["next gloss " * 10]),
         ],
     )
     mod = _bench_module()
-    rows = mod.discover_pathological(db, _DICT_ID, n=2)
-    assert len(rows) == 2
+    rows = mod.discover_pathological(db, _DICT_ID, n=n)
+    assert len(rows) == n
     # ordered by glossary payload size, descending — the biggest entry first
-    assert rows[0][0] == "大"
-    assert rows[1][0] == "中"
+    assert [row[0] for row in rows] == expected
     # each row carries (term, reading, payload_bytes)
     _term, reading, size = rows[0]
     assert reading == "だい"
     assert isinstance(size, int) and size > rows[1][2]
-
-
-def test_discover_pathological_caps_at_n(tmp_path):
-    db = _make_db(tmp_path / "d.sqlite", [(f"語{i}", f"ご{i}", ["g" * (i + 1)]) for i in range(10)])
-    mod = _bench_module()
-    assert len(mod.discover_pathological(db, _DICT_ID, n=3)) == 3
