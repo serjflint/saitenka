@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 
 import pytest
 
@@ -104,35 +105,6 @@ def _dexie(tmp_path):
     return p
 
 
-def test_value_unwraps_typeson_wrapper_but_not_inbound_rows():
-    assert ydb._value({"$": [1, {"a": 2}]}) == {"a": 2}
-    assert ydb._value({"$": [1, {"a": 2}], "$types": {}}) == {"a": 2}
-    assert ydb._value({"expression": "x"}) == {"expression": "x"}  # inbound row: value as-is
-
-
-def test_converters_match_yomitan_bank_shapes():
-    v = {
-        "expression": "猫",
-        "reading": "ねこ",
-        "definitionTags": "n",
-        "glossary": ["cat"],
-        "sequence": 3,
-    }
-    assert ydb._term_bank_entry(v) == ["猫", "ねこ", "n", "", 0, ["cat"], 3, ""]
-    assert ydb._term_meta_entry({"expression": "猫", "mode": "freq", "data": {"x": 1}}) == [
-        "猫",
-        "freq",
-        {"x": 1},
-    ]
-    assert ydb._tag_bank_entry({"name": "n", "category": "pos", "order": 2, "notes": "noun"}) == [
-        "n",
-        "pos",
-        2,
-        "noun",
-        0,
-    ]
-
-
 def test_read_header_validates_dexie_and_totals(tmp_path):
     tables, total = ydb.read_header(_dexie(tmp_path))
     assert total == 5
@@ -167,3 +139,12 @@ def test_import_reconstructs_zips_that_the_loader_reads(tmp_path):
     # content-based classification: the def dict vs the freq dict built from termMeta
     assert classify_zip(out / "TestDict.zip") == "dict"
     assert classify_zip(out / "TestFreq.zip") == "freq"
+
+    with zipfile.ZipFile(out / "TestDict.zip") as zf:
+        terms = json.loads(zf.read("term_bank_1.json"))
+        tags = json.loads(zf.read("tag_bank_1.json"))
+    with zipfile.ZipFile(out / "TestFreq.zip") as zf:
+        frequencies = json.loads(zf.read("term_meta_bank_1.json"))
+    assert terms[0] == ["猫", "ねこ", "n", "", 0, ["cat"], 1, ""]
+    assert tags == [["n", "partOfSpeech", 0, "noun", 0]]
+    assert frequencies == [["猫", "freq", {"reading": "ねこ", "frequency": 100}]]
