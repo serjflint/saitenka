@@ -33,7 +33,7 @@ def test_playback_adapter_runs_without_receiving_expected_answers() -> None:
     request.update(type="run", protocol=PROTOCOL)
 
     [result] = run_protocol(
-        [sys.executable, str(Path(__file__).with_name("playback_adapter.py"))],
+        [sys.executable, str(Path(__file__).with_name("default_adapter.py"))],
         protocol=PROTOCOL,
         capability=CAPABILITY,
         requests=[request],

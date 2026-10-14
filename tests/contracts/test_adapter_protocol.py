@@ -58,7 +58,7 @@ def test_default_adapter_runs_the_same_corpus_through_the_executable_port() -> N
     scenario = next(row for row in scenarios if row["scenario_id"] == "startup-observes-playback")
 
     [reply] = run_executable(
-        [sys.executable, str(Path(__file__).with_name("saitenka_session_adapter.py"))],
+        [sys.executable, str(Path(__file__).with_name("default_adapter.py"))],
         [scenario],
     )
 

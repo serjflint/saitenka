@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,7 @@ ADAPTER_DIR = Path(__file__).resolve().parent
 if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
-from protocol import CAPABILITY, PROTOCOL, compact_json  # noqa: E402
+from protocol import PROTOCOL  # noqa: E402
 from session_builder import build_session  # noqa: E402
 from util import FakeIPC, session_gateway  # noqa: E402
 
@@ -169,24 +168,3 @@ def execute(request: dict) -> dict:
         "status": "ok",
         "observations": observations,
     }
-
-
-def main() -> int:
-    for line in sys.stdin:
-        request = json.loads(line)
-        if request.get("type") == "hello":
-            if request.get("protocol") != PROTOCOL or CAPABILITY not in request.get("requires", []):
-                return 2
-            sys.stdout.write(
-                compact_json({"type": "hello", "protocol": PROTOCOL, "capabilities": [CAPABILITY]})
-                + "\n"
-            )
-            continue
-        if request.get("type") != "run" or request.get("protocol") != PROTOCOL:
-            return 2
-        sys.stdout.write(compact_json(execute(request)) + "\n")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
