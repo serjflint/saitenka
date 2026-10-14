@@ -19,7 +19,7 @@ from session_builder import build_session  # noqa: E402
 from util import FakeIPC, session_gateway  # noqa: E402
 
 from saitenka.app import subtitle_adapter  # noqa: E402
-from saitenka.app.config import ReaderOptions  # noqa: E402
+from saitenka.app.config import KeyOptions, ReaderOptions  # noqa: E402
 from saitenka.app.session.factory import SessionInfrastructure  # noqa: E402
 from saitenka.app.subtitle_render import NullRenderer  # noqa: E402
 from saitenka.runtime import ConnectionLost, ConnectionReady, ConnectionReplaced  # noqa: E402
@@ -44,8 +44,13 @@ class SaitenkaSessionAdapter:
         self.ipc = FakeIPC()
         self.ipc.props.update(given.get("mpv_properties", {}))
         self._capture = frozenset(given.get("capture", ["all"]))
+        self._binding_keys = tuple(given.get("capture_binding_keys", ()))
+        self._binding_sections: dict[str, tuple[str | None, dict[str, str]]] = {}
+        self._bindings_reported = False
         self.gateway = session_gateway(self.ipc)
-        options = ReaderOptions().with_overrides(prefetch=False)
+        options = ReaderOptions(keys=KeyOptions(**given.get("key_options", {}))).with_overrides(
+            prefetch=False
+        )
         self.session = build_session(
             self.ipc,
             options=options,
@@ -76,6 +81,31 @@ class SaitenkaSessionAdapter:
                 {"source": "mpv", "kind": "command", "value": value},
             )
         self._command_cursor = len(self.ipc.commands)
+        if self._binding_keys and self._binding_sections and not self._bindings_reported:
+            self._bindings_reported = True
+            for section, (flags, _bindings) in self._binding_sections.items():
+                self._append(
+                    "binding",
+                    {
+                        "source": "mpv",
+                        "kind": "binding-section",
+                        "name": section,
+                        "flags": flags,
+                    },
+                )
+            all_bindings = {
+                key: (section, message)
+                for section, (_flags, bindings) in self._binding_sections.items()
+                for key, message in bindings.items()
+            }
+            for key in self._binding_keys:
+                found = all_bindings.get(key)
+                observation = {"source": "mpv", "kind": "binding", "key": key}
+                if found is None:
+                    observation["status"] = "absent"
+                else:
+                    observation.update(section=found[0], message=found[1], status="present")
+                self._append("binding", observation)
 
     def _surface_id(self, raw: object) -> str:
         return self._surface_ids.setdefault(raw, f"surface-{len(self._surface_ids) + 1}")
@@ -95,7 +125,18 @@ class SaitenkaSessionAdapter:
                 "surface-absent" if len(command) > 2 and command[2] == "none" else "surface-present"
             )
             return "surface", [state, surface]
-        if command and command[0] in {"define-section", "enable-section"}:
+        if command and command[0] == "define-section":
+            bindings = {}
+            for line in command[2].splitlines():
+                key, separator, action = line.partition(" ")
+                if separator and action.startswith("script-message "):
+                    bindings[key] = action.removeprefix("script-message ")
+            self._binding_sections[command[1]] = (
+                command[3] if len(command) > 3 else None,
+                bindings,
+            )
+            return None
+        if command and command[0] == "enable-section":
             return "binding", [command[0], command[1]]
         if command and command[0] == "show-text":
             return "notice", ["notice", command[1]]

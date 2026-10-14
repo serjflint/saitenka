@@ -2,35 +2,61 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://saitenka.dev/contracts/schema/session-v0.json",
   "title": "Saitenka session compatibility scenario v0",
+  "$defs": {
+    "event": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["event", "name", "data"], "properties": {"event": {"const": "property-change"}, "name": {"type": "string"}, "data": {}}},
+        {"type": "object", "additionalProperties": false, "required": ["event", "args"], "properties": {"event": {"const": "client-message"}, "args": {"type": "array", "items": {"type": "string"}}}}
+      ]
+    },
+    "action": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["action"], "properties": {"action": {"const": "start"}}},
+        {"type": "object", "additionalProperties": false, "required": ["action", "events"], "properties": {"action": {"const": "emit_batch"}, "events": {"type": "array", "items": {"$ref": "#/$defs/event"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["action", "name"], "properties": {"action": {"const": "command"}, "name": {"type": "string"}}},
+        {"type": "object", "additionalProperties": false, "required": ["action", "epoch"], "properties": {"action": {"enum": ["transport_lost", "transport_ready", "transport_replaced"]}, "epoch": {"type": "integer", "minimum": 0}}},
+        {"type": "object", "additionalProperties": false, "required": ["action", "max_steps"], "properties": {"action": {"const": "drain_until_quiescent"}, "max_steps": {"type": "integer", "minimum": 1}}},
+        {"type": "object", "additionalProperties": false, "required": ["action"], "properties": {"action": {"const": "close"}}},
+        {"type": "object", "additionalProperties": false, "required": ["action", "name"], "properties": {"action": {"const": "checkpoint"}, "name": {"type": "string"}}}
+      ]
+    },
+    "observation": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind", "value"], "properties": {"source": {"const": "mpv"}, "kind": {"const": "command"}, "value": {"type": "array"}}},
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind", "text"], "properties": {"source": {"const": "clipboard"}, "kind": {"const": "write"}, "text": {"type": "string"}}},
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind"], "properties": {"source": {"const": "adapter"}, "kind": {"const": "terminated"}}},
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind", "name"], "properties": {"source": {"const": "driver"}, "kind": {"const": "checkpoint"}, "name": {"type": "string"}}},
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind", "name", "flags"], "properties": {"source": {"const": "mpv"}, "kind": {"const": "binding-section"}, "name": {"type": "string"}, "flags": {"type": ["string", "null"]}}},
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind", "key", "section", "message", "status"], "properties": {"source": {"const": "mpv"}, "kind": {"const": "binding"}, "key": {"type": "string"}, "section": {"type": "string"}, "message": {"type": "string"}, "status": {"const": "present"}}},
+        {"type": "object", "additionalProperties": false, "required": ["source", "kind", "key", "status"], "properties": {"source": {"const": "mpv"}, "kind": {"const": "binding"}, "key": {"type": "string"}, "status": {"const": "absent"}}}
+      ]
+    }
+  },
   "type": "object",
   "additionalProperties": false,
   "required": ["protocol", "scenario_id", "requires", "given", "when", "expect"],
   "properties": {
     "protocol": {"const": "saitenka.session/v0"},
     "scenario_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "requires": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
-    "given": {"type": "object"},
-    "when": {
-      "type": "array",
-      "items": {
-        "oneOf": [
-          {"type": "object", "additionalProperties": false, "required": ["action"], "properties": {"action": {"const": "start"}}},
-          {"type": "object", "additionalProperties": false, "required": ["action", "events"], "properties": {"action": {"const": "emit_batch"}, "events": {"type": "array", "items": {"type": "object"}}}},
-          {"type": "object", "additionalProperties": false, "required": ["action", "name"], "properties": {"action": {"const": "command"}, "name": {"type": "string"}}},
-          {"type": "object", "additionalProperties": false, "required": ["action", "epoch"], "properties": {"action": {"enum": ["transport_lost", "transport_ready", "transport_replaced"]}, "epoch": {"type": "integer", "minimum": 0}}},
-          {"type": "object", "additionalProperties": false, "required": ["action", "max_steps"], "properties": {"action": {"const": "drain_until_quiescent"}, "max_steps": {"type": "integer", "minimum": 1}}},
-          {"type": "object", "additionalProperties": false, "required": ["action"], "properties": {"action": {"const": "close"}}},
-          {"type": "object", "additionalProperties": false, "required": ["action", "name"], "properties": {"action": {"const": "checkpoint"}, "name": {"type": "string"}}}
-        ]
+    "requires": {"const": ["session-v0"]},
+    "given": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "capture": {"type": "array", "items": {"enum": ["observer", "surface", "termination", "clipboard", "notice", "seek", "checkpoint", "binding"]}, "uniqueItems": true},
+        "mpv_properties": {"type": "object"},
+        "key_options": {"type": "object", "additionalProperties": false, "properties": {"help_key": {"type": "string"}, "hover_pause_key": {"type": "string"}, "sub_prev_key": {"type": "string"}, "sub_next_key": {"type": "string"}, "sub_replay_key": {"type": "string"}}},
+        "capture_binding_keys": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
       }
     },
+    "when": {"type": "array", "items": {"$ref": "#/$defs/action"}},
     "expect": {
       "type": "object",
       "additionalProperties": false,
       "required": ["mode", "observations"],
       "properties": {
         "mode": {"enum": ["exact", "contains_in_order"]},
-        "observations": {"type": "array", "items": {"type": "object"}}
+        "observations": {"type": "array", "items": {"$ref": "#/$defs/observation"}}
       }
     }
   }

@@ -15,6 +15,7 @@ run failed and the source file was restored byte for byte.
 | `help-opens-pages-and-closes` | route help-next to help-previous | the second visible help-page write disappeared |
 | `help-opens-pages-and-closes` | bypass help-modal rejection | the forbidden overlay toggle hid the help surface and emitted `Saitenka hidden` |
 | `help-opens-pages-and-closes` | omit execution of every accepted command handler | the visible help transcript disappeared entirely |
+| `input-registration-publishes-effective-bindings` | lower the global mpv input section from `force` to `default` | the normalized section priority changed and the corpus failed |
 
 `tests/contracts/test_adapter_protocol.py` also feeds a deliberately wrong transcript to the comparator and
 requires it to fail. `contracts/evidence-v0.json` is the tracked witness ledger: it records the exact base,

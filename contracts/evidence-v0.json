@@ -84,6 +84,15 @@
       "mismatch": "the clipboard flattened new-line into newline"
     },
     {
+      "id": "session-global-binding-priority",
+      "scenario_id": "input-registration-publishes-effective-bindings",
+      "path": "src/saitenka/app/session/command_runtime.py",
+      "find": "                \"force\",",
+      "replace": "                \"default\",",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[input-registration-publishes-effective-bindings]'",
+      "mismatch": "the global binding section reported default priority instead of force"
+    },
+    {
       "id": "config-attach-layout",
       "scenario_id": "attach-overrides",
       "path": "src/saitenka/app/commands/attach.py",

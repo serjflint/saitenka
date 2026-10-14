@@ -45,6 +45,7 @@ an observation. Symbolic IDs replace process IDs, addresses, timestamps, and imp
 Each scenario file conforms to `schema/session-v0.json`. The reference runner also enforces the same closed
 request vocabulary before execution. Scenario IDs are stable API keys. The committed
 manifest locks their count and key-set hash so a re-vendor or cleanup cannot silently shrink the contract.
+The test runner validates every committed row against the published Draft 2020-12 schemas.
 
 ## Config v0 protocol
 

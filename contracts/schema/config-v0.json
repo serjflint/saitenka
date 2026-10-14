@@ -2,21 +2,37 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://saitenka.dev/contracts/schema/config-v0.json",
   "title": "Saitenka configuration compatibility scenario v0",
-  "type": "object",
-  "required": ["scenario_id", "mode", "expect"],
-  "properties": {
-    "scenario_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "mode": {"enum": ["run", "attach", "editor-catalog", "editor-defaults", "editor-coerce", "mine-model", "run-effective"]},
-    "config": {"type": "object"},
-    "flags": {"type": "object"},
-    "mine": {"type": "object"},
-    "fields": {"type": "array", "items": {"type": "string"}},
-    "checks": {"type": "array", "items": {"type": "object"}},
-    "configs": {"type": "array", "items": {"type": "object"}},
-    "scoped_config": {"type": "object"},
-    "cli": {"type": "object"},
-    "observe": {"type": "array", "items": {"type": "string"}},
-    "expect": {}
-  },
-  "additionalProperties": false
+  "$defs": {"id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}},
+  "oneOf": [
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "mode", "config", "flags", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "run"}, "config": {"type": "object"}, "flags": {"type": "object"}, "expect": {"type": "object"}}
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "mode", "config", "mine", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "attach"}, "config": {"type": "object"}, "mine": {"type": "object"}, "expect": {"type": "object"}}
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "mode", "fields", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "editor-catalog"}, "fields": {"type": "array", "items": {"type": "string"}}, "expect": {"type": "object"}}
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "mode", "checks", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"enum": ["editor-defaults", "editor-coerce"]}, "checks": {"type": "array", "items": {"type": "object"}}, "expect": {"type": "array"}}
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "mode", "configs", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "mine-model"}, "configs": {"type": "array", "items": {"type": "object"}}, "expect": {"type": "array"}}
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["scenario_id", "mode", "scoped_config", "cli", "observe", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "run-effective"}, "scoped_config": {"type": "object"}, "cli": {"type": "object"}, "observe": {"type": "array", "items": {"type": "string"}}, "expect": {"type": "object"}}
+    }
+  ]
 }

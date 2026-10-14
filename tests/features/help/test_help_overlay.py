@@ -29,19 +29,6 @@ def _entries(reader: TestSession):
     ]
 
 
-def test_default_and_configured_help_keys_are_registered(make_session):
-    default_ipc = FakeIPC()
-    make_session(default_ipc).graph.commands.install_input()
-    assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
-
-    custom_ipc = FakeIPC()
-    options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
-    make_session(custom_ipc, options=options).graph.commands.install_input()
-    custom_binds = keybind_registry(custom_ipc)
-    assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
-    assert "F1" not in custom_binds
-
-
 def test_help_document_uses_effective_catalog_and_context_labels(make_session):
     options = ReaderOptions(
         keys=KeyOptions(

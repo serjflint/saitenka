@@ -1,0 +1,37 @@
+{
+  "protocol": "saitenka.session/v0",
+  "scenario_id": "input-registration-publishes-effective-bindings",
+  "requires": ["session-v0"],
+  "given": {
+    "capture": ["binding", "termination"],
+    "mpv_properties": {},
+    "key_options": {
+      "help_key": "Ctrl+h",
+      "hover_pause_key": "Alt+q",
+      "sub_prev_key": "Alt+a",
+      "sub_next_key": "Alt+d",
+      "sub_replay_key": "Alt+s"
+    },
+    "capture_binding_keys": ["Ctrl+h", "F1", "Alt+q", "Alt+a", "Alt+d", "Alt+s", "z", "Z", "x"]
+  },
+  "when": [
+    {"action": "start"}
+  ],
+  "expect": {
+    "mode": "contains_in_order",
+    "observations": [
+      {"source": "mpv", "kind": "binding-section", "name": "saitenka-global", "flags": "force"},
+      {"source": "mpv", "kind": "binding-section", "name": "saitenka-mouse", "flags": "force"},
+      {"source": "mpv", "kind": "binding", "key": "Ctrl+h", "section": "saitenka-global", "message": "saitenka-toggle-help", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "F1", "status": "absent"},
+      {"source": "mpv", "kind": "binding", "key": "Alt+q", "section": "saitenka-global", "message": "saitenka-toggle-hover-pause", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Alt+a", "section": "saitenka-global", "message": "saitenka-sub-prev", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Alt+d", "section": "saitenka-global", "message": "saitenka-sub-next", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "Alt+s", "section": "saitenka-global", "message": "saitenka-sub-replay", "status": "present"},
+      {"source": "mpv", "kind": "binding", "key": "z", "status": "absent"},
+      {"source": "mpv", "kind": "binding", "key": "Z", "status": "absent"},
+      {"source": "mpv", "kind": "binding", "key": "x", "status": "absent"},
+      {"source": "adapter", "kind": "terminated"}
+    ]
+  }
+}

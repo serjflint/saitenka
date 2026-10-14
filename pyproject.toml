@@ -154,6 +154,7 @@ test = [
     "dirty-equals>=0.11",
     "pyfakefs>=6.2.0",
     "pyyaml>=6.0.3",
+    "jsonschema>=4.25",
 ]
 dev = [
     { include-group = "test" },

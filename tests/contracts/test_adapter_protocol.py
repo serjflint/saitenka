@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator, ValidationError
 
 from . import cli_adapter, config_adapter
 from .protocol import (
@@ -56,10 +57,24 @@ def test_comparator_rejects_a_representative_broken_observation() -> None:
 
 
 def test_contract_schemas_are_machine_readable() -> None:
-    for name in ("session-v0.json", "config-v0.json", "cli-v0.json"):
+    corpora = {
+        "session-v0.json": load_scenarios(ROOT / "contracts/session/v0"),
+        "config-v0.json": [
+            row
+            for name in ("editor.json", "options.json", "resolution.json")
+            for row in _json_rows(f"contracts/config/v0/{name}")
+        ],
+        "cli-v0.json": _json_rows("contracts/cli/v0/scenarios.json"),
+    }
+    for name, rows in corpora.items():
         schema = json.loads((ROOT / "contracts/schema" / name).read_text(encoding="utf-8"))
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-        assert schema["additionalProperties"] is False
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        for row in rows:
+            validator.validate(row)
+        with pytest.raises(ValidationError):
+            validator.validate(rows[0] | {"unknown_protocol_key": True})
 
 
 @pytest.mark.integration

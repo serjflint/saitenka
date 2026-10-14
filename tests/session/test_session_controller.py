@@ -96,69 +96,12 @@ def test_hover_view_snapshots_the_hover_stack():
     assert view.paused is True
 
 
-def test_every_global_binding_reaches_mpv_as_one_command_string(make_session):
-    """The trap this pins: a binding's command must be ONE string. Split into args it registers
-    without complaint and silently never fires. That held for the per-key `keybind` form and holds
-    for the section lines that replaced it — each line is `KEY script-message <msg>`.
-    """
-    ipc = FakeIPC()
-    make_session(ipc, services=SessionServices(anki=object())).graph.commands.install_input()
-
-    contents = _section(ipc, bindings.GLOBAL_SECTION)[0]
-    assert contents, "no global bindings registered"
-    for line in contents.splitlines():
-        key, _, spec = line.partition(" ")
-        assert key and spec.startswith("script-message "), line
-        assert len(spec.split()) == 2, f"command must be one string: {line}"
-
-    keys = {line.split(" ", 1)[0] for line in contents.splitlines()}
-    assert {
-        "a",
-        "c",
-        "Ctrl+m",
-        "Alt+p",
-        "Alt+t",
-        "Alt+b",
-        "\\",
-        "`",
-        "Alt+a",
-        "F1",
-        "Ctrl+Shift+T",
-    } <= keys
-    # mouse controls are NOT in the global scope — they need their own FORCED section (see below)
-    assert {"MBTN_LEFT", "WHEEL_UP", "WHEEL_DOWN"}.isdisjoint(keys)
-    # …but they ARE dispatchable, so the registry a press goes through spans both sections
-    assert "MBTN_LEFT" in keybind_registry(ipc)
-
-
 def _section(ipc, name):
     """(contents, flags) of the last `define-section` for ``name``."""
     for cmd in reversed(ipc.commands):
         if cmd and cmd[0] == "define-section" and cmd[1] == name:
             return cmd[2], (cmd[3] if len(cmd) > 3 else None)
     return None, None
-
-
-def test_the_global_bindings_register_as_one_forced_section(make_session):
-    """One command, not one per key: ~24 correlated commands in flight before the reactor drains
-    would compete for terminal reservations, and over the bound a bind is dropped with only a log
-    line — a dead shortcut.
-
-    Forced, because the per-key `keybind` form this replaced writes into mpv's OWN `default`
-    section and REPLACES the input.conf entry for that key. Asked for the binding table, mpv is
-    unambiguous: `keybind` lands at priority 16 and not weak; a `"default"` section is weak at 15,
-    below input.conf. Registering as `"default"` therefore did not preserve the old behaviour, it
-    inverted it — a user with `F1` bound in input.conf silently lost the help window.
-    """
-    ipc = FakeIPC()
-
-    make_session(ipc).graph.commands.install_input()
-
-    contents, flags = _section(ipc, bindings.GLOBAL_SECTION)
-    assert flags == "force"
-    assert ("enable-section", bindings.GLOBAL_SECTION) in [c[:2] for c in ipc.commands]
-    assert len([c for c in ipc.commands if c and c[0] == "keybind"]) == 0
-    assert len(contents.splitlines()) == len({ln.split(" ", 1)[0] for ln in contents.splitlines()})
 
 
 def test_mouse_controls_live_in_a_separate_forced_section(make_session):
@@ -253,16 +196,6 @@ def test_mouse_capture_reasserts_itself_until_the_surface_goes_down(make_session
     )  # the late one took nothing back
 
 
-def test_hover_pause_key_is_configurable(make_session):
-    from saitenka.app.config import KeyOptions, ReaderOptions
-
-    ipc = FakeIPC()
-    options = ReaderOptions(keys=KeyOptions(hover_pause_key="Alt+q"))
-    make_session(ipc, options=options).graph.commands.install_input()
-    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
-    assert binds["Alt+q"] == "script-message saitenka-toggle-hover-pause"
-
-
 def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch, make_session):
     from saitenka.app.config import KeyOptions, ReaderOptions
 
@@ -281,20 +214,6 @@ def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch, make_ses
 
 
 # --- Stage 4: subtitle navigation keys (Alt+←/→/↓, sub-delay) ------------------------------------
-
-
-def test_sub_nav_keybinds_registered_with_single_string(make_session):
-    """Alt+LEFT/RIGHT/DOWN must be registered as keybind + single-string script-message (the known mpv
-    gotcha: split args = key silently dead). z/Z/x are NOT ours — they pass through to mpv's builtin
-    repeatable sub-delay bindings, so we must not shadow them."""
-    ipc = FakeIPC()
-    make_session(ipc).graph.commands.install_input()
-    binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
-    for key in ("Alt+LEFT", "Alt+RIGHT", "Alt+DOWN"):
-        assert key in binds, f"{key} not registered; binds={list(binds)}"
-        assert binds[key].startswith("script-message "), f"{key}: not script-message: {binds[key]}"
-    for native in ("z", "Z", "x"):  # left to mpv's native sub-delay (repeatable, own OSD)
-        assert native not in binds, f"{native} should pass through to mpv, not be bound by saitenka"
 
 
 def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch, make_session):
@@ -326,22 +245,6 @@ def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch, make_sess
     assert r.graph.subtitle_navigation.seek(
         SeekCue(1, r.graph.cue.revision)
     )  # and the current cue still navigates
-
-
-def test_sub_nav_config_knobs_respected(make_session):
-    """Custom sub_prev_key/sub_next_key/sub_replay_key config knobs must be registered."""
-    ipc = FakeIPC()
-    r = make_session(
-        ipc,
-        options=ReaderOptions().with_overrides(
-            sub_prev_key="Alt+a", sub_next_key="Alt+d", sub_replay_key="Alt+s"
-        ),
-    )
-    r.graph.commands.install_input()
-    binds = set(keybind_registry(ipc))
-    assert "Alt+a" in binds
-    assert "Alt+d" in binds
-    assert "Alt+s" in binds
 
 
 # --- #5: instant subtitle navigation via the parsed cue index -----------------------------------
