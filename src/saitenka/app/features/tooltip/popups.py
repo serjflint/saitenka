@@ -318,8 +318,8 @@ class Panel:
 
         With a persistent ``cache`` + keys, a cost-gated head (``full_height >= min_height`` — the
         pathological tail #149 targets) is also written to disk here, so a *later session*'s cold hover
-        seeds it via :meth:`load_precomposed_head` and skips the raster. ``protected`` marks the offline
-        prewarm's popular set as eviction-last (see :meth:`RenderCache.put`)."""
+        is seeded by the preparation worker and skips the raster. ``protected`` marks the offline prewarm's
+        popular set as eviction-last (see :meth:`RenderCache.put`)."""
         view_h = min(self.full_height, cap)
         if view_h <= 0:
             return
@@ -352,21 +352,6 @@ class Panel:
 
                 if otel_metrics.render_cache_writebacks is not None:
                     otel_metrics.render_cache_writebacks.add(1)
-
-    def load_precomposed_head(
-        self, cap: int, cache: RenderCache, config_sig: str, content_key: str
-    ) -> bool:
-        """Seed the first viewport from the persistent cache so a cold hover is copy+upload with no head
-        raster. ``True`` on a hit. Call after the head is measured (``full_height`` set) so the requested
-        ``view_h`` matches the show's; a differing height / config simply misses (safe → live render)."""
-        view_h = min(self.full_height, cap)
-        if view_h <= 0:
-            return False
-        loaded = cache.get(config_sig, content_key, view_h, view_h)
-        if loaded is None:
-            return False
-        self.windowed.install_first_view(loaded.view_h, loaded.overscan, loaded.array)
-        return True
 
     def viewport(
         self,

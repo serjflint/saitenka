@@ -151,8 +151,8 @@ class RenderCache:
 
     Every public method is best-effort: any :class:`sqlite3.Error` is swallowed and logged at DEBUG, so
     a cache problem degrades to live rendering and never surfaces to the user. Connections are per-thread
-    (the main thread reads, the prefetch workers / offline builder write) with WAL enabled for
-    concurrent read-while-write."""
+    (workers read and write; the main thread uses the in-memory tier) with WAL enabled for concurrent
+    access."""
 
     def __init__(self, path: str | Path, *, max_bytes: int):
         self.path = Path(path)
@@ -192,32 +192,6 @@ class RenderCache:
             s = self._seq
             self._seq += 1
             return s
-
-    def get(
-        self, config_sig: str, content_key: str, view_h: int, overscan: int
-    ) -> LoadedView | None:
-        """The stored first-viewport for ``(config_sig, content_key)`` **iff** its ``view_h``/``overscan``
-        match the show about to happen (a differing full-height → differing view_h simply misses). For
-        seeding a BUILT panel's ``_first_view``. Pure read (no write). ``None`` on miss / any error."""
-        loaded = self.peek(config_sig, content_key)
-        if loaded is None or loaded.view_h != view_h or loaded.overscan != overscan:
-            return None  # geometry moved (content/height changed) — safe miss, live-render instead
-        return loaded
-
-    def peek(self, config_sig: str, content_key: str) -> LoadedView | None:
-        """The stored first-viewport for ``(config_sig, content_key)`` regardless of geometry — the
-        direct-paint path, which paints the pixels + places by ``full_h`` WITHOUT building a panel first,
-        then reconciles against the panel it builds afterward (same content → same geometry). Pure read
-        (no write — recency is not tracked; eviction is offline, insertion-ordered). ``None`` on miss /
-        any error."""
-        cv = self.peek_compressed(config_sig, content_key)
-        if cv is None:
-            return None
-        try:
-            return cv.inflate()
-        except ValueError:  # a truncated/garbled blob won't reshape → safe miss, live-render
-            log.debug("render cache peek inflate failed", exc_info=True)
-            return None
 
     def peek_compressed(self, config_sig: str, content_key: str) -> CompressedView | None:
         """The stored first viewport as its RAW zlib blob + geometry, WITHOUT inflating — for the
