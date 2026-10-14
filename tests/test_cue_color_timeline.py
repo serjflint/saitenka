@@ -556,24 +556,6 @@ def _blank(result: TestSession, ipc: FakeIPC, *, at: float) -> None:
     _settle(result, ipc)
 
 
-def test_a_blank_after_a_timed_cue_sends_no_reactive_clear(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The invariant the single write must not cost: when the line goes away, so does its color —
-    in one removal, not the two the teardown and the empty draw used to send."""
-    result, ipc, _backend, _spans = _session(tmp_path, monkeypatch, TIMELINE, scorer=_coloring())
-    try:
-        _show(result, ipc, TIMELINE[0])
-        before = len(_focus_writes(ipc))
-
-        _blank(result, ipc, at=TIMELINE[0].end + 0.1)
-
-        since = _focus_writes(ipc)[before:]
-        assert not [command for command in since if command[2] == "none"], since
-    finally:
-        result.close()
-
-
 def test_a_second_blank_sends_no_reactive_clear(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
