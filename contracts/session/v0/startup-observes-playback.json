@@ -1,0 +1,21 @@
+{
+  "protocol": "saitenka.session/v0",
+  "scenario_id": "startup-observes-playback",
+  "requires": ["session-v0"],
+  "given": {
+    "capture": ["observer", "termination"],
+    "mpv_properties": {"sub-text": "", "pause": false}
+  },
+  "when": [
+    {"action": "start"},
+    {"action": "drain_until_quiescent", "max_steps": 8}
+  ],
+  "expect": {
+    "mode": "contains_in_order",
+    "observations": [
+      {"source": "mpv", "kind": "command", "value": ["observe-property", "sub-text"]},
+      {"source": "adapter", "kind": "terminated"}
+    ]
+  }
+}
+

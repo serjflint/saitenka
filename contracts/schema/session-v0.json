@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://saitenka.dev/contracts/schema/session-v0.json",
+  "title": "Saitenka session compatibility scenario v0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "scenario_id", "requires", "given", "when", "expect"],
+  "properties": {
+    "protocol": {"const": "saitenka.session/v0"},
+    "scenario_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "requires": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "given": {"type": "object"},
+    "when": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {"action": {"type": "string"}},
+        "additionalProperties": true
+      }
+    },
+    "expect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "observations"],
+      "properties": {
+        "mode": {"enum": ["exact", "contains_in_order", "eventually"]},
+        "observations": {"type": "array", "items": {"type": "object"}},
+        "within_steps": {"type": "integer", "minimum": 1},
+        "within_ms": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
+

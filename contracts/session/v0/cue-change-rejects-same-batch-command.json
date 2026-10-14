@@ -1,0 +1,29 @@
+{
+  "protocol": "saitenka.session/v0",
+  "scenario_id": "cue-change-rejects-same-batch-command",
+  "requires": ["session-v0"],
+  "given": {
+    "capture": ["clipboard", "termination"],
+    "mpv_properties": {"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0}
+  },
+  "when": [
+    {"action": "start"},
+    {
+      "action": "emit_batch",
+      "events": [
+        {"event": "property-change", "name": "sub-text", "data": "new"},
+        {"event": "client-message", "args": ["saitenka-copy-line"]}
+      ]
+    },
+    {"action": "drain_until_quiescent", "max_steps": 8},
+    {"action": "command", "name": "saitenka-copy-line"}
+  ],
+  "expect": {
+    "mode": "contains_in_order",
+    "observations": [
+      {"source": "clipboard", "kind": "write", "text": "new"},
+      {"source": "adapter", "kind": "terminated"}
+    ]
+  }
+}
+

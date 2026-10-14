@@ -1,0 +1,14 @@
+# Session v0 detection evidence
+
+The seed corpus was run against reversible source faults before any old test was retired. Each focused
+run failed and the source file was restored byte for byte.
+
+| Scenario | Reversible fault | Observed failure |
+|---|---|---|
+| `loss-suspends-command-until-replacement` | bypass `CommandRuntime.perform`'s disconnected guard | a help surface appeared before the `lost-command-finished` checkpoint |
+| `cue-change-rejects-same-batch-command` | omit `CueIdentityRetired` application in `PlaybackProjection` | both copy commands wrote `old`; the expected `new` write never appeared |
+| `close-retires-visible-surface` | make `Overlay.remove_lifecycle_now` acknowledge without sending `overlay-remove` | the transcript terminated without `surface-absent` |
+
+`tests/contracts/test_adapter_protocol.py` also feeds a deliberately wrong transcript to the comparator and
+requires it to fail. Raw mutation output and the byte-restoring runner live under ignored
+`vibe/portable-corpus/` and `vibe/test-crossfile/`.
