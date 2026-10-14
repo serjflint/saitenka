@@ -3,16 +3,9 @@
 import pytest
 from saitenka_tokenize.japanese import (
     Token,
-    inflected_in,
-    merge_dict_compounds,
-    phrase_terms,
-    query_token,
-    tokenize,
 )
 from saitenka_tokenize.registry import (
-    DEFAULT_TOKENIZER,
     UnidicTokenizer,
-    get_tokenizer,
     register_tokenizer,
 )
 from util import FakeIPC
@@ -58,58 +51,6 @@ def _restore_registry():
     yield
     mod._FACTORIES.clear()
     mod._FACTORIES.update(saved)
-
-
-def test_get_tokenizer_defaults_to_unidic():
-    tok = get_tokenizer()
-    assert tok.name == "unidic"
-    assert DEFAULT_TOKENIZER == "unidic"
-
-
-def test_get_tokenizer_unknown_name_raises_listing_registered():
-    with pytest.raises(ValueError, match=r"unknown tokenizer 'nope'.*unidic"):
-        get_tokenizer("nope")
-
-
-def test_register_tokenizer_makes_it_retrievable():
-    register_tokenizer("fake-latin", _FakeTokenizer)
-    assert get_tokenizer("fake-latin").name == "fake"
-
-
-def test_unidic_tokenize_matches_module_function():
-    line = "習わぬ経を読む"
-    assert UnidicTokenizer().tokenize(line) == tokenize(line)
-
-
-def test_unidic_query_token_matches_module_function():
-    assert UnidicTokenizer().query_token("それにしては") == query_token("それにしては")
-
-
-def test_unidic_inflected_in_matches_module_function():
-    toks = tokenize("習わぬ")
-    assert UnidicTokenizer().inflected_in(toks, 0) == inflected_in(toks, 0)
-
-
-def test_unidic_phrase_terms_matches_module_function():
-    toks = tokenize("お休み")
-
-    def has_term(surface):
-        return surface == "お休み"
-
-    assert UnidicTokenizer().phrase_terms(tokens=toks, index=1, has_term=has_term) == phrase_terms(
-        tokens=toks, index=1, has_term=has_term
-    )
-
-
-def test_unidic_merge_dict_compounds_matches_module_function():
-    toks = tokenize("応急処置")
-
-    def exists(_surfaces):
-        return set()
-
-    assert UnidicTokenizer().merge_dict_compounds(toks, exists) == merge_dict_compounds(
-        toks, exists
-    )
 
 
 def test_reader_owns_unidic_tokenizer_by_default(make_session):

@@ -66,6 +66,7 @@ def test_a_query_is_looked_up_whole_and_never_segmented():
 
 
 def test_the_registry_serves_a_strategy_by_name_and_rejects_an_unknown_one():
+    assert get_tokenizer().name == "unidic"
     assert get_tokenizer("unidic").name == "unidic"
     assert get_tokenizer("latin").name == "latin"
     with pytest.raises(ValueError, match="unknown tokenizer"):
