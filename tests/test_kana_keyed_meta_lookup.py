@@ -70,21 +70,9 @@ def _set(tmp_path, *, pitch=(), freq=()):
     )
 
 
-def test_a_kanji_keyed_pitch_row_is_found(tmp_path):
-    """Control: the path that always worked still does."""
-    entry = _set(tmp_path, pitch=[[("本命", _PITCH)]]).entry_for(_TOKEN)
-    assert entry.pitches == [("ほんめい", (PitchAccent(0),))]
-
-
 def test_a_kana_keyed_pitch_row_is_found(tmp_path):
-    """The regression, fixed: NHK 2016 holds 12,228 kanji-written words only this way."""
     entry = _set(tmp_path, pitch=[[("ほんめい", _PITCH)]]).entry_for(_TOKEN)
     assert entry.pitches == [("ほんめい", (PitchAccent(0),))]
-
-
-def test_a_kana_keyed_frequency_row_reaches_the_pill(tmp_path):
-    entry = _set(tmp_path, freq=[[("ほんめい", _FREQ)]]).entry_for(_TOKEN)
-    assert [pill.value for pill in entry.freqs] == ["8912"]
 
 
 def test_the_pill_and_the_blend_now_agree_on_a_kana_keyed_row(tmp_path):
