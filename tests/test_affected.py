@@ -74,12 +74,12 @@ def test_classify_routes_blindspots_to_full_source_to_graph_docs_ignored() -> No
     assert all("README" not in f for f in (*full, *overlay_py))
 
 
-def test_tools_edit_routes_to_full() -> None:
-    # tests file-LOAD tools via importlib.util (no static import edge ruff can see); without this the
-    # selector returned 0 tests and silently skipped the tool's own test. Must route to a full run.
+def test_tools_are_outside_application_selection() -> None:
+    # Application-test selection ignores development tools; their focused tests and the pre-push gate
+    # own them. This also keeps session codemods and audit scripts out of the application inner loop.
     a = _mod()
     full, overlay_py, _ = a.classify(["tools/mutate/run.py"])
-    assert "tools/mutate/run.py" in full
+    assert not full
     assert not overlay_py
 
 
