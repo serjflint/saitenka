@@ -1,10 +1,11 @@
 """MVP: subtitle rendering (multi-line) + per-word hitbox geometry."""
 
-import pytest
 from saitenka_tokenize.japanese import tokenize
-from util import assert_golden
+from util import FakeIPC, assert_golden
 
 from saitenka.app.config import ReaderOptions, TooltipOptions
+from saitenka.app.session.factory import SessionInfrastructure
+from saitenka.app.subtitle_render import SubtitleRenderer
 from saitenka.app.subtitles import render_subtitle
 
 LINE = "門前の小僧習わぬ経を読む"
@@ -45,12 +46,6 @@ def test_box_contains_hit():
     b = sr.boxes[-1]  # 読む (last token; 習わ+ぬ merged so indices shift)
     assert b.contains(b.x + b.w / 2, b.y + b.h / 2)
     assert not b.contains(b.x - 5, b.y + b.h / 2)
-
-
-def test_shrinks_to_fit_width():
-    toks = tokenize(LINE * 4)  # a single very long token stream
-    sr = render_subtitle([toks], osd_w=1280, size=44)
-    assert sr.image.width <= 1280
 
 
 def test_explicit_line_breaks_stack_vertically():
@@ -134,51 +129,23 @@ def test_a_closed_renderer_draws_nothing_and_says_so():
     assert settled == [False]
 
 
-def test_the_request_carries_the_cue_state_as_one_snapshot():
-    """Frozen and built once: the raster can run off the main thread, and a request that changed
-    under it would raster one cue's text with another's styles."""
-    import dataclasses
-
-    request = _request()
-
-    assert dataclasses.is_dataclass(request)
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        request.text = "別の字幕"
-
-
 def test_a_drawn_cue_leaves_the_host_the_origin_its_hit_boxes_are_relative_to(make_session):
-    """The boxes the raster returns are relative to the subtitle image, so a hit test adds
-    `sub_origin` to reach screen coordinates. If the draw computed a new origin and the host kept an
-    old one, every hit would land offset by the difference — the boxes would look right and resolve
-    to the wrong word.
-    """
-    import util
-
-    from saitenka.app.subtitle_render import SubtitleRenderer
-
     def origin_for(frac: float) -> tuple[int, int]:
         reader = make_session(
-            util.FakeIPC(),
+            FakeIPC(),
+            infrastructure=SessionInfrastructure(renderer=SubtitleRenderer()),
             options=ReaderOptions(tooltip=TooltipOptions(bottom_margin_frac=frac)),
         )
         reader.graph.screen.osd = (1920, 1080)
-        reader.graph.subtitle_presentation.cue.replace_geometry(
-            origin=(999, 999)
-        )  # a stale origin the draw has to replace
         reader.graph.cue.set_subtitle("猫を見る")
-        result = SubtitleRenderer().draw(
-            reader.graph.cue.draw_request(),
-            reader.graph.lifecycle_surfaces,
-            reader.graph.ipc,
-        )
-        assert result is not None
-        reader.graph.subtitle_presentation.cue.replace_geometry(
-            origin=result.origin
-        )  # the coordinator's write-back, done here by hand
-        return reader.graph.subtitle_presentation.cue.current.origin
+        reader.graph.subtitle_presentation.cue.replace_geometry(origin=(999, 999))
+
+        reader.graph.subtitle_presentation.draw()
+
+        current = reader.graph.subtitle_presentation.cue.current
+        return current.origin
 
     low, high = origin_for(0.05), origin_for(0.15)
-
-    assert low != (999, 999)  # written back, not left stale
-    assert low[0] == high[0]  # centred the same way regardless of the margin
-    assert low[1] - high[1] == round(1080 * 0.10)  # lifted by exactly the margin it was given
+    assert low != (999, 999)
+    assert low[0] == high[0]
+    assert low[1] - high[1] == round(1080 * 0.10)

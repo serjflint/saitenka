@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from saitenka.app.features.annotation.jobs import (
     AnnotationDisposition,
     AnnotationResult,
@@ -28,6 +30,8 @@ KEY = AnnotationWorkKey(
     dependency_generation=0,
 )
 CUE = TokenizedCue(lines=[], tokens=[], styles=None)
+REPLACED_IDENTITY = CueIdentity(2, 2, "jp", "猫を見る", 1.0, 3.0)
+MOVED_KEY = AnnotationWorkKey("猫を見る", 1, 2, "jp", 0, 1)
 
 
 def result(
@@ -69,25 +73,22 @@ def test_a_matching_completion_publishes() -> None:
     assert decide(result()) is AnnotationDisposition.PUBLISH
 
 
-def test_a_retired_cue_quarantines_a_late_completion() -> None:
-    assert decide(result(), cue_retired=True) is AnnotationDisposition.STALE_CUE
-
-
-def test_a_replaced_cue_identity_quarantines_a_late_completion() -> None:
-    replaced = CueIdentity(2, 2, "jp", "猫を見る", 1.0, 3.0)
-
-    assert decide(result(), current_identity=replaced) is AnnotationDisposition.STALE_CUE
-
-
-def test_a_completion_for_an_abandoned_upgrade_does_not_publish() -> None:
-    assert decide(result(), pending_text=None) is AnnotationDisposition.STALE_CUE
-    assert decide(result(), pending_text="犬も見る") is AnnotationDisposition.STALE_CUE
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"cue_retired": True},
+        {"current_identity": REPLACED_IDENTITY},
+        {"pending_text": None},
+        {"pending_text": "犬も見る"},
+    ],
+    ids=["retired", "replaced-identity", "abandoned", "different-pending-text"],
+)
+def test_a_stale_cue_quarantines_a_late_completion(overrides) -> None:
+    assert decide(result(), **overrides) is AnnotationDisposition.STALE_CUE
 
 
 def test_a_moved_work_generation_quarantines_a_completion() -> None:
-    moved = AnnotationWorkKey("猫を見る", 1, 2, "jp", 0, 1)
-
-    assert decide(result(), current_key=moved) is AnnotationDisposition.STALE_GENERATION
+    assert decide(result(), current_key=MOVED_KEY) is AnnotationDisposition.STALE_GENERATION
 
 
 def test_a_failure_for_the_live_cue_degrades_interaction_only() -> None:
@@ -97,26 +98,27 @@ def test_a_failure_for_the_live_cue_degrades_interaction_only() -> None:
     assert outcome.failed
 
 
-def test_a_failure_for_a_gone_cue_has_nothing_to_degrade() -> None:
-    outcome = decide(result(cue=None, error=RuntimeError("boom")), current_identity=None)
-
+@pytest.mark.parametrize(
+    "overrides",
+    [{"current_identity": None}, {"current_key": MOVED_KEY}],
+    ids=["gone-cue", "moved-generation"],
+)
+def test_a_failure_for_stale_work_has_nothing_to_degrade(overrides) -> None:
+    outcome = decide(result(cue=None, error=RuntimeError("boom")), **overrides)
     assert outcome is AnnotationDisposition.FAILED_STALE
     assert outcome.failed
 
 
-def test_a_failure_under_a_moved_generation_has_nothing_to_degrade() -> None:
-    moved = AnnotationWorkKey("猫を見る", 1, 2, "jp", 0, 1)
-    outcome = decide(result(cue=None, error=RuntimeError("boom")), current_key=moved)
-
-    assert outcome is AnnotationDisposition.FAILED_STALE
-
-
-def test_a_result_missing_its_identity_is_never_published() -> None:
-    assert decide(result(identity=None)).failed
-
-
-def test_a_result_missing_its_cue_is_never_published() -> None:
-    assert decide(result(cue=None)).failed
+@pytest.mark.parametrize(
+    ("result_overrides", "expected"),
+    [
+        ({"identity": None}, AnnotationDisposition.FAILED_STALE),
+        ({"cue": None}, AnnotationDisposition.DEGRADE),
+    ],
+    ids=["missing-identity", "missing-cue"],
+)
+def test_an_incomplete_result_is_never_published(result_overrides, expected) -> None:
+    assert decide(result(**result_overrides)) is expected
 
 
 def test_only_failures_report_as_failed() -> None:
