@@ -3,17 +3,23 @@
   "scenario_id": "startup-observes-playback",
   "requires": ["session-v0"],
   "given": {
-    "capture": ["observer", "termination"],
-    "mpv_properties": {"sub-text": "", "pause": false}
+    "capture": ["observer", "surface", "termination"],
+    "mpv_properties": {
+      "sub-text": "",
+      "pause": false,
+      "osd-dimensions": {"w": 1280, "h": 720}
+    }
   },
   "when": [
     {"action": "start"},
-    {"action": "drain_until_quiescent", "max_steps": 8}
+    {"action": "drain_until_quiescent", "max_steps": 8},
+    {"action": "command", "name": "saitenka-copy-line"}
   ],
   "expect": {
     "mode": "contains_in_order",
     "observations": [
       {"source": "mpv", "kind": "command", "value": ["observe-property", "sub-text"]},
+      {"source": "mpv", "kind": "command", "value": ["surface-present", "surface-1"]},
       {"source": "adapter", "kind": "terminated"}
     ]
   }

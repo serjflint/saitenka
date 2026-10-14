@@ -56,22 +56,6 @@ def test_command_policy_rejects_duplicate_permanent_route():
         CommandPolicy((spec, spec))
 
 
-@pytest.mark.parametrize(
-    ("cue_state", "expected"),
-    [
-        (CueCommandState.NEVER_INSTALLED, None),
-        (CueCommandState.ACTIVE, None),
-        (CueCommandState.RETIRED_AFTER_ACTIVE, CommandRejection.CUE_RETIRED),
-    ],
-)
-def test_command_policy_preserves_three_state_cue_eligibility(cue_state, expected):
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-copy-line"), cue_state=cue_state, help_open=False
-    )
-
-    assert decision.rejection == expected
-
-
 def test_a_failing_action_is_a_terminal_typed_outcome():
     def fail() -> None:
         raise RuntimeError("boom")

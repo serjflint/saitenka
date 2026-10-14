@@ -8,6 +8,7 @@ run failed and the source file was restored byte for byte.
 | `loss-suspends-command-until-replacement` | bypass `CommandRuntime.perform`'s disconnected guard | a help surface appeared before the `lost-command-finished` checkpoint |
 | `cue-change-rejects-same-batch-command` | omit `CueIdentityRetired` application in `PlaybackProjection` | both copy commands wrote `old`; the expected `new` write never appeared |
 | `cue-change-rejects-same-batch-command` | mark the overlay toggle as cue-dependent | the cue-independent `Saitenka hidden` notice disappeared during cue retirement |
+| `startup-observes-playback` | reject cue commands before a cue has ever been installed | the visible `no line to copy` response disappeared |
 | `close-retires-visible-surface` | make `Overlay.remove_lifecycle_now` acknowledge without sending `overlay-remove` | the transcript terminated without `surface-absent` |
 | `subtitle-navigation-emits-seeks` | map next-subtitle to the previous-subtitle delta | the expected `sub-seek 1` disappeared and a second `sub-seek -1` was emitted |
 | `help-opens-pages-and-closes` | route help-next to help-previous | the second visible help-page write disappeared |
