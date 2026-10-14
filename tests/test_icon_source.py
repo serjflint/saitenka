@@ -2,25 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
 from PIL import Image
 from util import assert_golden
 
 from saitenka import fonts
 from saitenka.draw import icons
 from saitenka.draw.icon_source import Icon, render_icon
-
-
-def _opaque(img) -> int:
-    return sum(1 for px in img.get_flattened_data() if px[3] > 0)
-
-
-@pytest.mark.parametrize("icon", list(Icon))
-def test_every_icon_renders_a_square_sprite_with_content(icon: Icon) -> None:
-    sprite = render_icon(icon, 24)
-    assert sprite.size == (24, 24)
-    assert sprite.mode == "RGBA"
-    assert _opaque(sprite) > 0
 
 
 def test_marker_uses_the_font_glyph_not_the_vector() -> None:
@@ -55,7 +42,7 @@ def test_icon_sheet_golden() -> None:
     # Pins the actual icon visuals (glyphs + vector affordances) — the behaviour review the panel
     # goldens miss, since each icon is too small a region to move their whole-image MAE.
     size, gap = 40, 8
-    order = [Icon.MARKER, Icon.ADD, Icon.MINED, Icon.CLOSE, Icon.SPEAKER]
+    order = list(Icon)
     sheet = Image.new(
         "RGBA", (len(order) * (size + gap) + gap, size + 2 * gap), (255, 255, 255, 255)
     )

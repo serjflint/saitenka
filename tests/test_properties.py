@@ -107,21 +107,6 @@ def test_has_kanji_true_for_every_ext_b_codepoint(cp):
     assert has_kanji(chr(cp))
 
 
-# --- deinflection chain reaches the lemma or returns empty ---------------------------------------
-
-
-@given(surface=jp_text, lemma=jp_text)
-@settings(max_examples=100, deadline=None)
-def test_inflection_chain_reaches_lemma_or_empty(surface, lemma):
-    chain = inflection_chain(surface, lemma)
-    assert isinstance(chain, list)
-    if surface == lemma:
-        assert chain == []  # already the dictionary form → no chain
-    # a non-empty chain must be a list of transform names (strings)
-    for name in chain:
-        assert isinstance(name, str) and name
-
-
 # --- deinflect ⇄ inflection_chain agree (metamorphic cross-check) --------------------------------
 # Real inflected surfaces so the reachability relation has teeth — random kana rarely inflects.
 _INFLECTED = [

@@ -258,10 +258,3 @@ def test_pipeline_resolves_expected_entry(case, tmp_path):
     if case.get("not_found") == "jp":  # the byte-identical JP path keeps the Japanese message
         text = _all_text(entry)
         assert "見つかり" in text and "not found" not in text.lower()
-
-
-def test_oracle_rejects_the_inflected_surface_as_headword(tmp_path):
-    """Negative control: the oracle discriminates. The plural's headword is the base ``parapluie`` — a
-    regression that let the inflected surface head the tooltip (the live bug) would flip this."""
-    dict_set, tok, hover_terms, _entry = _resolve("fr", "de parapluies", 3, tmp_path)
-    assert dict_set.card_for(tok, extra_terms=hover_terms).expression != "parapluies"

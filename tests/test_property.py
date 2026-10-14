@@ -15,21 +15,31 @@ from saitenka.app import paths, report
 from saitenka.app.init_wizard import dumps_toml
 from saitenka.mpvio.ipc import MpvIPC
 
+_WINDOWS_FORBIDDEN = set('<>:"/\\|?*')
+_WINDOWS_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
 
 @given(st.text())
 def test_sanitize_filename_windows_output_is_windows_safe(name):
     out = paths._sanitize(name, "_", windows=True)  # force Windows rules regardless of host
     assert out  # never empty
-    assert not paths._INVALID_WIN.search(out)  # no <>:"/\|?* or control chars
+    assert not any(char in _WINDOWS_FORBIDDEN or ord(char) < 32 for char in out)
     assert not out.endswith((" ", "."))  # no trailing dot/space (Windows strips them)
-    assert out.split(".")[0].upper() not in paths._WIN_RESERVED  # not a reserved device name
+    assert out.split(".")[0].upper() not in _WINDOWS_RESERVED
 
 
 @given(st.text())
 def test_sanitize_filename_posix_output_is_posix_safe(name):
     out = paths._sanitize(name, "_", windows=False)
     assert out  # never empty
-    assert not paths._INVALID_POSIX.search(out)  # no "/" or control chars
+    assert not any(char == "/" or ord(char) < 32 for char in out)
 
 
 # JSON-serialised events joined by '\n', then re-sliced at ARBITRARY byte boundaries, must reassemble
