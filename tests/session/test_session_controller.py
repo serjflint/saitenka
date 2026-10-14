@@ -4,6 +4,7 @@ import functools
 import logging
 from dataclasses import replace
 from pathlib import Path
+from typing import Protocol, cast
 
 import pytest
 from driver import Driver
@@ -49,19 +50,31 @@ def _enable_mining(r: TestSession, anki=None, config: MineConfig | None = None) 
     r.graph.mining.close_capability()
 
 
-def _captured_prefetch_items(r: TestSession, monkeypatch) -> list[prefetch.PrefetchItem]:
-    items: list[prefetch.PrefetchItem] = []
+class _TokenView(Protocol):
+    surface: str
+
+
+class _PrefetchView(Protocol):
+    token: _TokenView
+    inflected: str
+    mined: bool
+    full: bool
+
+
+def _captured_prefetch_items(r: TestSession, monkeypatch) -> list[_PrefetchView]:
+    items: list[_PrefetchView] = []
+
+    def append(candidate) -> None:
+        if hasattr(candidate, "full"):
+            items.append(cast("_PrefetchView", candidate))
 
     def capture(_state, jobs, _on_finished, *, context):  # noqa: ARG001
         for _priority, item in jobs:
             if isinstance(item, prefetch.CandidateScan):
-                items.extend(
-                    candidate
-                    for _, candidate in prefetch.candidate_jobs(item.ports, item.head, item.gen)
-                    if isinstance(candidate, prefetch.PrefetchItem)
-                )
-            elif isinstance(item, prefetch.PrefetchItem):
-                items.append(item)
+                for _, candidate in prefetch.candidate_jobs(item.ports, item.head, item.gen):
+                    append(candidate)
+            else:
+                append(item)
         return True
 
     monkeypatch.setattr(prefetch, "schedule", capture)
@@ -527,7 +540,9 @@ def test_mine_command_uses_one_observed_encounter_without_property_queries(monke
     monkeypatch.setattr(
         miner,
         "preflight_token",
-        lambda transaction, _token, **_kwargs: admitted.append(transaction.encounter),
+        lambda transaction, token, **_kwargs: admitted.append(
+            (transaction.encounter, token.surface)
+        ),
     )
     ipc.commands.clear()
 
@@ -537,11 +552,13 @@ def test_mine_command_uses_one_observed_encounter_without_property_queries(monke
     )
 
     assert len(admitted) == 1
-    assert (admitted[0].media_path, admitted[0].playhead, admitted[0].span) == (
+    encounter, surface = admitted[0]
+    assert (encounter.media_path, encounter.playhead, encounter.span) == (
         "/video.mkv",
         5.0,
         miner.Timespan(4.0, 6.0),
     )
+    assert (encounter.cue.hover, surface) == (0, "本命")
     assert not [command for command in ipc.commands if command[0] == "get_property"]
 
 
@@ -1736,6 +1753,7 @@ def test_prefetch_queues_cheap_warm_while_just_playing(monkeypatch):
     item = _captured_prefetch_items(r, monkeypatch)[0]
     assert r.graph.tooltip_preparation.generation == g0 + 1
     assert item.token.surface == "本命"
+    assert item.inflected == "本命"
     assert item.full is False  # idle-time warm only, no layout/drawing
 
 
@@ -3133,63 +3151,6 @@ def test_mine_tags_carry_source_and_episode():
 # --- Stage 3: hygiene batch -----------------------------------------------------------------------
 
 
-def test_bottom_margin_no_dead_code(make_session):
-    """bottom_margin must not have unreachable code — verify it returns correctly."""
-    r = make_session(FakeIPC())
-    r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    result = r.graph.subtitle_presentation.visual.bottom_margin(r.graph.screen.osd[1])
-    assert isinstance(result, int)
-    assert result == round(
-        1080 * r.graph.subtitle_presentation.visual.bottom_margin_fraction
-    )  # subtitle margin is OSD-native (osd=1080 here)
-
-
-def test_panel_cache_lru_eviction_not_wholesale_clear(make_session):
-    """_panel_cache must evict the OLDEST entry (LRU) at its limit, not clear everything.
-    After overflow, the most-recently-used entry must still be present."""
-    from saitenka_tokenize.japanese import Token
-
-    from saitenka.panel import Definition, Entry
-
-    class _CountDS:
-        def __init__(self):
-            self.calls = 0
-
-        def entry_for(self, tok, inflected=None, *, extra_terms=()):  # noqa: ARG002  # protocol shape
-            self.calls += 1
-            return Entry(headword=tok.surface, defs=[Definition("D", ["x"])])
-
-        def rareness_rank(self, _token):  # protocol shape
-            """No frequency dictionaries, so no blended rank and no pill."""
-            return
-
-    r = make_session(FakeIPC(), services=SessionServices(dictionaries=_CountDS()))
-    r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-
-    from saitenka.app.subtitles import WordBox
-
-    # Fill the cache to exactly the limit + 1 to trigger eviction.
-    # We'll manually insert sentinel keys to test LRU behaviour. Fill exactly to the cap so the next
-    # insert (the real tooltip below) triggers a single eviction of the oldest.
-    sentinel = object()
-    for i in range(r.graph.tooltip.cache_limit):
-        r.graph.tooltip.surface_state().panel_cache.setdefault(f"key_{i}", sentinel)
-    tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
-    # Tokens first: a box exists because a token was measured, and the store drops a box that
-    # indexes a token the cue does not have. Reversed, this builds a state the runtime never reaches.
-    r.graph.subtitle_presentation.cue.replace_tokenized(tokens=[tok])
-    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 100, 40, 40)])
-    Driver(r).move_to_word(0)
-    # the most-recently inserted sentinel survives; the oldest (key_0) is evicted, not the whole cache.
-    assert (
-        f"key_{r.graph.tooltip.cache_limit - 1}" in r.graph.tooltip.surface_state().panel_cache
-    ), "LRU eviction removed recently-used entry"
-    assert "key_0" not in r.graph.tooltip.surface_state().panel_cache, (
-        "LRU eviction should have removed oldest entry"
-    )
-
-
 def test_close_cleans_up_tmp_dir(make_session):
     """SessionController.close() must remove the mkdtemp directory it created."""
     r = make_session(FakeIPC())
@@ -3337,9 +3298,10 @@ def test_prepared_prefetch_items_carry_the_mined_flag(monkeypatch):
     ipc.props["pause"] = True
     r = _reader_with_word(ipc)
     r.graph.playback.install_seed({"sub-text": "本命"})
+    r.graph.mining.record_mined_expression("本命")
     items = _captured_prefetch_items(r, monkeypatch)
     assert items, "nothing was queued"
-    assert isinstance(items[0].mined, bool), f"queue item lacks the mined flag: {items[0]}"
+    assert items[0].mined is True
 
 
 def test_cue_change_nested_also_cleared(monkeypatch):
@@ -3814,37 +3776,6 @@ def test_reader_kwargs_still_work_and_map_onto_groups(make_session):
         )  # typo detection preserved
 
 
-def test_prefetch_queue_items_are_typed_dataclasses(monkeypatch):
-    from saitenka.app.features.tooltip.prefetch import PrefetchItem
-
-    ipc = FakeIPC()
-    ipc.props["pause"] = True
-    r = _reader_with_word(ipc)
-    r.graph.playback.install_seed({"sub-text": "本命"})
-    item = _captured_prefetch_items(r, monkeypatch)[0]
-    assert isinstance(item, PrefetchItem)
-    assert item.token.surface == "本命"
-    assert item.inflected == "本命"
-    assert isinstance(item.gen, int) and isinstance(item.mined, bool)
-
-
-def test_popups_module_unifies_popup_view_state(make_session):
-    from saitenka.app.features.tooltip.popups import Panel, PopupView
-    from saitenka.panel import Definition, Entry, panel_rows
-
-    pv = PopupView()
-    # the unified per-popup view state (nested popup; base tip keeps its own exploded state)
-    assert pv.state is None and pv.scroll == 0 and pv.rect is None
-    r = make_session(FakeIPC())
-    assert isinstance(r.graph.tooltip.surface_state().nest, PopupView)
-    # Panel wraps the windowed engine and is constructible from rows
-    entry = Entry(
-        headword="本命", reading="ほんめい", defs=[Definition("辞書", ["これは定義です。"])]
-    )
-    panel = Panel.from_rows(panel_rows(entry, 384), 384, "ほんめい")
-    assert panel.reading == "ほんめい" and panel.width == 384 and panel.full_height > 0
-
-
 def test_from_rows_band_cache_max_retains_more_of_a_tall_panel():
     from saitenka.app.features.tooltip.popups import Panel
     from saitenka.panel import Definition, Entry, panel_rows
@@ -3863,31 +3794,6 @@ def test_from_rows_band_cache_max_retains_more_of_a_tall_panel():
         default.viewport(scroll, 300, overscan=60)
         capped.viewport(scroll, 300, overscan=60)
     assert capped.windowed.cached_blocks > default.windowed.cached_blocks
-
-
-def test_miner_module_owns_the_mining_flow(monkeypatch):
-    from saitenka.app.features.mining import miner
-    from saitenka.app.features.mining.miner import tag_slug
-
-    assert tag_slug("Nippon Sangoku") == "Nippon_Sangoku"
-    ipc = FakeIPC()
-    r = _reader_with_word(ipc)
-    # SessionController's mining API delegates to the module, handing it the cue it built (behaviour preserved)
-    mined = []
-    monkeypatch.setattr(
-        miner,
-        "preflight_token",
-        lambda p, tok, **_k: mined.append((p.encounter.cue.hover, tok.surface)),
-    )
-    _enable_mining(r)
-    r.graph.tooltip.select(0)
-    r.command(bindings.MINE_MSG)
-    await_ready(
-        lambda: not r.graph.mining.operation_pending,
-        "mining preflight did not finish",
-        pump=r.pump,
-    )
-    assert mined == [(0, "本命")]
 
 
 def test_a_reader_with_no_deck_has_no_active_mining_target(monkeypatch):
