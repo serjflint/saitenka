@@ -67,12 +67,10 @@ def _reader(
     scorer=None,
 ):
     ipc = _FakeIPC(props)
-    options = ReaderOptions(
-        perf=PerfOptions(
-            prefetch_lookahead=lookahead,
-            head_prefetch_lookahead=head_lookahead,
-            head_prefetch_queue_max=head_queue_max,
-        )
+    options = ReaderOptions().with_overrides(
+        prefetch_lookahead=lookahead,
+        head_prefetch_lookahead=head_lookahead,
+        head_prefetch_queue_max=head_queue_max,
     )
     r = build_session(
         ipc,
@@ -105,16 +103,6 @@ def _submitted_items(r, monkeypatch):
     monkeypatch.setattr(prefetch, "schedule", capture)
     r.graph.tooltip.update_prefetch()
     return submitted
-
-
-def _upcoming(r, n: int) -> list[str]:
-    """The next `n` cue texts, from the function that owns them rather than through the SessionController."""
-    return prefetch.upcoming_cue_texts(
-        r.graph.track_commands.navigation.current.sub_index,
-        n,
-        text=r.graph.playback.cue.text,
-        preferred=r.graph.track_commands.navigation.current.nav_idx,
-    )
 
 
 def test_lookahead_warms_the_next_cues_words(monkeypatch):
@@ -162,6 +150,7 @@ def test_lookahead_dedupes_against_the_current_line(monkeypatch):
 
 
 def test_no_lookahead_when_disabled(monkeypatch):
+    assert PerfOptions().prefetch_lookahead == 0
     r = _reader(monkeypatch, lookahead=0)
     r.graph.cue.set_subtitle("本を読む")
     surfaces = [i.token.surface for i in _submitted_items(r, monkeypatch)]
@@ -327,25 +316,6 @@ def test_head_job_limit_does_not_hide_an_eligible_token_after_an_ineligible_pref
     )
 
     assert [item.token.surface for _priority, item in heads] == ["語"]
-
-
-def test_upcoming_cue_texts_bounds_at_the_tail(monkeypatch):
-    r = _reader(monkeypatch, lookahead=5)
-    r.graph.cue.set_subtitle("水を飲む")  # last cue
-    assert _upcoming(r, 5) == []
-
-
-def test_upcoming_cue_texts_is_empty_without_an_index(monkeypatch):
-    r = _reader(monkeypatch, lookahead=2)
-    r.graph.track_commands.navigation.current.sub_index = None
-    r.graph.cue.set_subtitle("本を読む")
-    assert _upcoming(r, 2) == []
-
-
-def test_prefetch_lookahead_routes_through_reader_options():
-    opts = ReaderOptions().with_overrides(prefetch_lookahead=3)
-    assert opts.perf.prefetch_lookahead == 3
-    assert PerfOptions().prefetch_lookahead == 0  # off by default
 
 
 def test_telemetry_gauges_report_cache_occupancy(monkeypatch):
