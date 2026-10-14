@@ -97,6 +97,8 @@ class SaitenkaSessionAdapter:
             return "binding", [command[0], command[1]]
         if command and command[0] == "show-text":
             return "notice", ["notice", command[1]]
+        if command and command[0] == "sub-seek":
+            return "seek", ["sub-seek", str(command[1])]
         return "mpv", _json_value(command)
 
     def perform(self, action: dict) -> None:

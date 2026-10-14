@@ -3331,49 +3331,6 @@ def test_click_cursor_queries_mpv_instead_of_using_the_hover_observation(request
     assert reader.graph.tooltip.click_ports.cursor() == current
 
 
-def test_property_change_event_drives_subtitle_update(monkeypatch, make_session):
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    r = make_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    r.graph.playback.start_session()
-    ipc.set_prop("sub-text", "新しい字幕")
-    r.pump()
-    assert r.graph.playback.cue.text == "新しい字幕"
-
-
-def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch, make_session):
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    ipc.props.update({"sub-text": "古い字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.playback.start_session()
-    reader.graph.cue.set_subtitle("古い字幕")
-    navigated = []
-    monkeypatch.setattr(
-        reader.graph.subtitle_navigation, "navigate", lambda delta: navigated.append(delta)
-    )
-    ipc.emit({"event": "property-change", "name": "sub-text", "data": "新しい字幕"})
-    ipc.emit({"event": "client-message", "args": [bindings.SUB_NEXT_MSG]})
-
-    reader.pump()
-
-    assert navigated == []  # the nav command was rejected against the retired cue
-    assert (
-        reader.graph.playback.cue.text == "新しい字幕"
-    )  # and the replacement settled in the same drain
-
-
 def test_a_replaced_source_revises_the_identity_of_the_same_cue_text(make_session):
     """Re-showing identical text after a source swap must not reuse the old cue identity."""
     from util import FakeIPC as EventIPC

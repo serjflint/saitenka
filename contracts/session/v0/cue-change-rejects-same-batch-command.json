@@ -3,7 +3,7 @@
   "scenario_id": "cue-change-rejects-same-batch-command",
   "requires": ["session-v0"],
   "given": {
-    "capture": ["clipboard", "notice", "termination"],
+    "capture": ["clipboard", "notice", "seek", "termination"],
     "mpv_properties": {"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0}
   },
   "when": [
@@ -13,18 +13,21 @@
       "events": [
         {"event": "property-change", "name": "sub-text", "data": "new"},
         {"event": "client-message", "args": ["saitenka-copy-line"]},
+        {"event": "client-message", "args": ["saitenka-sub-next"]},
         {"event": "client-message", "args": ["saitenka-toggle-overlay"]}
       ]
     },
     {"action": "drain_until_quiescent", "max_steps": 8},
     {"action": "command", "name": "saitenka-copy-line"},
+    {"action": "command", "name": "saitenka-sub-next"},
     {"action": "command", "name": "saitenka-toggle-overlay"}
   ],
   "expect": {
-    "mode": "contains_in_order",
+    "mode": "exact",
     "observations": [
       {"source": "mpv", "kind": "command", "value": ["notice", "Saitenka hidden"]},
       {"source": "clipboard", "kind": "write", "text": "new"},
+      {"source": "mpv", "kind": "command", "value": ["sub-seek", "1"]},
       {"source": "mpv", "kind": "command", "value": ["notice", "Saitenka shown"]},
       {"source": "adapter", "kind": "terminated"}
     ]
