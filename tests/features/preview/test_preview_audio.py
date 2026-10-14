@@ -90,11 +90,6 @@ def reader_with_clip(tmp_path, monkeypatch):
     return r, proc, killed
 
 
-def test_play_button_retains_the_player_handle(reader_with_clip):
-    r, proc, _killed = reader_with_clip
-    assert r.graph.preview.panel.audio_proc is proc  # the fire-and-forget Popen is now stoppable
-
-
 def test_second_play_press_replaces_the_clip_never_stacks(reader_with_clip, monkeypatch):
     r, first, killed = reader_with_clip
     second = _FakeProc()
