@@ -102,12 +102,17 @@ def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
     assert reader.graph.analysis.result is not None
 
 
-def test_no_index_reports_unavailable(reader):
-    reader.graph.track_commands.navigation.current.sub_index = None
+@pytest.mark.parametrize("unavailable", ["missing-index", "english"])
+def test_unavailable_analysis_input_has_terminal_state(reader, unavailable):
+    if unavailable == "missing-index":
+        reader.graph.track_commands.navigation.current.sub_index = None
+    else:
+        reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
 
     _toggle(reader)
 
     assert reader.graph.analysis.status == "Japanese track unavailable"
+    assert reader.graph.analysis.result is None
     assert reader.graph.analysis.settled
 
 
@@ -291,16 +296,6 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
     assert reader.graph.analysis.result is None
     assert reader.graph.analysis.status == "Analysis unavailable"
     assert "episode analysis failed" in caplog.text
-
-
-def test_english_or_missing_japanese_track_is_unavailable(reader):
-    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
-
-    _toggle(reader)
-
-    assert reader.graph.analysis.status == "Japanese track unavailable"
-    assert reader.graph.analysis.result is None
-    assert reader.graph.analysis.settled
 
 
 def test_ui_scale_enlarges_episode_analysis_window():
