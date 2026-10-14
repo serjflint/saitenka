@@ -7,6 +7,8 @@ executable corpus:
 |---|---|---|
 | `legacy-run-defaults` | change the run command's default subtitle languages | the normalized `slang` result changed from `ja,jpn,jp` to `en` |
 | `toml-feeds-cli-defaults` | detach the Cyclopts app from the configured TOML path | every configured default disappeared |
+| `resource-name-precedence` | ignore explicit resource-name flags | the configured dictionary incorrectly replaced the flag value |
+| `jimaku-fetch-policy` | remove the explicit-fetch override | an explicit `--jimaku` request stopped fetching |
 
 The registry-driven all-command help check and legacy wrapper subprocess remain separate: they cover an
 open command set and a real compatibility process boundary rather than finite parser examples.

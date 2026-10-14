@@ -53,16 +53,6 @@ def test_legacy_mpv_reader_entrypoint_delegates_to_run_help():
     assert "--mine-key" in result.stdout
 
 
-def test_resolve_names_flag_wins_over_config():
-    """dict/freq/pitch are dictionary TITLES resolved against the DB: explicit flags win over the
-    config file, and both are passed through verbatim (titles, not paths — no ~-expansion)."""
-    from saitenka.app.launch.run import resolve_names
-
-    assert resolve_names(["FlagDict"], {"dicts": ["ConfigDict"]}, "dicts") == ["FlagDict"]
-    assert resolve_names([], {"dicts": ["ConfigDict"]}, "dicts") == ["ConfigDict"]
-    assert resolve_names(None, {}, "dicts") == []
-
-
 def test_version_is_wired_to_package_metadata():
     """`--version` printed 0.0.0 because cyclopts couldn't resolve the `overlay` import package to the
     `saitenka` distribution — now pinned via saitenka.__version__."""
@@ -73,29 +63,6 @@ def test_version_is_wired_to_package_metadata():
 
     assert saitenka.__version__ == version("saitenka")
     assert app.version not in {None, "", "0.0.0"}
-
-
-def test_jimaku_should_fetch_decision():
-    """run fetches jimaku on an explicit flag always; config-driven fetch only when there's no
-    embedded JP track (so it never overrides good embedded subs)."""
-    from saitenka.app.cli import jimaku_should_fetch as f
-
-    assert (
-        f(explicit_flag=True, cfg_fetch=False, video="v.mkv", probe=lambda _v, _s: True) is True
-    )  # --jimaku wins over embedded JP
-    assert f(explicit_flag=True, cfg_fetch=True, video=None) is False  # no video → never
-    assert (
-        f(explicit_flag=False, cfg_fetch=True, video="v.mkv", probe=lambda _v, _s: False) is True
-    )  # config + no JP track → fetch
-    assert (
-        f(explicit_flag=False, cfg_fetch=True, video="v.mkv", probe=lambda _v, _s: True) is False
-    )  # config + JP track → skip
-    assert (
-        f(explicit_flag=False, cfg_fetch=True, video="v.mkv", probe=lambda _v, _s: None) is True
-    )  # config + can't probe → fetch
-    assert (
-        f(explicit_flag=False, cfg_fetch=False, video="v.mkv", probe=lambda _v, _s: False) is False
-    )  # neither → never
 
 
 @pytest.mark.parametrize(

@@ -69,4 +69,22 @@ def evaluate(scenario: dict) -> object:
         return _parse(scenario)
     if scenario["mode"] == "parse-config":
         return _parse_with_config(scenario)
+    if scenario["mode"] == "resolve-names":
+        from saitenka.app.launch.run import resolve_names
+
+        return [
+            resolve_names(case["flags"], case["config"], case["key"]) for case in scenario["cases"]
+        ]
+    if scenario["mode"] == "jimaku-decision":
+        from saitenka.app.launch.run import jimaku_should_fetch
+
+        return [
+            jimaku_should_fetch(
+                explicit_flag=case["explicit"],
+                cfg_fetch=case["configured"],
+                video=case["video"],
+                probe=lambda _video, _slang, answer=case["probe"]: answer,
+            )
+            for case in scenario["cases"]
+        ]
     raise ValueError(f"unknown cli-v0 mode: {scenario['mode']!r}")

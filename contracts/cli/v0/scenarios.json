@@ -83,5 +83,28 @@
     "args": ["run", "--slang", "ja"],
     "observe": ["slang"],
     "expect": {"slang": "ja"}
+  },
+  {
+    "scenario_id": "resource-name-precedence",
+    "mode": "resolve-names",
+    "cases": [
+      {"flags": ["FlagDict"], "config": {"dicts": ["ConfigDict"]}, "key": "dicts"},
+      {"flags": [], "config": {"dicts": ["ConfigDict"]}, "key": "dicts"},
+      {"flags": null, "config": {}, "key": "dicts"}
+    ],
+    "expect": [["FlagDict"], ["ConfigDict"], []]
+  },
+  {
+    "scenario_id": "jimaku-fetch-policy",
+    "mode": "jimaku-decision",
+    "cases": [
+      {"explicit": true, "configured": false, "video": "v.mkv", "probe": true},
+      {"explicit": true, "configured": true, "video": null, "probe": null},
+      {"explicit": false, "configured": true, "video": "v.mkv", "probe": false},
+      {"explicit": false, "configured": true, "video": "v.mkv", "probe": true},
+      {"explicit": false, "configured": true, "video": "v.mkv", "probe": null},
+      {"explicit": false, "configured": false, "video": "v.mkv", "probe": false}
+    ],
+    "expect": [true, false, true, false, true, false]
   }
 ]
