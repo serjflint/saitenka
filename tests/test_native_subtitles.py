@@ -1111,10 +1111,13 @@ def test_a_non_ass_source_is_drawn_by_legacy_and_stays_scannable(tmp_path: Path)
     run — the boxes here are the whole reason the renderer switches."""
     result, _ipc, backend = reader(tmp_path)
     assert result.graph.subtitle_presentation.native is not None
+    source = tmp_path / "episode.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
 
-    result.graph.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
+    result.graph.subtitle_presentation.native.set_source(source, live=True)
     result.graph.cue.set_subtitle("猫を見る")
 
+    assert result.graph.subtitle_presentation.native.source_unsupported is True
     assert (
         result.graph.subtitle_presentation.native.status.fallback_reason
         == "subtitle-source-not-authored-ass"
@@ -1186,25 +1189,6 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
         result.close()
         otel_metrics.unregister()
         provider.shutdown()
-
-
-def test_a_source_geometry_can_never_use_hands_the_pixels_to_legacy(tmp_path: Path) -> None:
-    """An .srt otherwise leaves mpv drawing with no hit boxes for the whole episode — unscannable,
-    and unrecoverable without changing tracks. The reason is a property of the source, so this
-    selects a renderer once per track rather than reacting to a geometry outcome."""
-    result, _ipc, _backend = reader(tmp_path)
-    renderer = NativeVisibleRenderer()
-    result.graph.subtitle_presentation.pipeline.renderer = renderer
-    assert result.graph.subtitle_presentation.native is not None
-    result.graph.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
-    result.graph.playback.install_seed({"sub-text": "猫を見る"})
-
-    result.graph.subtitle_presentation.pipeline.draw_current(
-        result.graph.subtitle_presentation.target()
-    )
-
-    assert renderer.ownership_state.context.mode.value == "legacy-overlay"
-    result.close()
 
 
 def test_the_track_load_reset_does_not_hand_the_pixels_to_legacy(tmp_path: Path) -> None:
@@ -2501,24 +2485,6 @@ def test_a_converted_track_carries_the_features_and_scale_mpv_sets(tmp_path: Pat
     state = backend.requests[-1].renderer_state
     assert dict(state.features) == {1: True, 2: True, 3: True}
     assert state.font_scale > 0
-
-
-def test_an_srt_stays_with_the_legacy_renderer_unless_the_config_asks(tmp_path: Path) -> None:
-    """The default envelope is the tested one. A track the native path has not been asked to take
-    still selects the renderer that can draw its hit boxes."""
-    result, _ipc, _backend = reader(tmp_path)
-    assert result.graph.subtitle_presentation.native is not None
-    source = tmp_path / "episode.srt"
-    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
-
-    result.graph.subtitle_presentation.native.set_source(source, live=True)
-
-    assert result.graph.subtitle_presentation.native.source_unsupported is True
-    assert (
-        result.graph.subtitle_presentation.native.status.fallback_reason
-        == "subtitle-source-not-authored-ass"
-    )
-    result.close()
 
 
 TWO_CUE_SRT = (
