@@ -244,43 +244,16 @@ TestTooltipSession = pytest.mark.integration(TooltipSession.TestCase)
 
 
 @pytest.mark.integration
-def test_the_agreement_oracle_has_teeth() -> None:
-    # Negative control (arm-2 oracle-liveness made permanent): the invariant isn't vacuous. Correct
-    # displayed centres round-trip, but a deliberately DRIFTED transform mis-hits — so a real seam
-    # regression (a stale scroll / scale / panel after some transition) would turn the state machine red.
+def test_the_agreement_oracle_has_teeth(monkeypatch) -> None:
     session = _fresh_reader()
-    r = session.graph
     Driver(session).move_to_word(0)
-    panel, s, scroll = tooltip_panel.hit_target(
-        r.tooltip.surface_state().nest,
-        r.tooltip.surface_state().view.state,
-        r.tooltip.surface_state().view.scroll,
-        r.tooltip.scale().raster,
-        nested=False,
-    )
-    panel.windowed.viewport(scroll, r.tooltip.surface_state().view.view_h)
-    sx, sy = r.tooltip.surface_state().view.xy
-    lo, hi = scroll, scroll + r.tooltip.surface_state().view.view_h
-    visible = [b for b in panel.windowed.scan_boxes() if lo <= b.y + b.h / 2 < hi]
-    assert visible  # the fixture shows scan cells to hit-test
-    for b in visible:  # the true centres round-trip (the oracle passes on correct geometry)
-        assert (
-            tooltip_panel.scan_hit(
-                r.tooltip.surface_state(),
-                r.tooltip.scale().raster,
-                sx + (b.x + b.w / 2) * s,
-                sy + (b.y + b.h / 2 - scroll) * s,
-            )
-            == b
-        )
-    drifted = sum(
-        tooltip_panel.scan_hit(
-            r.tooltip.surface_state(),
-            r.tooltip.scale().raster,
-            sx + (b.x + b.w / 2) * s,
-            sy + (b.y + b.h / 2 - scroll) * s + 40 * s,
-        )
-        != b
-        for b in visible
-    )
-    assert drifted > 0  # a 40px transform drift mis-hits → the invariant can fail (has teeth)
+    _assert_agrees(session, nested=False)
+    scan_hit = tooltip_panel.scan_hit
+
+    def drifted_scan_hit(state, scale, mx, my):
+        return scan_hit(state, scale, mx, my + 40 * scale)
+
+    monkeypatch.setattr(tooltip_panel, "scan_hit", drifted_scan_hit)
+    with pytest.raises(AssertionError, match="scan mis-hit"):
+        _assert_agrees(session, nested=False)
+    session.close()
