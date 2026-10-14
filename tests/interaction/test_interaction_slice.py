@@ -122,8 +122,12 @@ def test_each_turn_publishes_its_own_decisions_and_no_earlier_ones() -> None:
     drained = _fold(STREAM)
 
     assert drained[0] == ()  # configuration decides nothing
-    assert ShowWord(0) in drained[1]  # first word opens instantly
-    assert ShowWord(0) not in drained[2]  # …and is not published again
+    assert [decision for decision in drained[1] if isinstance(decision, Arm | ShowWord)] == [
+        ShowWord(0)
+    ]
+    assert [decision for decision in drained[2] if isinstance(decision, Arm | ShowWord)] == [
+        Arm(Dwell.SWITCH, DELAYS.switch, SwitchTo(1))
+    ]
 
 
 def test_a_dwell_that_elapses_publishes_the_switch_it_was_armed_for() -> None:

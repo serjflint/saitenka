@@ -53,25 +53,6 @@ def kinds(decisions, cls) -> list:
     return [d for d in decisions if isinstance(d, cls)]
 
 
-# --- switching words -----------------------------------------------------------------------------
-
-
-def test_the_first_word_opens_instantly_with_no_dwell() -> None:
-    """Nothing is up, so there is no tooltip to hijack — the dwell only exists to protect one."""
-    result = turn(hover=-1, word=0)
-
-    assert kinds(result.decisions, ShowWord) == [ShowWord(0)]
-    assert not kinds(result.decisions, Arm)
-
-
-def test_switching_to_another_word_arms_a_dwell_instead_of_switching() -> None:
-    result = turn(hover=0, word=1)
-
-    assert not kinds(result.decisions, ShowWord)
-    assert kinds(result.decisions, Arm) == [Arm(Dwell.SWITCH, 0.3, SwitchTo(1))]
-    assert result.state.word_target == 1
-
-
 def test_resting_on_the_same_new_word_does_not_re_arm_its_dwell() -> None:
     """Re-arming every tick would push the switch out forever — the cursor never gets to rest."""
     first = turn(hover=0, word=1)
@@ -79,15 +60,6 @@ def test_resting_on_the_same_new_word_does_not_re_arm_its_dwell() -> None:
 
     assert kinds(first.decisions, Arm)
     assert not kinds(second.decisions, Arm)
-
-
-def test_a_dwell_that_elapses_on_the_word_it_was_armed_for_switches() -> None:
-    armed = turn(hover=0, word=1).state
-
-    result = elapsed(armed, SwitchTo(1))
-
-    assert result.decisions == (ShowWord(1),)
-    assert result.state.word_target is None
 
 
 def test_a_dwell_that_outlived_its_target_switches_nothing() -> None:
@@ -208,19 +180,36 @@ def test_no_nested_popup_means_nothing_to_linger() -> None:
 
 
 @pytest.mark.parametrize(
-    ("intent", "expected"),
+    ("intent", "expected_decisions", "expected_state"),
     [
-        (SwitchTo(1), (ShowWord(1),)),
-        (HideTip(), (RetireWord(),)),
-        (HideNested(), (CloseNested(),)),
+        (
+            SwitchTo(1),
+            (ShowWord(1),),
+            HoverState(tip_hide_pending=True, nest_hide_pending=True),
+        ),
+        (
+            HideTip(),
+            (RetireWord(),),
+            HoverState(word_target=1, nest_hide_pending=True),
+        ),
+        (
+            HideNested(),
+            (CloseNested(),),
+            HoverState(word_target=1, tip_hide_pending=True),
+        ),
     ],
 )
-def test_a_switch_or_a_hide_that_cannot_be_armed_happens_at_once(intent, expected) -> None:
+def test_a_switch_or_a_hide_that_cannot_be_armed_happens_at_once(
+    intent, expected_decisions, expected_state
+) -> None:
     """Fails open. A hide that can never fire leaves a popup on screen for the rest of the session,
     and a switch that never fires strands the tooltip on a word the cursor left."""
     state = HoverState(word_target=1, tip_hide_pending=True, nest_hide_pending=True)
 
-    assert refused(state, intent).decisions == expected
+    result = refused(state, intent)
+
+    assert result.decisions == expected_decisions
+    assert result.state == expected_state
 
 
 def test_an_open_that_cannot_be_armed_stays_shut() -> None:
@@ -231,14 +220,3 @@ def test_an_open_that_cannot_be_armed_stays_shut() -> None:
 
     assert refused(state, OpenScan(scan)).decisions == ()
     assert elapsed(state, OpenScan(scan)).decisions == (OpenNested(scan),)  # negative control
-
-
-@pytest.mark.parametrize("intent", [HideTip(), HideNested()])
-def test_a_refused_hide_does_not_leave_a_pending_flag_behind(intent) -> None:
-    """The flag means "a deadline is armed". Left set by a refusal, the next tick reads it as armed
-    and never arms one — a popup that lingers forever with nothing coming to hide it."""
-    state = HoverState(tip_hide_pending=True, nest_hide_pending=True)
-
-    after = refused(state, intent).state
-
-    assert not (after.tip_hide_pending and after.nest_hide_pending)
