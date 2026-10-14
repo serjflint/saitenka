@@ -21,22 +21,6 @@ from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
 
 
-def test_the_executor_runs_the_action_bound_to_an_accepted_command():
-    handled: list[str] = []
-    policy = CommandPolicy((CommandSpec("mine", Owner.INTERACTION, requires_cue=True),))
-    executor = CommandExecutor(
-        {"mine": lambda: handled.append("mined")},
-        policy=policy,
-    )
-
-    result = executor.dispatch(
-        UserCommand("mine"), cue_state=CueCommandState.ACTIVE, help_open=False
-    )
-
-    assert result.outcome == CommandOutcome.EXECUTED
-    assert handled == ["mined"]
-
-
 def test_a_spec_with_no_action_dispatches_to_unbound_rather_than_rejecting():
     """The negative control for "every spec is routed" (tests/session/test_bindings_registry.py).
 
@@ -93,26 +77,6 @@ def test_command_policy_keeps_cue_independent_command_eligible_after_retirement(
         UserCommand("saitenka-toggle-overlay"),
         cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
         help_open=False,
-    )
-
-    assert decision.intent is not None
-
-
-def test_command_policy_rejects_non_help_command_while_help_is_open():
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-toggle-overlay"),
-        cue_state=CueCommandState.ACTIVE,
-        help_open=True,
-    )
-
-    assert decision.rejection == CommandRejection.HELP_MODAL
-
-
-def test_command_policy_accepts_help_navigation_while_help_is_open():
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-help-next"),
-        cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
-        help_open=True,
     )
 
     assert decision.intent is not None

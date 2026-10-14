@@ -3,12 +3,13 @@
   "scenario_id": "help-opens-pages-and-closes",
   "requires": ["session-v0"],
   "given": {
-    "capture": ["surface", "termination"],
+    "capture": ["surface", "notice", "termination"],
     "mpv_properties": {"osd-dimensions": {"w": 480, "h": 220}}
   },
   "when": [
     {"action": "start"},
     {"action": "command", "name": "saitenka-toggle-help"},
+    {"action": "command", "name": "saitenka-toggle-overlay"},
     {"action": "command", "name": "saitenka-help-next"},
     {"action": "command", "name": "saitenka-help-close"}
   ],
