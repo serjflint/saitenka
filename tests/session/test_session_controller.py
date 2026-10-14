@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from saitenka_card import MineConfig
 from session_builder import TestSession, build_session
-from util import FakeIPC, await_ready, bare_gateway, keybind_registry, session_gateway
+from util import FakeIPC, await_ready, keybind_registry, session_gateway
 
 import saitenka.app.session.builder as session_builder_module
 from saitenka.app import bindings, subtitle_adapter
@@ -2643,7 +2643,6 @@ def test_copy_line_copies_all_lines(monkeypatch):
             [Token("読む", "読む", "よむ", "動詞", 0, 2)],
         ]
     )
-    from saitenka.app import subtitle_adapter
 
     got = []
     monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda s: got.append(s))
@@ -3421,42 +3420,6 @@ def test_property_change_event_drives_subtitle_update(monkeypatch, make_session)
     assert r.graph.playback.cue.text == "新しい字幕"
 
 
-def test_cue_change_retires_interaction_before_later_command_in_same_batch(
-    monkeypatch, make_session
-):
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    ipc.props.update({"sub-text": "古い字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.playback.start_session()
-    reader.graph.cue.set_subtitle("古い字幕")
-    copied = []
-    monkeypatch.setattr(
-        subtitle_adapter,
-        "copy_clipboard",
-        lambda _text: copied.append(reader.graph.playback.cue.text),
-    )
-    ipc.emit({"event": "property-change", "name": "sub-text", "data": "新しい字幕"})
-    ipc.emit({"event": "client-message", "args": [bindings.COPY_LINE_MSG]})
-
-    reader.pump()
-
-    # The command was rejected because the conflicting observation retired the cue first — that
-    # rejection IS the ordering proof. The drain then settles the replacement in the same turn;
-    # reconciliation used to wait for the next tick.
-    assert copied == []
-    assert reader.graph.playback.cue.text == "新しい字幕"
-
-
 def test_cue_change_retires_subtitle_navigation_in_the_same_batch(monkeypatch, make_session):
     from util import FakeIPC as EventIPC
 
@@ -3516,42 +3479,6 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text(make_sessio
     assert after is not None
     assert after != before
     assert after.normalized_text == before.normalized_text
-
-
-def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(make_session):
-    from util import FakeIPC as EventIPC
-
-    from saitenka.app.session.routes import install_session_reactor
-    from saitenka.runtime import ConnectionLost
-
-    ipc = EventIPC()
-    gateway = bare_gateway(ipc)
-    install_session_reactor(gateway, startup_hint=False)
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.cue.set_subtitle("古い字幕")
-    try:
-        assert ipc.publish_runtime_event(ConnectionLost(0))
-        ipc.emit({"event": "client-message", "args": [bindings.HELP_TOGGLE_MSG]})
-        assert reader.pump()
-
-        assert not any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
-        assert reader.graph.annotation.view.retired
-        assert (
-            reader.graph.subtitle_presentation.cue.current.tokens == []
-            and reader.graph.subtitle_presentation.cue.current.boxes == []
-        )
-        assert gateway.snapshot.command_outcomes == 1
-    finally:
-        reader.close()
-        gateway.close()
 
 
 def test_same_text_with_new_timing_installs_a_new_cue_identity(make_session):

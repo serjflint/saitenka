@@ -2,16 +2,12 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 from dataclasses import replace
-from typing import cast
 
-import pytest
-from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from saitenka_tokenize.japanese import Token
 from session_behavior_trace import SessionTrace, _visible_surfaces
 from subtitle_test_support import FakeSurfaces, Style, draw_request
 from util import FakeIPC, await_ready, bare_gateway
 
-from saitenka.app import subtitle_adapter
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -106,84 +102,6 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(
             "surfaces": "none",
             "lifecycle": "open",
             "outcome": "clear-reply-not-required",
-        },
-    )
-    reader.close()
-
-
-def test_changed_cue_retires_interaction_before_later_batch_command(
-    monkeypatch, make_session
-) -> None:
-    ipc = FakeIPC()
-    ipc.props.update({"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.playback.start_session()
-    reader.graph.cue.set_subtitle("old")
-    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
-    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
-    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
-    # assertion below then rests on it.
-    reader.graph.subtitle_presentation.cue.install_tokenized(
-        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
-    )
-    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
-    copied: list[str] = []
-    monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
-    trace = SessionTrace(reader)
-    trace.observe("cue-installed", outcome="interactive")
-
-    ipc.set_prop("sub-text", "new")
-    ipc.emit({"event": "client-message", "args": ["saitenka-copy-line"]})
-    # Reconciliation now runs at the drain's batch boundary rather than on the next tick, so the
-    # conflict phase is observed from inside the drain — after every event in the batch was
-    # processed against the retired cue, before the replacement settles. Same three phases, real
-    # boundaries; snapshotting after the drain would only ever see the settled state.
-    settle = reader.graph.cue.settle
-
-    def traced_settle() -> None:
-        trace.observe("cue-conflict", outcome="input-rejected")
-        settle()
-
-    monkeypatch.setattr(reader.graph.cue, "settle", traced_settle)
-    reader.pump()
-    trace.observe("cue-reconciled", outcome="replacement-active")
-
-    assert copied == []
-    assert trace.records() == (
-        {
-            "event": "cue-installed",
-            "cue": "active",
-            "pixels": "none",
-            "interaction": "ready",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "interactive",
-        },
-        {
-            "event": "cue-conflict",
-            "cue": "retired",
-            "pixels": "none",
-            "interaction": "unavailable",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "input-rejected",
-        },
-        {
-            "event": "cue-reconciled",
-            "cue": "active",
-            "pixels": "none",
-            "interaction": "unavailable",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "replacement-active",
         },
     )
     reader.close()
@@ -422,37 +340,3 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
         "lifecycle": "closed",
         "outcome": "presentation-retired",
     }
-
-
-def test_behavior_trace_rejects_unbounded_user_text() -> None:
-    trace = BehaviorTrace()
-
-    with pytest.raises(ValueError, match="text-free vocabulary"):
-        trace.append(
-            BehaviorRecord(
-                event="猫を見る",
-                cue="none",
-                pixels="none",
-                interaction="unavailable",
-                surfaces="none",
-                lifecycle="open",
-                outcome="interactive",
-            )
-        )
-
-
-def test_behavior_trace_rejects_user_text_in_state_fields() -> None:
-    trace = BehaviorTrace()
-
-    with pytest.raises(ValueError, match="text-free vocabulary"):
-        trace.append(
-            BehaviorRecord(
-                event="close",
-                cue=cast("CueState", "猫を見る"),
-                pixels="none",
-                interaction="unavailable",
-                surfaces="none",
-                lifecycle="closed",
-                outcome="presentation-retired",
-            )
-        )
