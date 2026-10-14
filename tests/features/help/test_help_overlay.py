@@ -7,7 +7,6 @@ from util import FakeIPC, keybind_registry
 from saitenka.app.bindings import (
     BOOKMARK_MSG,
     HELP_CLOSE_MSG,
-    HELP_NEXT_MSG,
     HELP_TOGGLE_MSG,
     MINE_MSG,
     SUB_NEXT_MSG,
@@ -123,25 +122,6 @@ def test_ui_scale_enlarges_help_document(make_session):
     assert enlarged_document.width > normal_document.width
     assert enlarged_document.height > normal_document.height
     assert enlarged_document.scale == 1.5
-
-
-def test_toggle_navigation_and_escape_are_playback_neutral(make_session):
-    ipc = FakeIPC()
-    reader = make_session(ipc, services=SessionServices(anki=object()))
-    reader.graph.screen.osd = (480, 220)
-
-    reader.command(HELP_TOGGLE_MSG)
-    assert any(command[:2] == ("keybind", "ESC") for command in ipc.commands)
-    assert any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
-
-    adds_before = sum(command[0] == "overlay-add" for command in ipc.commands)
-    reader.command(HELP_NEXT_MSG)
-    assert sum(command[0] == "overlay-add" for command in ipc.commands) == adds_before + 1
-    reader.command(HELP_CLOSE_MSG)
-    assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
-
-    forbidden = {"add", "sub-add", "sub-seek", "loadfile", "seek", "set_property"}
-    assert not [command for command in ipc.commands if command[0] in forbidden]
 
 
 def test_help_suppresses_actions_and_hover_then_restores_hover(monkeypatch, make_session):

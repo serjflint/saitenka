@@ -64,7 +64,7 @@ def assert_observations(expect: dict, actual: Sequence[dict]) -> None:
     wanted = expect["observations"]
     mode = expect["mode"]
     if mode == "exact":
-        assert list(actual) == wanted
+        assert list(actual) == wanted, f"expected {wanted!r}, got {list(actual)!r}"
         return
     if mode == "contains_in_order":
         remaining = iter(actual)

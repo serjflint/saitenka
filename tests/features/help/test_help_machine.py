@@ -5,54 +5,15 @@ from __future__ import annotations
 import pytest
 
 from saitenka.runtime.help import (
-    CloseHelp,
     HelpCommand,
     HelpState,
     HelpTurn,
-    OpenHelp,
     ShowHelpPage,
     decide,
     repaginate,
 )
 
 CLOSED = HelpState()
-
-
-@pytest.mark.parametrize(
-    ("given", "command", "expected"),
-    [
-        (CLOSED, HelpCommand.TOGGLE, HelpTurn(HelpState(open=True), (OpenHelp(),))),
-        (HelpState(open=True, page=1), HelpCommand.TOGGLE, HelpTurn(CLOSED, (CloseHelp(),))),
-        (HelpState(open=True, page=1), HelpCommand.CLOSE, HelpTurn(CLOSED, (CloseHelp(),))),
-        (CLOSED, HelpCommand.CLOSE, HelpTurn(CLOSED)),
-    ],
-    ids=["toggle-open", "toggle-close", "close-open", "close-closed"],
-)
-def test_open_and_close_commands_preserve_their_input(
-    given: HelpState, command: HelpCommand, expected: HelpTurn
-) -> None:
-    before = HelpState(given.open, given.page)
-
-    assert decide(given, command) == expected
-    assert given == before
-
-
-@pytest.mark.parametrize(
-    ("command", "page", "expected"),
-    [
-        (HelpCommand.NEXT, 0, 1),
-        (HelpCommand.PREVIOUS, 2, 1),
-    ],
-)
-def test_paging_moves_the_state_and_publishes_the_page(
-    command: HelpCommand, page: int, expected: int
-) -> None:
-    given = HelpState(open=True, page=page)
-
-    turn = decide(given, command, page_count=3)
-
-    assert turn == HelpTurn(HelpState(open=True, page=expected), (ShowHelpPage(expected),))
-    assert given == HelpState(open=True, page=page)
 
 
 @pytest.mark.parametrize(

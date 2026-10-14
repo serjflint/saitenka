@@ -9,6 +9,7 @@ run failed and the source file was restored byte for byte.
 | `cue-change-rejects-same-batch-command` | omit `CueIdentityRetired` application in `PlaybackProjection` | both copy commands wrote `old`; the expected `new` write never appeared |
 | `close-retires-visible-surface` | make `Overlay.remove_lifecycle_now` acknowledge without sending `overlay-remove` | the transcript terminated without `surface-absent` |
 | `subtitle-navigation-emits-seeks` | map next-subtitle to the previous-subtitle delta | the expected `sub-seek 1` disappeared and a second `sub-seek -1` was emitted |
+| `help-opens-pages-and-closes` | route help-next to help-previous | the second visible help-page write disappeared |
 
 `tests/contracts/test_adapter_protocol.py` also feeds a deliberately wrong transcript to the comparator and
 requires it to fail. Raw mutation output and the byte-restoring runner live under ignored
