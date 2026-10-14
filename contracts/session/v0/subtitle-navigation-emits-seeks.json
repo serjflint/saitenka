@@ -3,7 +3,7 @@
   "scenario_id": "subtitle-navigation-emits-seeks",
   "requires": ["session-v0"],
   "given": {
-    "capture": ["mpv", "termination"],
+    "capture": ["seek", "termination"],
     "mpv_properties": {}
   },
   "when": [
