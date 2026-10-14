@@ -194,10 +194,16 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     directly, which crashed on any install without the `observability` extra (found via live
     end-to-end testing — the dev/test env always has the extra via `[full]`, so no test caught it).
     traced() must run the wrapped block regardless of whether opentelemetry is importable."""
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     real_import = __import__
+    attempts = 0
 
     def _fake_import(name, *a, **kw):
+        nonlocal attempts
         if name.startswith("opentelemetry"):
+            attempts += 1
             raise ImportError(name)
         return real_import(name, *a, **kw)
 
@@ -209,7 +215,24 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     ran = False
     with otel_metrics.traced("test-span"):
         ran = True
-    assert ran
+    with otel_metrics.traced("cached-noop"):
+        ran = ran and True
+    assert ran and attempts == 1
+
+
+def test_traced_lazily_resolves_an_available_trace_module(monkeypatch):
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
+    fake = _FakeTraceModule()
+    monkeypatch.setattr(trace, "get_tracer", fake.get_tracer)
+    monkeypatch.setattr(otel_metrics, "_trace_available", None)
+    monkeypatch.setattr(otel_metrics, "_trace_module", None)
+
+    with otel_metrics.traced("resolved"):
+        pass
+
+    assert fake.tracer.spans
 
 
 class _FakeSpan:

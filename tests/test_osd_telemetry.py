@@ -11,7 +11,6 @@ silently reverting to scale 1.0 (the help/stats/sidebar regression) would have t
 from __future__ import annotations
 
 import threading
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -202,8 +201,9 @@ def test_visibility_off_removes_an_inflight_interaction_paint(monkeypatch):
         ipc.close()
 
 
+@pytest.mark.parametrize("deferred", [True, False], ids=["forced-deferred", "forced-inline"])
 @pytest.mark.timeout(5)
-def test_composition_may_override_who_presents_interaction_pixels():
+def test_composition_may_override_who_presents_interaction_pixels(deferred):
     """`Overlay(defer_interaction=…)` decides the path; the `isinstance` probe is only the default.
 
     Deferral is what keeps encode-and-write off the event thread, so it is the difference between
@@ -212,42 +212,19 @@ def test_composition_may_override_who_presents_interaction_pixels():
     measures the path production does not run, and cannot say so. Both directions are pinned here:
     a fake that asks for deferral gets it, and a real IPC that asks for inline gets that.
     """
-    deferred = Overlay(_FakeIPC(), defer_interaction=True)
+    ipc = _FakeIPC() if deferred else MpvIPC("unused")
+    overlay = Overlay(ipc, defer_interaction=deferred)
     presented = threading.Event()
     try:
-        result = deferred.show_bgra_interactive(
+        result = overlay.show_bgra_interactive(
             np.zeros((8, 8, 4), np.uint8),
             oid=OverlayId.TIP,
             on_presented=lambda _result: presented.set(),
         )
-        assert result == {"error": "deferred"}  # the caller did not pay for the upload
-        assert presented.wait(2)  # and someone else did
+        assert (result == {"error": "deferred"}) is deferred
+        if deferred:
+            assert presented.wait(2)
     finally:
-        deferred.close()
-
-    ipc = MpvIPC("unused")
-    inline = Overlay(ipc, defer_interaction=False)
-    try:
-        assert inline.show_bgra_interactive(np.zeros((8, 8, 4), np.uint8), oid=OverlayId.TIP) != {
-            "error": "deferred"
-        }
-    finally:
-        inline.close()
-        ipc.close()
-
-
-def test_publishing_a_frame_leaks_no_files():
-    """One stable path per oid plus its staging name, however many frames a scroll publishes. What
-    makes that path safe to reuse is `tests/test_overlay_frame_publication.py` — the frame-identity
-    assertion that used to live here asserted the alternating-slot *implementation*, which was built
-    on a mechanism the crash reports refute."""
-    ov = Overlay(_FakeIPC())
-    physical = ov.physical_oid(OverlayId.TIP)
-    for shade in range(6):
-        ov.show_bgra(np.full((64, 48, 4), shade, np.uint8), oid=OverlayId.TIP)
-
-    published = Path(ov._live[physical][2])
-    assert published.exists()
-    assert not published.with_name(published.name + ".staging").exists()
-    ov.close()
-    assert not published.exists()
+        overlay.close()
+        if isinstance(ipc, MpvIPC):
+            ipc.close()

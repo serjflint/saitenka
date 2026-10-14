@@ -59,6 +59,13 @@ def test_escape_at_the_root_closes_the_tooltip() -> None:
     )
 
 
-def test_a_click_is_routed_and_a_right_click_copies() -> None:
-    assert reduce(InteractionCommand.CLICK, InteractionInputs()) == (RouteClick(),)
-    assert reduce(InteractionCommand.COPY_UNDER_CURSOR, InteractionInputs()) == (CopyUnderCursor(),)
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        (InteractionCommand.CLICK, RouteClick()),
+        (InteractionCommand.COPY_UNDER_CURSOR, CopyUnderCursor()),
+    ],
+    ids=["click", "copy-under-cursor"],
+)
+def test_pointer_command_routes_expected_effect(command, expected) -> None:
+    assert reduce(command, InteractionInputs()) == (expected,)

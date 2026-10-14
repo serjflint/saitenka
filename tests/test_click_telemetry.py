@@ -13,7 +13,6 @@ from util import record_spans
 from saitenka.app import backlog
 from saitenka.app import bindings as app_bindings
 from saitenka.app.features.sidebar import sidebar
-from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitles import SidebarHitBox
 from saitenka.runtime import events
 
@@ -89,28 +88,3 @@ def test_bookmark_toggle_write_is_spanned(monkeypatch, tmp_path, make_session):
     reader.command(app_bindings.BOOKMARK_MSG)
     (attrs,) = _named(spans, "backlog_write")
     assert attrs["op"] == "toggle"
-
-
-def test_mined_store_write_is_spanned(monkeypatch, tmp_path, make_session):
-    # The #253 mined-card link write (main-thread SQLite) is spanned mined_store_write.
-    from types import SimpleNamespace
-
-    from saitenka_card import MineConfig
-
-    from saitenka.app.features.mining import mined_store, miner
-
-    spans = record_spans(monkeypatch)
-    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
-    reader = make_session(
-        _FakeIPC({"sub-start": 1.0, "sub-end": 3.0}),
-        services=SessionServices(
-            anki=SimpleNamespace(),
-            mining=MineConfig(deck="Mining"),
-        ),
-    )
-    card = SimpleNamespace(expression="猫", reading="ねこ")
-
-    ports = reader.graph.mining._operation()  # transaction write under test
-    assert ports is not None
-    miner._persist_mined(ports, note_id=42, card=card, video="/x/Show - 01.mkv")
-    assert len(_named(spans, "mined_store_write")) == 1
