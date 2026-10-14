@@ -43,3 +43,10 @@ an observation. Symbolic IDs replace process IDs, addresses, timestamps, and imp
 Each scenario file conforms to `schema/session-v0.json`. Scenario IDs are stable API keys. The committed
 manifest locks their count and key-set hash so a re-vendor or cleanup cannot silently shrink the contract.
 
+## Config v0 protocol
+
+`saitenka.config/v0` uses the same JSON Lines `hello`/`run` framing with capability `config-v0`. A run
+request contains `scenario_id`, `mode`, `config`, optional `flags` or `mine`, and `observe` paths; expected
+values stay with the runner. The adapter returns those normalized dotted paths in `observations`. This makes
+run/attach configuration parity a product contract without exposing `ReaderOptions` or Python dataclasses.
+
