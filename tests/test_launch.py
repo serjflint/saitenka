@@ -52,6 +52,7 @@ def test_core_flags_ipc_server_and_video_last():
     # observes. Nothing pauses the interactive path up front.
     assert "--loop-file=inf" not in argv and "--pause" not in argv
     assert "--keep-open=yes" in argv
+    assert "--script-opts=saitenka-managed=yes" in argv
 
 
 def test_native_subs_are_always_center_aligned():
@@ -61,14 +62,7 @@ def test_native_subs_are_always_center_aligned():
     assert "--sub-align-x=center" in argv
     assert "--sub-justify=center" in argv
     assert "--sub-ass-justify=yes" in argv
-
-
-def test_centering_never_touches_vertical_position():
-    # Centering is HORIZONTAL only. We must never emit a vertical-position flag (--sub-align-y defaults to
-    # bottom, --sub-pos to 100=bottom), so subs stay pinned at the bottom and a user's mpv.conf wins.
-    joined = " ".join(_argv())
-    assert "--sub-align-y" not in joined
-    assert "--sub-pos" not in joined
+    assert not any(arg.startswith(("--sub-align-y", "--sub-pos")) for arg in argv)
 
 
 def test_screenshot_pauses_on_the_first_frame():
@@ -132,27 +126,23 @@ def test_no_config_and_fullscreen_go_after_the_binary_not_at_slot_0():
     assert "--no-config" in argv[:4] and "--fullscreen" in argv[:4]
 
 
-def test_script_opts_mark_the_launch_as_run_managed():
-    # A globally-installed saitenka.lua plugin autoloads regardless of --no-config and would
-    # otherwise double-attach onto this same socket (see saitenka.lua's spawn_overlay guard).
-    assert "--script-opts=saitenka-managed=yes" in _argv()
-
-
-def test_extra_args_can_override_our_own_defaults():
-    # mpv is last-flag-wins: a user --mpv-arg re-stating one of our own overridable defaults
-    # (here --slang) must win, matching SubMiner's -a/--args precedent.
-    argv = _argv(extra_args=["--slang=en"])
-    assert argv.index("--slang=en") > argv.index("--slang=jpn")
-
-
-def test_extra_args_cannot_override_the_ipc_socket_or_log_file():
-    # These two are load-bearing for our own code (the SessionController connects to `sock`; `report` bundles
-    # the fixed mpv_log path) — an --mpv-arg re-stating either must still lose.
-    argv = _argv(extra_args=["--input-ipc-server=/tmp/evil.sock", "--log-file=/tmp/evil.log"])
-    assert argv.index("--input-ipc-server=/tmp/s.sock") > argv.index(
-        "--input-ipc-server=/tmp/evil.sock"
+def test_extra_args_override_defaults_but_not_runtime_paths():
+    argv = _argv(
+        extra_args=[
+            "--slang=en",
+            "--input-ipc-server=/tmp/evil.sock",
+            "--script-opts=saitenka-managed=no",
+            "--log-file=/tmp/evil.log",
+        ]
     )
-    assert argv.index("--log-file=/tmp/mpv.log") > argv.index("--log-file=/tmp/evil.log")
+    assert [arg for arg in argv if arg.startswith("--slang=")] == ["--slang=jpn", "--slang=en"]
+    assert [arg for arg in argv if arg.startswith("--input-ipc-server=")][-1] == (
+        "--input-ipc-server=/tmp/s.sock"
+    )
+    assert [arg for arg in argv if arg.startswith("--script-opts=")][-1] == (
+        "--script-opts=saitenka-managed=yes"
+    )
+    assert [arg for arg in argv if arg.startswith("--log-file=")][-1] == "--log-file=/tmp/mpv.log"
 
 
 def test_d3d11_flip_disabled_only_on_windows(monkeypatch):
