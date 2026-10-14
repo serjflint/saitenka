@@ -129,3 +129,17 @@ def load_scenarios(directory: Path) -> list[dict]:
     manifest = json.loads((directory / "manifest.lock").read_text(encoding="utf-8"))
     assert manifest == {"count": len(ids), "key_sha256": scenario_key_hash(ids)}
     return scenarios
+
+
+def load_row_corpus(directory: Path) -> list[dict]:
+    rows = [
+        row
+        for path in sorted(directory.glob("*.json"))
+        for row in json.loads(path.read_text(encoding="utf-8"))
+    ]
+    ids = [row["scenario_id"] for row in rows]
+    if len(ids) != len(set(ids)):
+        raise ValueError("scenario IDs must be unique")
+    manifest = json.loads((directory / "manifest.lock").read_text(encoding="utf-8"))
+    assert manifest == {"count": len(ids), "key_sha256": scenario_key_hash(ids)}
+    return rows
