@@ -375,32 +375,6 @@ def _msg_for(ipc, key):
     return keybind_registry(ipc)[key]
 
 
-def test_anchor_snaps_the_nearest_cue_start_to_the_playhead(monkeypatch):
-    # One-press manual re-time: at playhead 9s the nearest cue is さん (@10s), so sub-delay shifts by
-    # -1s to land it here — every later cue follows by the same offset (fixes residual auto-sync drift).
-    r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r.graph.notifications, "show", lambda *_a, **_k: None)
-    ipc.set_prop("time-pos", 9.0)
-    ipc.set_prop("sub-delay", 0.0)
-
-    r.command(app_bindings.SUB_ANCHOR_MSG)
-
-    assert ("set_property", "sub-delay", "-1.000") in ipc.commands
-
-
-def test_anchor_is_cumulative_from_the_current_delay(monkeypatch):
-    # A second anchor refines a first: from an existing +2s delay, snapping さん (@10s) to playhead 13s
-    # sets an absolute delay of +3s (13 - 10), not +2 plus a fresh guess.
-    r, ipc = _reader_with_index(monkeypatch)
-    monkeypatch.setattr(r.graph.notifications, "show", lambda *_a, **_k: None)
-    ipc.set_prop("time-pos", 13.0)
-    ipc.set_prop("sub-delay", 2.0)
-
-    r.command(app_bindings.SUB_ANCHOR_MSG)
-
-    assert ("set_property", "sub-delay", "3.000") in ipc.commands
-
-
 def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch, make_session):
     ipc = FakeIPC()
     r = make_session(ipc)
@@ -423,9 +397,8 @@ def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch, make_sess
 def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
     starts_ms, playhead_ms, delay_ms
 ):
-    # The anchor invariant behind the single hand-picked example: whatever the cue set, current delay,
-    # and playhead, the emitted sub-delay makes the nearest displayed cue's effective start coincide
-    # with the playhead — the "snap what I'm hearing to now" contract, over the whole input space.
+    # Whatever the cue set, current delay, and playhead, the emitted delay snaps the nearest
+    # displayed cue to the playhead.
     from saitenka_subtitles import Cue, CueIndex
 
     ipc = FakeIPC()
