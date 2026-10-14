@@ -4,6 +4,11 @@ This directory defines behavior that another Saitenka implementation can run wit
 Python package. An implementation supplies an executable adapter; the corpus runner supplies stimuli and
 judges the returned boundary transcript.
 
+The reference executable is `tests/contracts/default_adapter.py`. It exposes every capability below over
+the same JSON Lines transport; a replacement may use any language and process model as long as it
+implements the negotiated capability. `tests/contracts/test_adapter_protocol.py` sends the same corpus
+requests through that boundary without any `expect` or `expect_contains` field.
+
 ## Session v0 protocol
 
 The runner and adapter exchange one compact JSON object per line on stdin/stdout. Diagnostics go to stderr.
