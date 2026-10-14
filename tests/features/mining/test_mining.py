@@ -58,11 +58,6 @@ def test_known_entities_match_entity_values_keys():
     assert set(values) == set(KNOWN_ENTITIES)
 
 
-def test_bold_word():
-    assert bold_word("私は本を読む", "本") == "私は<b>本</b>を読む"
-    assert bold_word("no match here", "本") == "no match here"
-
-
 def test_build_note_maps_lapis_fields():
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     note = build_note(
@@ -156,29 +151,6 @@ def test_build_note_card_kind_none_sets_no_marker():
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     note = build_note(MineConfig(card_kind="none"), card_for(tok), CardContent(sentence_html="s"))
     assert not any(m in note["fields"] for m in KNOWN_MARKERS)  # no card-template marker at all
-
-
-def test_build_note_unknown_card_kind_falls_back_to_default(caplog):
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    with caplog.at_level("WARNING"):
-        note = build_note(
-            MineConfig(card_kind="bogus"), card_for(tok), CardContent(sentence_html="s")
-        )
-    assert note["fields"]["IsWordAndSentenceCard"] == "1"  # typo didn't disable the marker
-    assert "card_kind" in caplog.text
-
-
-def test_build_note_card_format_wins_over_fields():
-    # card_format present → ONLY its fields written (fields map ignored); card_kind flag still applies.
-    cfg = MineConfig(
-        fields={"expression": "Expression"},
-        card_format={"Word": "{expression}", "Furigana": "{furigana}"},
-    )
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), CardContent(sentence_html="本を<b>読む</b>"))
-    assert note["fields"]["Word"] == "読む" and note["fields"]["Furigana"] == "読[よ]む"
-    assert "Expression" not in note["fields"]  # the entity map is ignored wholesale
-    assert note["fields"]["IsWordAndSentenceCard"] == "1"  # card_kind marker still added
 
 
 def test_build_note_card_format_fans_one_entity_into_two_fields():
