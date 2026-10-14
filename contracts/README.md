@@ -50,3 +50,12 @@ request contains `scenario_id`, `mode`, `config`, optional `flags` or `mine`, an
 values stay with the runner. The adapter returns those normalized dotted paths in `observations`. This makes
 run/attach configuration parity a product contract without exposing `ReaderOptions` or Python dataclasses.
 
+## Playback v0 protocol
+
+`saitenka.playback/v0` uses capability `playback-v0`. A scenario supplies initial observed properties,
+optional installed-cue timing, preparation actions whose events are discarded, ordered playback actions,
+and the stable state fields to observe. Results contain normalized semantic events and state: cue identity
+uses integer source/track/cue revisions rather than implementation objects. The vocabulary describes cue,
+track, source, connection, timing, and render-space behavior; reducer classes and Python type names are not
+part of the contract.
+

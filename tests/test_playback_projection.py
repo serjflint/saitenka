@@ -8,21 +8,14 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from saitenka.runtime.playback import (
-    AuthoredCueStale,
-    ConnectionChanged,
     CueIdentityRetired,
     CueObservationChanged,
     FactDomain,
-    GeometryInputChanged,
     ObservedCue,
     PlaybackProjection,
     PlaybackState,
-    RenderSpaceChanged,
-    RetireReason,
     Revision,
-    SourceChanged,
     SubtitleSelectionChanged,
-    SubtitleTimingChanged,
 )
 
 
@@ -45,17 +38,6 @@ def kinds(deltas: tuple[object, ...]) -> list[type]:
 
 
 # --- gate: the first conflicting observation retires before the next command ------------------
-
-
-def test_a_changed_track_retires_the_identity_before_the_selection_delta() -> None:
-    projection = PlaybackProjection()
-    state = projection.seed(installed(projection), "sid", 1)
-    state = projection.install(state, start=1.0, end=3.0)
-
-    projected = projection.observe(state, "sid", 2)
-
-    assert kinds(projected.deltas)[:2] == [CueIdentityRetired, AuthoredCueStale]
-    assert SubtitleSelectionChanged in kinds(projected.deltas)
 
 
 # --- gate: joined and split sequences converge -------------------------------------------------
@@ -99,140 +81,7 @@ def test_reobserving_the_latest_values_emits_nothing(
 # --- gate: identical text under a new source/track/role/cue is a new identity -----------------
 
 
-def test_identical_text_on_a_new_cue_receives_a_new_identity() -> None:
-    projection = PlaybackProjection()
-    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
-    first = state.identity()
-
-    state = projection.observe(state, "sub-text", "").state
-    state = projection.observe(state, "sub-text", "猫を見る").state
-
-    assert state.identity() != first
-    assert state.identity().text == first.text
-
-
-def test_identical_text_on_a_new_source_receives_a_new_identity() -> None:
-    projection = PlaybackProjection()
-    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
-    first = state.identity()
-
-    state = projection.source_replaced(state, "/media/next.mkv").state
-
-    assert state.identity() != first
-    assert state.identity().source == first.source.advance()
-
-
-def test_identical_text_on_a_new_track_receives_a_new_identity() -> None:
-    projection = PlaybackProjection()
-    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
-    state = projection.seed(state, "sid", 1)
-    first = state.identity()
-
-    state = projection.observe(state, "sid", 2).state
-
-    assert state.identity() != first
-
-
-def test_a_same_sid_role_change_retires_the_old_identity() -> None:
-    projection = PlaybackProjection()
-    state = projection.seed(installed(projection), "sid", 1)
-    state = projection.install(state, start=1.0, end=3.0)
-    first = state.identity()
-
-    projected = projection.role_changed(state, "second")
-
-    assert kinds(projected.deltas) == [SubtitleSelectionChanged, CueIdentityRetired]
-    assert projected.state.identity() != first
-    assert projected.state.track.sid == 1
-
-
-def test_an_unchanged_role_is_not_a_transition() -> None:
-    projection = PlaybackProjection()
-    state = projection.role_changed(PlaybackState(), "jp").state
-
-    unchanged = projection.role_changed(state, "jp")
-
-    assert unchanged.state == state
-    assert unchanged.deltas == ()
-
-
-def test_a_reducer_side_cue_becomes_the_projected_one() -> None:
-    """Invariant 13 at the reducer: the owning reducer and mpv write the same fact, so a cue the
-    reducer chose has to land where the observed one does — otherwise the next observed cue fact
-    carries mpv's stale text and reconciliation puts it back."""
-    projection = PlaybackProjection()
-    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
-
-    state = projection.cue_replaced(state, "")
-
-    assert state.identity().text == ""
-    assert projection.observe(state, "sub-end", 9.5).state.identity().text == ""
-
-
-def test_a_reducer_side_cue_leaves_the_old_text_observable_again() -> None:
-    """The value moves with the fact, so mpv re-sending the text the reducer cleared is a change
-    once more. Without this the dedup guard would hold the old value and silently swallow it."""
-    projection = PlaybackProjection()
-    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
-    state = projection.cue_replaced(state, "")
-
-    projected = projection.observe(state, "sub-text", "猫を見る")
-
-    assert projected.deltas != ()
-    assert projected.state.identity().text == "猫を見る"
-
-
-def test_an_unchanged_reducer_side_cue_is_not_a_new_cue() -> None:
-    """The negative control: reconciliation reinstalls the cue it just read, so treating that as a
-    replacement would advance the revision on every settle and never converge."""
-    projection = PlaybackProjection()
-    state = projection.seed(PlaybackState(), "sub-text", "猫を見る")
-
-    assert projection.cue_replaced(state, "猫を見る") is state
-
-
 # --- gate: an old epoch or incomplete observation cannot resurrect retired state ---------------
-
-
-def test_an_older_epoch_observation_changes_nothing() -> None:
-    projection = PlaybackProjection()
-    state = projection.connection_changed(installed(projection), epoch=2, ready=True).state
-
-    projected = projection.observe(state, "sub-text", "犬も見る", connection_epoch=1)
-
-    assert projected.state == state
-    assert projected.deltas == ()
-
-
-def test_a_replacement_epoch_retires_before_it_reports_ready() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.connection_changed(installed(projection), epoch=1, ready=True)
-
-    assert kinds(projected.deltas) == [CueIdentityRetired, ConnectionChanged]
-    retired = projected.deltas[0]
-    assert isinstance(retired, CueIdentityRetired)
-    assert retired.reason is RetireReason.CONNECTION
-
-
-def test_connection_loss_retires_the_installed_identity() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.connection_changed(installed(projection), epoch=0, ready=False)
-
-    assert kinds(projected.deltas) == [CueIdentityRetired, ConnectionChanged]
-    assert projected.state.connection.ready is False
-
-
-def test_a_retired_identity_is_not_resurrected_by_a_replayed_observation() -> None:
-    projection = PlaybackProjection()
-    state = projection.connection_changed(installed(projection), epoch=0, ready=False).state
-
-    # The gateway replays every observer after reconnect, including the pre-loss cue.
-    for name, data in (("sub-text", "猫を見る"), ("sub-start", 1.0), ("sub-end", 3.0)):
-        state = projection.observe(state, name, data).state
-
-    assert state.cue.installed is None
 
 
 def test_an_unnamed_observation_is_inert() -> None:
@@ -246,46 +95,6 @@ def test_an_unnamed_observation_is_inert() -> None:
 
 
 # --- gate: source, role, and render-space revisions are explicit and immutable -----------------
-
-
-def test_a_render_space_observation_revises_the_render_space() -> None:
-    projection = PlaybackProjection()
-    state = PlaybackState()
-
-    projected = projection.observe(state, "osd-dimensions", {"w": 1920, "h": 1080})
-
-    assert projected.state.render_space.render_space == Revision(1)
-    assert RenderSpaceChanged in kinds(projected.deltas)
-    assert GeometryInputChanged in kinds(projected.deltas)
-
-
-def test_a_source_replacement_revises_the_source_and_stales_the_authored_probe() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.source_replaced(PlaybackState(), "/media/next.mkv")
-
-    assert kinds(projected.deltas) == [SourceChanged]
-    assert projected.state.media == type(projected.state.media)(Revision(1), "/media/next.mkv")
-    assert projected.state.cue.authored_stale is True
-
-
-def test_cue_timing_is_a_geometry_input_but_not_a_render_space_revision() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.observe(PlaybackState(), "sub-start", 4.0)
-
-    assert kinds(projected.deltas) == [CueObservationChanged, GeometryInputChanged]
-    assert projected.state.render_space.render_space == Revision()
-
-
-def test_sub_delay_reports_timing_without_revising_the_render_space() -> None:
-    projection = PlaybackProjection()
-
-    projected = projection.observe(PlaybackState(), "sub-delay", 0.5)
-
-    assert kinds(projected.deltas) == [SubtitleTimingChanged]
-    assert projected.state.timing.delay == 0.5
-    assert projected.state.render_space.render_space == Revision()
 
 
 # --- gate: every cue observation publishes the identity it implies -----------------------------
