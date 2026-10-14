@@ -4,6 +4,8 @@ super run's ink sits higher than the same run inline, and the sup line box is ta
 
 from __future__ import annotations
 
+import pytest
+
 from saitenka.model import Style
 from saitenka.render.flow import build_items, layout_flow, render_flow
 from saitenka.render.layout import Block
@@ -22,16 +24,15 @@ def _sup_token_shift(flow):
     return tok.baseline_shift
 
 
-def test_sup_token_carries_a_positive_baseline_shift():
-    assert _sup_token_shift(_flow({"tag": "sup", "content": "ア"})) > 0  # raised
-
-
-def test_sub_token_carries_a_negative_baseline_shift():
-    assert _sup_token_shift(_flow({"tag": "sub", "content": "ア"})) < 0  # lowered
-
-
-def test_plain_run_has_no_shift():
-    assert _sup_token_shift(_flow({"tag": "span", "content": "ア"})) == 0.0
+@pytest.mark.parametrize(
+    ("tag", "expected"), [("sup", 1), ("span", 0), ("sub", -1)], ids=["raised", "plain", "lowered"]
+)
+def test_inline_tag_sets_baseline_direction(tag, expected):
+    shift = _sup_token_shift(_flow({"tag": tag, "content": "ア"}))
+    if expected == 0:
+        assert shift == 0.0
+    else:
+        assert shift * expected > 0
 
 
 def test_sup_line_box_grows_so_the_raised_glyph_is_not_clipped():

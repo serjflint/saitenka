@@ -1,5 +1,6 @@
 """Stage 5: isolated ruby — reading centred over base, both narrow and wide cases."""
 
+import pytest
 from util import assert_golden
 
 from saitenka.model import Span, Style
@@ -12,17 +13,14 @@ def _base(text):
     return [Span(text, BASE)]
 
 
-def test_reading_centered_narrow():
-    # reading narrower than base: 漢字 (base) / かんじ (reading)
-    box = layout_ruby(_base("漢字"), "かんじ")
-    assert box.reading_width < box.base_width
-    _assert_centered(box)
-
-
-def test_reading_centered_wide():
-    # reading wider than base: 兎 (base) / うさぎ (reading)
-    box = layout_ruby(_base("兎"), "うさぎ")
-    assert box.reading_width > box.base_width
+@pytest.mark.parametrize(
+    ("base", "reading", "width_direction"),
+    [("漢字", "かんじ", -1), ("兎", "うさぎ", 1)],
+    ids=["narrow-reading", "wide-reading"],
+)
+def test_ruby_reading_is_centered(base, reading, width_direction):
+    box = layout_ruby(_base(base), reading)
+    assert (box.reading_width - box.base_width) * width_direction > 0
     _assert_centered(box)
 
 

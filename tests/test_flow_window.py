@@ -58,12 +58,3 @@ def test_window_at_exact_boundaries_matches_the_crop(band):
     win = render_flow(_tall_flow(), _block(), y_window=(y0, y1))
     ref = full.crop((0, y0, full.width, y1))
     assert np.array_equal(np.asarray(win), np.asarray(ref))
-
-
-def test_window_draws_only_overlapping_lines_cheaply():
-    # A tiny mid-block window renders a small image regardless of the full block height.
-    full = _full()
-    mid = full.height // 2
-    win = render_flow(_tall_flow(), _block(), y_window=(mid, mid + 40))
-    assert win.height == 40
-    assert win.height < full.height

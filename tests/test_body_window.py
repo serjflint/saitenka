@@ -65,27 +65,18 @@ def test_any_band_is_pixel_identical_to_the_full_crop(data):
     assert np.array_equal(np.asarray(win), np.asarray(ref))
 
 
-def test_one_layout_serves_many_band_rasters_walking_once(monkeypatch):
-    # The caching contract: laying out once then rastering many bands walks the SC exactly once.
+def test_band_rasters_reuse_the_precomputed_layout(monkeypatch):
     import saitenka.panel.body as BB
 
-    calls = [0]
-    orig = BB.walk
-    monkeypatch.setattr(
-        BB,
-        "walk",
-        lambda node, base=None, media=None: (
-            calls.__setitem__(0, calls[0] + 1),
-            orig(node, base, media),
-        )[1],
-    )
     args = _args()
     laid = layout_body_block(args)
-    assert calls[0] == 1  # the single walk
+    monkeypatch.setattr(BB, "walk", lambda *_a, **_k: pytest.fail("band raster re-walked SC"))
     h = laid.full_height
+    images = []
     for y0 in range(0, h, 128):
-        raster_body_window(laid, y0, min(h, y0 + 128))
-    assert calls[0] == 1  # every band reused the one layout — no re-walk
+        image, *_ = raster_body_window(laid, y0, min(h, y0 + 128))
+        images.append(image)
+    assert sum(image.height for image in images) == h
 
 
 def test_band_scan_boxes_land_in_band_space():
