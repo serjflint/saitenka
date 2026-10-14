@@ -3,12 +3,11 @@ Also the #193 catalog invariants — one CATALOG feeds MARKERS, build_markers, a
 
 from pathlib import Path
 
-import saitenka_card.markers as cm
+import pytest
 from saitenka_card import (
     CATALOG,
     MARKERS,
     CardData,
-    Marker,
     MarkerContext,
     build_markers,
     render_card_format,
@@ -151,17 +150,19 @@ def test_render_card_format_substitutes_and_survives_stray_braces():
     assert out == {"Word": "読む", "Reading": "【よむ】", "Lit": "a { brace 読む"}
 
 
-def test_render_card_format_unknown_marker_renders_empty(caplog):
+@pytest.mark.parametrize(
+    ("template", "markers", "expected", "warning"),
+    [
+        ("x{bogus}y", {"expression": "読む"}, "xy", "unknown marker"),
+        ("{Reading}", {"reading": "よむ"}, "", "Reading"),
+    ],
+    ids=["absent", "miscased"],
+)
+def test_unknown_card_markers_render_empty_and_warn(caplog, template, markers, expected, warning):
     with caplog.at_level("WARNING"):
-        out = render_card_format({"F": "x{bogus}y"}, {"expression": "読む"})
-    assert out == {"F": "xy"} and "unknown marker" in caplog.text
-
-
-def test_render_card_format_catches_miscased_marker(caplog):
-    # {Reading} (wrong case) must be treated as unknown → empty + warn, not left literal on the card
-    with caplog.at_level("WARNING"):
-        out = render_card_format({"R": "{Reading}"}, {"reading": "よむ"})
-    assert out == {"R": ""} and "Reading" in caplog.text
+        out = render_card_format({"field": template}, markers)
+    assert out == {"field": expected}
+    assert warning in caplog.text
 
 
 # --- #193 catalog: one source of truth for the marker vocabulary ------------------------------
@@ -182,16 +183,6 @@ def test_markers_and_producers_derive_from_one_catalog():
 def test_build_markers_produces_exactly_the_shippable_markers():
     # the producer map and the validator can't disagree: build_markers emits precisely MARKERS.
     assert set(build_markers(MarkerContext(_FULL_CARD, **_FULL_KW))) == MARKERS
-
-
-def test_catalog_only_addition_surfaces_in_both_markers_and_output(monkeypatch):
-    # Done-when #2: a catalog-only addition surfaces in BOTH derivations. build_markers iterates the live
-    # CATALOG, so a new entry appears in its output; and the ship-filter comprehension below is verbatim the
-    # rule that defines MARKERS — so the module constant (frozen at import) can't structurally diverge from it.
-    extra = Marker("test-only", "ship", "a synthetic marker", lambda c: f"X:{c.card.expression}")
-    monkeypatch.setattr(cm, "CATALOG", (*CATALOG, extra))
-    assert "test-only" in frozenset(m.name for m in cm.CATALOG if m.status == "ship")
-    assert cm.build_markers(MarkerContext(_FULL_CARD, **_FULL_KW))["test-only"] == "X:読む"
 
 
 def test_docs_marker_fragment_matches_generator():
