@@ -36,6 +36,7 @@ STREAM = (
     PropertyObserved("sid", 1),
     PropertyObserved("sub-start", 1.0),
     PropertyObserved("sub-text", "ある日"),
+    PropertySeeded("sid", 1),  # a quiet turn after a publishing one must clear the outbox
     PropertyObserved("sub-end", 3.0),
     CueIdentityInstalled(1.0, 3.0),
     PropertyObserved("sub-end", 4.0),
@@ -47,6 +48,7 @@ STREAM = (
     PropertyObserved("options/sub-scale", 1.2),
     CueTextReplaced(""),
     SourceReplaced("/tmp/next.srt"),
+    CueIdentityInstalled(1.0, 4.0),
     CueIdentityRetireRequested(RetireReason.TRACK),
 )
 
@@ -82,21 +84,6 @@ def test_reducer_matches_the_projection_state_and_delta_order() -> None:
         direct, deltas = _direct(projection, direct, event)
         assert slice_.state == direct
         assert slice_.published == deltas
-
-
-def test_published_is_the_last_turns_outbox_not_an_accumulator() -> None:
-    reducer = PlaybackReducer()
-    slice_ = reducer.reduce(PlaybackSlice(), PropertyObserved("sub-text", "hello"))
-    assert slice_.published
-    assert reducer.reduce(slice_, PropertySeeded("sid", 1)).published == ()
-
-
-def test_a_declaration_publishes_nothing_so_the_sender_is_not_told_its_own_news() -> None:
-    reducer = PlaybackReducer()
-    slice_ = reducer.reduce(PlaybackSlice(), CueIdentityInstalled(1.0, 2.0))
-    retired = reducer.reduce(slice_, CueIdentityRetireRequested(RetireReason.SOURCE))
-    assert retired.state.cue.installed is None
-    assert retired.published == ()
 
 
 def test_the_feature_call_shape_returns_a_reduce_result() -> None:
