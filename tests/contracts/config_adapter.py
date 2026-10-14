@@ -3,8 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 
 from saitenka.app import config_editor
+from saitenka.app.command_defaults import resolve_mine_model
 from saitenka.app.commands.attach import _build_attach_options
-from saitenka.app.launch.run import RunFlags, _build_run_options
+from saitenka.app.launch.run import (
+    RunDepsRequest,
+    RunFlags,
+    _build_run_options,
+    _run_effective_config,
+)
 
 BASE_FLAGS = RunFlags(
     mine_key="Ctrl+m",
@@ -28,6 +34,10 @@ CAPABILITY = "config-v0"
 def evaluate(scenario: dict) -> object:
     if scenario["mode"].startswith("editor-"):
         return _evaluate_editor(scenario)
+    if scenario["mode"] == "mine-model":
+        return [resolve_mine_model(config) for config in scenario["configs"]]
+    if scenario["mode"] == "run-effective":
+        return _evaluate_run_config(scenario)
     if scenario["mode"] == "run":
         options = _build_run_options(
             scenario["config"], replace(BASE_FLAGS, **scenario.get("flags", {}))
@@ -38,6 +48,29 @@ def evaluate(scenario: dict) -> object:
         raise ValueError(f"unknown config adapter mode: {scenario['mode']!r}")
     paths = scenario.get("observe", scenario.get("expect", {}))
     return {path: _read_path(options, path) for path in paths}
+
+
+def _evaluate_run_config(scenario: dict) -> dict[str, object]:
+    cli = scenario.get("cli", {})
+    request = RunDepsRequest(
+        mine=False,
+        mine_deck="",
+        mine_model="",
+        mine_key="",
+        mine_all_key="",
+        mine_normalize_audio=False,
+        mine_animated_screenshot=False,
+        raw_mine={},
+        known_cfg=None,
+        known="",
+        color=True,
+        dict_titles=cli.get("dict_titles", []),
+        freq_titles=cli.get("freq_titles", []),
+        pitch_titles=cli.get("pitch_titles", []),
+        scoped_cfg=scenario["scoped_config"],
+    )
+    effective = _run_effective_config(request)
+    return {key: effective[key] for key in scenario["observe"]}
 
 
 def _evaluate_editor(scenario: dict):

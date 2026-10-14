@@ -1,0 +1,26 @@
+[
+  {
+    "scenario_id": "mine-model-precedence",
+    "mode": "mine-model",
+    "configs": [{}, {"preset": "Kiku"}, {"model": "Custom", "preset": "Kiku"}],
+    "expect": ["Lapis", "Kiku", "Custom"]
+  },
+  {
+    "scenario_id": "run-effective-config-preserves-tables",
+    "mode": "run-effective",
+    "scoped_config": {
+      "palette": {"learning": "#eed49f"},
+      "fsrs": {"collection": "/tmp/copy.anki2"},
+      "scoring": {"jlpt_underlines": false},
+      "dicts": ["from config"]
+    },
+    "cli": {"dict_titles": ["from the flag"]},
+    "observe": ["palette", "fsrs", "scoring", "dicts"],
+    "expect": {
+      "palette": {"learning": "#eed49f"},
+      "fsrs": {"collection": "/tmp/copy.anki2"},
+      "scoring": {"jlpt_underlines": false},
+      "dicts": ["from the flag"]
+    }
+  }
+]

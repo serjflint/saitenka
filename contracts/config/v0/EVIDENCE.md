@@ -8,3 +8,7 @@ mining, key, annotation, and statistics settings.
 Two additional reversible faults proved the editor rows before their point tests retired: forcing every
 field to its built-in default lost both a top-level and nested on-disk value, while removing whitespace
 normalization broke optional blank handling and preserved spaces around a string value.
+
+The resolution rows killed two more faults: ignoring a mining preset selected `Lapis` instead of `Kiku`,
+and rebuilding effective run configuration without the scoped base removed the palette, FSRS, and scoring
+tables before dependency construction.
