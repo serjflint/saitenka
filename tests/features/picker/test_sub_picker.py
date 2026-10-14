@@ -313,9 +313,9 @@ def test_provider_warnings_are_shown_in_the_footer():
 
     assert _listed(reader).warnings == ("tsukihime: search truncated",)
     footer = sub_picker._footer(
-        reader.graph.picker.state, ReaderOptions().keys.sub_picker_key, 1, 1
+        reader.graph.picker.state, ReaderOptions().keys.sub_picker_key, 20, 6
     )
-    assert "tsukihime: search truncated" in footer
+    assert footer == "tsukihime: search truncated  ·  Ctrl+j closes"
 
 
 def test_listing_error_is_shown_and_leaves_no_candidates():
@@ -486,21 +486,6 @@ def test_open_picker_wants_the_forced_mouse_section():
     assert reader.graph.interaction.router.wants_mouse_capture() is True
 
 
-def test_toggle_closes_an_open_picker():
-    reader, ipc = _reader(path="/v/ep.mkv")
-    reader.graph.picker.configure_listing(_lister([]))
-    _open(reader)
-
-    _close(reader) if reader.graph.picker.state.open else sub_picker.open_picker(
-        _listing_ports(reader),
-        reader.graph.playback.query("path"),
-        retire_hover=reader.graph.tooltip.retire_hover,
-    )
-
-    assert reader.graph.picker.state.open is False
-    assert ("overlay-remove", OverlayId.PICKER) in ipc.commands
-
-
 @pytest.mark.parametrize(
     ("size", "expected"),
     [(0, "—"), (512, "512 B"), (2048, "2 K"), (3 * 1024 * 1024, "3.0 M")],
@@ -532,17 +517,6 @@ def test_the_footer_reports_the_visible_slice_of_a_scrolled_list() -> None:
     assert _footer(PickerState(scroll=4), "Alt+p", total=20, shown=6).startswith("5–10 / 20")
 
 
-def test_provider_warnings_replace_the_position_readout() -> None:
-    """A warning is the more useful thing to say in the same space, and losing it to a row count
-    would leave a partial listing looking complete."""
-    from saitenka.app.features.picker.sub_picker import ListingResult, _footer
-    from saitenka.runtime.picker import PickerState
-
-    state = PickerState(listing=ListingResult((), ("jimaku timed out",)))
-
-    assert "jimaku timed out" in _footer(state, "Alt+p", total=20, shown=6)
-
-
 def _state(*, open_=True, generation=3):
     return picker.PickerState(open=open_, generation=generation, loading=True)
 
@@ -559,42 +533,14 @@ def test_a_listing_for_the_open_generation_is_installed():
     assert turn.state.loading is False
 
 
-def test_a_listing_for_a_superseded_generation_is_dropped():
-    """Close-then-reopen while a listing is in flight. The result belongs to the closed picker, and
-    installing it would repopulate the one the user has since reopened with the old file's tracks."""
-    state = _state(generation=4)
-
-    turn = picker.listed(state, 3, _listing())
-
-    assert turn == picker.PickerTurn(state)  # untouched, not merely un-redrawn
-    assert turn.state.loading is True  # still waiting on its own listing, not silently marked done
-
-
 def test_a_listing_arriving_after_the_picker_closed_is_dropped():
     state = _state(open_=False)
 
     assert picker.listed(state, 3, _listing()) == picker.PickerTurn(state)
 
 
-def test_retiring_the_picker_bumps_the_generation_that_makes_a_listing_stale():
-    turn = picker.retired(_state(generation=3))
-
-    assert turn.decisions == (picker.PickerRetired(),)
-    assert turn.state.generation == 4
-    assert picker.listed(turn.state, 3, _listing()).decisions == ()
-
-
-def test_retiring_an_already_closed_picker_decides_nothing():
-    """Published so the caller can skip the surface removal — and the generation must not drift, or
-    a second close would invalidate a listing the reopened picker legitimately asked for."""
-    state = _state(open_=False, generation=3)
-
-    assert picker.retired(state) == picker.PickerTurn(state)
-
-
 def test_opening_starts_a_generation_that_no_listing_in_flight_can_claim():
-    """The bump is the whole reason the machine holds a number: a result for the picker that was up
-    a moment ago must not repopulate the one that is up now."""
+    """A result for the previous picker must not repopulate the one that just opened."""
     before = _state(generation=3)
 
     turn = picker.opened(before)

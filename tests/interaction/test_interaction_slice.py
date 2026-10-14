@@ -79,6 +79,7 @@ from saitenka.runtime.interaction_slice import (
     SidebarStore,
     TipNavStore,
 )
+from saitenka.runtime.picker import PickerRetired
 
 DELAYS = HoverDelays(scan=0.1, hide=0.2, switch=0.3)
 
@@ -328,6 +329,7 @@ def test_the_same_picker_events_decide_the_same_state_with_or_without_a_reactor(
 
     assert local_turns == routed_turns
     assert local_states == routed_states
+    assert local_turns[2] == (PickerRetired(),)
     assert local_states[3] == local_states[2]
     assert local_turns[3] == ()
     assert local_turns[5] == ()
