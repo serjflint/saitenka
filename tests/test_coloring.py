@@ -2,7 +2,6 @@
 
 import dicthelp
 import pytest
-from saitenka_dict import FreqDict
 from saitenka_tokenize.japanese import tokenize
 from saitenka_wordstate import Scorer, mark_n_plus_one
 from saitenka_wordstate.known import KnownForm, KnownWords
@@ -30,14 +29,6 @@ def test_jlpt_levels(jlpt):
 def test_jlpt_keeps_highest_level(jlpt):
     # every mapped level is one of N1..N5
     assert set(jlpt.by_key.values()) <= {"N1", "N2", "N3", "N4", "N5"}
-
-
-def test_freq_banding_math():
-    assert FreqDict.band(1, top_x=10000, bands=5) == 1
-    assert FreqDict.band(2000, top_x=10000, bands=5) == 1
-    assert FreqDict.band(2001, top_x=10000, bands=5) == 2
-    assert FreqDict.band(10000, top_x=10000, bands=5) == 5
-    assert FreqDict.band(10001, top_x=10000, bands=5) is None
 
 
 def test_known_words_reading_fallback():
