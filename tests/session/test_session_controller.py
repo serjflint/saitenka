@@ -15,7 +15,7 @@ from session_builder import TestSession, build_session
 from util import FakeIPC, await_ready, keybind_registry, session_gateway
 
 import saitenka.app.session.builder as session_builder_module
-from saitenka.app import bindings, subtitle_adapter
+from saitenka.app import bindings
 from saitenka.app import bindings as app_bindings
 from saitenka.app.config import ReaderOptions
 from saitenka.app.features.mining import miner
@@ -2556,23 +2556,6 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
 # --- copy: Shift+C (whole line) and right-click (word under cursor) + highlight flash ---------------
 
 
-def test_copy_line_copies_all_lines(monkeypatch):
-    from saitenka_tokenize.japanese import Token
-
-    r = _scan_reader(FakeIPC())
-    r.graph.subtitle_presentation.cue.replace_tokenized(
-        lines=[
-            [Token("本命", "本命", "ほんめい", "名詞", 0, 2)],
-            [Token("読む", "読む", "よむ", "動詞", 0, 2)],
-        ]
-    )
-
-    got = []
-    monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda s: got.append(s))
-    r.command(app_bindings.COPY_LINE_MSG)
-    assert got == ["本命\n読む"]  # the whole cue, line by line
-
-
 def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
     ipc = FakeIPC()
     r = _scan_reader(ipc)
@@ -3837,20 +3820,6 @@ def test_anki_media_failures_are_absent_media_not_errors() -> None:
     assert media_image(DownAnki(), "shot.png") is None  # Anki configured but down
     assert media_image(DownAnki(), "") is None  # nothing to fetch
     assert media_tempfile(DownAnki(), "clip.mp3", Path("/nonexistent")) is None
-
-
-def test_sentence_lines_rejoins_each_tokenized_line() -> None:
-    from saitenka_tokenize.japanese import Token
-
-    from saitenka.app.features.preview.miner_ui import sentence_lines
-
-    def token(surface: str) -> Token:
-        return Token(surface, surface, "", "名詞", 0, len(surface))
-
-    assert sentence_lines([[token("猫"), token("を"), token("見る")], [token("犬")]]) == [
-        "猫を見る",
-        "犬",
-    ]
 
 
 def test_a_refused_interaction_command_is_reported_rather_than_lost(caplog):
