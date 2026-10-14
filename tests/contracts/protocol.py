@@ -81,13 +81,21 @@ def assert_observations(expect: dict, actual: Sequence[dict]) -> None:
 
 def run_executable(command: Sequence[str], scenarios: Iterable[dict]) -> list[dict]:
     scenario_list = list(scenarios)
-    requests = [
-        {"type": "hello", "protocol": PROTOCOL, "requires": [CAPABILITY]},
-        *(scenario_request(scenario) for scenario in scenario_list),
-    ]
+    return run_protocol(
+        command,
+        protocol=PROTOCOL,
+        capability=CAPABILITY,
+        requests=[scenario_request(scenario) for scenario in scenario_list],
+    )
+
+
+def run_protocol(
+    command: Sequence[str], *, protocol: str, capability: str, requests: Sequence[dict]
+) -> list[dict]:
+    wire = [{"type": "hello", "protocol": protocol, "requires": [capability]}, *requests]
     completed = subprocess.run(
         command,
-        input="".join(f"{compact_json(request)}\n" for request in requests),
+        input="".join(f"{compact_json(request)}\n" for request in wire),
         text=True,
         capture_output=True,
         check=False,
@@ -97,10 +105,10 @@ def run_executable(command: Sequence[str], scenarios: Iterable[dict]) -> list[di
     replies = [json.loads(line) for line in completed.stdout.splitlines()]
     assert replies[0] == {
         "type": "hello",
-        "protocol": PROTOCOL,
-        "capabilities": [CAPABILITY],
+        "protocol": protocol,
+        "capabilities": [capability],
     }
-    assert len(replies) == len(requests)
+    assert len(replies) == len(wire)
     return replies[1:]
 
 

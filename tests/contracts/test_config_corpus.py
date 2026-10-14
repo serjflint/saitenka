@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
 from .config_adapter import CAPABILITY, PROTOCOL, evaluate
-from .protocol import scenario_key_hash
+from .protocol import run_protocol, scenario_key_hash
 
 CORPUS = Path(__file__).resolve().parents[2] / "contracts/config/v0"
 SCENARIOS = json.loads((CORPUS / "options.json").read_text(encoding="utf-8"))
@@ -33,21 +32,11 @@ def test_config_adapter_runs_the_corpus_without_receiving_expected_answers() -> 
     request = {key: value for key, value in scenario.items() if key != "expect"}
     request["observe"] = list(scenario["expect"])
     request.update(type="run", protocol=PROTOCOL)
-    payload = [
-        {"type": "hello", "protocol": PROTOCOL, "requires": [CAPABILITY]},
-        request,
-    ]
-
-    completed = subprocess.run(
+    [result] = run_protocol(
         [sys.executable, str(Path(__file__).with_name("config_adapter.py"))],
-        input="".join(json.dumps(row, separators=(",", ":")) + "\n" for row in payload),
-        text=True,
-        capture_output=True,
-        check=False,
-        timeout=10,
+        protocol=PROTOCOL,
+        capability=CAPABILITY,
+        requests=[request],
     )
 
-    assert completed.returncode == 0, completed.stderr
-    hello, result = map(json.loads, completed.stdout.splitlines())
-    assert hello["capabilities"] == [CAPABILITY]
     assert result["observations"] == scenario["expect"]
