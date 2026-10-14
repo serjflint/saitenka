@@ -17,5 +17,5 @@ run failed and the source file was restored byte for byte.
 | `help-opens-pages-and-closes` | omit execution of every accepted command handler | the visible help transcript disappeared entirely |
 
 `tests/contracts/test_adapter_protocol.py` also feeds a deliberately wrong transcript to the comparator and
-requires it to fail. Raw mutation output and the byte-restoring runner live under ignored
-`vibe/portable-corpus/` and `vibe/test-crossfile/`.
+requires it to fail. `contracts/evidence-v0.json` is the tracked witness ledger: it records the exact base,
+production substitution, command, scenario, and observed mismatch for every reversible fault above.

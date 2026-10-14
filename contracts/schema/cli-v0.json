@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://saitenka.dev/contracts/schema/cli-v0.json",
+  "title": "Saitenka CLI compatibility scenario v0",
+  "type": "object",
+  "required": ["scenario_id", "mode"],
+  "properties": {
+    "scenario_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "mode": {"enum": ["inventory", "parse", "parse-config", "resolve-names", "jimaku-decision"]},
+    "args": {"type": "array", "items": {"type": "string"}},
+    "observe": {"type": "array", "items": {"type": "string"}},
+    "apply_defaults": {"type": "boolean"},
+    "config": {"type": "string"},
+    "cases": {"type": "array", "items": {"type": "object"}},
+    "expect": {},
+    "expect_contains": {"type": "object"}
+  },
+  "oneOf": [
+    {"required": ["expect"]},
+    {"required": ["expect_contains"]}
+  ],
+  "additionalProperties": false
+}

@@ -4,10 +4,20 @@ HARD CONSTRAINT: every existing mpv_reader.py flag keeps its exact name and repe
 behaviour. These tests pin the inventory and the parse semantics without launching mpv.
 """
 
+import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
+
+INVENTORY = next(
+    row
+    for row in json.loads(
+        (Path(__file__).parents[1] / "contracts/cli/v0/scenarios.json").read_text(encoding="utf-8")
+    )
+    if row["scenario_id"] == "help-inventory"
+)["expect_contains"]
 
 
 def _cli_app():
@@ -32,6 +42,25 @@ def test_every_command_help_stands_up():
         with contextlib.redirect_stdout(io.StringIO()), pytest.raises(SystemExit) as exc:
             app([name, "--help"], exit_on_error=False)
         assert exc.value.code == 0, f"`{name} --help` exited {exc.value.code}"
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [(["--help"], INVENTORY["commands"]), (["run", "--help"], INVENTORY["flags"])],
+    ids=("commands", "run-flags"),
+)
+def test_module_entrypoint_exposes_portable_cli_inventory(args, expected):
+    result = subprocess.run(
+        [sys.executable, "-m", "saitenka.app.cli", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not [item for item in expected if item not in result.stdout]
 
 
 @pytest.mark.integration

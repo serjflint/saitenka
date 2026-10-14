@@ -4,11 +4,14 @@ import json
 import sys
 from collections.abc import Callable
 
-import cli_adapter
-import config_adapter
-import playback_adapter
-import protocol as session_protocol
-import saitenka_session_adapter
+if __package__:
+    from . import cli_adapter, config_adapter, saitenka_session_adapter
+    from . import protocol as session_protocol
+else:
+    import cli_adapter
+    import config_adapter
+    import protocol as session_protocol
+    import saitenka_session_adapter
 
 Adapter = tuple[str, Callable[[dict], object]]
 ADAPTERS: dict[str, Adapter] = {
@@ -18,7 +21,6 @@ ADAPTERS: dict[str, Adapter] = {
     ),
     config_adapter.PROTOCOL: (config_adapter.CAPABILITY, config_adapter.evaluate),
     cli_adapter.PROTOCOL: (cli_adapter.CAPABILITY, cli_adapter.evaluate),
-    playback_adapter.PROTOCOL: (playback_adapter.CAPABILITY, playback_adapter.evaluate),
 }
 
 
@@ -47,6 +49,8 @@ def main() -> int:
             active = protocol, adapter
             response = {"type": "hello", "protocol": protocol, "capabilities": [adapter[0]]}
         elif request.get("type") == "run" and active is not None and protocol == active[0]:
+            if {"expect", "expect_contains"} & request.keys():
+                return 2
             response = _result(protocol, request, active[1][1])
         else:
             return 2

@@ -12,8 +12,19 @@ if TYPE_CHECKING:
 PROTOCOL = "saitenka.session/v0"
 CAPABILITY = "session-v0"
 SCENARIO_KEYS = frozenset({"protocol", "scenario_id", "requires", "given", "when", "expect"})
-EXPECT_KEYS = frozenset({"mode", "observations", "within_steps", "within_ms"})
-MODES = frozenset({"exact", "contains_in_order", "eventually"})
+EXPECT_KEYS = frozenset({"mode", "observations"})
+MODES = frozenset({"exact", "contains_in_order"})
+ACTION_KEYS = {
+    "start": frozenset({"action"}),
+    "emit_batch": frozenset({"action", "events"}),
+    "command": frozenset({"action", "name"}),
+    "transport_lost": frozenset({"action", "epoch"}),
+    "transport_ready": frozenset({"action", "epoch"}),
+    "transport_replaced": frozenset({"action", "epoch"}),
+    "drain_until_quiescent": frozenset({"action", "max_steps"}),
+    "close": frozenset({"action"}),
+    "checkpoint": frozenset({"action", "name"}),
+}
 
 
 def compact_json(value: object) -> str:
@@ -32,6 +43,16 @@ def scenario_request(scenario: dict) -> dict:
     }
 
 
+def validate_request(request: dict) -> None:
+    expected = {"type", "protocol", "scenario_id", "requires", "given", "when"}
+    if set(request) != expected or request.get("type") != "run":
+        raise ValueError("invalid session-v0 request envelope")
+    validate_scenario(
+        {key: value for key, value in request.items() if key != "type"}
+        | {"expect": {"mode": "exact", "observations": []}}
+    )
+
+
 def validate_scenario(scenario: dict) -> None:
     if set(scenario) != SCENARIO_KEYS:
         raise ValueError(f"scenario keys must be {sorted(SCENARIO_KEYS)}")
@@ -48,16 +69,15 @@ def validate_scenario(scenario: dict) -> None:
         for action in scenario["when"]
     ):
         raise ValueError("when must be an array of actions")
+    for action in scenario["when"]:
+        allowed = ACTION_KEYS.get(action["action"])
+        if allowed is None or set(action) != allowed:
+            raise ValueError(f"invalid {action['action']!r} action keys")
     expect = scenario["expect"]
     if not isinstance(expect, dict) or not set(expect) <= EXPECT_KEYS:
         raise ValueError(f"expect keys must be drawn from {sorted(EXPECT_KEYS)}")
     if expect.get("mode") not in MODES or not isinstance(expect.get("observations"), list):
         raise ValueError("expect requires a known mode and an observations array")
-    if expect["mode"] == "eventually" and not {
-        "within_steps",
-        "within_ms",
-    } & set(expect):
-        raise ValueError("eventually requires a logical-time or step bound")
 
 
 def assert_observations(expect: dict, actual: Sequence[dict]) -> None:
@@ -74,9 +94,7 @@ def assert_observations(expect: dict, actual: Sequence[dict]) -> None:
                     f"missing ordered observation {observation!r} in {list(actual)!r}"
                 )
         return
-    assert mode == "eventually"
-    assert len(wanted) == 1, "eventually v0 accepts one bounded observation"
-    assert wanted[0] in actual
+    raise AssertionError(f"unsupported comparison mode: {mode!r}")
 
 
 def run_executable(command: Sequence[str], scenarios: Iterable[dict]) -> list[dict]:

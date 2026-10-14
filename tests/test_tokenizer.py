@@ -3,6 +3,11 @@
 import pytest
 from saitenka_tokenize.japanese import (
     Token,
+    inflected_in,
+    merge_dict_compounds,
+    phrase_terms,
+    query_token,
+    tokenize,
 )
 from saitenka_tokenize.registry import (
     UnidicTokenizer,
@@ -58,6 +63,32 @@ def test_reader_owns_unidic_tokenizer_by_default(make_session):
     assert reader.graph.profile.profile.tokenizer.name == "unidic"
     langs = reader.graph.profile.profile.langs
     assert (langs.main, langs.second) == ("jp", "en")
+
+
+def test_unidic_strategy_matches_public_functions():
+    strategy = UnidicTokenizer()
+    line = "習わぬ経を読む"
+    tokens = tokenize(line)
+    assert strategy.tokenize(line) == tokens
+    assert strategy.query_token("それにしては") == query_token("それにしては")
+    assert strategy.inflected_in(tokens, 0) == inflected_in(tokens, 0)
+
+    phrase_tokens = tokenize("お休み")
+
+    def has_term(surface):
+        return surface == "お休み"
+
+    assert strategy.phrase_terms(phrase_tokens, 1, has_term) == phrase_terms(
+        phrase_tokens, 1, has_term
+    )
+    compound_tokens = tokenize("応急処置")
+
+    def exists(_surfaces):
+        return set()
+
+    assert strategy.merge_dict_compounds(compound_tokens, exists) == merge_dict_compounds(
+        compound_tokens, exists
+    )
 
 
 @pytest.mark.integration

@@ -1,0 +1,168 @@
+{
+  "base_sha": "e1daa025",
+  "method": "Each exact text substitution was applied once, the named focused command failed on the named scenario, and the original bytes were restored in a finally block.",
+  "witnesses": [
+    {
+      "id": "session-disconnected-command-guard",
+      "scenario_id": "loss-suspends-command-until-replacement",
+      "path": "src/saitenka/app/session/command_runtime.py",
+      "find": "if not self._ports.connection.current.ready:",
+      "replace": "if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[loss-suspends-command-until-replacement]'",
+      "mismatch": "help surface appeared before the lost-command checkpoint"
+    },
+    {
+      "id": "session-cue-retirement",
+      "scenario_id": "cue-change-rejects-same-batch-command",
+      "path": "src/saitenka/app/session/playback_observation.py",
+      "find": "target.retire_cue(delta.reason.value)",
+      "replace": "pass",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
+      "mismatch": "old cue commands were accepted and the new clipboard write was absent"
+    },
+    {
+      "id": "session-overlay-removal",
+      "scenario_id": "close-retires-visible-surface",
+      "path": "src/saitenka/mpvio/osd.py",
+      "find": "return self.ipc.command(\"overlay-remove\", physical_oid)",
+      "replace": "return {\"error\": \"success\"}",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[close-retires-visible-surface]'",
+      "mismatch": "surface-absent was missing before adapter termination"
+    },
+    {
+      "id": "session-next-direction",
+      "scenario_id": "subtitle-navigation-emits-seeks",
+      "path": "src/saitenka/app/subtitle_intents.py",
+      "find": "SubtitleCommand.NAVIGATE_NEXT: _navigate(1)",
+      "replace": "SubtitleCommand.NAVIGATE_NEXT: _navigate(-1)",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[subtitle-navigation-emits-seeks]'",
+      "mismatch": "sub-seek 1 became a second sub-seek -1"
+    },
+    {
+      "id": "session-help-next-routing",
+      "scenario_id": "help-opens-pages-and-closes",
+      "path": "src/saitenka/app/session/assembly.py",
+      "find": "(HELP_NEXT_MSG, HelpCommand.NEXT)",
+      "replace": "(HELP_NEXT_MSG, HelpCommand.PREVIOUS)",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[help-opens-pages-and-closes]'",
+      "mismatch": "the second help page presentation was absent"
+    },
+    {
+      "id": "session-handler-execution",
+      "scenario_id": "help-opens-pages-and-closes",
+      "path": "src/saitenka/app/runtime/commands.py",
+      "find": "handler()",
+      "replace": "pass",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[help-opens-pages-and-closes]'",
+      "mismatch": "the visible help transcript disappeared"
+    },
+    {
+      "id": "session-cue-independent-overlay",
+      "scenario_id": "cue-change-rejects-same-batch-command",
+      "path": "src/saitenka/app/runtime/commands.py",
+      "find": "requires_cue=name not in _CUE_INDEPENDENT",
+      "replace": "requires_cue=True",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
+      "mismatch": "the cue-independent hidden notice disappeared"
+    },
+    {
+      "id": "session-retired-cue-guard",
+      "scenario_id": "cue-change-rejects-same-batch-command",
+      "path": "src/saitenka/app/runtime/commands.py",
+      "find": "cue_state == CueCommandState.RETIRED_AFTER_ACTIVE",
+      "replace": "cue_state != CueCommandState.RETIRED_AFTER_ACTIVE",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
+      "mismatch": "retired-cue commands ran while active-cue commands were rejected"
+    },
+    {
+      "id": "session-multiline-copy",
+      "scenario_id": "cue-change-rejects-same-batch-command",
+      "path": "src/saitenka/app/features/preview/miner_ui.py",
+      "find": "return [\"\".join(token.surface for token in line) for line in lines]",
+      "replace": "return [\"\".join(token.surface for line in lines for token in line)]",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
+      "mismatch": "the clipboard flattened new-line into newline"
+    },
+    {
+      "id": "config-attach-layout",
+      "scenario_id": "attach-overrides",
+      "path": "src/saitenka/app/commands/attach.py",
+      "find": "layout_engine=cfg.get(\"layout_engine\", tt.layout_engine)",
+      "replace": "layout_engine=tt.layout_engine",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[attach-overrides]'",
+      "mismatch": "layout engine was default instead of taffy"
+    },
+    {
+      "id": "config-editor-current-value",
+      "scenario_id": "editor-default-precedence",
+      "path": "src/saitenka/app/config_editor.py",
+      "find": "return spec.default if got is _UNSET else got",
+      "replace": "return spec.default",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[editor-default-precedence]'",
+      "mismatch": "top-level and nested on-disk values became built-in defaults"
+    },
+    {
+      "id": "config-editor-whitespace",
+      "scenario_id": "editor-value-coercion",
+      "path": "src/saitenka/app/config_editor.py",
+      "find": "text = raw.strip()",
+      "replace": "text = raw",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[editor-value-coercion]'",
+      "mismatch": "blank optional input and trimmed string coercion changed"
+    },
+    {
+      "id": "config-mine-preset",
+      "scenario_id": "mine-model-precedence",
+      "path": "src/saitenka/app/launch/run.py",
+      "find": "model = mine.get(\"model\") or mine.get(\"preset\") or \"Lapis\"",
+      "replace": "model = mine.get(\"model\") or \"Lapis\"",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[mine-model-precedence]'",
+      "mismatch": "Kiku preset resolved to Lapis"
+    },
+    {
+      "id": "config-scoped-table-preservation",
+      "scenario_id": "run-effective-config-preserves-tables",
+      "path": "src/saitenka/app/launch/run.py",
+      "find": "**req.scoped_cfg,",
+      "replace": "",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[run-effective-config-preserves-tables]'",
+      "mismatch": "palette, FSRS, and scoring tables disappeared"
+    },
+    {
+      "id": "cli-default-language",
+      "scenario_id": "legacy-run-defaults",
+      "path": "src/saitenka/app/commands/run.py",
+      "find": "] = \"ja,jpn,jp\"",
+      "replace": "] = \"en\"",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[legacy-run-defaults]'",
+      "mismatch": "slang changed from ja,jpn,jp to en"
+    },
+    {
+      "id": "cli-config-source",
+      "scenario_id": "toml-feeds-cli-defaults",
+      "path": "src/saitenka/app/cli.py",
+      "find": "config_path(), must_exist=False",
+      "replace": "Path(\"/nonexistent\"), must_exist=False",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[toml-feeds-cli-defaults]'",
+      "mismatch": "configured defaults disappeared"
+    },
+    {
+      "id": "cli-resource-precedence",
+      "scenario_id": "resource-name-precedence",
+      "path": "src/saitenka/app/launch/run.py",
+      "find": "return list(flag_vals or []) or list(cfg.get(key) or [])",
+      "replace": "return list(cfg.get(key) or [])",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[resource-name-precedence]'",
+      "mismatch": "configured dictionary replaced the explicit flag value"
+    },
+    {
+      "id": "cli-explicit-jimaku",
+      "scenario_id": "jimaku-fetch-policy",
+      "path": "src/saitenka/app/launch/run.py",
+      "find": "if explicit_flag:\n        return True",
+      "replace": "if False:\n        return True",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[jimaku-fetch-policy]'",
+      "mismatch": "an explicit jimaku request stopped fetching"
+    }
+  ]
+}

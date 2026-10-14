@@ -12,3 +12,6 @@ normalization broke optional blank handling and preserved spaces around a string
 The resolution rows killed two more faults: ignoring a mining preset selected `Lapis` instead of `Kiku`,
 and rebuilding effective run configuration without the scoped base removed the palette, FSRS, and scoring
 tables before dependency construction.
+
+The exact substitutions, commands, scenarios, and mismatches are tracked in
+`contracts/evidence-v0.json`.

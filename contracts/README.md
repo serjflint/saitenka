@@ -30,22 +30,20 @@ scenario ID, `status: "ok"`, and an `observations` array. Exit status zero means
 protocol response for every request. Behavioral mismatches are decided by the runner. A malformed request,
 unsupported required capability, or adapter failure uses a nonzero exit status.
 
-Actions are ordered. `drain_until_quiescent` processes work already eligible at the current logical time and
-must stop within `max_steps`; it does not advance time. `advance_clock` advances only the logical clock.
-Delayed operations and replies carry corpus-chosen symbolic IDs so their completion order is explicit.
+Actions are ordered. `drain_until_quiescent` processes eligible work and must stop within `max_steps`.
 
-Expectations use one of three comparison modes:
+Expectations use one of two comparison modes:
 
 - `exact`: the full observation sequence must match;
-- `contains_in_order`: listed observations must appear in order; unrelated output may occur between them;
-- `eventually`: the observation must occur before its declared logical-time and step bounds.
+- `contains_in_order`: listed observations must appear in order; unrelated output may occur between them.
 
 Session v0 observations come only from external transcripts: commands sent to mpv, visible overlay writes
 and removals, clipboard writes, and bounded adapter termination. An adapter may inspect its own internals to
 drive the implementation, but it must not publish reducer, store, object, thread, or private-field state as
 an observation. Symbolic IDs replace process IDs, addresses, timestamps, and implementation names.
 
-Each scenario file conforms to `schema/session-v0.json`. Scenario IDs are stable API keys. The committed
+Each scenario file conforms to `schema/session-v0.json`. The reference runner also enforces the same closed
+request vocabulary before execution. Scenario IDs are stable API keys. The committed
 manifest locks their count and key-set hash so a re-vendor or cleanup cannot silently shrink the contract.
 
 ## Config v0 protocol
@@ -54,15 +52,7 @@ manifest locks their count and key-set hash so a re-vendor or cleanup cannot sil
 request contains `scenario_id`, `mode`, `config`, optional `flags` or `mine`, and `observe` paths; expected
 values stay with the runner. The adapter returns those normalized dotted paths in `observations`. This makes
 run/attach configuration parity a product contract without exposing `ReaderOptions` or Python dataclasses.
-
-## Playback v0 protocol
-
-`saitenka.playback/v0` uses capability `playback-v0`. A scenario supplies initial observed properties,
-optional installed-cue timing, preparation actions whose events are discarded, ordered playback actions,
-and the stable state fields to observe. Results contain normalized semantic events and state: cue identity
-uses integer source/track/cue revisions rather than implementation objects. The vocabulary describes cue,
-track, source, connection, timing, and render-space behavior; reducer classes and Python type names are not
-part of the contract.
+Corpus rows conform to `schema/config-v0.json`; the runner strips answers and validates mode-specific keys.
 
 ## CLI v0 protocol
 
@@ -71,4 +61,4 @@ registered commands; parser scenarios return only named bound arguments. Config 
 isolated TOML file before parsing, so the corpus covers default precedence without reading a user's config.
 The open-ended all-command help check and the legacy wrapper process remain native tests because their sets
 and process boundary cannot be represented by a finite scenario list without weakening them.
-
+Corpus rows conform to `schema/cli-v0.json`; the runner strips answers and validates mode-specific keys.

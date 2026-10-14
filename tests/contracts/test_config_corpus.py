@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from .config_adapter import evaluate
+from .config_adapter import evaluate, scenario_request
 from .protocol import load_row_corpus
 
 CORPUS = Path(__file__).resolve().parents[2] / "contracts/config/v0"
@@ -13,4 +13,4 @@ SCENARIOS = load_row_corpus(CORPUS)
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda row: row["scenario_id"])
 def test_effective_options_contract(scenario: dict) -> None:
-    assert evaluate(scenario) == scenario["expect"]
+    assert evaluate(scenario_request(scenario)) == scenario["expect"]

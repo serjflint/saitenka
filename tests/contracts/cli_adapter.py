@@ -10,6 +10,49 @@ from pathlib import Path
 
 PROTOCOL = "saitenka.cli/v0"
 CAPABILITY = "cli-v0"
+ANSWER_KEYS = frozenset({"expect", "expect_contains"})
+MODE_KEYS = {
+    "inventory": frozenset({"scenario_id", "mode", "expect_contains"}),
+    "parse": frozenset({"scenario_id", "mode", "args", "observe", "expect"}),
+    "parse-config": frozenset({"scenario_id", "mode", "config", "args", "observe", "expect"}),
+    "resolve-names": frozenset({"scenario_id", "mode", "cases", "expect"}),
+    "jimaku-decision": frozenset({"scenario_id", "mode", "cases", "expect"}),
+}
+
+
+def scenario_request(scenario: dict) -> dict:
+    mode = scenario.get("mode")
+    allowed = MODE_KEYS.get(mode)
+    if allowed is None:
+        raise ValueError(f"unknown cli-v0 mode: {mode!r}")
+    expected_keys = set(allowed)
+    if mode == "parse" and "apply_defaults" in scenario:
+        expected_keys.add("apply_defaults")
+    if set(scenario) != expected_keys:
+        raise ValueError(f"invalid cli-v0 scenario keys for {mode!r}")
+    payload = {key: value for key, value in scenario.items() if key not in ANSWER_KEYS}
+    return {"type": "run", "protocol": PROTOCOL, **payload}
+
+
+def validate_request(request: dict) -> None:
+    if ANSWER_KEYS & request.keys():
+        raise ValueError("cli-v0 requests cannot contain answer keys")
+    required = {"type", "protocol", "scenario_id", "mode"}
+    if (
+        not required <= request.keys()
+        or request["type"] != "run"
+        or request["protocol"] != PROTOCOL
+    ):
+        raise ValueError("invalid cli-v0 request envelope")
+    mode = request["mode"]
+    allowed = MODE_KEYS.get(mode)
+    if allowed is None:
+        raise ValueError(f"unknown cli-v0 mode: {mode!r}")
+    request_keys = (allowed - ANSWER_KEYS) | {"type", "protocol"}
+    if mode == "parse" and "apply_defaults" in request:
+        request_keys |= {"apply_defaults"}
+    if set(request) != request_keys:
+        raise ValueError(f"invalid cli-v0 request keys for {mode!r}")
 
 
 def _cli():
@@ -63,6 +106,7 @@ def _inventory() -> dict[str, object]:
 
 
 def evaluate(scenario: dict) -> object:
+    validate_request(scenario)
     if scenario["mode"] == "inventory":
         return _inventory()
     if scenario["mode"] == "parse":

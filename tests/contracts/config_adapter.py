@@ -29,9 +29,55 @@ BASE_FLAGS = RunFlags(
 )
 PROTOCOL = "saitenka.config/v0"
 CAPABILITY = "config-v0"
+ANSWER_KEYS = frozenset({"expect", "expect_contains"})
+MODE_KEYS = {
+    "run": (frozenset({"scenario_id", "mode", "config", "flags", "expect"}), True),
+    "attach": (frozenset({"scenario_id", "mode", "config", "mine", "expect"}), True),
+    "editor-catalog": (frozenset({"scenario_id", "mode", "fields", "expect"}), False),
+    "editor-defaults": (frozenset({"scenario_id", "mode", "checks", "expect"}), False),
+    "editor-coerce": (frozenset({"scenario_id", "mode", "checks", "expect"}), False),
+    "mine-model": (frozenset({"scenario_id", "mode", "configs", "expect"}), False),
+    "run-effective": (
+        frozenset({"scenario_id", "mode", "scoped_config", "cli", "observe", "expect"}),
+        False,
+    ),
+}
+
+
+def scenario_request(scenario: dict) -> dict:
+    mode = scenario.get("mode")
+    spec = MODE_KEYS.get(mode)
+    if spec is None or set(scenario) != spec[0]:
+        raise ValueError(f"invalid config-v0 scenario keys for {mode!r}")
+    payload = {key: value for key, value in scenario.items() if key not in ANSWER_KEYS}
+    if spec[1]:
+        payload["observe"] = list(scenario["expect"])
+    return {"type": "run", "protocol": PROTOCOL, **payload}
+
+
+def validate_request(request: dict) -> None:
+    if ANSWER_KEYS & request.keys():
+        raise ValueError("config-v0 requests cannot contain answer keys")
+    required = {"type", "protocol", "scenario_id", "mode"}
+    if (
+        not required <= request.keys()
+        or request["type"] != "run"
+        or request["protocol"] != PROTOCOL
+    ):
+        raise ValueError("invalid config-v0 request envelope")
+    mode = request["mode"]
+    spec = MODE_KEYS.get(mode)
+    if spec is None:
+        raise ValueError(f"unknown config-v0 mode: {mode!r}")
+    allowed = (spec[0] - ANSWER_KEYS) | {"type", "protocol"}
+    if spec[1]:
+        allowed |= {"observe"}
+    if set(request) != allowed:
+        raise ValueError(f"invalid config-v0 request keys for {mode!r}")
 
 
 def evaluate(scenario: dict) -> object:
+    validate_request(scenario)
     if scenario["mode"].startswith("editor-"):
         return _evaluate_editor(scenario)
     if scenario["mode"] == "mine-model":
@@ -46,7 +92,7 @@ def evaluate(scenario: dict) -> object:
         options = _build_attach_options(scenario["config"], mine=scenario.get("mine", {}))
     else:
         raise ValueError(f"unknown config adapter mode: {scenario['mode']!r}")
-    paths = scenario.get("observe", scenario.get("expect", {}))
+    paths = scenario["observe"]
     return {path: _read_path(options, path) for path in paths}
 
 

@@ -13,10 +13,15 @@
     "when": {
       "type": "array",
       "items": {
-        "type": "object",
-        "required": ["action"],
-        "properties": {"action": {"type": "string"}},
-        "additionalProperties": true
+        "oneOf": [
+          {"type": "object", "additionalProperties": false, "required": ["action"], "properties": {"action": {"const": "start"}}},
+          {"type": "object", "additionalProperties": false, "required": ["action", "events"], "properties": {"action": {"const": "emit_batch"}, "events": {"type": "array", "items": {"type": "object"}}}},
+          {"type": "object", "additionalProperties": false, "required": ["action", "name"], "properties": {"action": {"const": "command"}, "name": {"type": "string"}}},
+          {"type": "object", "additionalProperties": false, "required": ["action", "epoch"], "properties": {"action": {"enum": ["transport_lost", "transport_ready", "transport_replaced"]}, "epoch": {"type": "integer", "minimum": 0}}},
+          {"type": "object", "additionalProperties": false, "required": ["action", "max_steps"], "properties": {"action": {"const": "drain_until_quiescent"}, "max_steps": {"type": "integer", "minimum": 1}}},
+          {"type": "object", "additionalProperties": false, "required": ["action"], "properties": {"action": {"const": "close"}}},
+          {"type": "object", "additionalProperties": false, "required": ["action", "name"], "properties": {"action": {"const": "checkpoint"}, "name": {"type": "string"}}}
+        ]
       }
     },
     "expect": {
@@ -24,12 +29,9 @@
       "additionalProperties": false,
       "required": ["mode", "observations"],
       "properties": {
-        "mode": {"enum": ["exact", "contains_in_order", "eventually"]},
-        "observations": {"type": "array", "items": {"type": "object"}},
-        "within_steps": {"type": "integer", "minimum": 1},
-        "within_ms": {"type": "integer", "minimum": 0}
+        "mode": {"enum": ["exact", "contains_in_order"]},
+        "observations": {"type": "array", "items": {"type": "object"}}
       }
     }
   }
 }
-

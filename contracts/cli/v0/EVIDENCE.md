@@ -12,3 +12,6 @@ executable corpus:
 
 The registry-driven all-command help check and legacy wrapper subprocess remain separate: they cover an
 open command set and a real compatibility process boundary rather than finite parser examples.
+
+The exact substitutions, commands, scenarios, and mismatches are tracked in
+`contracts/evidence-v0.json`.

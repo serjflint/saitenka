@@ -12,7 +12,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from saitenka_card import MineConfig
 from session_builder import TestSession, build_session
-from util import FakeIPC, await_ready, keybind_registry, session_gateway
+from util import FakeIPC, await_ready, bare_gateway, keybind_registry, session_gateway
 
 import saitenka.app.session.builder as session_builder_module
 from saitenka.app import bindings
@@ -3342,6 +3342,36 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text(make_sessio
     assert after is not None
     assert after != before
     assert after.normalized_text == before.normalized_text
+
+
+def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(make_session):
+    from util import FakeIPC as EventIPC
+
+    from saitenka.app.session.routes import install_session_reactor
+    from saitenka.runtime import ConnectionLost
+
+    ipc = EventIPC()
+    gateway = bare_gateway(ipc)
+    install_session_reactor(gateway, startup_hint=False)
+    reader = make_session(
+        ipc,
+        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
+        options=ReaderOptions().with_overrides(prefetch=False),
+    )
+    reader.graph.cue.set_subtitle("古い字幕")
+    try:
+        assert ipc.publish_runtime_event(ConnectionLost(0))
+        ipc.emit({"event": "client-message", "args": [bindings.HELP_TOGGLE_MSG]})
+        assert reader.pump()
+
+        assert not any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
+        assert reader.graph.annotation.view.retired
+        cue = reader.graph.subtitle_presentation.cue.current
+        assert cue.tokens == [] and cue.boxes == []
+        assert gateway.snapshot.command_outcomes == 1
+    finally:
+        reader.close()
+        gateway.close()
 
 
 def test_same_text_with_new_timing_installs_a_new_cue_identity(make_session):

@@ -11,7 +11,10 @@ ADAPTER_DIR = Path(__file__).resolve().parent
 if str(ADAPTER_DIR) not in sys.path:
     sys.path.insert(0, str(ADAPTER_DIR))
 
-from protocol import PROTOCOL  # noqa: E402
+if __package__:
+    from .protocol import PROTOCOL, validate_request
+else:
+    from protocol import PROTOCOL, validate_request
 from session_builder import build_session  # noqa: E402
 from util import FakeIPC, session_gateway  # noqa: E402
 
@@ -159,6 +162,7 @@ class SaitenkaSessionAdapter:
 
 
 def execute(request: dict) -> dict:
+    validate_request(request)
     adapter = SaitenkaSessionAdapter(request["given"])
     observations = adapter.run(request["when"])
     return {
