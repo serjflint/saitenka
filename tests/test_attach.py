@@ -21,11 +21,6 @@ from saitenka.mpvio.osd import Overlay
 # --- mpv discovery ---------------------------------------------------------------------------
 
 
-def test_discover_prefers_path(monkeypatch):
-    monkeypatch.setattr(discover.shutil, "which", lambda _name: "/usr/local/bin/mpv")
-    assert discover.find_mpv() == "/usr/local/bin/mpv"
-
-
 def test_discover_falls_back_to_known_locations(monkeypatch):
     monkeypatch.setattr(discover.shutil, "which", lambda _name: None)
     fake = Path("/Applications/mpv.app/Contents/MacOS/mpv")
@@ -37,11 +32,18 @@ def test_discover_falls_back_to_known_locations(monkeypatch):
 
 
 def test_discover_respects_config_mpv_path(monkeypatch, tmp_path):
-    mpv = tmp_path / "mympv"
-    mpv.write_text("#!/bin/sh\n")
-    mpv.chmod(0o755)
-    monkeypatch.setattr(discover.shutil, "which", lambda _name: None)
-    assert discover.find_mpv(config_path=str(mpv)) == str(mpv)
+    config = tmp_path / "config-mpv"
+    env = tmp_path / "env-mpv"
+    for path in (config, env):
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+    monkeypatch.setenv("SAITENKA_MPV_PATH", str(env))
+    monkeypatch.setattr(discover.shutil, "which", lambda _name: "/usr/local/bin/mpv")
+
+    assert discover.find_mpv(config_path=str(config)) == str(config)
+    assert discover.find_mpv() == str(env)
+    monkeypatch.delenv("SAITENKA_MPV_PATH")
+    assert discover.find_mpv() == "/usr/local/bin/mpv"
 
 
 def test_discover_returns_none_when_absent(monkeypatch):
@@ -136,30 +138,44 @@ def test_install_plugin_writes_lua_into_fake_scripts_dir(tmp_path):
     assert m and Path(m.group(1)).is_absolute()  # "/..." on POSIX, "D:\\..." on Windows
 
 
-def test_install_plugin_backs_up_existing(tmp_path):
+def test_install_plugin_backs_up_existing(tmp_path, monkeypatch):
     from saitenka.app import plugin
 
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    existing = scripts / "saitenka.lua"
-    existing.write_text("-- OLD lua\n")
-    dest = plugin.install_plugin(scripts_dir=scripts)
-    # backups live OUTSIDE scripts/ (mpv would try to load a .bak left in scripts/ as a script)
-    backups = list((scripts.parent / "saitenka-backups").glob("saitenka.lua.*.bak"))
-    assert backups and "OLD" in backups[0].read_text()
-    assert not list(scripts.glob("*.bak"))  # nothing mpv-loadable left behind
-    assert "saitenka" in dest.read_text()
+    scripts = [tmp_path / "mpv" / "scripts", tmp_path / "mpvnet" / "scripts"]
+    for directory in scripts:
+        directory.mkdir(parents=True)
+        (directory / "saitenka.lua").write_text("-- OLD lua\n")
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: scripts)
+    dest = plugin.install_plugin()
+
+    assert dest == scripts[0] / "saitenka.lua"
+    for directory in scripts:
+        backups = list((directory.parent / "saitenka-backups").glob("saitenka.lua.*.bak"))
+        assert backups and "OLD" in backups[0].read_text()
+        assert not list(directory.glob("*.bak"))
+        assert "saitenka" in (directory / "saitenka.lua").read_text()
 
 
-def test_uninstall_plugin_backs_up_then_removes(tmp_path):
+@pytest.mark.parametrize("present", [(0, 1), (1,)])
+def test_uninstall_plugin_backs_up_then_removes(tmp_path, monkeypatch, present):
     from saitenka.app import plugin
 
-    scripts = tmp_path / "scripts"
-    scripts.mkdir()
-    (scripts / "saitenka.lua").write_text("-- installed\n")
-    backup = plugin.uninstall_plugin(scripts_dir=scripts)
-    assert not (scripts / "saitenka.lua").exists()
-    assert backup is not None and "installed" in backup.read_text()
+    scripts = [tmp_path / "mpv" / "scripts", tmp_path / "mpvnet" / "scripts"]
+    for index, directory in enumerate(scripts):
+        directory.mkdir(parents=True)
+        if index in present:
+            (directory / "saitenka.lua").write_text("-- installed\n")
+    monkeypatch.setattr(plugin, "all_scripts_dirs", lambda: scripts)
+
+    backup = plugin.uninstall_plugin()
+
+    assert backup is not None and backup.parent == scripts[min(present)].parent / "saitenka-backups"
+    for index, directory in enumerate(scripts):
+        assert not (directory / "saitenka.lua").exists()
+        backups = list((directory.parent / "saitenka-backups").glob("saitenka.lua.*.bak"))
+        assert bool(backups) is (index in present)
+        if backups:
+            assert "installed" in backups[0].read_text()
 
 
 def test_uninstall_plugin_noop_when_absent(tmp_path):

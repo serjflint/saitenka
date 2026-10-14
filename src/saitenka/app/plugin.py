@@ -54,14 +54,6 @@ def _lua_source() -> Path:
     return lua_path()
 
 
-def default_scripts_dir() -> Path:
-    """The primary mpv scripts dir, mirroring mpv's own resolution ($MPV_HOME > %APPDATA%\\mpv on
-    Windows > ~/.config/mpv). mpv.net's separate dir is added by ``all_scripts_dirs``."""
-    from saitenka.app.paths import mpv_config_dir
-
-    return mpv_config_dir() / "scripts"
-
-
 def all_scripts_dirs() -> list[Path]:
     """Every scripts dir to install into so the plugin loads from any launcher: mpv's + mpv.net's."""
     from saitenka.app.paths import mpv_scripts_dirs

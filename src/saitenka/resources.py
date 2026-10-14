@@ -1,7 +1,7 @@
 """Locate bundled non-Python assets via ``importlib.resources``.
 
-All data files (fonts, wordlists, ``saitenka.lua``) live under the
-``saitenka`` package (``src/saitenka/assets`` and ``src/saitenka/app/data``), so they resolve the same
+All bundled files (fonts, wordlists, ``saitenka.lua``) live under
+``src/saitenka/assets``, so they resolve the same
 way from the source tree and from an installed wheel. ``importlib.resources.files`` returns a real
 filesystem path for wheels that uv unpacks; the loaders below therefore get a ``Path`` usable by
 Pillow / zipfile / ``open`` directly.
@@ -24,8 +24,3 @@ def _pkg_path(package: str, *parts: str) -> Path:
 def asset(*parts: str) -> Path:
     """Path to a file under ``saitenka/assets`` (e.g. ``asset("fonts", "NotoSansJP.ttf")``)."""
     return _pkg_path("saitenka", "assets", *parts)
-
-
-def data(*parts: str) -> Path:
-    """Path to a file under ``saitenka/app/data`` (source tree or unpacked wheel)."""
-    return _pkg_path("saitenka.app", "data", *parts)
