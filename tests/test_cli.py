@@ -227,25 +227,33 @@ def test_toml_config_feeds_defaults(tmp_path, monkeypatch):
         importlib.reload(cli)
 
 
-def test_mpv_reader_is_thin_wrapper():
-    """examples/mpv_reader.py must delegate to saitenka.app.cli (no argparse of its own)."""
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_legacy_mpv_reader_entrypoint_delegates_to_run_help():
+    """The documented legacy entrypoint loads and exposes the current run command."""
     from pathlib import Path
 
-    src = (Path(__file__).resolve().parent.parent / "examples" / "mpv_reader.py").read_text(
-        encoding="utf-8"
+    wrapper = Path(__file__).resolve().parent.parent / "examples" / "mpv_reader.py"
+    result = subprocess.run(
+        [sys.executable, str(wrapper), "--help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=5,
     )
-    assert "saitenka.app.cli" in src
-    assert "argparse" not in src
+    assert result.returncode == 0, result.stderr
+    assert "--sub-file" in result.stdout
+    assert "--mine-key" in result.stdout
 
 
 def test_resolve_names_flag_wins_over_config():
     """dict/freq/pitch are dictionary TITLES resolved against the DB: explicit flags win over the
     config file, and both are passed through verbatim (titles, not paths — no ~-expansion)."""
-    from saitenka.app.cli import _resolve_names
+    from saitenka.app.launch.run import resolve_names
 
-    assert _resolve_names(["FlagDict"], {"dicts": ["ConfigDict"]}, "dicts") == ["FlagDict"]
-    assert _resolve_names([], {"dicts": ["ConfigDict"]}, "dicts") == ["ConfigDict"]
-    assert _resolve_names(None, {}, "dicts") == []
+    assert resolve_names(["FlagDict"], {"dicts": ["ConfigDict"]}, "dicts") == ["FlagDict"]
+    assert resolve_names([], {"dicts": ["ConfigDict"]}, "dicts") == ["ConfigDict"]
+    assert resolve_names(None, {}, "dicts") == []
 
 
 def test_version_is_wired_to_package_metadata():
@@ -283,29 +291,37 @@ def test_jimaku_should_fetch_decision():
     )  # neither → never
 
 
-def test_resolve_atlas_scale_explicit_value_wins():
-    from saitenka.app.cli import _resolve_atlas_scale
+@pytest.mark.parametrize(
+    ("config", "explicit", "expected"),
+    [
+        pytest.param({"tip_scale": 1.5}, 2.0, 2.0, id="explicit"),
+        pytest.param({"tip_scale": 1.5}, 0.0, 1.5, id="top-level-tip-scale"),
+        pytest.param({"tooltip": {"tip_scale": 1.5}}, 0.0, 1.0, id="nested-is-ignored"),
+        pytest.param({}, 0.0, 1.0, id="reference-default"),
+    ],
+)
+def test_prewarm_forwards_the_runtime_atlas_scale(monkeypatch, config, explicit, expected):
+    from saitenka.app import prewarm as prewarm_module
+    from saitenka.app.commands import diagnostics
+    from saitenka.app.prewarm import PrewarmResult
 
-    assert (
-        _resolve_atlas_scale({"tip_scale": 1.5}, 2.0) == 2.0
-    )  # an explicit --atlas-scale > 0 is used
+    seen = []
+    monkeypatch.setattr(diagnostics, "load_config", lambda: config)
+    monkeypatch.setattr(
+        prewarm_module,
+        "prewarm",
+        lambda *_args, opts, **_kwargs: (
+            seen.append(opts)
+            or PrewarmResult(
+                candidates=0,
+                stored=0,
+                rows=0,
+                bytes=0,
+                skipped=0,
+                stopped_at_ceiling=False,
+            )
+        ),
+    )
 
-
-def test_resolve_atlas_scale_zero_inherits_top_level_tip_scale():
-    from saitenka.app.cli import _resolve_atlas_scale
-
-    assert _resolve_atlas_scale({"tip_scale": 1.5}, 0.0) == 1.5  # 0 → the runtime's tip_scale
-
-
-def test_resolve_atlas_scale_ignores_nested_tooltip_key_like_the_runtime():
-    from saitenka.app.cli import _resolve_atlas_scale
-
-    # The runtime reads only top-level tip_scale; a nested [tooltip] tip_scale it ignores must NOT be
-    # honoured here either, or prewarm would build a scale the tooltip never displays.
-    assert _resolve_atlas_scale({"tooltip": {"tip_scale": 1.5}}, 0.0) == 1.0
-
-
-def test_resolve_atlas_scale_defaults_to_reference_when_unset():
-    from saitenka.app.cli import _resolve_atlas_scale
-
-    assert _resolve_atlas_scale({}, 0.0) == 1.0  # nothing configured → reference only
+    assert diagnostics.prewarm(limit=1, atlas_scale=explicit, atlas_only=True) == 0
+    assert seen[0].atlas_scale == expected

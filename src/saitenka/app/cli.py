@@ -15,12 +15,8 @@ from saitenka.app.commands import diagnostics as diagnostics_commands
 from saitenka.app.commands import dictionaries as dictionary_commands
 from saitenka.app.commands import lifecycle as lifecycle_commands
 from saitenka.app.commands import run as run_commands
-from saitenka.app.commands.diagnostics import (
-    _resolve_atlas_scale as _resolve_atlas_scale,  # noqa: PLC0414
-)
 from saitenka.app.config import config_path
 from saitenka.app.features.profiles.profile_cli import profile_app
-from saitenka.app.launch.run import _resolve_names as _resolve_names  # noqa: PLC0414
 from saitenka.app.launch.run import jimaku_should_fetch as jimaku_should_fetch  # noqa: PLC0414
 from saitenka.app.paths import cache_dir
 

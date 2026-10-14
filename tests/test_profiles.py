@@ -380,9 +380,9 @@ def test_profile_scoped_config_keeps_resolution_on_the_same_profile():
 
 
 def test_scoped_dicts_are_what_the_run_path_resolves():
-    """Observable through the actual run-path seam: with no --dict flag, ``_resolve_names`` reads the
+    """Observable through the actual run-path seam: with no --dict flag, ``resolve_names`` reads the
     profile-scoped dict list (which dictionaries load)."""
-    from saitenka.app.launch.run import _resolve_names
+    from saitenka.app.launch.run import resolve_names
 
     cfg = scope_config(
         {
@@ -393,7 +393,7 @@ def test_scoped_dicts_are_what_the_run_path_resolves():
             },
         }
     )
-    assert _resolve_names(None, cfg, "dicts") == ["Le Grand Robert"]  # profile dicts, not JP
+    assert resolve_names(None, cfg, "dicts") == ["Le Grand Robert"]  # profile dicts, not JP
 
 
 def test_profilemine_targets_its_own_deck_model_and_fields_in_a_built_mineconfig():
