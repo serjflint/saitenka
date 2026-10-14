@@ -308,12 +308,6 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks(ma
     cannot be handed a different one, which is what makes the conformance contract testable.
     """
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-    from saitenka.app.session.factory import _geometry_backend
-
-    assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
-    chosen = _geometry_backend(SubtitleGeometryOptions(native_visible=True))
-    assert chosen is not None  # composition makes the choice
-    chosen.close()
 
     options = ReaderOptions(
         subtitle_geometry=SubtitleGeometryOptions(native_visible=True), prefetch=False
@@ -325,6 +319,16 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks(ma
     assert direct.graph.subtitle_presentation.pipeline.render(_probe_request(direct)) is None
     assert direct.graph.subtitle_presentation.pipeline.last_error is not None
     direct.close()
+
+    disabled = make_session(
+        FakeIPC(),
+        options=ReaderOptions(
+            subtitle_geometry=SubtitleGeometryOptions(native_visible=False), prefetch=False
+        ),
+    )
+    assert disabled.graph.subtitle_presentation.pipeline.render(_probe_request(disabled)) is None
+    assert disabled.graph.subtitle_presentation.pipeline.last_error is None
+    disabled.close()
 
 
 def _probe_request(reader):

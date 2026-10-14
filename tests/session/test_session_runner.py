@@ -48,19 +48,8 @@ def test_each_step_is_given_the_time_that_is_left() -> None:
     assert seen == [3.0, 2.0, 1.0]
 
 
-def test_a_passed_deadline_reports_failure_rather_than_raising() -> None:
-    """The caller knows what its own timeout means — annotation raises `TimeoutError`, a capture
-    might retry. Deciding that here would put one feature's policy in everyone's loop."""
-    clock = [10.0]
-
-    ran = SessionRunner(lambda _t: None, clock=lambda: clock[0]).run_until(
-        lambda: False, deadline=10.0
-    )
-
-    assert ran is False
-
-
 def test_a_deadline_already_past_takes_no_step() -> None:
+    """The caller owns timeout policy, and an expired wait must not touch the transport."""
     steps: list[float | None] = []
     clock = [50.0]
 
