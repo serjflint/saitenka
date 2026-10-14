@@ -54,20 +54,22 @@ def request(**overrides: object) -> SubtitleRasterRequest:
 
 
 @pytest.mark.parametrize(
-    "reason",
-    ["secondary_role", "upgrade_pending", "annotation_degraded"],
+    ("reason", "expected"),
+    [
+        ("secondary_role", RasterStyle.PLAIN),
+        ("upgrade_pending", RasterStyle.PLAIN),
+        ("annotation_degraded", RasterStyle.PLAIN),
+        (None, RasterStyle.STYLED),
+    ],
 )
-def test_a_cue_with_no_annotation_to_show_publishes_plain(reason: str) -> None:
+def test_raster_style_reflects_annotation_availability(
+    reason: str | None, expected: RasterStyle
+) -> None:
     flags = dict.fromkeys(("secondary_role", "upgrade_pending", "annotation_degraded"), False)
-    flags[reason] = True
+    if reason is not None:
+        flags[reason] = True
 
-    assert raster_style(**flags) is RasterStyle.PLAIN
-
-
-def test_an_annotated_target_cue_publishes_styled() -> None:
-    style = raster_style(secondary_role=False, upgrade_pending=False, annotation_degraded=False)
-
-    assert style is RasterStyle.STYLED
+    assert raster_style(**flags) is expected
 
 
 def test_annotations_show_in_full_mode_or_while_hovering() -> None:
@@ -93,23 +95,19 @@ def test_an_unannotated_styled_request_drops_hover_and_styles() -> None:
     assert (built.hover, built.hover_end, built.styles) == (None, None, None)
 
 
-def test_a_hover_span_drives_the_underline_over_the_hovered_token() -> None:
-    """A phrase span can start before the hovered token (a leading お in お休み)."""
-    built = request(hover=3, hover_span=(2, 4))
+@pytest.mark.parametrize(
+    ("hover", "span", "expected"),
+    [
+        (3, (2, 4), (2, 4)),
+        (3, None, (3, None)),
+        (-1, None, (None, None)),
+    ],
+)
+def test_request_encodes_the_hover_range(hover, span, expected) -> None:
+    """A phrase can start before the hovered token, while no hover encodes no range."""
+    built = request(hover=hover, hover_span=span)
 
-    assert (built.hover, built.hover_end) == (2, 4)
-
-
-def test_without_a_span_the_hovered_token_underlines() -> None:
-    built = request(hover=3, hover_span=None)
-
-    assert (built.hover, built.hover_end) == (3, None)
-
-
-def test_no_hover_underlines_nothing() -> None:
-    built = request(hover=-1, hover_span=None)
-
-    assert built.hover is None
+    assert (built.hover, built.hover_end) == expected
 
 
 def test_a_request_is_immutable_and_holds_no_live_sequence() -> None:
@@ -125,27 +123,21 @@ def test_a_request_is_immutable_and_holds_no_live_sequence() -> None:
 # --- provider neutrality -----------------------------------------------------------------------
 
 
-def test_the_pillow_provider_satisfies_the_same_contract_as_a_fake() -> None:
+@pytest.mark.parametrize("style", list(RasterStyle))
+def test_the_pillow_provider_satisfies_the_same_contract_as_a_fake(style: RasterStyle) -> None:
     from util import RecordingRasterProvider
 
-    built = request(style=RasterStyle.PLAIN)
+    built = request(style=style, styles=None)
     shipped = PillowRasterProvider().render(built)
     faked = RecordingRasterProvider().render(built)
 
     for result in (shipped, faked):
         assert result.image.width > 0
         assert isinstance(result.boxes, tuple)
+    assert shipped.image.width > 1 and shipped.image.height > 1
+    assert shipped.image.getchannel("A").getextrema()[1] > built.background[3]
+    assert bool(shipped.boxes) is (style is RasterStyle.STYLED)
     assert faked is not None
-
-
-def test_the_pillow_provider_renders_both_styles() -> None:
-    provider = PillowRasterProvider()
-
-    plain = provider.render(request(style=RasterStyle.PLAIN))
-    styled = provider.render(request(style=RasterStyle.STYLED, styles=None))
-
-    assert plain.image.width > 0
-    assert styled.image.width > 0
 
 
 # --- the surface: what a SessionController publishes, under either provider -------------------------------

@@ -149,27 +149,20 @@ def test_request_cache_identity_covers_render_inputs_but_not_generation() -> Non
 
 
 @pytest.mark.parametrize(
-    "changed",
+    ("attachments", "same"),
     [
-        (("renamed.ttf", b"font"),),
-        (("font.ttf", b"FONT"),),
-        (("font.ttf", b"font"), ("extra.ttf", b"extra")),
+        ((("font.ttf", bytes(bytearray(b"font"))),), True),
+        ((("renamed.ttf", b"font"),), False),
+        ((("font.ttf", b"FONT"),), False),
+        ((("font.ttf", b"font"), ("extra.ttf", b"extra")), False),
     ],
 )
-def test_font_content_and_names_invalidate_both_snapshot_and_renderer(changed):
+def test_font_identity_tracks_names_and_content(attachments, *, same: bool) -> None:
     baseline = request()
-    altered = replace(baseline, attachments=changed)
+    altered = replace(baseline, generation=2, attachments=attachments)
 
-    assert baseline.cache_key() != altered.cache_key()
-    assert baseline.renderer_key() != altered.renderer_key()
-
-
-def test_identical_font_bytes_share_identity_across_requests():
-    first = request()
-    second = replace(first, generation=2, attachments=(("font.ttf", bytes(bytearray(b"font"))),))
-
-    assert first.cache_key() == second.cache_key()
-    assert first.renderer_key() == second.renderer_key()
+    assert (baseline.cache_key() == altered.cache_key()) is same
+    assert (baseline.renderer_key() == altered.renderer_key()) is same
 
 
 def test_track_feature_change_gets_a_fresh_renderer():
@@ -242,9 +235,11 @@ class FakeRenderer:
         self.closed = False
         self.calls: list[tuple[tuple, dict]] = []
         self.documents: list[bytes] = [ass]
+        self.rendered_documents: list[bytes] = []
 
     def render(self, *args, **kwargs) -> Result:
         self.calls.append((args, kwargs))
+        self.rendered_documents.append(self.documents[-1])
         # A real renderer answers the document it was given. A fake that always returns the cue's
         # colours would make the anchor probe — which renders its own document in its own palette —
         # unrecoverable, and hide the probe wiring behind a swallowed exception.
@@ -303,21 +298,7 @@ def test_a_new_cue_swaps_the_document_instead_of_rebuilding_libass() -> None:
 
     assert len(created) == 1, "a second cue rebuilt the whole library"
     assert created[0].documents == [b"ass", b"the next cue"]
-
-
-def test_the_swapped_in_document_is_the_one_the_render_is_measured_against() -> None:
-    """The hazard the reuse opens, and the reason the swap is not left to the caller: a cached
-    renderer still holding the previous cue's track answers with that cue's boxes, silently — hit
-    regions beside the words, which is the failure this whole path exists to prevent."""
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
-
-    backend.render(request())
-    backend.render(request(ass=b"the next cue"))
-    rendered_under = created[0].documents[-1]
-    backend.close()
-
-    assert rendered_under == b"the next cue"
+    assert created[0].rendered_documents == [b"ass", b"the next cue"]
 
 
 def test_a_different_font_environment_gets_its_own_renderer() -> None:
