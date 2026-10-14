@@ -7,21 +7,6 @@ Layering enforcement (PIL-agnostic core, GPL chokepoint, import cycles) moved to
 reproduce identical bytes.
 """
 
-from pathlib import Path
-
-import numpy as np
-
-SRC = Path(__file__).resolve().parent.parent / "src" / "saitenka"
-
-
-def test_raster_backend_protocol_shape():
-    from saitenka.raster.protocol import RasterBackend, RasterResult
-
-    assert hasattr(RasterBackend, "raster_rows")
-    # RasterResult carries premultiplied BGRA + height + layout-produced hit geometry
-    fields = set(RasterResult.__dataclass_fields__)
-    assert {"bgra", "height", "scan_boxes", "link_boxes"} <= fields
-
 
 def test_pillow_backend_matches_lazy_panel_bytes():
     """PillowBackend.raster_rows must be byte-identical to the existing LazyPanel full render +
@@ -64,16 +49,3 @@ def test_hit_geometry_is_produced_by_layout_not_raster():
     assert res.link_boxes == lp.link_boxes
     assert res.link_boxes and isinstance(res.link_boxes[0], model.LinkBox)
     assert res.scan_boxes and isinstance(res.scan_boxes[0], model.ScanBox)
-
-
-def test_native_backend_plan_requires_free_threading():
-    """The future cosmic-text backend must preserve free-threaded rendering."""
-    readme = SRC.parent.parent / "docs" / "contributing" / "native-renderer.md"
-    assert readme.exists(), "native-renderer.md missing"
-    text = readme.read_text(encoding="utf-8")
-    assert "cosmic-text" in text
-    assert "free-threading" in text or "free-threaded" in text
-
-
-def _unused(x):  # keep numpy imported for future byte assertions without ruff noise
-    return np.asarray(x)

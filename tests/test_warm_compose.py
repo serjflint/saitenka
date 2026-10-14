@@ -140,9 +140,15 @@ def test_eviction_keeps_what_the_lookahead_just_warmed():
     Evicting at the compose's own `overscan` boundary would drop the bands `render_ahead` warms just
     past it — the next frame re-rasters them, and the retention fix pays for itself in jank.
     """
-    wp = _panel(n_defs=30, length=8)
-    _warm_like_a_worker(wp, 0)
-    ahead = set(wp._blocks)
-    wp.viewport_bgra(0, VIEW_H, VIEW_H, warm_only=True)
+    probe = _panel(n_defs=30, length=8)
+    _warm_like_a_worker(probe, 0)
+    reach = 2 * VIEW_H + _AHEAD_BANDS * _BAND_PX
+    targets = [y for y in range(2 * VIEW_H, reach, _BAND_PX // 2) if probe.viewport_warm(y, 1)]
 
-    assert ahead <= set(wp._blocks), "the compose evicted the lookahead it had just been handed"
+    assert targets
+    for target in targets:
+        wp = _panel(n_defs=30, length=8)
+        _warm_like_a_worker(wp, 0)
+        wp.viewport_bgra(0, VIEW_H, VIEW_H, warm_only=True)
+        wp.viewport_bgra(target, 1, 0)
+        assert wp.last_frame_rasters == 0, f"the compose evicted warmed pixels at y={target}"

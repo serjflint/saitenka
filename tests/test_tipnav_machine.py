@@ -14,18 +14,6 @@ from saitenka.runtime.tipnav import (
 EMPTY = TipNavState()
 
 
-def test_pushing_keeps_what_the_navigation_replaces() -> None:
-    assert pushed(EMPTY, "base") == TipNavTurn(TipNavState(("base",)))
-
-
-def test_popping_hands_back_the_step_it_removes() -> None:
-    """The view comes back as a decision, not as a return value: whoever restores it is not the
-    code that decided there was one to restore."""
-    assert popped(TipNavState(("base", "first"))) == TipNavTurn(
-        TipNavState(("base",)), (TipViewRestored("first"),)
-    )
-
-
 def test_popping_an_empty_stack_decides_nothing() -> None:
     """The refusal is the whole reason this is a machine: Esc falls through to closing the
     tooltip, so the check has to be answerable without being the code that unwinds."""
@@ -33,11 +21,16 @@ def test_popping_an_empty_stack_decides_nothing() -> None:
 
 
 def test_the_stack_unwinds_in_the_order_it_was_built() -> None:
-    state = pushed(pushed(EMPTY, "base").state, "first").state
+    base = pushed(EMPTY, "base")
+    first_push = pushed(base.state, "first")
+    assert base.decisions == ()
+    assert first_push.decisions == ()
 
-    first = popped(state)
+    first = popped(first_push.state)
     assert first.decisions == (TipViewRestored("first"),)
-    assert popped(first.state).decisions == (TipViewRestored("base"),)
+    second = popped(first.state)
+    assert second.decisions == (TipViewRestored("base"),)
+    assert second.state == EMPTY
 
 
 def test_clearing_drops_every_step_without_restoring_one() -> None:
