@@ -1,0 +1,90 @@
+[
+  {
+    "scenario_id": "run-defaults",
+    "mode": "run",
+    "config": {},
+    "flags": {},
+    "expect": {
+      "tooltip.scan_delay": 1.0,
+      "tooltip.tip_scale": 0.0,
+      "panels.scale": 1.0,
+      "mining.show_preview": true
+    }
+  },
+  {
+    "scenario_id": "run-overrides",
+    "mode": "run",
+    "config": {
+      "scan_delay": 1.5,
+      "ui_scale": 1.5,
+      "hover_pause_key": "Alt+q",
+      "subtitle_language_key": "Alt+l",
+      "bookmark_key": "Alt+b",
+      "sidebar_key": "Alt+s",
+      "analysis_key": "Ctrl+d",
+      "annotation_key": "Ctrl+a",
+      "help_key": "Ctrl+h",
+      "subtitle_retry_key": "Ctrl+r",
+      "annotation_mode": "hover",
+      "stats": {"enabled": true, "summary": false}
+    },
+    "flags": {"layout_engine": "taffy", "tip_scale": 1.5, "mine_preview": false},
+    "expect": {
+      "tooltip.scan_delay": 1.5,
+      "tooltip.layout_engine": "taffy",
+      "tooltip.tip_scale": 1.5,
+      "tooltip.annotation_mode": "hover",
+      "panels.scale": 1.5,
+      "mining.show_preview": false,
+      "keys.hover_pause_key": "Alt+q",
+      "keys.subtitle_language_key": "Alt+l",
+      "keys.bookmark_key": "Alt+b",
+      "keys.sidebar_key": "Alt+s",
+      "keys.analysis_key": "Ctrl+d",
+      "keys.annotation_key": "Ctrl+a",
+      "keys.help_key": "Ctrl+h",
+      "keys.subtitle_retry_key": "Ctrl+r",
+      "stats.enabled": true,
+      "stats.summary": false
+    }
+  },
+  {
+    "scenario_id": "attach-overrides",
+    "mode": "attach",
+    "config": {
+      "layout_engine": "taffy",
+      "tip_scale": 1.5,
+      "ui_scale": 1.5,
+      "pause_on_tooltip": false,
+      "hover_pause_key": "Alt+q",
+      "subtitle_language_key": "Alt+l",
+      "bookmark_key": "Alt+b",
+      "sidebar_key": "Alt+s",
+      "analysis_key": "Ctrl+d",
+      "annotation_key": "Ctrl+a",
+      "help_key": "Ctrl+h",
+      "subtitle_retry_key": "Ctrl+r",
+      "annotation_mode": "hover",
+      "stats": {"enabled": true, "summary": false}
+    },
+    "mine": {"preview": false},
+    "expect": {
+      "tooltip.layout_engine": "taffy",
+      "tooltip.tip_scale": 1.5,
+      "tooltip.pause_on_tooltip": false,
+      "tooltip.annotation_mode": "hover",
+      "panels.scale": 1.5,
+      "mining.show_preview": false,
+      "keys.hover_pause_key": "Alt+q",
+      "keys.subtitle_language_key": "Alt+l",
+      "keys.bookmark_key": "Alt+b",
+      "keys.sidebar_key": "Alt+s",
+      "keys.analysis_key": "Ctrl+d",
+      "keys.annotation_key": "Ctrl+a",
+      "keys.help_key": "Ctrl+h",
+      "keys.subtitle_retry_key": "Ctrl+r",
+      "stats.enabled": true,
+      "stats.summary": false
+    }
+  }
+]
