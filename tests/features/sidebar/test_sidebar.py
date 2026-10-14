@@ -75,7 +75,15 @@ def _capture_render(monkeypatch):
 
 
 def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
-    reader, ipc = _reader(active=12)
+    reader, ipc = _reader(active=12, props={"sub-start": 120.2, "time-pos": 120.3})
+    cues = [
+        dataclasses.replace(cue, start=float(i * 10), end=float(i * 10) + 0.8)
+        for i, cue in enumerate(reader.graph.track_commands.navigation.current.sub_index.cues)
+    ]
+    cues[3] = dataclasses.replace(cues[3], text="same line")
+    cues[12] = dataclasses.replace(cues[12], text="same line")
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(cues)
+    reader.graph.playback.install_seed({"sub-text": "same line"})
     calls = _capture_render(monkeypatch)
 
     (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
@@ -83,25 +91,6 @@ def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
     assert reader.graph.sidebar.state.open is True
     assert [row.value for row in calls[-1][0]] == list(range(8, 17))
     assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
-
-
-def test_active_row_uses_timing_to_disambiguate_repeated_text():
-    reader, _ipc = _reader(props={"sub-start": 5.2, "time-pos": 5.3})
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
-        [Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")]
-    )
-    reader.graph.playback.install_seed({"sub-text": "same line"})
-
-    assert (
-        sidebar._active_index(
-            reader.graph.track_commands.navigation.current.sub_index,
-            reader.graph.playback.cue.text,
-            sub_start=reader.graph.playback.query("sub-start"),
-            time_pos=reader.graph.playback.query("time-pos"),
-            preferred=reader.graph.track_commands.navigation.current.nav_idx,
-        )
-        == 1
-    )
 
 
 def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
@@ -143,14 +132,17 @@ def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("kind", "command"),
+    ("kind", "command", "active"),
     [
-        ("bookmark", mine_intents.MineCommand.BOOKMARK_CUE),
-        ("mine", mine_intents.MineCommand.WORD),
+        ("bookmark", mine_intents.MineCommand.BOOKMARK_CUE, 3),
+        ("bookmark", mine_intents.MineCommand.BOOKMARK_CUE, 9),
+        ("mine", mine_intents.MineCommand.WORD, 3),
+        ("mine", mine_intents.MineCommand.WORD, 9),
     ],
 )
-def test_active_cue_actions_use_registered_mining_commands(kind, command, monkeypatch):
-    reader, _ipc = _reader(active=3)
+def test_active_cue_actions_use_registered_mining_commands(kind, command, active, monkeypatch):
+    """The drawn action fires both before and after playback moves beyond its row (#252)."""
+    reader, _ipc = _reader(active=active)
     _capture_render(monkeypatch)
     invoked = []
     monkeypatch.setattr(reader.graph.stateless_commands, "run", invoked.append)
@@ -166,37 +158,6 @@ def test_active_cue_actions_use_registered_mining_commands(kind, command, monkey
     reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110)
 
     assert invoked == [command]
-
-
-@pytest.mark.parametrize(
-    ("kind", "command"),
-    [
-        ("bookmark", mine_intents.MineCommand.BOOKMARK_CUE),
-        ("mine", mine_intents.MineCommand.WORD),
-    ],
-)
-def test_active_cue_action_still_fires_when_the_active_cue_drifted(kind, command, monkeypatch):
-    """#252: B/+ render only on the active row, so re-gating the click on `hit.value == active` dropped
-    it silently when playback advanced a cue between redraw and click. The click must fire regardless of
-    the clicked row's value vs the now-active index — parity with the ungated Alt+b."""
-    reader, _ipc = _reader(active=9)  # the live cue has moved on since the row was drawn
-    _capture_render(monkeypatch)
-    invoked = []
-    monkeypatch.setattr(reader.graph.stateless_commands, "run", invoked.append)
-    reader.graph.sidebar.store.dispatch(
-        events.SidebarShown(
-            reader.graph.sidebar.view().active,
-            reader.graph.sidebar.view().capacity,
-        )
-    )
-    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
-    reader.graph.sidebar.panel.hits = (
-        SidebarHitBox(kind, 3, 0, 0, 40, 40),
-    )  # row 3, no longer active
-
-    reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110)
-
-    assert invoked == [command]  # not the old silent no-op
 
 
 def test_sidebar_cue_action_is_not_routed_after_cue_retirement(monkeypatch):
