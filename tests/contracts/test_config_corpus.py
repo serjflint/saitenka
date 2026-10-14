@@ -10,7 +10,11 @@ from .config_adapter import CAPABILITY, PROTOCOL, evaluate
 from .protocol import run_protocol, scenario_key_hash
 
 CORPUS = Path(__file__).resolve().parents[2] / "contracts/config/v0"
-SCENARIOS = json.loads((CORPUS / "options.json").read_text(encoding="utf-8"))
+SCENARIOS = [
+    scenario
+    for path in sorted(CORPUS.glob("*.json"))
+    for scenario in json.loads(path.read_text(encoding="utf-8"))
+]
 
 
 def _locked() -> list[dict]:
@@ -28,7 +32,7 @@ def test_effective_options_contract(scenario: dict) -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(10)
 def test_config_adapter_runs_the_corpus_without_receiving_expected_answers() -> None:
-    scenario = SCENARIOS[0]
+    scenario = next(row for row in SCENARIOS if row["mode"] == "run")
     request = {key: value for key, value in scenario.items() if key != "expect"}
     request["observe"] = list(scenario["expect"])
     request.update(type="run", protocol=PROTOCOL)

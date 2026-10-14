@@ -9,78 +9,14 @@ import pytest
 
 from saitenka.app import config_editor as ce
 from saitenka.app import prompt
-from saitenka.app.config import DictDbOptions, MiningOptions, TooltipOptions
 
 # --- schema introspection (the #254 baton): types + choices + help come from config.py, not a 2nd list ---
-
-
-def test_catalog_derives_kind_and_choices_from_the_dataclass_types():
-    by = {s.label: s for s in ce.catalog()}
-    assert by["layout_engine"].kind == "select"
-    assert by["layout_engine"].choices == ("default", "taffy")
-    assert by["annotation_mode"].choices == ("full", "hover")
-    assert by["render_cache"].kind == "bool"
-    assert by["max_bulk"].kind == "int"
-    assert by["anki_ok_ttl"].kind == "float"
-
-
-def test_catalog_defaults_track_the_config_ssot():
-    by = {(*s.toml_path,): s for s in ce.catalog()}
-    assert by["layout_engine",].default == TooltipOptions().layout_engine
-    assert by["max_bulk",].default == MiningOptions().max_bulk
-    assert by["dictdb", "mmap_size"].default == DictDbOptions().mmap_size
-
-
-def test_catalog_carries_machine_readable_help_from_field_metadata():
-    render_cache = next(s for s in ce.catalog() if s.label == "render_cache")
-    assert render_cache.help  # non-empty — the editor surfaces it next to the prompt
-
-
-def test_optional_field_is_detected():
-    export_dir = next(s for s in ce.catalog() if s.toml_path == ("telemetry", "export_dir"))
-    assert export_dir.optional is True
-
-
-def test_renamed_and_tabled_toml_addresses():
-    by = {s.label: s for s in ce.catalog()}
-    # mine keybinds live under [mine], panel scale is `ui_scale`, tooltip height is `tip_height`
-    assert by["key"].toml_path == ("mine", "key")
-    assert by["ui_scale"].toml_path == ("ui_scale",)
-    assert by["tip_height"].toml_path == ("tip_height",)
 
 
 # --- default precedence: current value wins over the built-in default -----------------------------
 
 
-def test_current_default_prefers_the_config_value_then_falls_back():
-    spec = next(s for s in ce.catalog() if s.label == "tip_scale")
-    assert ce.current_default(spec, {"tip_scale": 1.5}) == 1.5
-    assert ce.current_default(spec, {}) == spec.default  # unset → built-in
-
-
-def test_current_default_reads_a_nested_table_value():
-    spec = next(s for s in ce.catalog() if s.toml_path == ("dictdb", "mmap_size"))
-    assert ce.current_default(spec, {"dictdb": {"mmap_size": 42}}) == 42
-    assert ce.current_default(spec, {"dictdb": {}}) == spec.default
-
-
 # --- coercion: bool via confirm, Literal rejects out-of-set, numeric parse+validate ---------------
-
-
-def test_coerce_numbers_and_optionals():
-    max_bulk = next(s for s in ce.catalog() if s.label == "max_bulk")
-    assert ce.coerce(max_bulk, "20") == 20
-    ttl = next(s for s in ce.catalog() if s.label == "anki_ok_ttl")
-    assert ce.coerce(ttl, "2.5") == 2.5
-    mpv = next(s for s in ce.catalog() if s.label == "mpv_path")
-    assert ce.coerce(mpv, "  ") is None  # optional + blank → unset
-
-
-def test_coerce_select_rejects_out_of_set():
-    layout = next(s for s in ce.catalog() if s.label == "layout_engine")
-    with pytest.raises(ValueError, match="not one of"):
-        ce.coerce(layout, "wgpu")
-    assert ce.coerce(layout, "taffy") == "taffy"
 
 
 # --- prompt_value: right primitive per kind; an invalid reply keeps the current value -------------
@@ -206,11 +142,6 @@ def test_run_editor_offers_on_disk_sibling_after_an_edit(tmp_path, monkeypatch):
     doc = tomllib.loads(cfg.read_text(encoding="utf-8"))
     assert defaults == ["111", "222"]
     assert doc["dictdb"] == {"mmap_size": 999, "cache_size_kib": 222, "dexie_chunk_size": 333}
-
-
-def test_coerce_str_strips_surrounding_whitespace():
-    slang = next(s for s in ce.catalog() if s.label == "slang")
-    assert ce.coerce(slang, "  ja,en  ") == "ja,en"
 
 
 def test_run_editor_non_tty_makes_no_changes(tmp_path, monkeypatch):
