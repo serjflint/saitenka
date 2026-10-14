@@ -17,15 +17,16 @@
       ]
     },
     {"action": "drain_until_quiescent", "max_steps": 8},
-    {"action": "command", "name": "saitenka-copy-line"}
+    {"action": "command", "name": "saitenka-copy-line"},
+    {"action": "command", "name": "saitenka-toggle-overlay"}
   ],
   "expect": {
     "mode": "contains_in_order",
     "observations": [
       {"source": "mpv", "kind": "command", "value": ["notice", "Saitenka hidden"]},
       {"source": "clipboard", "kind": "write", "text": "new"},
+      {"source": "mpv", "kind": "command", "value": ["notice", "Saitenka shown"]},
       {"source": "adapter", "kind": "terminated"}
     ]
   }
 }
-
