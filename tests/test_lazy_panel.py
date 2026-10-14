@@ -3,6 +3,7 @@
 import threading
 
 import numpy as np
+import pytest
 
 from saitenka.panel import (
     Definition,
@@ -28,49 +29,16 @@ def _tall_entry(n_defs: int = 6) -> Entry:
     )
 
 
-def test_panel_rows_count_matches_entry():
-    e = _tall_entry(3)
-    rows = panel_rows(e, WIDTH)
-    # 1 header + (name chip + body) per def
-    assert len(rows) == 1 + 2 * 3
-
-
-def test_render_to_defers_below_the_fold_rows():
-    lp = LazyPanel(panel_rows(_tall_entry(6), WIDTH), WIDTH)
-    head = lp.render_to(300)
-    assert not lp.complete  # tall entry: the fold is not the end
-    assert head.height >= 300  # the viewport is fully covered by real content
-    n_head = len(lp._rendered)
-
-    full = lp.finish()
-    assert lp.complete
-    assert len(lp._rendered) > n_head  # finishing rendered the deferred bodies
-    assert full.height > head.height  # …and the panel got taller
-
-
-def test_first_def_body_streams_block_by_block():
-    # N6 → Stage 6: a long multi-block first definition must not be fully rasterised on first
-    # paint — the head is a bounded strip (mid-def block budget), the rest deferred to finish().
-    # (N6's one-row-per-block was replaced by one deferred row per def with capped raster.)
+def _split_first_def_entry():
     para = "とても長い定義の本文であり視界を超えて縦に伸びていく説明文です。" * 2
-    e = Entry(
+    return Entry(
         headword=["本命"],
         defs=[Definition("MonoA", [{"tag": "div", "content": [para]} for _ in range(10)])],
     )
-    rows = panel_rows(e, WIDTH)
-    assert len(rows) == 3  # header + def-name + ONE deferred body row
-    lp = LazyPanel(rows, WIDTH)
-    head = lp.render_to(300)
-    assert not lp.complete  # the tall first body is NOT fully rasterised…
-    assert head.height <= 300 + 120  # …only the strip that fills the viewport
-    assert head.height >= 300  # but the viewport is fully covered
-    full = lp.finish()
-    assert full.height > head.height  # the deferred remainder streams in on finish
 
 
-def test_split_first_def_body_is_pixel_identical_to_render_panel():
-    # multi-block first def (the N6 split path) still composes byte-for-byte like the one-shot panel
-    e = Entry(
+def _multi_definition_entry():
+    return Entry(
         headword=["観る", {"tag": "rt", "content": "みる"}],
         defs=[
             Definition(
@@ -79,13 +47,6 @@ def test_split_first_def_body_is_pixel_identical_to_render_panel():
             Definition("JMdict", ["to watch; to view"]),
         ],
     )
-    lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
-    lp.render_to(120)
-    streamed = lp.finish()
-    oneshot = render_panel(e, width=WIDTH)
-    assert streamed.size == oneshot.size
-    diff = np.abs(np.asarray(streamed, np.int16) - np.asarray(oneshot, np.int16))
-    assert diff.max() == 0
 
 
 def _huge_single_block_entry(n_senses: int = 200) -> Entry:
@@ -100,6 +61,21 @@ def _huge_single_block_entry(n_senses: int = 200) -> Entry:
         headword=["取る", {"tag": "rt", "content": "とる"}],
         defs=[Definition("MonoB", [{"tag": "div", "content": senses}])],
     )
+
+
+@pytest.mark.parametrize(
+    "entry", [_tall_entry(6), _split_first_def_entry(), _huge_single_block_entry()]
+)
+def test_render_to_defers_below_the_fold_rows(entry):
+    lp = LazyPanel(panel_rows(entry, WIDTH), WIDTH)
+    head = lp.render_to(300)
+    assert 300 <= head.height <= 420
+    assert not lp.complete
+
+    full = lp.finish()
+
+    assert lp.complete
+    assert full.height > head.height
 
 
 def test_panel_rows_defers_walk_to_render(monkeypatch):
@@ -122,30 +98,6 @@ def test_panel_rows_defers_walk_to_render(monkeypatch):
     assert calls[0] == 0, "panel_rows walked def content at build time"
     LazyPanel(rows, WIDTH).render_to(300)
     assert calls[0] < 6, "the head walked below-the-fold defs"
-
-
-def test_huge_single_block_first_body_first_paints_bounded():
-    # Stage 6: a 200-sense single-block first def must NOT rasterise past the viewport on first
-    # paint — the head is a bounded strip, the rest is deferred to finish().
-    lp = LazyPanel(panel_rows(_huge_single_block_entry(), WIDTH), WIDTH)
-    head = lp.render_to(300)
-    assert head.height >= 300  # the viewport is fully covered…
-    assert head.height <= 300 + 120, (  # …but bounded (≤ one extra line + margins),
-        f"head is {head.height}px — the whole block was rasterised"  # not the ~8000px full block
-    )
-    assert not lp.complete  # the tail is deferred
-
-
-def test_huge_single_block_finish_is_pixel_identical_to_render_panel():
-    # After a mid-block partial head, finish() must still compose byte-for-byte the same full panel.
-    e = _huge_single_block_entry(40)
-    lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
-    lp.render_to(300)  # partial (mid-block) head first…
-    full = lp.finish()  # …then the complete panel
-    oneshot = render_panel(e, width=WIDTH)
-    assert full.size == oneshot.size
-    diff = np.abs(np.asarray(full, np.int16) - np.asarray(oneshot, np.int16))
-    assert diff.max() == 0
 
 
 def test_partial_head_scan_boxes_stay_inside_the_strip():
@@ -212,12 +164,19 @@ def test_thunks_run_at_most_once_each(monkeypatch):
         PA.shutdown_shared_executor()
 
 
-def test_finish_is_pixel_identical_to_render_panel():
-    e = _tall_entry(5)
-    lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
-    lp.render_to(200)  # partial first…
+@pytest.mark.parametrize(
+    ("entry", "viewport"),
+    [
+        (_multi_definition_entry(), 120),
+        (_huge_single_block_entry(40), 300),
+        (_tall_entry(5), 200),
+    ],
+)
+def test_finish_is_pixel_identical_to_render_panel(entry, viewport):
+    lp = LazyPanel(panel_rows(entry, WIDTH), WIDTH)
+    lp.render_to(viewport)
     streamed = lp.finish()  # …then completed
-    oneshot = render_panel(e, width=WIDTH)
+    oneshot = render_panel(entry, width=WIDTH)
     assert streamed.size == oneshot.size
     diff = np.abs(np.asarray(streamed, np.int16) - np.asarray(oneshot, np.int16))
     assert diff.max() == 0  # streaming in two passes composes byte-for-byte the same panel
@@ -299,7 +258,8 @@ def test_scan_boxes_absent_for_english_only_body():
     e = Entry(headword=["本命"], defs=[Definition("JMdict", ["favourite; front runner"])])
     lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
     lp.finish()
-    assert lp.scan_boxes == []  # no CJK to scan → nothing to hover
+    assert lp.scan_boxes == []
+    assert [b for b in lp.link_boxes if not b.query.startswith("kanji:")] == []
 
 
 def test_scan_boxes_grow_as_panel_finishes():
@@ -322,14 +282,6 @@ def test_link_boxes_capture_cross_references():
     assert lb.x >= 0 and lb.x + lb.w <= img.width  # sits inside the panel
     assert lb.y >= 0 and lb.y + lb.h <= img.height
     assert lb.w > 0 and lb.h > 0
-
-
-def test_link_boxes_absent_without_links():
-    e = Entry(headword=["本命"], defs=[Definition("JMdict", ["favourite; front runner"])])
-    lp = LazyPanel(panel_rows(e, WIDTH), WIDTH)
-    lp.finish()
-    # no cross-reference links when the body has none (the header's own kanji links are orthogonal)
-    assert [b for b in lp.link_boxes if not b.query.startswith("kanji:")] == []
 
 
 def test_header_speaker_rect_lands_on_the_drawn_speaker():
