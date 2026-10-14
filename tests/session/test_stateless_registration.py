@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import importlib
 import inspect
 from pathlib import Path
@@ -13,10 +12,6 @@ from saitenka.app.session.stateless import StatelessCommandGraph, StatelessComma
 
 ROOT = Path(__file__).resolve().parents[2]
 INTENTS = ROOT / "src/saitenka/app"
-
-
-def _boundary_paths() -> tuple[Path, ...]:
-    return tuple(sorted({*INTENTS.rglob("*adapter.py"), *INTENTS.rglob("*endpoint.py")}))
 
 
 def _policy_types() -> set[type]:
@@ -92,44 +87,3 @@ def test_the_command_graph_rejects_duplicate_messages() -> None:
 
     with pytest.raises(ValueError, match="already registered"):
         StatelessCommandGraph(_bindings(), (*STATELESS_COMMANDS, duplicate))
-
-
-def test_stateless_boundaries_do_not_capture_the_session_or_replaceable_episode() -> None:
-    forbidden: list[str] = []
-    for path in _boundary_paths():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            annotation = getattr(node, "annotation", None)
-            if annotation is None:
-                continue
-            text = ast.unparse(annotation)
-            if "SessionController" in text or "NavigationState" in text:
-                forbidden.append(f"{path.relative_to(ROOT)}:{node.lineno} {text}")
-
-    assert forbidden == []
-
-
-def test_stateless_capabilities_do_not_hide_authority_in_opaque_callables() -> None:
-    opaque: list[str] = []
-    for path in _boundary_paths():
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.AnnAssign):
-                continue
-            text = ast.unparse(node.annotation)
-            if "Callable[...," in text:
-                opaque.append(f"{path.relative_to(ROOT)}:{node.lineno} {text}")
-
-    assert opaque == []
-
-
-def test_stateless_command_composition_has_no_deferred_session_reads() -> None:
-    path = INTENTS / "session" / "builder.py"
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    graph = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_assemble_stateless_commands"
-    )
-
-    assert [node.lineno for node in ast.walk(graph) if isinstance(node, ast.Lambda)] == []

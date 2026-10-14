@@ -50,10 +50,6 @@ def test_showing_without_a_wanted_translation_draws_none() -> None:
     )
 
 
-def test_renderer_toggle_is_a_typed_session_effect() -> None:
-    assert reduce(SessionCommand.TOGGLE_RENDERER, SessionInputs())[0] == ToggleRenderer()
-
-
 @pytest.mark.parametrize(("drawing_now", "engine"), [("native", "legacy"), ("legacy", "mpv's own")])
 def test_the_renderer_toggle_names_the_engine_it_switches_to(drawing_now: str, engine: str) -> None:
     """The switch was silent. Its only tell on screen is that the legacy renderer paints a
@@ -63,4 +59,5 @@ def test_the_renderer_toggle_names_the_engine_it_switches_to(drawing_now: str, e
         SessionCommand.TOGGLE_RENDERER, SessionInputs(legacy_forced=drawing_now == "legacy")
     )
 
+    assert effects[0] == ToggleRenderer()
     assert Announce(f"subtitles: {engine} renderer") in effects
