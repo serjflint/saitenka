@@ -152,18 +152,6 @@ def test_gateway_publishes_wire_event_before_the_producer_returns() -> None:
     assert envelope.payload == UserCommand("saitenka-picker", command_id=0)
 
 
-def test_gateway_preserves_typed_command_arguments() -> None:
-    mailbox = SessionMailbox()
-    ipc = FakeIPC()
-    MpvGateway(ipc, mailbox)
-
-    ipc.publish({"event": "client-message", "args": ["saitenka-command", 1, "two"]})
-
-    envelope = mailbox.receive(timeout=0)
-    assert envelope is not None
-    assert envelope.payload == UserCommand("saitenka-command", (1, "two"), 0)
-
-
 @pytest.mark.timeout(5)
 def test_connection_loss_wakes_reconnect_and_replays_registered_observers() -> None:
     mailbox = SessionMailbox()
@@ -248,9 +236,9 @@ def test_legacy_router_preserves_typed_user_command() -> None:
     mailbox = SessionMailbox()
     ipc = FakeIPC()
     MpvGateway(ipc, mailbox)
-    ipc.publish({"event": "client-message", "args": ["saitenka-picker", "arg"]})
+    ipc.publish({"event": "client-message", "args": ["saitenka-picker", 1, "two"]})
 
-    assert ipc.drain() == [UserCommand("saitenka-picker", ("arg",), 0)]
+    assert ipc.drain() == [UserCommand("saitenka-picker", (1, "two"), 0)]
 
 
 def test_gateway_publishes_legacy_command_terminal_outcome() -> None:
