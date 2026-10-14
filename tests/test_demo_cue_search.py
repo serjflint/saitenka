@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 from types import SimpleNamespace
 
+import pytest
 import util
 
 from saitenka.app.launch.run import DEMO_LINE, _demo_cue_text
@@ -125,17 +126,16 @@ def test_each_hop_is_bounded_so_the_search_keeps_seeking() -> None:
         waits.append(timeout)
         original(timeout)  # still advances the clock, or the search never reaches its deadline
 
-    # A new value rather than a patched one: the acts are frozen, which is what stops a drive from
-    # rebinding what it was handed halfway through.
-    acts = dataclasses.replace(acts, drive_annotation_once=record)
-
-    _demo_cue_text(
-        SessionRuntime(facts, acts, ipc, clock=lambda: clock[0]),
-        "/a.mkv",
+    runtime = SessionRuntime(
+        facts,
+        dataclasses.replace(acts, drive_annotation_once=record),
+        ipc,
+        clock=lambda: clock[0],
     )
 
-    assert waits
-    assert max(w for w in waits if w is not None) <= 0.12
+    assert runtime.await_cue(timeout=0.25) == ""
+    assert waits == pytest.approx([0.12, 0.12, 0.01])
+    assert clock[0] == pytest.approx(0.25)
 
 
 def test_a_search_that_never_finds_a_cue_falls_back() -> None:

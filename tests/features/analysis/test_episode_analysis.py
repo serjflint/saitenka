@@ -2,9 +2,8 @@
 
 from saitenka_dict import FreqDict, JlptDict
 from saitenka_subtitles import Cue, CueIndex
-from saitenka_tokenize.japanese import tokenize
 from saitenka_tokenize.registry import UnidicTokenizer
-from saitenka_wordstate import Scorer, mark_n_plus
+from saitenka_wordstate import Scorer
 from saitenka_wordstate.fsrs import KnownSnap
 from saitenka_wordstate.known import KnownWords
 
@@ -40,16 +39,17 @@ def test_sentence_count_includes_a_sentence_without_eligible_content_words():
 
 
 def test_n_plus_two_uses_the_n_plus_one_eligibility_rules():
-    tokens = tokenize("太郎は新しい本を読む。")
-    known = [token.surface == "本" for token in tokens]
+    scorer = Scorer(known=KnownWords.from_set(["本"]))
 
-    targets = mark_n_plus(tokens, known, unknowns=2, min_words=3)
+    result = analyze_cues([Cue(0, 1, "太郎は新しい本を読む。")], scorer, TOKENIZER)
 
-    assert {tokens[index].lemma for index in targets} == {"新しい", "読む"}
-    assert all(not tokens[index].is_proper_noun for index in targets)
+    assert result.n_plus_one_count == 0
+    assert result.n_plus_two_count == 1
+    assert result.unknown_lemmas >= {"新しい", "読む"}
+    assert "太郎" not in result.unknown_lemmas
 
 
-def test_forgotten_words_are_unknown_and_proper_nouns_do_not_become_unknown_types():
+def test_forgotten_words_are_unknown():
     scorer = Scorer(
         known=KnownWords.from_set(["本"]),
         fsrs_snap=KnownSnap.of({"読む": "forgotten"}),
@@ -58,7 +58,6 @@ def test_forgotten_words_are_unknown_and_proper_nouns_do_not_become_unknown_type
     result = analyze_cues([Cue(0, 1, "太郎は本を読む。")], scorer, TOKENIZER)
 
     assert "読む" in result.unknown_lemmas
-    assert "太郎" not in result.unknown_lemmas
 
 
 def test_optional_sources_degrade_and_configured_sources_report_distributions():
