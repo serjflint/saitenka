@@ -46,8 +46,8 @@ ancestors =
 [importlinter:contract:layers]
 name = Package layering — a lower layer must not import a higher one
 # Positive DIRECTION contract (no-cycles only forbids round-trips; this forbids a backward edge even
-# without a cycle). High→low follows the data flow: app orchestrates → mpvio bridges → panel/raster
-# compose → draw rasterises → render lays out → sc models the input → model/version are leaf values.
+# without a cycle). High→low follows the data flow: app orchestrates → mpvio bridges → panel
+# composes → draw rasterises → render lays out → sc models the input → model/version are leaf values.
 # TYPE_CHECKING edges don't count (exclude_type_checking_imports). Ruff analyze counts typing-only
 # edges, so it can show phantom backedges this contract does not: import-linter is the SSOT.
 type = layers
@@ -56,7 +56,6 @@ layers =
     saitenka.app
     saitenka.mpvio
     saitenka.panel
-    saitenka.raster
     saitenka.render
     saitenka.draw
     saitenka.sc
@@ -78,15 +77,14 @@ forbidden_modules =
     PIL
 
 [importlinter:contract:pil-app-allowlist]
-name = app/ imports PIL only via raster/ or the migration allowlist
+name = app/ direct PIL imports stay on the explicit allowlist
 type = forbidden
 allow_indirect_imports = True
 source_modules =
     saitenka.app
 forbidden_modules =
     PIL
-# subtitles/toast/preview migrate to the raster protocol opportunistically, later
-# (see tests/test_layering.py docstring, pre-existing allowlist).
+# These UI surfaces deliberately own direct PIL work; new direct imports must earn an allowlist entry.
 ignore_imports =
     saitenka.app.subtitles -> PIL
     saitenka.app.toast -> PIL

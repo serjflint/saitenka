@@ -28,10 +28,8 @@ internal modules with explicit dependency contracts, not independently published
   `render_panel` crop. It is the **sole tooltip compositor** — every popup (base / nested / kanji /
   search) is a `Panel` (`app/features/tooltip/popups.py`) wrapping one `WindowedPanel`.
 - **`draw/`** — rasterization primitives that paint the laid-out content.
-- **`raster/`** + **`panel/`** — define the one-shot raster contract and compose the final RGBA
-  panel image. `app/render_backend.py` is the characterized Pillow implementation; the interactive
-  tooltip still uses `WindowedPanel` directly because its incremental viewport protocol is richer
-  than `RasterBackend`. `panel.model` owns
+- **`panel/`** — defines the row model and composes final RGBA panels. The interactive tooltip uses
+  `WindowedPanel` for incremental viewport rendering. `panel.model` owns
   `Definition`/`Entry`; `panel.rows` plans deferred rows; `panel.body` owns picklable definition-body
   workers; and `panel.compose` owns full and viewport-first composition. `body_block.py` is a
   compatibility import for pre-package callers, not a second implementation.
@@ -216,7 +214,7 @@ protocol-shaped class from being mistaken for production swappability.
 | Stateful features | `StatefulBinding` + owner plan | Live for `Owner.INTERACTION`: one declaration supplies runtime reducers, no-runtime stores, accepted events, and explicit feature order; the reducer remains pure by gate. |
 | Stateless features | `StatelessBinding` + `StatelessCommandGraph` | Live: command type and script message close independently; coordinators receive bounded owners and named acts, never the session controller. |
 | Session events and effects | `saitenka.runtime` | Live: the mailbox is the session's ingress, `SessionLoop` drives it, and effects return as correlated terminals. |
-| Full-panel raster | `RasterBackend` | Characterized by the Pillow adapter; the incremental tooltip path is not yet replaceable through it. |
+| Panel raster | `render_panel` / `WindowedPanel` | Live Pillow paths for one-shot and incremental viewport rendering; no unused native-backend facade. |
 | Subtitle geometry | `GeometryBackend` | Experimental: external authored ASS can use native-visible libass geometry; geometry degradation removes only interaction boxes while mpv retains pixel ownership. |
 
 `render/` and `panel/` are internal package boundaries in the Saitenka distribution, as are
@@ -706,8 +704,8 @@ baseline instead.
 - **Dictionaries are imported once** into a consolidated SQLite DB (the Yomitan model); play-time
   only opens it — nothing rebuilds during playback, RAM stays low.
 - **Dictionary semantics and rendering are separate contracts.** `saitenka_dict.LookupSource` is the
-  swappable information seam; Saitenka's `Entry`/panel model is the presentation boundary. The
-  incremental renderer is not yet fully swappable through `RasterBackend`.
+  swappable information seam; Saitenka's `Entry`/panel model is the presentation boundary. A future
+  native rasterizer must first introduce a measured production seam; see the contributing note.
   The headless oracle compares stable semantic projections, not Yomitan's internal JSON object shape.
 - **Composition is explicit at the application boundary.** `cli.py` registers commands and process
   policy; domain commands call launch use cases; `session_factory.py` constructs `SessionController`.
