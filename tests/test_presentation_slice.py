@@ -7,7 +7,6 @@ must never move `held`.
 
 from __future__ import annotations
 
-import pytest
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.session.routes import install_session_reactor
@@ -68,14 +67,3 @@ def test_the_same_stream_lands_the_same_state_with_or_without_a_reactor(request)
     routed = TranslationStore(ipc)
 
     assert [local.dispatch(e) for e in STREAM] == [routed.dispatch(e) for e in STREAM]
-
-
-def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None:
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = TranslationStore(ipc)
-
-    with pytest.raises(RuntimeError):
-        store.current = TranslationState(held=True)

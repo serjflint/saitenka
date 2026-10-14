@@ -8,12 +8,17 @@ window is the whole reason this state exists.
 
 from __future__ import annotations
 
+import pytest
 from util import FakeIPC, bare_gateway
 
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
-from saitenka.app.session.resources import Retiring
-from saitenka.app.session.routes import CUE_RETIRE_RESOURCE, install_session_reactor
+from saitenka.app.session.resources import Retiring, Starting
+from saitenka.app.session.routes import (
+    CUE_RETIRE_RESOURCE,
+    SUBTITLE_REPLAY_PARTICIPANT,
+    install_session_reactor,
+)
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.connection import ConnectionState, ConnectionStore, reduce_connection
 from saitenka.runtime.effects import ReplaySubtitleSelection, RetireCueIdentity
@@ -31,29 +36,25 @@ READY = ConnectionReady(2)
 REPLACED = ConnectionReplaced(2)
 
 
-def test_losing_and_regaining_the_transport_is_one_bit_each_way() -> None:
-    lost = reduce_connection(ConnectionState(), LOST)
-    assert lost.state == ConnectionState(ready=False)
-    assert reduce_connection(lost.state, READY).state == ConnectionState(ready=True)
-
-
-def test_the_acts_ride_out_as_effects_and_the_bit_stays_behind() -> None:
-    """No outbox — an outbox hands a delta back for the caller to apply in its own frame, and
-    neither of these acts is the caller's. `runtime` cannot name a tooltip or a subtitle track, so
-    it decides only *that* a cue is stranded and *that* a replacement has never heard the
-    selection; the performers are registered app-side."""
-    assert reduce_connection(ConnectionState(), LOST).effects == (RetireCueIdentity(),)
-    assert reduce_connection(ConnectionState(), REPLACED).effects == (ReplaySubtitleSelection(),)
-    assert reduce_connection(ConnectionState(), READY).effects == (), (
-        "learning the transport is back decides nothing but the bit"
-    )
-
-
-def test_an_unrelated_session_event_leaves_the_connection_alone() -> None:
-    """The slot is a slice, so every SESSION feature sees every SESSION event by broadcast."""
-    assert reduce_connection(ConnectionState(ready=False), StartupReady()).state == (
-        ConnectionState(ready=False)
-    )
+@pytest.mark.parametrize(
+    ("state", "event", "expected_state", "expected_effects"),
+    [
+        (ConnectionState(), LOST, ConnectionState(ready=False), (RetireCueIdentity(),)),
+        (ConnectionState(ready=False), READY, ConnectionState(), ()),
+        (ConnectionState(), READY, ConnectionState(), ()),
+        (
+            ConnectionState(),
+            REPLACED,
+            ConnectionState(),
+            (ReplaySubtitleSelection(),),
+        ),
+        (ConnectionState(ready=False), StartupReady(), ConnectionState(ready=False), ()),
+    ],
+    ids=("lost", "ready", "already-ready", "replaced", "unrelated"),
+)
+def test_connection_transition_contract(state, event, expected_state, expected_effects) -> None:
+    result = reduce_connection(state, event)
+    assert (result.state, result.effects) == (expected_state, expected_effects)
 
 
 def test_the_routed_and_unrouted_stores_agree_on_the_same_stream() -> None:
@@ -86,33 +87,6 @@ def test_a_routed_store_does_not_reduce_what_the_reactor_already_did() -> None:
 
     assert store.current.ready is True, "the reactor owns the slot; nothing else may write it"
     gateway.close()
-
-
-def test_a_session_that_has_seen_the_transport_go_refuses_a_command(make_session) -> None:
-    """The SessionController-side consequence, driven through the drain rather than by setting the state:
-    a command that reaches a session whose socket is gone is rejected, not queued at mpv."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    install_session_reactor(gateway, startup_hint=False)
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    try:
-        assert ipc.publish_runtime_event(ConnectionLost(0))
-        ipc.emit({"event": "client-message", "args": ["saitenka-help"]})
-        reader.pump()
-        outcomes = gateway.snapshot.command_outcomes
-    finally:
-        reader.close()
-        gateway.close()
-
-    assert outcomes == 1
 
 
 def test_a_failed_cue_retirement_ends_the_session_turn(make_session) -> None:
@@ -150,6 +124,8 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     gateway = bare_gateway(ipc)
     install_session_reactor(gateway, startup_hint=False)
     store = ConnectionStore(ipc)
+    replayed: list[bool] = []
+    gateway.session_resources[SUBTITLE_REPLAY_PARTICIPANT] = Starting(lambda: replayed.append(True))
 
     # Ordered lost -> ready -> replaced, not lost -> replaced -> ready: handling a replacement
     # moves the reactor's epoch, and every later envelope is fenced against it. Production publishes
@@ -160,6 +136,7 @@ def test_the_whole_connection_vocabulary_is_the_reactors() -> None:
     ipc.drain_events(0.0)
 
     assert store.current.ready is True
+    assert replayed == [True]
     census = gateway.routing_census()
     assert {name: census[name] for name in ("ConnectionLost", "ConnectionReplaced")} == {
         "ConnectionLost": (1, 1),

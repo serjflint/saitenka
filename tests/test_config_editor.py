@@ -183,39 +183,29 @@ def test_non_config_wired_fields_stay_unexposed():
     assert ("sub_picker_key",) not in paths
 
 
-# --- P1: editing one key in a table must not revert its untouched siblings (deep-merge, not shallow) ---
-
-
-def test_editing_one_table_key_keeps_siblings_on_disk_default():
-    """Repro of the shallow-merge data-loss: after editing `[mine].key`, the sibling `[mine].preview`
-    still defaults to its on-disk value, not the built-in — so accepting the shown default can't revert it."""
-    key = next(s for s in ce.catalog() if s.toml_path == ("mine", "key"))
-    preview = next(s for s in ce.catalog() if s.toml_path == ("mine", "preview"))
-    cfg = {"mine": {"key": "Ctrl+m", "preview": False}}
-    proposal: dict = {}
-    ce.apply_edit(proposal, key, "Ctrl+n")
-    merged = ce._deep_merge(cfg, proposal)
-    assert ce.current_default(preview, merged) is False  # on-disk, NOT the built-in True
-    assert ce.current_default(key, merged) == "Ctrl+n"  # the edit is visible too
-
-
-def test_run_editor_edits_two_table_keys_and_preserves_the_third(tmp_path, monkeypatch):
+def test_run_editor_offers_on_disk_sibling_after_an_edit(tmp_path, monkeypatch):
     cfg = tmp_path / "overlay.toml"
     cfg.write_text(
         "[dictdb]\nmmap_size = 111\ncache_size_kib = 222\ndexie_chunk_size = 333\n",
         encoding="utf-8",
     )
-    _script(
-        monkeypatch,
-        selects=["dictdb", "mmap_size", "dictdb", "cache_size_kib", ce._DONE],
-        texts=["999", "888"],
-    )
+    selects = iter(["dictdb", "mmap_size", "dictdb", "cache_size_kib", ce._DONE])
+    defaults: list[str] = []
+
+    monkeypatch.setattr(prompt, "select", lambda *_a, **_k: next(selects))
+
+    def answer(_message, *, default):
+        defaults.append(default)
+        return "999" if len(defaults) == 1 else default
+
+    monkeypatch.setattr(prompt, "text", answer)
+    monkeypatch.setattr(prompt, "confirm", lambda *_a, **_k: True)
     assert ce.run_editor(cfg) == 0
     import tomllib
 
     doc = tomllib.loads(cfg.read_text(encoding="utf-8"))
-    assert doc["dictdb"]["mmap_size"] == 999 and doc["dictdb"]["cache_size_kib"] == 888
-    assert doc["dictdb"]["dexie_chunk_size"] == 333  # untouched sibling survives the two edits
+    assert defaults == ["111", "222"]
+    assert doc["dictdb"] == {"mmap_size": 999, "cache_size_kib": 222, "dexie_chunk_size": 333}
 
 
 def test_coerce_str_strips_surrounding_whitespace():

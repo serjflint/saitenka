@@ -21,6 +21,10 @@ from util import FakeIPC, bare_gateway
 import saitenka.app.session.routes as session_routes
 from saitenka.runtime import Owner
 from saitenka.runtime import events as event_types
+from saitenka.runtime.hover import HoverState
+from saitenka.runtime.interaction_slice import HoverFeature, HoverStore
+from saitenka.runtime.presentation import TranslationState
+from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.state import SessionState
 
 #: Payloads consumed below the reducer graph. Declared because "another tier owns it" and "nobody
@@ -130,3 +134,22 @@ def test_the_payload_sweep_is_not_vacuous():
 
     assert len(payloads) > 20
     assert event_types.UserCommand in payloads
+
+
+@pytest.mark.parametrize(
+    ("store_type", "value"),
+    [
+        (HoverStore, HoverFeature(HoverState(word_target=3))),
+        (TranslationStore, TranslationState(held=True)),
+    ],
+    ids=("interaction", "presentation"),
+)
+def test_reactor_owned_stores_refuse_direct_writes(store_type, value, request):
+    ipc = FakeIPC()
+    gateway = bare_gateway(ipc)
+    request.addfinalizer(gateway.close)
+    session_routes.install_session_reactor(gateway)
+    store = store_type(ipc)
+
+    with pytest.raises(RuntimeError, match="reactor owns this slice"):
+        store.current = value

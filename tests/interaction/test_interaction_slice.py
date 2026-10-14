@@ -59,7 +59,6 @@ from saitenka.runtime.hover import (
     Dwell,
     HoverDelays,
     HoverObservation,
-    HoverState,
     RetireWord,
     ShowWord,
     SwitchTo,
@@ -177,19 +176,6 @@ def test_the_same_stream_decides_the_same_hover_with_or_without_a_reactor(reques
 
     assert [local.dispatch(e) for e in STREAM] == [routed.dispatch(e) for e in STREAM]
     assert local.current.hysteresis == routed.current.hysteresis
-
-
-def test_a_reactor_owned_slice_refuses_a_write_that_bypasses_it(request) -> None:
-    """A second writer of a slot the reactor owns is a state the runtime never saw — so it is
-    refused rather than silently kept beside the real one."""
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)
-    install_session_reactor(gateway)
-    store = HoverStore(ipc)
-
-    with pytest.raises(RuntimeError):
-        store.current = HoverFeature(HoverState(word_target=3))
 
 
 def test_the_hover_view_reads_the_slice_rather_than_a_copy_of_it(make_session) -> None:

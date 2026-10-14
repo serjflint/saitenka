@@ -3518,9 +3518,7 @@ def test_a_replaced_source_revises_the_identity_of_the_same_cue_text(make_sessio
     assert after.normalized_text == before.normalized_text
 
 
-def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(
-    monkeypatch, make_session
-):
+def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(make_session):
     from util import FakeIPC as EventIPC
 
     from saitenka.app.session.routes import install_session_reactor
@@ -3539,18 +3537,12 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(
         ),
     )
     reader.graph.cue.set_subtitle("古い字幕")
-    copied = []
-    monkeypatch.setattr(
-        subtitle_adapter,
-        "copy_clipboard",
-        lambda _text: copied.append(reader.graph.playback.cue.text),
-    )
     try:
         assert ipc.publish_runtime_event(ConnectionLost(0))
-        ipc.emit({"event": "client-message", "args": [bindings.COPY_LINE_MSG]})
+        ipc.emit({"event": "client-message", "args": [bindings.HELP_TOGGLE_MSG]})
         assert reader.pump()
 
-        assert copied == []
+        assert not any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
         assert reader.graph.annotation.view.retired
         assert (
             reader.graph.subtitle_presentation.cue.current.tokens == []
