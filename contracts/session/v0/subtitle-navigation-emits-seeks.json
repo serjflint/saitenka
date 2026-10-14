@@ -1,0 +1,24 @@
+{
+  "protocol": "saitenka.session/v0",
+  "scenario_id": "subtitle-navigation-emits-seeks",
+  "requires": ["session-v0"],
+  "given": {
+    "capture": ["mpv", "termination"],
+    "mpv_properties": {}
+  },
+  "when": [
+    {"action": "start"},
+    {"action": "command", "name": "saitenka-sub-prev"},
+    {"action": "command", "name": "saitenka-sub-next"},
+    {"action": "command", "name": "saitenka-sub-replay"}
+  ],
+  "expect": {
+    "mode": "contains_in_order",
+    "observations": [
+      {"source": "mpv", "kind": "command", "value": ["sub-seek", "-1"]},
+      {"source": "mpv", "kind": "command", "value": ["sub-seek", "1"]},
+      {"source": "mpv", "kind": "command", "value": ["sub-seek", "0"]},
+      {"source": "adapter", "kind": "terminated"}
+    ]
+  }
+}

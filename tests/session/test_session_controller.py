@@ -311,32 +311,6 @@ def test_sub_nav_keybinds_registered_with_single_string(make_session):
         assert native not in binds, f"{native} should pass through to mpv, not be bound by saitenka"
 
 
-def test_sub_seek_prev_sends_ipc_command(make_session):
-    """Receiving the sub-prev client-message must send sub-seek -1 to mpv IPC."""
-    ipc = FakeIPC()
-    r = make_session(ipc)
-    r.graph.commands.install_input()
-    binds = keybind_registry(ipc)
-    sub_prev_msg = binds.get("Alt+LEFT")
-    assert sub_prev_msg, "no Alt+LEFT keybind"
-    # Dispatch the message and verify sub-seek -1 was sent
-    r.command(sub_prev_msg)
-    assert ("sub-seek", "-1") in [(c[0], c[1]) for c in ipc.commands], (
-        f"sub-seek -1 not sent; commands={ipc.commands}"
-    )
-    assert r.graph.subtitle_presentation.pipeline.generation == 1
-
-
-def test_sub_seek_next_sends_ipc_command(make_session):
-    """Receiving the sub-next client-message must send sub-seek 1 to mpv IPC."""
-    ipc = FakeIPC()
-    r = make_session(ipc)
-    r.graph.commands.install_input()
-    binds = keybind_registry(ipc)
-    r.command(binds["Alt+RIGHT"])
-    assert ("sub-seek", "1") in [(c[0], c[1]) for c in ipc.commands]
-
-
 def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch, make_session):
     """A queued navigation effect remains qualified by the cue that produced it."""
     from util import record_spans
@@ -366,16 +340,6 @@ def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch, make_sess
     assert r.graph.subtitle_navigation.seek(
         SeekCue(1, r.graph.cue.revision)
     )  # and the current cue still navigates
-
-
-def test_sub_seek_replay_sends_ipc_command(make_session):
-    """Receiving the sub-replay client-message must send sub-seek 0 to mpv IPC."""
-    ipc = FakeIPC()
-    r = make_session(ipc)
-    r.graph.commands.install_input()
-    binds = keybind_registry(ipc)
-    r.command(binds["Alt+DOWN"])
-    assert ("sub-seek", "0") in [(c[0], c[1]) for c in ipc.commands]
 
 
 def test_sub_nav_config_knobs_respected(make_session):
