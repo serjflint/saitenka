@@ -14,26 +14,23 @@ def test_detect_extras_reads_importable_markers(monkeypatch):
     assert lc.detect_extras() == ["deinflect", "jmdict"]  # sorted, telemetry dropped
 
 
-def test_reinstall_command_pypi_and_github_forms():
-    assert lc.reinstall_command(["telemetry", "deinflect"])[-1] == "saitenka[deinflect,telemetry]"
-    assert lc.reinstall_command([])[-1] == "saitenka"  # bare when nothing installed
-    gh = lc.reinstall_command(["deinflect"], source="github", ref="v0.5.0")[-1]
-    assert gh == "saitenka[deinflect] @ git+https://github.com/serjflint/saitenka.git@v0.5.0"
-    assert (
-        "@v" not in lc.reinstall_command([], source="github")[-1]
-    )  # no ref → default branch (latest)
-
-
 def test_reinstall_attempts_ordering_by_source_and_ref():
-    def specs(plan):
-        return [c[-1] for c in plan]
+    install = ["uv", "tool", "install", "--reinstall"]
 
-    auto = lc.reinstall_attempts(["deinflect"], github_ref="v0.5.0")  # PyPI first, then GitHub@tag
-    assert len(auto) == 2 and "git+" not in specs(auto)[0]
-    assert "@v0.5.0" in specs(auto)[1]  # github attempt targets the release tag
-    assert "subdirectory=" not in specs(auto)[1]  # installable project is the repository root
-    assert specs(lc.reinstall_attempts([], source="pypi")) == ["saitenka"]  # PyPI only
-    assert len(lc.reinstall_attempts([], source="github")) == 1  # forced GitHub only
+    auto = lc.reinstall_attempts(
+        ["telemetry", "deinflect"], github_ref="v0.5.0"
+    )  # PyPI first, then GitHub@tag
+    assert auto == [
+        [*install, "saitenka[deinflect,telemetry]"],
+        [
+            *install,
+            "saitenka[deinflect,telemetry] @ git+https://github.com/serjflint/saitenka.git@v0.5.0",
+        ],
+    ]
+    assert lc.reinstall_attempts([], source="pypi") == [[*install, "saitenka"]]
+    assert lc.reinstall_attempts([], source="github") == [
+        [*install, "saitenka @ git+https://github.com/serjflint/saitenka.git"]
+    ]
 
 
 def test_update_command_is_uv_tool_upgrade():

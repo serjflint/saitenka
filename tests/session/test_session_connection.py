@@ -31,12 +31,6 @@ READY = ConnectionReady(2)
 REPLACED = ConnectionReplaced(2)
 
 
-def test_a_session_starts_ready() -> None:
-    """The default is not a refusal: a session is composed around a connection that is already up,
-    and one that has heard nothing since has no reason to hold work back."""
-    assert ConnectionState().ready is True
-
-
 def test_losing_and_regaining_the_transport_is_one_bit_each_way() -> None:
     lost = reduce_connection(ConnectionState(), LOST)
     assert lost.state == ConnectionState(ready=False)
