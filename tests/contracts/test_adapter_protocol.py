@@ -12,6 +12,7 @@ from . import cli_adapter, config_adapter
 from .protocol import (
     PROTOCOL,
     assert_observations,
+    load_row_corpus,
     load_scenarios,
     run_executable,
     run_protocol,
@@ -64,7 +65,7 @@ def test_contract_schemas_are_machine_readable() -> None:
             for name in ("editor.json", "options.json", "resolution.json")
             for row in _json_rows(f"contracts/config/v0/{name}")
         ],
-        "cli-v0.json": _json_rows("contracts/cli/v0/scenarios.json"),
+        "cli-v0.json": load_row_corpus(ROOT / "contracts/cli/v0"),
     }
     for name, rows in corpora.items():
         schema = json.loads((ROOT / "contracts/schema" / name).read_text(encoding="utf-8"))
@@ -123,7 +124,7 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
         protocol, capability = config_adapter.PROTOCOL, config_adapter.CAPABILITY
         requests = [config_adapter.scenario_request(row) for row in scenarios]
     else:
-        scenarios = _json_rows("contracts/cli/v0/scenarios.json")
+        scenarios = load_row_corpus(ROOT / "contracts/cli/v0")
         protocol, capability = cli_adapter.PROTOCOL, cli_adapter.CAPABILITY
         requests = [cli_adapter.scenario_request(row) for row in scenarios]
 

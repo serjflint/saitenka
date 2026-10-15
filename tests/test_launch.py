@@ -1,6 +1,8 @@
-"""mpv launch boundary. Two layers (SubMiner's split): the pure ``build_mpv_argv`` argv logic as unit
-tests, and one real-subprocess smoke that launches a fake mpv and confirms the IPC handshake — the
-``run`` path (``pragma: no cover``) that actually spawns mpv."""
+"""Real-process and version-probe boundaries for mpv launch.
+
+The portable CLI corpus owns command-line construction; these tests retain behavior a pure adapter cannot
+establish: socket readiness and actionable failure from the actual version probe.
+"""
 
 from __future__ import annotations
 
@@ -18,140 +20,9 @@ from saitenka.mpvio.launch import (
     MpvLaunchError,
     MpvLaunchOptions,
     build_mpv_argv,
-    supports_native_geometry_profile,
 )
 
 FAKE_MPV = Path(__file__).resolve().parent / "fake_mpv.py"
-
-_OPT_FIELDS = (
-    "slang",
-    "start",
-    "screenshot",
-    "use_config",
-    "fullscreen",
-    "native_visible",
-    "extra_args",
-)
-
-
-def _argv(**over) -> list[str]:
-    kw = {"slang": "jpn", "start": "1", "screenshot": False}
-    kw.update(over)
-    subs = {k: kw.pop(k) for k in ("sub_path", "en_sub_path") if k in kw}
-    opts = MpvLaunchOptions(**{k: v for k, v in kw.items() if k in _OPT_FIELDS})
-    return build_mpv_argv("mpv", "/tmp/s.sock", "/tmp/mpv.log", "video.mkv", opts, **subs)
-
-
-def test_core_flags_ipc_server_and_video_last():
-    argv = _argv()
-    assert argv[0] == "mpv"
-    assert "--input-ipc-server=/tmp/s.sock" in argv
-    assert "--log-file=/tmp/mpv.log" in argv
-    assert argv[-1] == "video.mkv"
-    # No loop: keep-open=yes holds the last frame at EOF, and a real EOF is what #100 auto-advance
-    # observes. Nothing pauses the interactive path up front.
-    assert "--loop-file=inf" not in argv and "--pause" not in argv
-    assert "--keep-open=yes" in argv
-    assert "--script-opts=saitenka-managed=yes" in argv
-
-
-def test_native_subs_are_always_center_aligned():
-    # Whatever mpv renders itself (the fallback: a track the overlay doesn't take over) must be centered,
-    # never left-aligned — including ASS subs, via --sub-ass-justify.
-    argv = _argv()
-    assert "--sub-align-x=center" in argv
-    assert "--sub-justify=center" in argv
-    assert "--sub-ass-justify=yes" in argv
-    assert not any(arg.startswith(("--sub-align-y", "--sub-pos")) for arg in argv)
-
-
-def test_screenshot_pauses_on_the_first_frame():
-    argv = _argv(screenshot=True)
-    assert "--pause" in argv and "--loop-file=inf" not in argv
-
-
-def _overrides(argv: list[str]) -> dict[str, object]:
-    from saitenka.app.native_subtitles import MPV_DEFAULT_RENDER_SETTINGS
-
-    settings: dict[str, object] = {}
-    for argument in argv:
-        name, _, value = argument.removeprefix("--").partition("=")
-        if name in MPV_DEFAULT_RENDER_SETTINGS:
-            settings[name] = {"yes": True, "no": False}.get(value, value)
-    return settings
-
-
-@pytest.mark.parametrize("source", ["auto", "shadow"])
-def test_a_native_visible_run_on_mpv_defaults_passes_the_geometry_gate(source) -> None:
-    from saitenka.app.native_subtitles import unsupported_render_settings
-
-    argv = _argv(native_visible=True, geometry_source=source)
-
-    assert unsupported_render_settings(_overrides(argv)) == ()
-
-
-def test_a_native_visible_run_leaves_the_users_subtitle_settings_alone() -> None:
-    # The gate reproduces mpv's defaults, so nothing needs forcing; a forced profile overrode the
-    # user's mpv.conf for settings the gate already accepts.
-    argv = _argv(native_visible=True)
-
-    assert "--sub-visibility=yes" in argv
-    assert not any(
-        argument.startswith(("--sub-ass-", "--sub-scale", "--sub-pos", "--sub-use-margins"))
-        for argument in argv
-    )
-
-
-def test_native_geometry_mpv_version_floor() -> None:
-    assert supports_native_geometry_profile("mpv v0.40.0")
-    assert supports_native_geometry_profile("mpv 0.41.0")
-    assert not supports_native_geometry_profile("mpv v0.39.0")
-    assert not supports_native_geometry_profile("mpv v0.38.0")
-    assert not supports_native_geometry_profile("mpv.net")
-
-
-def test_subtitle_files_inserted_before_the_video_arg():
-    argv = _argv(sub_path="a.srt", en_sub_path="b.srt")
-    assert argv[-1] == "video.mkv"  # video stays last
-    vi = argv.index("video.mkv")
-    assert argv.index("--sub-file=a.srt") < vi
-    assert argv.index("--sub-file=b.srt") < vi
-    # EN sub after JP sub → loads as the 2nd (secondary/translation) track
-    assert argv.index("--sub-file=a.srt") < argv.index("--sub-file=b.srt")
-
-
-def test_no_config_and_fullscreen_go_after_the_binary_not_at_slot_0():
-    argv = _argv(use_config=False, fullscreen=True)
-    assert argv[0] == "mpv"  # never displaces the binary
-    assert "--no-config" in argv[:4] and "--fullscreen" in argv[:4]
-
-
-def test_extra_args_override_defaults_but_not_runtime_paths():
-    argv = _argv(
-        extra_args=[
-            "--slang=en",
-            "--input-ipc-server=/tmp/evil.sock",
-            "--script-opts=saitenka-managed=no",
-            "--log-file=/tmp/evil.log",
-        ]
-    )
-    assert [arg for arg in argv if arg.startswith("--slang=")] == ["--slang=jpn", "--slang=en"]
-    assert [arg for arg in argv if arg.startswith("--input-ipc-server=")][-1] == (
-        "--input-ipc-server=/tmp/s.sock"
-    )
-    assert [arg for arg in argv if arg.startswith("--script-opts=")][-1] == (
-        "--script-opts=saitenka-managed=yes"
-    )
-    assert [arg for arg in argv if arg.startswith("--log-file=")][-1] == "--log-file=/tmp/mpv.log"
-
-
-def test_d3d11_flip_disabled_only_on_windows(monkeypatch):
-    # The flip-model swapchain doesn't re-present while paused → overlay updates only show on a
-    # window event. We force the blit model on Windows; other platforms must not get the flag.
-    monkeypatch.setattr("saitenka.mpvio.launch.sys.platform", "win32")
-    assert "--d3d11-flip=no" in _argv()
-    monkeypatch.setattr("saitenka.mpvio.launch.sys.platform", "darwin")
-    assert "--d3d11-flip=no" not in _argv()
 
 
 @pytest.mark.integration

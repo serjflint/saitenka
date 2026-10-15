@@ -9,6 +9,8 @@ executable corpus:
 | `toml-feeds-cli-defaults` | detach the Cyclopts app from the configured TOML path | every configured default disappeared |
 | `resource-name-precedence` | ignore explicit resource-name flags | the configured dictionary incorrectly replaced the flag value |
 | `jimaku-fetch-policy` | remove the explicit-fetch override | an explicit `--jimaku` request stopped fetching |
+| `mpv-launch-subtitle-order` | move the video before runtime and subtitle arguments | the complete argv transcript changed order |
+| `native-geometry-version-floor` | change the inclusive 0.40 floor to exclusive | mpv 0.40 became unsupported |
 
 The registry-driven all-command help check and legacy wrapper subprocess remain separate: they cover an
 open command set and a real compatibility process boundary rather than finite parser examples.

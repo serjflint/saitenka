@@ -181,6 +181,24 @@
       "replace": "if False:\n        return True",
       "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[jimaku-fetch-policy]'",
       "mismatch": "an explicit jimaku request stopped fetching"
+    },
+    {
+      "id": "cli-mpv-video-order",
+      "scenario_id": "mpv-launch-subtitle-order",
+      "path": "src/saitenka/mpvio/launch.py",
+      "find": "    cmd.append(str(video_path))",
+      "replace": "    cmd.insert(1, str(video_path))",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[mpv-launch-subtitle-order]'",
+      "mismatch": "the video moved ahead of runtime and subtitle arguments"
+    },
+    {
+      "id": "cli-native-geometry-version-boundary",
+      "scenario_id": "native-geometry-version-floor",
+      "path": "src/saitenka/mpvio/launch.py",
+      "find": "    return version is not None and version >= NATIVE_GEOMETRY_MPV_MIN",
+      "replace": "    return version is not None and version > NATIVE_GEOMETRY_MPV_MIN",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[native-geometry-version-floor]'",
+      "mismatch": "the supported 0.40 boundary became unsupported"
     }
   ]
 }

@@ -17,6 +17,22 @@ MODE_KEYS = {
     "parse-config": frozenset({"scenario_id", "mode", "config", "args", "observe", "expect"}),
     "resolve-names": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "jimaku-decision": frozenset({"scenario_id", "mode", "cases", "expect"}),
+    "mpv-launch": frozenset(
+        {
+            "scenario_id",
+            "mode",
+            "binary",
+            "ipc_path",
+            "log_path",
+            "video",
+            "options",
+            "sub_path",
+            "second_sub_path",
+            "platform",
+            "expect",
+        }
+    ),
+    "native-geometry-version": frozenset({"scenario_id", "mode", "versions", "expect"}),
 }
 
 
@@ -131,4 +147,25 @@ def evaluate(scenario: dict) -> object:
             )
             for case in scenario["cases"]
         ]
+    if scenario["mode"] == "mpv-launch":
+        from saitenka.mpvio import launch
+
+        original_platform = launch.sys.platform
+        launch.sys.platform = scenario["platform"]
+        try:
+            return launch.build_mpv_argv(
+                scenario["binary"],
+                scenario["ipc_path"],
+                scenario["log_path"],
+                scenario["video"],
+                launch.MpvLaunchOptions(**scenario["options"]),
+                sub_path=scenario["sub_path"],
+                en_sub_path=scenario["second_sub_path"],
+            )
+        finally:
+            launch.sys.platform = original_platform
+    if scenario["mode"] == "native-geometry-version":
+        from saitenka.mpvio.launch import supports_native_geometry_profile
+
+        return [supports_native_geometry_profile(version) for version in scenario["versions"]]
     raise ValueError(f"unknown cli-v0 mode: {scenario['mode']!r}")
