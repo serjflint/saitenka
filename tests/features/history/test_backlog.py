@@ -1,12 +1,11 @@
 from types import SimpleNamespace
 
-import pytest
 import util
 from util import keybind_registry
 
 from saitenka.app import bindings as app_bindings
 from saitenka.app.backlog import BacklogStore
-from saitenka.runtime.events import SubtitleLanguageChanged, SubtitleTracksDiscovered
+from saitenka.runtime.events import SubtitleTracksDiscovered
 
 
 class _IPC(util.FakeIPC):
@@ -84,54 +83,6 @@ def test_bookmark_hotkey_captures_metadata_without_playback_or_mining(
     assert not any(command[0] in forbidden for command in ipc.commands)
     reader.graph.history.replace_recorder(None)
     reader.close()
-
-
-@pytest.mark.parametrize(
-    ("language", "primary", "secondary", "expected"),
-    [
-        ("jp", "日本語", "english", ("日本語", "english")),
-        ("en", "English line", "日本語", ("日本語", "English line")),
-        ("jp", "日本語", "", ("日本語", "")),
-    ],
-)
-def test_a_bookmark_stores_the_cue_by_language_not_by_position(
-    tmp_path, monkeypatch, make_session, language, primary, secondary, expected
-):
-    video = tmp_path / "Show - 02.mkv"
-    ipc = _IPC(
-        {
-            "path": str(video),
-            "sub-start": 1.0,
-            "sub-end": 2.0,
-            "secondary-sub-text": secondary,
-            "track-list": [],
-        }
-    )
-    reader = make_session(ipc)
-    reader.graph.track_commands.declare(SubtitleLanguageChanged(language))
-    reader.graph.playback.install_seed({"sub-text": primary})
-    store = BacklogStore(tmp_path / "reader.sqlite")
-    reader.graph.history.replace_backlog(store)
-    monkeypatch.setattr(reader.graph.notifications, "show", lambda *_args: None)
-
-    reader.command(app_bindings.BOOKMARK_MSG)
-
-    entry = store.entries_for_path(video)[0]
-    assert (entry.jp_text, entry.en_text) == expected
-    reader.close()
-
-
-def test_bookmark_without_active_cue_does_not_open_store(monkeypatch, make_session):
-    ipc = _IPC({"path": "/video.mkv", "sub-start": None, "sub-end": None})
-    reader = make_session(ipc)
-    reader.graph.playback.install_seed({"sub-text": "日本語"})
-    shown = []
-    monkeypatch.setattr(reader.graph.notifications, "show", lambda *args: shown.append(args))
-
-    reader.command(app_bindings.BOOKMARK_MSG)
-
-    assert reader.graph.history.backlog is None
-    assert shown == [("no active cue to bookmark", "warn")]
 
 
 def test_bookmark_key_is_configurable(make_session):

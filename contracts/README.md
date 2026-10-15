@@ -53,7 +53,8 @@ an observation. Symbolic IDs replace process IDs, addresses, timestamps, and imp
 Each scenario file conforms to `schema/session-v0.json`. The reference runner also enforces the same closed
 request vocabulary before execution. Scenario IDs are stable API keys. The committed
 manifest locks scenario IDs, content-derived nested-vector identities, vector count, and the complete
-answer-free input payload, so a re-vendor or cleanup cannot silently remove or rewrite behavior.
+answer-free input payload plus the complete oracle payload, so a re-vendor or cleanup cannot silently
+remove or rewrite behavior.
 The test runner validates every committed row against the published Draft 2020-12 schemas.
 
 ## Config v0 protocol

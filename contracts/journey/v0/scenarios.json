@@ -10,10 +10,14 @@
       "mpv_properties": {
         "path": "/video/[Grp] Show - 03 [1080p].mkv",
         "time-pos": 63,
-        "sub-text": "本を読む",
+        "sub-text": "",
         "sid": 1,
         "sub-start": 60.0,
-        "sub-end": 64.0
+        "sub-end": 64.0,
+        "osd-dimensions": {
+          "w": 1920,
+          "h": 1080
+        }
       },
       "word_state": {
         "known": [],
@@ -91,6 +95,7 @@
     "expect": [
       {
         "surface": "subtitle",
+        "published": true,
         "tokens": [
           {
             "text": "本",

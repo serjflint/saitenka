@@ -169,12 +169,21 @@ def _manifest(rows: Sequence[dict]) -> dict:
         for case in row.get("cases", ())
     ]
     input_payload = "\n".join(compact_json(_request_payload(row)) for row in rows).encode()
+    oracle_payload = "\n".join(
+        compact_json({key: row[key] for key in ("expect", "expect_contains") if key in row})
+        for row in rows
+    ).encode()
+    oracle_count = sum(
+        len(value) if isinstance(value := row.get("expect"), list) else 1 for row in rows
+    )
     return {
         "count": len(ids),
         "key_sha256": scenario_key_hash(ids),
         "vector_count": len(vector_ids) or len(ids),
         "vector_key_sha256": scenario_key_hash(vector_ids or ids),
         "input_sha256": hashlib.sha256(input_payload).hexdigest(),
+        "oracle_count": oracle_count,
+        "oracle_sha256": hashlib.sha256(oracle_payload).hexdigest(),
     }
 
 

@@ -70,6 +70,17 @@ def test_manifest_rejects_removing_a_nested_case_with_its_answer(tmp_path: Path)
         load_row_corpus(tmp_path)
 
 
+def test_manifest_rejects_removing_an_expected_observation(tmp_path: Path) -> None:
+    source = ROOT / "contracts/journey/v0"
+    shutil.copy(source / "manifest.lock", tmp_path / "manifest.lock")
+    rows = json.loads((source / "scenarios.json").read_text(encoding="utf-8"))
+    rows[0]["expect"].pop()
+    (tmp_path / "scenarios.json").write_text(json.dumps(rows), encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        load_row_corpus(tmp_path)
+
+
 def test_runner_rejects_a_result_for_the_wrong_scenario() -> None:
     program = """
 import json, sys

@@ -46,7 +46,9 @@ def evaluate(request: dict) -> list[dict]:
     from saitenka.app.config import ReaderOptions
     from saitenka.app.features.mining import miner
     from saitenka.app.scoring import Coloring
-    from saitenka.app.session.factory import SessionServices
+    from saitenka.app.session.factory import SessionInfrastructure, SessionServices
+    from saitenka.app.subtitle_raster import PillowRasterProvider
+    from saitenka.app.subtitle_render import SubtitleRenderer
     from saitenka.panel import Definition, Entry
 
     given = request["given"]
@@ -63,6 +65,7 @@ def evaluate(request: dict) -> list[dict]:
     )
     ipc = FakeIPC()
     ipc.props.update(given["mpv_properties"])
+    raster = _RecordingRaster(PillowRasterProvider())
     reader = build_session(
         ipc,
         services=SessionServices(
@@ -71,9 +74,11 @@ def evaluate(request: dict) -> list[dict]:
             dictionaries=dictionary,
             scorer=scorer,
         ),
+        infrastructure=SessionInfrastructure(renderer=SubtitleRenderer(raster)),
         options=ReaderOptions().with_overrides(prefetch=False, scan_delay=0.0),
     )
     reader.graph.screen.osd = tuple(given["viewport"])
+    reader.start()
     captured: list[dict] = []
     original_capture = miner.capture_media
 
@@ -88,18 +93,26 @@ def evaluate(request: dict) -> list[dict]:
     try:
         for action in request["when"]:
             if action["action"] == "present-cue":
-                reader.graph.cue.set_subtitle(given["cue"])
-                state = reader.graph.subtitle_presentation.cue.current
+                before = len(raster.requests)
+                ipc.set_prop("sub-text", given["cue"])
+                reader.pump()
+                drawn = next(
+                    request
+                    for request in reversed(raster.requests[before:])
+                    if request.text == given["cue"]
+                )
+                tokens = [token for line in drawn.lines for token in line]
                 observations.append(
                     {
                         "surface": "subtitle",
+                        "published": any(command[0] == "overlay-add" for command in ipc.commands),
                         "tokens": [
                             {
                                 "text": token.surface,
                                 "role": style.tag,
                                 "color": list(style.color),
                             }
-                            for token, style in zip(state.tokens, state.styles or (), strict=True)
+                            for token, style in zip(tokens, drawn.styles or (), strict=True)
                         ],
                     }
                 )
@@ -207,3 +220,16 @@ class _Anki:
 
     def store_media(self, name: str, _path: object) -> str:
         return name
+
+
+class _RecordingRaster:
+    def __init__(self, delegate) -> None:
+        self.delegate = delegate
+        self.requests: list = []
+
+    def render(self, request):
+        self.requests.append(request)
+        return self.delegate.render(request)
+
+    def close(self) -> None:
+        self.delegate.close()

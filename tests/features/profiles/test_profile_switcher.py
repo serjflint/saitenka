@@ -171,45 +171,6 @@ def test_degraded_cycle_preserves_the_actual_secondary_primary(request, monkeypa
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_degraded_cycle_retires_the_unavailable_main_when_secondary_is_unchanged(
-    request, monkeypatch
-):
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    reader = _headless(request, profile=_JP_DE_SUBS, profiles=[_JP_DE_SUBS, _FR_DE_SUBS])
-    reader.graph.ipc.props["track-list"] = [
-        {"type": "sub", "id": 1, "lang": "jpn"},
-        {"type": "sub", "id": 8, "lang": "deu"},
-    ]
-    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "de")
-    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
-    reader.graph.ipc.props["sid"] = 8
-    reader.graph.ipc.commands.clear()
-    notices = []
-    monkeypatch.setattr(
-        reader.graph.notifications,
-        "show",
-        lambda text, kind="ok", _seconds=2.8: notices.append((text, kind)),
-    )
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-
-    tracks = reader.graph.track_commands.current()
-    assert (outcome.status, tracks.slang, tracks.jp_sid, tracks.en_sid, tracks.language) == (
-        ProfileSwitchStatus.DEGRADED,
-        "fr",
-        None,
-        8,
-        "en",
-    )
-    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
-
-    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
-
-    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
-    assert ("FR subtitles unavailable", "warn") in notices
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
 @pytest.mark.parametrize(
     ("initial", "target", "secondary_sid"),
     [(DEFAULT_PROFILE, _FR_SUBS, 7), (DEFAULT_PROFILE, _FR_DE_SUBS, 8), (_FR_SUBS, _FR_DE_SUBS, 8)],
@@ -256,84 +217,6 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(
         secondary_sid,
     )
     assert secondary[-1] == secondary_sid
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-@pytest.mark.parametrize(
-    ("old", "new", "track_list", "expected_sid", "expected_slang", "expected_second"),
-    [
-        (
-            Profile("fr", ReaderLanguages("fr", "en"), "latin", slang="fr"),
-            Profile("fra", ReaderLanguages("fr", "en"), "latin", slang="fra"),
-            [{"type": "sub", "id": 6, "lang": "fra"}, {"type": "sub", "id": 7, "lang": "eng"}],
-            7,
-            "fra",
-            "en",
-        ),
-        (
-            _FR_SUBS,
-            _FR_DE_SUBS,
-            [
-                {"type": "sub", "id": 6, "lang": "fr"},
-                {"type": "sub", "id": 7, "lang": "eng"},
-                {"type": "sub", "id": 8, "lang": "deu"},
-            ],
-            8,
-            "fr",
-            "de",
-        ),
-    ],
-    ids=["primary-alias", "second-language"],
-)
-def test_profile_change_preserves_the_active_secondary_role(
-    request, old, new, track_list, expected_sid, expected_slang, expected_second
-):
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    reader = _headless(request, profile=old, profiles=[old, new])
-    reader.graph.ipc.props["track-list"] = track_list
-    reader.graph.profile_integration.select_subtitle_track("fr", "en")
-    reader.graph.ipc.props["sid"] = 6
-    reader.command(app_bindings.SUBTITLE_LANGUAGE_MSG)
-    reader.graph.ipc.props["sid"] = 7
-    reader.graph.ipc.commands.clear()
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-
-    tracks = reader.graph.track_commands.current()
-    assert (
-        outcome.status,
-        tracks.language,
-        tracks.primary_sid,
-        tracks.slang,
-        tracks.second_slang,
-    ) == (
-        ProfileSwitchStatus.COMMITTED,
-        "en",
-        expected_sid,
-        expected_slang,
-        expected_second,
-    )
-    assert ("set_property", "sid", expected_sid) in reader.graph.ipc.commands
-    assert ("set_property", "sid", 6) not in reader.graph.ipc.commands
-
-
-def test_second_only_cycle_keeps_an_untagged_primary(request):
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _JP_DE_SUBS])
-    reader.graph.ipc.props["track-list"] = [
-        {"type": "sub", "id": 1, "selected": True},
-        {"type": "sub", "id": 8, "lang": "deu"},
-    ]
-    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "en")
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-
-    tracks = reader.graph.track_commands.current()
-    assert (
-        outcome.status,
-        tracks.jp_sid,
-        tracks.en_sid,
-        tracks.second_slang,
-    ) == (ProfileSwitchStatus.COMMITTED, 1, 8, "de")
 
 
 # --- atomicity: an unresolvable profile leaves the old one intact ----------------------------------

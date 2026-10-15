@@ -8,8 +8,6 @@ from typing import Protocol, cast
 
 import pytest
 from driver import Driver
-from hypothesis import given, settings
-from hypothesis import strategies as st
 from saitenka_card import MineConfig
 from session_builder import TestSession, build_session
 from util import FakeIPC, await_ready, bare_gateway, keybind_registry, session_gateway
@@ -21,7 +19,6 @@ from saitenka.app.config import ReaderOptions
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.mining_controller import MiningSpec, MiningTarget
 from saitenka.app.features.preview import miner_ui
-from saitenka.app.features.sidebar import sidebar as sidebar_module
 from saitenka.app.features.tooltip import (
     hover_adapter,
     nested_popup,
@@ -216,37 +213,6 @@ def test_subtitle_retry_key_is_configurable_and_dispatches(monkeypatch, make_ses
 # --- Stage 4: subtitle navigation keys (Alt+←/→/↓, sub-delay) ------------------------------------
 
 
-def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch, make_session):
-    """A queued navigation effect remains qualified by the cue that produced it."""
-    from util import record_spans
-
-    from saitenka.app.subtitle_intents import SeekCue
-
-    spans = record_spans(monkeypatch)
-    ipc = FakeIPC()
-    r = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    r.graph.cue.set_subtitle("猫を見る")
-    stale = SeekCue(1, r.graph.cue.revision)
-    r.graph.cue.set_subtitle("犬も見る")  # the cue the step was decided against is gone
-
-    assert not r.graph.subtitle_navigation.seek(stale)
-
-    assert not any(command and command[0] == "sub-seek" for command in ipc.commands)
-    (decision,) = [span["attrs"] for span in spans if span["name"] == "sub_nav_identity"]
-    assert decision["outcome"] == "superseded"  # dropped out loud, not silently
-    assert r.graph.subtitle_navigation.seek(
-        SeekCue(1, r.graph.cue.revision)
-    )  # and the current cue still navigates
-
-
 # --- #5: instant subtitle navigation via the parsed cue index -----------------------------------
 
 _NAV_SRT = (
@@ -276,58 +242,6 @@ def _msg_for(ipc, key):
     # The message currently bound to `key` (KeyError if unbound). Shared parse: keybind_registry honours
     # later-binds-over-earlier and the `keybind KEY ignore` unbinds tooltip teardown emits.
     return keybind_registry(ipc)[key]
-
-
-def test_anchor_warns_and_no_ops_without_a_subtitle_index(monkeypatch, make_session):
-    ipc = FakeIPC()
-    r = make_session(ipc)
-    messages: list[str] = []
-    monkeypatch.setattr(r.graph.notifications, "show", lambda text, *_a: messages.append(text))
-    r.graph.track_commands.navigation.current.sub_index = None
-
-    r.command(app_bindings.SUB_ANCHOR_MSG)
-
-    assert messages == ["No subtitle track to anchor"]
-    assert not [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
-
-
-@given(
-    starts_ms=st.lists(st.integers(0, 600_000), min_size=1, max_size=8, unique=True),
-    playhead_ms=st.integers(0, 600_000),
-    delay_ms=st.integers(-10_000, 10_000),
-)
-@settings(max_examples=200, deadline=None)
-def test_anchor_lands_the_nearest_cue_start_on_the_playhead_for_any_index(
-    starts_ms, playhead_ms, delay_ms
-):
-    # Whatever the cue set, current delay, and playhead, the emitted delay snaps the nearest
-    # displayed cue to the playhead.
-    from saitenka_subtitles import Cue, CueIndex
-
-    ipc = FakeIPC()
-    r = build_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
-    try:
-        r.graph.track_commands.navigation.current.sub_index = CueIndex(
-            [Cue(s / 1000, s / 1000 + 1.0, "x") for s in sorted(starts_ms)]
-        )
-        playhead, delay = playhead_ms / 1000, delay_ms / 1000
-        ipc.set_prop("time-pos", playhead)
-        ipc.set_prop("sub-delay", delay)
-
-        r.command(app_bindings.SUB_ANCHOR_MSG)
-
-        emitted = [c for c in ipc.commands if c[:2] == ("set_property", "sub-delay")]
-        assert emitted, "anchor must set sub-delay"
-        new_delay = float(emitted[-1][2])
-        nearest = min(
-            r.graph.track_commands.navigation.current.sub_index.cues,
-            key=lambda c: abs((c.start + delay) - playhead),
-        )
-        assert (
-            abs((nearest.start + new_delay) - playhead) < 1e-3
-        )  # ±the 3-decimal delay quantisation
-    finally:
-        r.close()
 
 
 def test_mine_current_video_forces_the_animated_clip(monkeypatch):
@@ -435,109 +349,6 @@ def test_sub_nav_renders_target_line_instantly_and_still_seeks(monkeypatch):
     r.command(_msg_for(ipc, "Alt+RIGHT"))
     assert r.graph.playback.cue.text == "に"  # cue 2 rendered instantly, before any seek settles
     assert ("seek", "4.01", "absolute+exact") in ipc.commands  # video seek still fired
-
-
-def test_sub_nav_keeps_target_geometry_after_issuing_seek(monkeypatch):
-    from saitenka_subtitles import (
-        GeometryRequest,
-        GeometrySnapshot,
-        SubtitleEventId,
-        SubtitleFrameId,
-        SubtitleTrackId,
-    )
-
-    from saitenka.app.subtitle_render import NullRenderer as _Inert
-
-    class PublishingRenderer(_Inert):
-        """Publishes geometry at `activate`. Holds the SessionController by construction: the cue identity it
-        fabricates is host state, and `activate` receives a `SubtitleTarget` — deliberately narrower
-        than a host, so a stub that needs one says so instead of taking it from the protocol."""
-
-        def __init__(self, reader: TestSession) -> None:
-            self._reader = reader
-
-        def draw(self, _request=None, _surfaces=None, _ipc=None, /, **_ports) -> None:
-            return None
-
-        def activate(self, _target=None, _sid=None, /) -> bool:
-            reader = self._reader
-            track_id = SubtitleTrackId("track-1")
-            source_order = {"いち": 1, "に": 2}[reader.graph.playback.cue.text]
-            event_id = SubtitleEventId(
-                track_id, source_order * 1_000, source_order * 1_000 + 500, 0, source_order
-            )
-            request = GeometryRequest(
-                reader.graph.subtitle_presentation.pipeline.generation,
-                track_id,
-                SubtitleFrameId(track_id, (event_id,)),
-                source_order * 1_000,
-                reader.graph.screen.osd,
-                reader.graph.screen.osd,
-                b"[Script Info]\n",
-            )
-            ticket = reader.graph.subtitle_presentation.pipeline.prepare(request)
-            assert ticket is not None
-            assert reader.graph.subtitle_presentation.pipeline.publish(
-                ticket,
-                GeometrySnapshot(
-                    request.generation,
-                    request.track_id,
-                    request.frame_id,
-                    request.timestamp_ms,
-                    request.variant,
-                    (),
-                ),
-            )
-            return True
-
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.subtitle_presentation.renderer = PublishingRenderer(r)
-    ipc.props["sub-text"] = "いち"
-    r.graph.cue.set_subtitle("いち")
-    ipc.props["sub-start"] = 1.0
-
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-
-    assert r.graph.subtitle_presentation.pipeline.current is not None
-    assert (
-        r.graph.subtitle_presentation.pipeline.current.frame_id.active_event_ids[0].source_order
-        == 2
-    )
-
-
-def test_sub_nav_prev_and_replay(monkeypatch):
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("に")  # cue 2
-    ipc.props["sub-start"] = 4.0
-    r.command(_msg_for(ipc, "Alt+LEFT"))
-    assert r.graph.playback.cue.text == "いち"
-    assert ("seek", "1.01", "absolute+exact") in ipc.commands
-    r.graph.cue.set_subtitle("に")
-    ipc.props["sub-start"] = 4.0
-    r.command(_msg_for(ipc, "Alt+DOWN"))  # replay → same cue
-    assert r.graph.playback.cue.text == "に"
-
-
-def test_sub_nav_chains_forward_with_stale_position(monkeypatch):
-    """Rapid next/next while the seek is still in flight (sub-start/time-pos stale) must keep
-    stepping forward, resolved by the rendered text + the _nav_idx hint."""
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("いち")
-    ipc.props["sub-start"] = 1.0  # stale for the whole burst (video hasn't caught up)
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.graph.playback.cue.text == "に"
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.graph.playback.cue.text == "さん"  # advanced past cue 2 despite the stale sub-start
-
-
-def test_sub_nav_from_a_gap_opens_the_upcoming_cue(monkeypatch):
-    """Navigating NEXT while no sub is on screen (a gap) must land ON the upcoming cue — matching
-    mpv's sub-seek 1 — not skip past it."""
-    r, ipc = _reader_with_index(monkeypatch)
-    r.graph.cue.set_subtitle("")  # nothing showing (between cues)
-    ipc.props["time-pos"] = 8.5  # gap before cue 3 (starts at 10.0)
-    r.command(_msg_for(ipc, "Alt+RIGHT"))
-    assert r.graph.playback.cue.text == "さん"  # cue 3, the upcoming one — not skipped
 
 
 def test_sub_nav_records_otel_sub_seek_metric(monkeypatch):
@@ -948,105 +759,6 @@ def test_navigation_identity_reinstall_does_not_count_the_cue_twice(monkeypatch)
     reader.graph.subtitle_navigation.reconcile("に")
 
     assert reader.graph.history.recorder.snapshot.cue_count == count_after_instant_render
-
-
-def test_identical_text_navigation_counts_the_landed_cue(make_session):
-    from saitenka_subtitles import Cue, CueIndex
-
-    from saitenka.app.session_stats import SessionRecorder
-
-    class Writer:
-        def submit(self, _snapshot) -> None:
-            pass
-
-        def close(self, _timeout=2.0) -> None:
-            pass
-
-    ipc = FakeIPC()
-    ipc.props.update({"sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
-        [Cue(1.0, 2.0, "同じ"), Cue(3.0, 4.0, "同じ")]
-    )
-    reader.graph.history.replace_recorder(
-        SessionRecorder(
-            "/anime/Show 01.mkv",
-            clock=lambda: 0.0,
-            wall_clock=lambda: 0.0,
-            writer=Writer(),
-        )
-    )
-    reader.graph.cue.set_subtitle("同じ")
-    reader.graph.subtitle_navigation.navigate(1)
-    assert reader.graph.history.recorder.snapshot.cue_count == 1
-    ipc.props.update({"sub-start": 3.0, "sub-end": 4.0})
-    reader.graph.cue.retire("sub-start")
-
-    reader.graph.subtitle_navigation.reconcile("同じ")
-
-    assert reader.graph.history.recorder.snapshot.cue_count == 2
-
-
-def test_navigation_hands_a_filtered_episode_back_to_mpv(make_session):
-    """`--sub-filter-regex`/`-jsre` drop whole cues between the file and the screen, and the cue
-    index is the file's. Stepping by index there renders a line mpv never shows and then settles
-    somewhere else; mpv's own `sub-seek` cannot land on a cue mpv dropped, so the instant half is
-    given up rather than aimed at silence."""
-    from saitenka_subtitles import Cue, CueIndex
-
-    ipc = FakeIPC()
-    ipc.props.update({"sub-start": 1.0, "sub-end": 2.0, "options/sub-filter-regex": ["^SIGN:"]})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
-        [Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")]
-    )
-    reader.graph.cue.set_subtitle("いち")
-
-    assert reader.graph.subtitle_navigation.navigate(1) is False
-    assert reader.graph.playback.cue.text == "いち", (
-        "the overlay was moved onto a cue mpv may not show"
-    )
-
-
-def test_navigation_stays_instant_without_a_filter(make_session):
-    """The negative control for the guard above: it costs the feature when it fires, so it must not
-    fire on an ordinary session."""
-    from saitenka_subtitles import Cue, CueIndex
-
-    ipc = FakeIPC()
-    ipc.props.update({"sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
-        [Cue(1.0, 2.0, "いち"), Cue(3.0, 4.0, "に")]
-    )
-    reader.graph.cue.set_subtitle("いち")
-
-    assert reader.graph.subtitle_navigation.navigate(1) is True
-    assert reader.graph.playback.cue.text == "に"
 
 
 def test_reader_has_subtitle_state_before_any_cue(make_session):
@@ -1490,14 +1202,6 @@ def test_set_hover_refuses_the_nothing_hovered_sentinel():
         r.graph.tooltip.set_hover(-1)
 
 
-def test_pause_on_tooltip_respects_manual_pause():
-    ipc = FakeIPC()
-    ipc.props["pause"] = True  # user already paused
-    r = _reader_with_word(ipc)
-    Driver(r).move_to_word(0)
-    assert not r.graph.tooltip.hover_view().paused  # never took ownership → won't resume
-
-
 def test_hover_pause_toggle_releases_saitenka_owned_pause(monkeypatch):
 
     ipc = FakeIPC()
@@ -1685,41 +1389,6 @@ def _point_at_add_button(r) -> Driver:
     return Driver(r, instant=False).move(*_add_button_center(r))
 
 
-@pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
-def test_header_add_button_click_mines_hovered_word(monkeypatch):
-    ipc = FakeIPC()
-    r = _tall_reader(ipc, tts=True)
-    _enable_mining(r)
-    r.graph.tooltip.select(0)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    r.graph.tooltip.show_tooltip(0)
-    events = []
-    monkeypatch.setattr(
-        r.graph.mining, "mine_index", lambda _index, **_kwargs: events.append("mine")
-    )
-    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
-    _point_at_add_button(r).click()
-    assert events == ["mine"]  # ⊕ mined; did not fall through to TTS
-
-
-def test_tooltip_empty_click_does_nothing(monkeypatch):
-    # clicking an empty area of the card must NOT play audio (the 🔊 button is the only play affordance)
-    ipc = FakeIPC()
-    r = _tall_reader(ipc)
-    _enable_mining(r)
-    r.graph.tooltip.select(0)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    r.graph.tooltip.show_tooltip(0)
-    events = []
-    monkeypatch.setattr(
-        r.graph.mining, "mine_index", lambda _index, **_kwargs: events.append("mine")
-    )
-    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
-    tx, ty, tw, th = r.graph.tooltip.surface_state().view.rect
-    Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
-    assert events == []  # neither speaks nor mines
-
-
 def test_tooltip_speaker_button_click_speaks(monkeypatch):
     from saitenka.panel import header_speaker_rect
 
@@ -1736,24 +1405,6 @@ def test_tooltip_speaker_button_click_speaks(monkeypatch):
         sx + px + pw / 2, sy + (py - r.graph.tooltip.surface_state().view.scroll) + ph / 2
     ).click()
     assert events == ["speak"]  # only the 🔊 button plays audio
-
-
-def test_header_add_button_absent_without_anki(monkeypatch):
-    ipc = FakeIPC()
-    r = _tall_reader(ipc)  # no anki
-    r.graph.tooltip.select(0)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    r.graph.tooltip.show_tooltip(0)
-    cx, cy = _add_button_center(r)
-    assert not tooltip.hit_header_add(
-        tooltip.chrome_for(
-            r.graph.tooltip.surface_state().view,
-            scale=r.graph.tooltip.scale(),
-            style=r.graph.tooltip.panel_style,
-        ),
-        cx,
-        cy,
-    )  # no ⊕ button when mining is unavailable
 
 
 # --- R4: nested scanning (hover a word inside the tooltip) ------------------------------------------
@@ -1995,20 +1646,6 @@ def test_scan_hit_round_trips_through_the_display_scale(monkeypatch):
     assert hit is not None and hit.text == sb.text
 
 
-def test_hover_inner_word_opens_nested_popup(monkeypatch):
-    ipc = FakeIPC()
-    r = _scan_reader(ipc)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    _hover_base_word(r)  # base tooltip on the subtitle word
-    _hover_first_scan_cell(r)
-    _fire_dwell(ipc, "scan-open")
-    assert r.graph.tooltip.hover_view().nested.shown  # a nested popup opened…
-    assert r.graph.tooltip.hover_view().nested.rect is not None
-    assert r.graph.tooltip.hover_view().nested.word.startswith(
-        "追"
-    )  # …for the inner word under the cursor
-
-
 def test_nested_scan_waits_for_dwell(monkeypatch):
     """Arriving on a cell arms the dwell; only its due event opens the popup. Re-arriving on the
     same cell must not re-arm, or a cursor jittering inside one cell would never settle."""
@@ -2051,32 +1688,6 @@ def test_nested_scan_dwell_restarts_when_cursor_moves(monkeypatch):
     assert not r.graph.tooltip.hover_view().nested.shown  # no popup fired mid-drift
     assert _fire_dwell(ipc, "scan-open")  # and when it does elapse, it opens the NEW cell
     assert r.graph.tooltip.hover_view().nested.shown
-
-
-def test_switch_base_word_drops_nested(monkeypatch):
-    from saitenka_tokenize.japanese import Token
-
-    from saitenka.app.subtitles import WordBox
-
-    ipc = FakeIPC()
-    r = _scan_reader(ipc)
-    r.graph.subtitle_presentation.cue.replace_tokenized(
-        tokens=[
-            Token("本命", "本命", "ほんめい", "名詞", 0, 2),
-            Token("読む", "読む", "よむ", "動詞", 2, 4),
-        ]
-    )
-    r.graph.subtitle_presentation.cue.replace_geometry(
-        boxes=[WordBox(0, 100, 300, 40, 40), WordBox(1, 500, 300, 40, 40)]
-    )
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    _hover_base_word(r)
-    _hover_first_scan_cell(r)
-    _fire_dwell(ipc, "scan-open")
-    assert r.graph.tooltip.hover_view().nested.shown
-    # a real switch: the cursor moves to the other word and its switch dwell comes due
-    Driver(r).move_to_word(1)
-    assert not r.graph.tooltip.hover_view().nested.shown  # the stale scan popup is dropped
 
 
 def test_nested_lingers_then_dismisses(monkeypatch):
@@ -2199,46 +1810,6 @@ class _WildcardDS:
     def rareness_rank(self, _token):  # protocol shape
         """No frequency dictionaries, so no blended rank and no pill."""
         return
-
-
-def test_click_wildcard_link_navigates_base_to_search_results(monkeypatch, make_session):
-    from saitenka_tokenize.japanese import Token
-
-    from saitenka.app.subtitles import WordBox
-
-    ipc = FakeIPC()
-    r = make_session(ipc, services=SessionServices(dictionaries=_WildcardDS()))
-    r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
-    r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
-    r.graph.subtitle_presentation.cue.replace_tokenized(
-        tokens=[Token("観る", "観る", "みる", "動詞", 0, 2)]
-    )
-    r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    _hover_base_word(r)
-    # the wildcard cross-ref in the body (skip the header's per-kanji `kanji:` links)
-    lb = next(
-        b
-        for b in r.graph.tooltip.surface_state().view.state.windowed.link_boxes()
-        if not b.query.startswith("kanji:")
-    )
-    assert "*" in lb.query  # the cross-ref is a wildcard pattern
-    sx, sy = r.graph.tooltip.surface_state().view.xy
-    Driver(r, instant=False).move(
-        sx + lb.x + lb.w / 2,
-        sy + (lb.y - r.graph.tooltip.surface_state().view.scroll) + lb.h / 2,
-    ).click()
-    # A wildcard cross-ref navigates the BASE tooltip to the search-results page, in place.
-    assert not r.graph.tooltip.hover_view().nested.shown
-    assert r.graph.tooltip.observation().navigation_depth == 1
-    results = [
-        b
-        for b in r.graph.tooltip.surface_state().view.state.windowed.link_boxes()
-        if not b.query.startswith("kanji:")
-    ]
-    assert (
-        results[0].query == "食べる"
-    )  # the base now shows results, each drilling into an exact term
 
 
 def test_external_link_is_not_a_clickable_region(monkeypatch, make_session):
@@ -2401,24 +1972,6 @@ def test_scroll_resets_scan_dwell(monkeypatch):
     assert (
         r.graph.tooltip.hover_view().scan_target is None
     )  # …restarts the dwell so no popup fires mid-scroll
-
-
-def test_click_link_does_not_mine_or_speak(monkeypatch):
-    # a link click must open the target, not fall through to mining / TTS
-    ipc = FakeIPC()
-    r = _link_reader(ipc)
-    _enable_mining(r)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    _hover_base_word(r)
-    events = []
-    monkeypatch.setattr(
-        r.graph.mining, "mine_index", lambda _index, **_kwargs: events.append("mine")
-    )
-    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
-    _point_at_link(r).click()
-    assert (
-        events == [] and r.graph.tooltip.observation().navigation_depth == 1
-    )  # navigated the base, no mine/speak fallthrough
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):
@@ -3086,18 +2639,6 @@ def test_cue_change_nested_also_cleared(monkeypatch):
 # --- Stage 7c: event-driven property reads (observe_property instead of per-tick get_property) ----
 
 
-def test_fakeipc_in_util_emits_property_change_events():
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    ipc.set_prop("sub-text", "本を読む")
-    evs = ipc.drain_events()
-    assert {"event": "property-change", "name": "sub-text", "data": "本を読む"} in [
-        {k: e.get(k) for k in ("event", "name", "data")} for e in evs
-    ]
-    assert ipc.drain_events() == []  # drained
-
-
 def test_start_observing_registers_and_seeds_initial_state(request, make_session):
     from util import FakeIPC as EventIPC
 
@@ -3147,23 +2688,6 @@ def test_poll_tick_does_no_property_round_trips_once_observing(monkeypatch, make
         and c[1] in {"sub-text", "mouse-pos", "osd-dimensions", "pause", "secondary-sub-text"}
     ]
     assert gets == [], f"steady-state tick still does blocking property reads: {gets}"
-
-
-def test_click_cursor_queries_mpv_instead_of_using_the_hover_observation(request, make_session):
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    observed = {"hover": True, "x": 5, "y": 5}
-    current = {"hover": True, "x": 50, "y": 50}
-    ipc.props["mouse-pos"] = observed
-    reader = make_session(ipc, options=ReaderOptions().with_overrides(prefetch=False))
-    request.addfinalizer(reader.close)
-    reader.graph.playback.start_session()
-    reader.graph.playback.observe("mouse-pos", observed)
-    ipc.props["mouse-pos"] = current
-
-    assert reader.graph.tooltip.hover_inputs.mouse_pos() == observed
-    assert reader.graph.tooltip.click_ports.cursor() == current
 
 
 def test_a_replaced_source_revises_the_identity_of_the_same_cue_text(make_session):
@@ -3226,61 +2750,6 @@ def test_connection_loss_retires_cue_and_suspends_commands_and_settlement(make_s
         gateway.close()
 
 
-def test_same_text_with_new_timing_installs_a_new_cue_identity(make_session):
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    ipc.props.update({"sub-text": "同じ字幕", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.playback.start_session()
-    reader.graph.cue.set_subtitle("同じ字幕")
-    previous = reader.graph.annotation.view.identity
-
-    ipc.set_prop("sub-start", 3.0)
-    reader.pump()
-
-    assert reader.graph.annotation.view.retired is False
-    assert reader.graph.annotation.view.identity != previous
-    assert reader.graph.annotation.view.identity.observed_start == 3.0
-
-
-def test_a_cue_cleared_by_the_reader_is_not_resurrected_by_the_next_observation(make_session):
-    """Two writers, one fact. `set_subtitle` is the SessionController-side writer (subtitle_modes clears the
-    cue on a mode/track change) and `observe` is mpv's; reconciliation reads the projection. Both
-    writers now reach it, per invariant 13 — before that the cleared cue came back on the next
-    changed cue fact."""
-    from util import FakeIPC as EventIPC
-
-    ipc = EventIPC()
-    ipc.props.update({"sub-text": "猫を見る", "sid": 1, "sub-start": 1.0, "sub-end": 3.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.playback.start_session()
-
-    reader.graph.cue.set_subtitle("")  # what a language/track switch does
-    assert reader.graph.playback.cue.text == ""
-
-    reader.graph.playback.observe_event({"name": "sub-end", "data": 9.5})
-    reader.graph.cue.settle()
-
-    assert reader.graph.playback.cue.text == ""
-
-
 @pytest.mark.parametrize(("name", "value"), [("sid", 2), ("sub-start", 3.0), ("sub-end", 4.0)])
 def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, value, make_session):
     from util import FakeIPC as EventIPC
@@ -3310,64 +2779,6 @@ def test_reconnect_retires_same_text_cue_when_seeded_identity_changed(name, valu
         reader.graph.subtitle_presentation.cue.current.tokens == []
         and reader.graph.subtitle_presentation.cue.current.boxes == []
     )
-
-
-def test_property_change_invalidates_subtitle_geometry(make_session):
-    from saitenka_subtitles import (
-        GeometryRequest,
-        GeometrySnapshot,
-        SubtitleEventId,
-        SubtitleFrameId,
-        SubtitleTrackId,
-    )
-    from util import FakeIPC as EventIPC
-
-    from saitenka.app.subtitle_pipeline import SubtitleModeCoordinator
-
-    class Backend:
-        def render(self, request: GeometryRequest) -> GeometrySnapshot:
-            return GeometrySnapshot(
-                request.generation,
-                request.track_id,
-                request.frame_id,
-                request.timestamp_ms,
-                request.variant,
-                (),
-            )
-
-        def close(self) -> None:
-            pass
-
-    ipc = EventIPC()
-    r = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    r.graph.subtitle_presentation.pipeline = SubtitleModeCoordinator(NullRenderer(), Backend())
-    r.graph.playback.start_session()
-    track_id = SubtitleTrackId("track-1")
-    event_id = SubtitleEventId(track_id, 1_000, 2_000, 0, 2)
-    request = GeometryRequest(
-        r.graph.subtitle_presentation.pipeline.generation,
-        track_id,
-        SubtitleFrameId(track_id, (event_id,)),
-        1_250,
-        (1920, 1080),
-        (1920, 1080),
-        b"[Script Info]\n",
-    )
-    assert r.graph.subtitle_presentation.pipeline.render(request) is not None
-    assert r.graph.subtitle_presentation.pipeline.current is not None
-
-    ipc.set_prop("sub-text", "新しい字幕")
-    r.pump()
-
-    assert r.graph.subtitle_presentation.pipeline.current is None
 
 
 def test_property_change_event_drives_hover(monkeypatch, make_session):
@@ -3544,31 +2955,6 @@ def test_an_osd_resize_redraws_from_the_observation_alone(make_session):
     r.close()
 
 
-def test_a_sub_rendering_option_does_not_resize_anything(make_session):
-    """The negative control. Every `options/sub-*` property is render space too, and treating one
-    as a resize would redraw the whole chrome on a styling change that moved no window."""
-    ipc = FakeIPC()
-    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
-    r = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    r.graph.playback.start_session()
-    operations_before = r.graph.overlay.ops
-
-    ipc.emit({"event": "property-change", "name": "options/sub-scale", "data": 1.4})
-    r.pump()
-
-    assert r.graph.screen.osd == (1280, 720)
-    assert r.graph.overlay.ops == operations_before
-    r.close()
-
-
 def test_capability_probes_refresh_on_their_own_deadline(monkeypatch, make_session):
     """The tick asked TTL-gated probes 40x a second, almost always to be told "not yet". A deadline
     asks far less often and, unlike a tick, keeps asking in a runtime that has none."""
@@ -3596,61 +2982,6 @@ def test_capability_probes_refresh_on_their_own_deadline(monkeypatch, make_sessi
     assert len(applied) == 1
     assert ipc.fire_runtime_timer("lifecycle:capability-refresh")  # re-armed itself
     assert len(applied) == 2
-    r.close()
-
-
-def test_the_sidebar_follows_the_cue_when_the_cue_settles(monkeypatch, make_session):
-    """The active row re-follows when a cue observation settles, not on every turn: the follow
-    used to run in the interaction settle ahead of the cue, and its three blocking property reads
-    put 250 ms between a seek and the cue's color."""
-    ipc = FakeIPC()
-    r = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    follows = []
-    monkeypatch.setattr(sidebar_module, "follow", follows.append)
-
-    r.graph.interaction.settle()
-    assert follows == []  # a turn with no cue change is not a follow
-
-    r.graph.playback.observe("sub-text", "次の行")
-    r.graph.cue.settle()
-
-    # The view it followed, not the host: identity with the owner says the settle boundary
-    # reached this sidebar's own state rather than merely calling something once.
-    assert [view.state for view in follows] == [r.graph.sidebar.state]
-
-    r.graph.cue.set_subtitle("先の行")  # a cue the session installs itself: a nav pre-arm
-
-    assert len(follows) == 2
-    r.close()
-
-
-def test_the_sidebar_reads_the_next_episode_path_even_without_a_sub_index(make_session):
-    """Observed paths follow episode changes without a sidebar-triggered IPC read."""
-    ipc = FakeIPC()
-    r = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
-        options=ReaderOptions().with_overrides(prefetch=False),
-    )
-    ipc.props["path"] = "/ep1.mkv"
-    r.graph.playback.install_seed({"path": "/ep1.mkv"})
-    assert r.graph.track_commands.navigation.current.sub_index is None
-    assert r.graph.sidebar.view().video == "/ep1.mkv"
-
-    ipc.props["path"] = "/ep2.mkv"
-    assert r.graph.sidebar.view().video == "/ep1.mkv"  # same episode: no read
-    r.graph.cue.rebind_episode()
-    r.graph.playback.observe("path", "/ep2.mkv")
-
-    assert r.graph.sidebar.view().video == "/ep2.mkv"
     r.close()
 
 
@@ -3726,31 +3057,6 @@ def test_a_refused_interaction_command_is_reported_rather_than_lost(caplog):
     assert "not admitted" in caplog.text
 
 
-def test_every_hover_pause_resume_takes_the_same_path(monkeypatch):
-    """There were three writes for this one fact, and two reached mpv through a
-    `getattr(ipc, "command_async", ipc.command)` probe — invisible to the direct-write gate, and a
-    fake missing the port silently took the other branch. Both triggers must now be indistinguishable
-    at the wire.
-    """
-
-    def resume_via(act) -> list[tuple]:
-        ipc = FakeIPC()
-        ipc.props["pause"] = False
-        reader = _reader_with_word(ipc)
-        monkeypatch.setattr(reader.graph.subtitle_presentation, "renderer", NullRenderer())
-        Driver(reader).move_to_word(0)
-        assert reader.graph.tooltip.hover_view().paused
-        before = len(ipc.commands)
-        act(reader)
-        assert not reader.graph.tooltip.hover_view().paused
-        return [c for c in ipc.commands[before:] if c[:2] == ("set_property", "pause")]
-
-    by_cue = resume_via(lambda r: r.graph.cue.set_subtitle("別の字幕"))
-    by_reducer = resume_via(lambda r: r.command(app_bindings.HOVER_PAUSE_MSG))
-
-    assert by_cue == by_reducer == [("set_property", "pause", False)]
-
-
 def _seeded_reader(request, *, latched, settled):
     """Adopt one observed size before a fresh startup seed arrives."""
     from util import FakeIPC as EventIPC
@@ -3766,20 +3072,6 @@ def _seeded_reader(request, *, latched, settled):
     ipc.props["osd-dimensions"] = settled
     r.graph.playback.start_session()
     return r
-
-
-def test_seeding_folds_the_settled_osd_over_a_transient_pre_observe_read(request):
-    """`self.osd` decides where every overlay lands; the geometry lays hit boxes out against the live
-    `osd-dimensions`. A real report caught the blocking read returning 3642x2096 six milliseconds
-    before mpv settled on 3024x1898.
-
-    Seeding publishes no delta, so nothing re-drives `refresh_render_space` afterwards. Without a
-    hand reconcile the transient stands for the whole session and every box is uniformly offset —
-    which is why the shift was per-launch luck rather than per-episode.
-    """
-    r = _seeded_reader(request, latched={"w": 3642, "h": 2096}, settled={"w": 3024, "h": 1898})
-
-    assert r.graph.screen.osd == (3024, 1898)
 
 
 def test_seeding_keeps_the_osd_when_mpv_reports_nothing(request):

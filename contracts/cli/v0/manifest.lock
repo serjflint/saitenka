@@ -3,5 +3,7 @@
   "key_sha256": "07a273e0d59a65a9fe8ca3ace7869f331123f0efd3025fe346537584db03c8aa",
   "vector_count": 21,
   "vector_key_sha256": "515ffff5dbf14c46efebed574d8bd7c7837ac5f04c0dbe0135787c6fcc0c21da",
-  "input_sha256": "464c816e74ac17a575c10ce114906aed186da1e62a1ba79bf4d8f8f9d81c7a53"
+  "input_sha256": "464c816e74ac17a575c10ce114906aed186da1e62a1ba79bf4d8f8f9d81c7a53",
+  "oracle_count": 156,
+  "oracle_sha256": "6085964b031b08cc8fd4a10243459474ab5931f8761cd6c3a02a9f00cb96fad1"
 }

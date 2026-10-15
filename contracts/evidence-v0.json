@@ -775,6 +775,24 @@
       "replace": "    Marker(\"screenshot\", \"ship\", \"scene image, `<img>`-wrapped\", lambda c: c.picture),\n",
       "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
       "mismatch": "the Anki Picture field lost its image markup while the media capture still succeeded"
+    },
+    {
+      "id": "journey-mpv-observation-reaches-cue",
+      "scenario_id": "watch-hover-mine-rich-card",
+      "path": "src/saitenka/app/session/playback_observation.py",
+      "find": "        elif isinstance(delta, playback.CueObservationChanged):\n            target.observe_cue(delta.cue)\n",
+      "replace": "        elif isinstance(delta, playback.CueObservationChanged):\n            pass\n",
+      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
+      "mismatch": "the observed sub-text never reached cue presentation, so no matching render request existed"
+    },
+    {
+      "id": "journey-colored-surface-publication",
+      "scenario_id": "watch-hover-mine-rich-card",
+      "path": "src/saitenka/app/subtitle_render.py",
+      "find": "            surfaces.present(\n                sr.image, ox, oy, oid=SUB_ID, owner=Owner.SUBTITLE, on_settled=on_settled\n            ),\n",
+      "replace": "            None,\n",
+      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
+      "mismatch": "the renderer computed styled tokens but emitted no subtitle overlay boundary write"
     }
   ]
 }
