@@ -31,7 +31,7 @@ done
 # grep-free — safe under the search-shim mock; see AGENTS.md "Tooling").
 test -f "$skill_dir/references/oracle-catalog.md" || { echo "MISSING: references/oracle-catalog.md"; fail=1; }
 test -f "$ROOT/contracts/README.md" || { echo "MISSING: contracts/README.md"; fail=1; }
-test -f "$ROOT/tests/contracts/test_session_corpus.py" || { echo "MISSING: portable corpus owner"; fail=1; }
+test -f "$ROOT/tests/contracts/test_adapter_protocol.py" || { echo "MISSING: portable corpus owner"; fail=1; }
 for t in tests/features/tooltip/test_scale_boundary.py tests/features/tooltip/test_tooltip_statemachine.py tests/test_cache_race.py; do
   test -f "$ROOT/$t" || { echo "MISSING oracle example: $t"; fail=1; }
 done

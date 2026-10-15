@@ -22,6 +22,9 @@ Read `.agents/sharpen/SPEC.md` completely, then run one existing-test audit.
    If several internal tests own the same user-visible proposition, stop the bounded audit and hand off a
    priced portable-corpus migration. Sharpen records the duplicate family; it does not polish or migrate
    every internal owner one at a time.
+   If the portable corpus already owns the proposition, ask which distinct fault class the selected test
+   preserves. No schedule, real boundary, composition, diagnostic, or minimal production-path distinction
+   means the improvement is retirement or consolidation, not a sharper internal assertion.
 4. Run focused affected tests and `sharpen_gate.py anticheat` for every assertion edit, then the relevant
    objective proof:
    - mutation: kill the named survivor and retain relevant prior kills;
@@ -30,6 +33,8 @@ Read `.agents/sharpen/SPEC.md` completely, then run one existing-test audit.
 5. For a PR-ready result, obtain two isolated read-only adversarial reviews of the exact final diff.
    Reviewers receive the coordinate, claimed observable behavior, diff, and validation only.
 6. Offer a genuine improvement as a PR. Suppress cosmetic or metric-only churn.
+   Never report a classified survivor as “necessary”; report its retained role and the evidence that would
+   allow a later Sharpen run to remove it.
 7. Use `sharpen_ledger.py append` only for durable duplicate-prevention: PR/landed, Grow handoff, product
    issue, or unsharpenable. It derives the mapped tests and content hash. Do not write receipts for
    no-candidate, bounce, or clean exploration.
