@@ -120,6 +120,15 @@
       "mismatch": "the consolidated package owner lost the Picture field"
     },
     {
+      "id": "package-card-french-fields",
+      "scenario_id": "saitenka-card-french-note-shape",
+      "path": "saitenka-card/src/saitenka_card/note.py",
+      "find": "FRENCH_FIELDS = {k: v for k, v in LAPIS_FIELDS.items() if k != \"reading\"}",
+      "replace": "FRENCH_FIELDS = {k: v for k, v in LAPIS_FIELDS.items() if k != \"glossary\"}",
+      "command": "uv run pytest -q saitenka-card/tests/test_card.py::test_the_french_preset_has_no_reading_field",
+      "mismatch": "the French preset retained the JP reading field and lost Glossary"
+    },
+    {
       "id": "config-attach-layout",
       "scenario_id": "attach-overrides",
       "path": "src/saitenka/app/commands/attach.py",

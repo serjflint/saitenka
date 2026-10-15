@@ -5,11 +5,8 @@ import threading
 
 import pytest
 from saitenka_card import (
-    KNOWN_MARKERS,
     AnimatedClip,
-    CardContent,
     MineConfig,
-    build_note,
 )
 from saitenka_tokenize.japanese import tokenize
 from session_builder import build_session
@@ -45,76 +42,6 @@ def test_card_data_from_token():
     assert card.idseq.isdigit()  # JMdict ent_seq
     assert "to read" in card.glossary_html
     assert card.glossary_html.startswith("<ol>")
-
-
-def test_build_note_writes_idseq_into_the_default_id_field():
-    """#255 coverage gap: the ``card.idseq → 'id' entity → 'ID' field`` chain was only covered in
-    halves. Under the default LAPIS map, a non-empty idseq must land in the real ``ID`` field the Kanji
-    Study ``kanjistudy://word?id={{ID}}`` deep-link reads — proven with a constructed idseq (not a live
-    jamdict lookup), so it runs regardless of the ``jmdict`` extra."""
-    from saitenka_card import CardData
-
-    note = build_note(MineConfig(), CardData("読む", "よむ", "", idseq="1456360"))
-    assert note["fields"]["ID"] == "1456360"
-
-
-def test_build_note_writes_frequency_fields():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(),
-        card_for(tok),
-        CardContent(sentence_html="s", freq_html="<ul><li>FreqA: 12</li></ul>", freq_sort="12"),
-    )
-    assert note["fields"]["Frequency"] == "<ul><li>FreqA: 12</li></ul>"  # plan: freq → Frequency
-    assert note["fields"]["FreqSort"] == "12"
-
-
-def test_build_note_merges_source_tags():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(),
-        card_for(tok),
-        CardContent(sentence_html="s"),
-        tags=["saitenka::mined", "saitenka::source::Nippon_Sangoku", "saitenka::ep::10"],
-    )
-    assert "saitenka" in note["tags"]  # static tool tag kept
-    assert "saitenka::source::Nippon_Sangoku" in note["tags"]  # + per-card source/episode
-    assert "saitenka::ep::10" in note["tags"]
-    assert len(note["tags"]) == len(set(note["tags"]))  # deduped
-
-
-def test_custom_field_map_only_writes_mapped():
-    cfg = MineConfig(model="Animecards", fields={"expression": "Word", "reading": "Reading"})
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), CardContent(sentence_html="s"))
-    assert set(note["fields"]) == {"Word", "Reading", "IsWordAndSentenceCard"}
-    assert note["fields"]["Word"] == "読む"
-
-
-@pytest.mark.parametrize(
-    ("card_kind", "marker"),
-    [
-        ("sentence", "IsSentenceCard"),
-        ("word-and-sentence", "IsWordAndSentenceCard"),
-        ("click", "IsClickCard"),
-        ("audio", "IsAudioCard"),
-    ],
-)
-def test_build_note_card_kind_sets_exactly_one_marker(card_kind, marker):
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(card_kind=card_kind), card_for(tok), CardContent(sentence_html="s")
-    )
-    present = [m for m in KNOWN_MARKERS if m in note["fields"]]
-    assert (
-        present == [marker] and note["fields"][marker] == "1"
-    )  # mutually exclusive by construction
-
-
-def test_build_note_card_kind_none_sets_no_marker():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(MineConfig(card_kind="none"), card_for(tok), CardContent(sentence_html="s"))
-    assert not any(m in note["fields"] for m in KNOWN_MARKERS)  # no card-template marker at all
 
 
 def test_dedupe_allows_add_when_card_format_has_no_expression_field():
@@ -160,23 +87,6 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch, mak
     _await_mining(r)
     assert anki.added == [] and "読む" in r.graph.mining.index_snapshot()
     assert queries and '"Word:読む"' in queries[0]
-
-
-def test_build_note_card_format_uses_passed_markers():
-    # the miner passes a full marker map (pitch/pos the args can't supply); build_note renders it
-    cfg = MineConfig(card_format={"Pitch": "{pitch-accents}"})
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        cfg, card_for(tok), CardContent(sentence_html="s"), markers={"pitch-accents": "よむ [0]"}
-    )
-    assert note["fields"]["Pitch"] == "よむ [0]"
-
-
-def test_mine_config_from_preset_kiku_uses_lapis_fields_and_word_and_sentence():
-    cfg = MineConfig.from_preset("Kiku")
-    assert cfg.model == "Kiku"
-    assert cfg.fields["expression"] == "Expression" and cfg.fields["audio"] == "SentenceAudio"
-    assert cfg.flags == {"IsWordAndSentenceCard": "1"}  # Kiku's word-and-sentence marker
 
 
 def test_mine_config_from_unknown_preset_warns_and_uses_lapis(caplog):

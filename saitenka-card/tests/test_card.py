@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import pytest
 from saitenka_card import (
+    FRENCH_FIELDS,
     KNOWN_ENTITIES,
+    LAPIS_FIELDS,
     CardContent,
     CardData,
     MineConfig,
@@ -21,47 +23,122 @@ from saitenka_card import (
 CARD = CardData("読む", "よむ", "<ol><li>to read</li></ol>", idseq="1234")
 
 
-def test_a_preset_writes_only_the_fields_it_maps() -> None:
+@pytest.mark.parametrize(
+    ("config", "expected_fields"),
+    [
+        pytest.param(
+            MineConfig.from_preset("Lapis"),
+            {
+                "Expression": "読む",
+                "ExpressionReading": "よむ",
+                "Sentence": "本を<b>読む</b>",
+                "Glossary": "<ol><li>to read</li></ol>",
+                "Picture": '<img src="p.jpg">',
+                "SentenceAudio": "[sound:a.mp3]",
+                "MiscInfo": "ep10 · 10:03",
+                "ID": "1234",
+                "Frequency": "<ul><li>FreqA: 12</li></ul>",
+                "FreqSort": "12",
+                "IsWordAndSentenceCard": "1",
+            },
+            id="lapis",
+        ),
+        pytest.param(
+            MineConfig.from_preset("Kiku"),
+            {
+                "Expression": "読む",
+                "ExpressionReading": "よむ",
+                "Sentence": "本を<b>読む</b>",
+                "Glossary": "<ol><li>to read</li></ol>",
+                "Picture": '<img src="p.jpg">',
+                "SentenceAudio": "[sound:a.mp3]",
+                "MiscInfo": "ep10 · 10:03",
+                "ID": "1234",
+                "Frequency": "<ul><li>FreqA: 12</li></ul>",
+                "FreqSort": "12",
+                "IsWordAndSentenceCard": "1",
+            },
+            id="kiku",
+        ),
+        pytest.param(
+            MineConfig(model="Animecards", fields={"expression": "Word", "reading": "Reading"}),
+            {"Word": "読む", "Reading": "よむ", "IsWordAndSentenceCard": "1"},
+            id="custom-map",
+        ),
+    ],
+)
+def test_a_preset_writes_only_the_fields_it_maps(config, expected_fields) -> None:
     """The silent-empty-note trap runs the other way too: an unmapped logical entity must not appear."""
     from saitenka_card.note import _entity_values
 
     content = CardContent(
-        sentence_html="本を<b>読む</b>", picture="p.jpg", audio="a.mp3", misc="ep10 · 10:03"
+        sentence_html="本を<b>読む</b>",
+        picture="p.jpg",
+        audio="a.mp3",
+        misc="ep10 · 10:03",
+        freq_html="<ul><li>FreqA: 12</li></ul>",
+        freq_sort="12",
     )
-    note = build_note(MineConfig.from_preset("Lapis"), CARD, content)
+    note = build_note(
+        config,
+        CARD,
+        content,
+        tags=["saitenka::mined", "saitenka::source::Show", "saitenka::ep::03", "saitenka::mined"],
+    )
 
     assert set(_entity_values(CARD, content)) == set(KNOWN_ENTITIES)
     assert note["deckName"] == "Saitenka::Mining"
-    assert note["modelName"] == "Lapis"
-    assert note["fields"]["Expression"] == "読む"
-    assert note["fields"]["ExpressionReading"] == "よむ"
-    assert note["fields"]["Sentence"] == "本を<b>読む</b>"
-    assert note["fields"]["Picture"] == '<img src="p.jpg">'
-    assert note["fields"]["SentenceAudio"] == "[sound:a.mp3]"
-    assert note["fields"]["MiscInfo"] == "ep10 · 10:03"
-    assert note["fields"]["IsWordAndSentenceCard"] == "1"
+    assert note["modelName"] == config.model
+    assert note["fields"] == expected_fields
     assert note["options"]["allowDuplicate"] is False
-    assert "saitenka" in note["tags"]
+    assert note["tags"] == [
+        "saitenka",
+        "saitenka::mined",
+        "saitenka::source::Show",
+        "saitenka::ep::03",
+    ]
 
 
 def test_the_french_preset_has_no_reading_field() -> None:
     """A Latin-tokenized mine grounds no kana reading, so the note type carries no field for one."""
-    note = build_note(MineConfig.from_preset("French"), CardData("lire", "", ""))
+    config = MineConfig.from_preset("French")
+    note = build_note(config, CardData("lire", "", "<div>to read</div>"))
 
+    assert config.model == "French"
+    assert (
+        config.fields == FRENCH_FIELDS == {k: v for k, v in LAPIS_FIELDS.items() if k != "reading"}
+    )
+    assert note["fields"]["Expression"] == "lire"
+    assert note["fields"]["Glossary"] == "<div>to read</div>"
     assert "ExpressionReading" not in note["fields"]
+    assert note["modelName"] == "French"
 
 
 def test_a_card_format_wins_wholesale_over_the_field_map() -> None:
     """Not merged — the two ways of describing a card are exclusive, and a merge would write fields
     the user did not ask for."""
     cfg = MineConfig(
-        card_format={"Word": "{expression}", "Key": "{expression}", "Gloss": "{glossary}"}
+        card_format={
+            "Word": "{expression}",
+            "Key": "{expression}",
+            "Gloss": "{glossary}",
+            "Pitch": "{pitch-accents}",
+        }
     )
 
-    note = build_note(cfg, CARD)
+    note = build_note(
+        cfg,
+        CARD,
+        markers={
+            "expression": CARD.expression,
+            "glossary": CARD.glossary_html,
+            "pitch-accents": "よむ [0]",
+        },
+    )
 
-    assert set(note["fields"]) == {"Word", "Key", "Gloss", *cfg.flags}
+    assert set(note["fields"]) == {"Word", "Key", "Gloss", "Pitch", *cfg.flags}
     assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
+    assert note["fields"]["Pitch"] == "よむ [0]"
 
 
 def test_the_expression_field_is_found_through_a_template() -> None:
@@ -72,9 +149,22 @@ def test_the_expression_field_is_found_through_a_template() -> None:
     assert MineConfig(card_format={"Gloss": "{glossary}"}).expression_field() == ""
 
 
-def test_an_unknown_card_kind_falls_back_rather_than_disabling_mining() -> None:
+@pytest.mark.parametrize(
+    ("card_kind", "expected"),
+    [
+        ("sentence", {"IsSentenceCard": "1"}),
+        ("word-and-sentence", {"IsWordAndSentenceCard": "1"}),
+        ("click", {"IsClickCard": "1"}),
+        ("audio", {"IsAudioCard": "1"}),
+        ("none", {}),
+        ("nonsense", {"IsWordAndSentenceCard": "1"}),
+    ],
+)
+def test_an_unknown_card_kind_falls_back_rather_than_disabling_mining(
+    card_kind: str, expected: dict[str, str]
+) -> None:
     """A `[mine].card_kind` typo would otherwise mark no template and produce an unusable card."""
-    assert MineConfig(card_kind="nonsense").flags == {"IsWordAndSentenceCard": "1"}
+    assert MineConfig(card_kind=card_kind).flags == expected
 
 
 def test_sentence_bolding_escapes_the_context_it_wraps() -> None:
