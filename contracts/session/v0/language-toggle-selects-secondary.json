@@ -1,0 +1,31 @@
+{
+  "protocol": "saitenka.session/v0",
+  "scenario_id": "language-toggle-selects-secondary",
+  "requires": ["session-v0"],
+  "given": {
+    "capture": ["track", "termination"],
+    "mpv_properties": {
+      "track-list": [
+        {"id": 1, "type": "sub", "lang": "eng", "selected": false},
+        {"id": 2, "type": "sub", "lang": "jpn", "selected": true}
+      ],
+      "sid": 2,
+      "sub-text": "猫",
+      "sub-start": 1.0,
+      "sub-end": 2.0
+    }
+  },
+  "when": [
+    {"action": "start"},
+    {"action": "drain_until_quiescent", "max_steps": 8},
+    {"action": "command", "name": "saitenka-toggle-subtitle-language"}
+  ],
+  "expect": {
+    "mode": "exact",
+    "observations": [
+      {"source": "mpv", "kind": "command", "value": ["set-property", "secondary-sid", "no"]},
+      {"source": "mpv", "kind": "command", "value": ["set-property", "sid", 1]},
+      {"source": "adapter", "kind": "terminated"}
+    ]
+  }
+}

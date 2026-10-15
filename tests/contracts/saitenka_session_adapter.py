@@ -190,6 +190,8 @@ class SaitenkaSessionAdapter:
             return None
         if command and command[0] == "show-text":
             return "notice", ["notice", command[1]]
+        if command and command[0] == "set_property" and command[1] in {"sid", "secondary-sid"}:
+            return "track", ["set-property", command[1], _json_value(command[2])]
         if command and command[0] == "sub-seek":
             return "seek", ["sub-seek", str(command[1])]
         return "mpv", _json_value(command)

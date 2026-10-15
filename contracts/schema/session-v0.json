@@ -47,7 +47,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "capture": {"type": "array", "items": {"enum": ["observer", "surface", "termination", "clipboard", "notice", "seek", "checkpoint", "binding", "anki"]}, "uniqueItems": true},
+        "capture": {"type": "array", "items": {"enum": ["observer", "surface", "termination", "clipboard", "notice", "seek", "checkpoint", "binding", "anki", "track"]}, "uniqueItems": true},
         "mpv_properties": {"type": "object"},
         "key_options": {"type": "object", "additionalProperties": false, "properties": {"help_key": {"type": "string"}, "hover_pause_key": {"type": "string"}, "sub_prev_key": {"type": "string"}, "sub_next_key": {"type": "string"}, "sub_replay_key": {"type": "string"}}},
         "capture_binding_keys": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
