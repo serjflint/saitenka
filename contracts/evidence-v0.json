@@ -793,6 +793,15 @@
       "replace": "            None,\n",
       "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
       "mismatch": "the renderer computed styled tokens but emitted no subtitle overlay boundary write"
+    },
+    {
+      "id": "subtitle-stale-navigation-revision-fence",
+      "scenario_id": "retained-stale-navigation-schedule",
+      "path": "src/saitenka/app/subtitle_adapter.py",
+      "find": "            if effect.cue_revision != self.cue_revision():\n",
+      "replace": "            if False:\n",
+      "command": "uv run pytest -q 'tests/session/test_session_controller.py::test_a_navigation_step_for_a_replaced_cue_never_seeks'",
+      "mismatch": "a navigation effect decided for the retired cue emitted sub-seek and lost its superseded outcome"
     }
   ]
 }

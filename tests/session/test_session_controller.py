@@ -3080,3 +3080,87 @@ def test_seeding_keeps_the_osd_when_mpv_reports_nothing(request):
     r = _seeded_reader(request, latched={"w": 1920, "h": 1080}, settled={})
 
     assert r.graph.screen.osd == (1920, 1080)
+
+
+def test_a_navigation_step_for_a_replaced_cue_never_seeks(monkeypatch, make_session):
+    """A queued navigation effect remains qualified by the cue that produced it."""
+    from util import record_spans
+
+    from saitenka.app.subtitle_intents import SeekCue
+
+    spans = record_spans(monkeypatch)
+    ipc = FakeIPC()
+    r = make_session(
+        ipc,
+        infrastructure=SessionInfrastructure(
+            renderer=NullRenderer(),
+        ),
+        options=ReaderOptions().with_overrides(
+            prefetch=False,
+        ),
+    )
+    r.graph.cue.set_subtitle("猫を見る")
+    stale = SeekCue(1, r.graph.cue.revision)
+    r.graph.cue.set_subtitle("犬も見る")  # the cue the step was decided against is gone
+
+    assert not r.graph.subtitle_navigation.seek(stale)
+
+    assert not any(command and command[0] == "sub-seek" for command in ipc.commands)
+    (decision,) = [span["attrs"] for span in spans if span["name"] == "sub_nav_identity"]
+    assert decision["outcome"] == "superseded"  # dropped out loud, not silently
+    assert r.graph.subtitle_navigation.seek(
+        SeekCue(1, r.graph.cue.revision)
+    )  # and the current cue still navigates
+
+
+@pytest.mark.usefixtures("anki_up")  # the ⊕ button only draws when AnkiConnect is reachable
+def test_header_add_button_click_mines_hovered_word(monkeypatch):
+    ipc = FakeIPC()
+    r = _tall_reader(ipc, tts=True)
+    _enable_mining(r)
+    r.graph.tooltip.select(0)
+    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
+    r.graph.tooltip.show_tooltip(0)
+    events = []
+    monkeypatch.setattr(
+        r.graph.mining, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
+    _point_at_add_button(r).click()
+    assert events == ["mine"]  # ⊕ mined; did not fall through to TTS
+
+
+def test_tooltip_empty_click_does_nothing(monkeypatch):
+    # clicking an empty area of the card must NOT play audio (the 🔊 button is the only play affordance)
+    ipc = FakeIPC()
+    r = _tall_reader(ipc)
+    _enable_mining(r)
+    r.graph.tooltip.select(0)
+    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
+    r.graph.tooltip.show_tooltip(0)
+    events = []
+    monkeypatch.setattr(
+        r.graph.mining, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
+    tx, ty, tw, th = r.graph.tooltip.surface_state().view.rect
+    Driver(r, instant=False).move(tx + tw / 2, ty + th - 5).click()  # low in the body
+    assert events == []  # neither speaks nor mines
+
+
+def test_click_link_does_not_mine_or_speak(monkeypatch):
+    # a link click must open the target, not fall through to mining / TTS
+    ipc = FakeIPC()
+    r = _link_reader(ipc)
+    _enable_mining(r)
+    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
+    _hover_base_word(r)
+    events = []
+    monkeypatch.setattr(
+        r.graph.mining, "mine_index", lambda _index, **_kwargs: events.append("mine")
+    )
+    monkeypatch.setattr(hover_adapter, "speak", lambda _text: events.append("speak"))
+    _point_at_link(r).click()
+    assert (
+        events == [] and r.graph.tooltip.observation().navigation_depth == 1
+    )  # navigated the base, no mine/speak fallthrough
