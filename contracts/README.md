@@ -83,3 +83,10 @@ adapter in another language receives inputs but no answers. Rows conform to `sch
 `saitenka.analysis/v0` uses capability `analysis-v0`. It evaluates whole-track lexical metrics and cache
 identity from JSON cues and vocabulary snapshots. Controller scheduling and history persistence remain
 native concurrency and storage contracts. Rows conform to `schema/analysis-v0.json`.
+
+## Dictionary v0 protocol
+
+`saitenka.dictionary/v0` uses capability `dictionary-v0`. It imports abstract Yomitan rows into an
+isolated adapter store and returns normalized entry, reading-group, term-reachability, and mining-card
+observations. Archive, media, telemetry, and connection lifetimes stay native boundaries. Rows conform to
+`schema/dictionary-v0.json`.

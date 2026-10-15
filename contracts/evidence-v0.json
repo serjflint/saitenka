@@ -415,6 +415,15 @@
       "replace": "        sum(len(profile.unknown_indices) == 3 for profile in eligible),",
       "command": "uv run pytest -q tests/contracts/test_analysis_corpus.py",
       "mismatch": "a two-unknown sentence stopped counting as N+2"
+    },
+    {
+      "id": "dictionary-exact-term-filter",
+      "scenario_id": "dictionary-lookup-laws",
+      "path": "src/saitenka/app/source_adapter.py",
+      "find": "        return exact or entries",
+      "replace": "        return entries",
+      "command": "uv run pytest -q tests/contracts/test_dictionary_corpus.py",
+      "mismatch": "an exact term lookup merged a reading-only homophone into its definitions"
     }
   ]
 }

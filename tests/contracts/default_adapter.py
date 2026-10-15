@@ -10,6 +10,7 @@ if __package__:
         analysis_adapter,
         cli_adapter,
         config_adapter,
+        dictionary_adapter,
         saitenka_session_adapter,
         subtitle_adapter,
         wordstate_adapter,
@@ -20,6 +21,7 @@ else:
     import analysis_adapter
     import cli_adapter
     import config_adapter
+    import dictionary_adapter
     import protocol as session_protocol
     import saitenka_session_adapter
     import subtitle_adapter
@@ -33,6 +35,7 @@ ADAPTERS: dict[str, Adapter] = {
         saitenka_session_adapter.execute,
     ),
     config_adapter.PROTOCOL: (config_adapter.CAPABILITY, config_adapter.evaluate),
+    dictionary_adapter.PROTOCOL: (dictionary_adapter.CAPABILITY, dictionary_adapter.evaluate),
     cli_adapter.PROTOCOL: (cli_adapter.CAPABILITY, cli_adapter.evaluate),
     subtitle_adapter.PROTOCOL: (subtitle_adapter.CAPABILITY, subtitle_adapter.evaluate),
     wordstate_adapter.PROTOCOL: (wordstate_adapter.CAPABILITY, wordstate_adapter.evaluate),

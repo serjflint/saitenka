@@ -5,7 +5,7 @@ import zipfile
 
 import dicthelp
 import pytest
-from saitenka_tokenize.japanese import Token, tokenize
+from saitenka_tokenize.japanese import Token
 
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
@@ -100,97 +100,6 @@ def test_glosses_of_separates_block_and_chip_items():
     assert _glosses_of([sense]) == ["na-adj colloquial dramatic exciting touching"]
 
 
-def test_load_and_lookup(tmp_path):
-    p = dicthelp.term_zip(
-        tmp_path / "d1.zip", "TestDict", [["読む", "よむ", ["to read"]], ["本", "ほん", ["book"]]]
-    )
-    ds = dicthelp.load_set([p])
-    assert [d.title for d in ds.dicts] == ["TestDict"]
-    entry = ds.entry_for(
-        Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
-    )
-    assert _glosses_of(entry.defs[0].content) == ["to read"]
-    assert ds.has_term("よむ")  # a term is keyed by its reading too
-    assert not ds.has_term("nope")
-
-
-def test_lookup_ranks_exact_term_above_reading_only(tmp_path):
-    # の (a particle, term=の) must outrank 箆 — an obscure noun that merely READS の. Without ranking
-    # 箆 sorts first in the term bank and becomes the headword (the screenshot bug).
-    d = dicthelp.term_zip(
-        tmp_path / "n.zip",
-        "N",
-        [["箆", "の", ["shaft of an arrow"]], ["の", "の", ["possessive particle"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="の", lemma="の", reading="の", pos="助詞", start=0, end=1)
-    # exact-term match heads the entry, not the reading-only 箆
-    assert ds.entry_for(tok).headword == ["の"]
-
-
-def test_entry_for_drops_reading_only_homophones_when_a_term_matches(tmp_path):
-    # Hovering 気 (reading き) must NOT merge every き-homophone (木/生) into its tooltip — Yomitan groups
-    # on the term, so a reading collision is a separate entry, never fused. With an exact-term hit we
-    # keep only it and drop the reading-only homophones.
-    d = dicthelp.term_zip(
-        tmp_path / "h.zip",
-        "H",
-        [["気", "き", ["spirit; mind"]], ["木", "き", ["tree"]], ["生", "き", ["raw"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="気", lemma="気", reading="き", pos="名詞", start=0, end=1)
-    entry = ds.entry_for(tok)
-    assert "気" in json.dumps(
-        entry.headword, ensure_ascii=False
-    )  # headword is 気 (ruby'd 気【き】)
-    glosses = json.dumps(entry.defs[0].content, ensure_ascii=False)
-    assert "spirit" in glosses  # 気's own gloss is shown
-    assert "tree" not in glosses and "raw" not in glosses  # 木/生 homophones are NOT merged in
-
-
-def test_entry_for_keeps_all_reading_matches_for_a_kana_word(tmp_path):
-    # A kana word whose dictionary forms are all kanji (かける → 掛ける/懸ける) has NO exact-term hit, so
-    # the reading fallback keeps every form — that IS the intended polysemy, not a homophone collision.
-    d = dicthelp.term_zip(
-        tmp_path / "k.zip",
-        "K",
-        [["掛ける", "かける", ["to hang"]], ["懸ける", "かける", ["to wager"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="かける", lemma="かける", reading="かける", pos="動詞", start=0, end=3)
-    glosses = json.dumps(ds.entry_for(tok).defs[0].content, ensure_ascii=False)
-    assert "hang" in glosses and "wager" in glosses  # both かける forms kept
-
-
-def test_dictionary_set_miss_falls_back(tmp_path):
-    a = dicthelp.term_zip(tmp_path / "c.zip", "AAA", [["猫", "ねこ", ["cat"]]])
-    ds = dicthelp.load_set([a])
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    entry = ds.entry_for(tok)
-    assert entry.defs[0].dict_name == "—"  # not found placeholder
-
-
-def test_entry_for_headword_comes_from_the_first_dict_with_a_hit(tmp_path):
-    a = dicthelp.term_zip(tmp_path / "first.zip", "First", [["行く", "いく", ["to go"]]])
-    b = dicthelp.term_zip(tmp_path / "second.zip", "Second", [["行く", "ゆく", ["to go (poetic)"]]])
-    ds = dicthelp.load_set([a, b])
-    tok = next(t for t in tokenize("学校に行く") if t.surface == "行く")
-    entry = ds.entry_for(tok)
-    assert entry.reading == "いく"  # First dict's reading wins, not Second's
-
-
-def test_entry_for_with_many_dicts_preserves_order_and_content(tmp_path):
-    paths = [
-        dicthelp.term_zip(tmp_path / f"d{i}.zip", f"Dict{i}", [["猫", "ねこ", [f"cat ({i})"]]])
-        for i in range(6)
-    ]
-    ds = dicthelp.load_set(paths)
-    tok = next(t for t in tokenize("猫がいる") if t.surface == "猫")
-    entry = ds.entry_for(tok)
-    assert [d.dict_name for d in entry.defs] == [f"Dict{i}" for i in range(6)]
-    assert [d.content[0] for d in entry.defs] == [f"cat ({i})" for i in range(6)]
-
-
 def test_a_hover_does_not_issue_one_query_per_dictionary(tmp_path):
     """A hover issues the same nonzero SQL count with one or four dictionaries."""
     tok = Token(surface="猫", lemma="猫", reading="ねこ", pos="名詞", start=0, end=1)
@@ -222,20 +131,6 @@ def test_a_hover_does_not_issue_one_query_per_dictionary(tmp_path):
     assert wide == narrow
 
 
-def test_card_for_uses_user_dictionary(tmp_path):
-    """Dict-first mining: the mined card's expression / reading / glossary come from the user's dict."""
-    d = dicthelp.term_zip(
-        tmp_path / "cf.zip", "TestDict", [["読む", "よむ", ["to read", "to peruse"]]]
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
-    card = ds.card_for(tok)
-    assert card.expression == "読む"
-    assert card.reading == "よむ"
-    assert card.glossary_html == "<ol><li>to read</li><li>to peruse</li></ol>"
-    assert card.glosses == ("to read", "to peruse")
-
-
 @pytest.mark.parametrize(
     ("title", "persist_seq", "expected"),
     [
@@ -256,69 +151,6 @@ def test_card_sequence_requires_persisted_jmdict_provenance(tmp_path, title, per
     token = Token("読む", "読む", "よむ", "動詞", 0, 2)
 
     assert dictionary.card_for(token).idseq == expected
-
-
-def test_card_for_breaks_reading_tie_by_frequency(tmp_path):
-    """No entry's reading matches the (absent) context reading → the tie falls through to commonness:
-    the lower freq rank (おもて) wins over the first-listed ひょう."""
-    d = dicthelp.term_zip(
-        tmp_path / "fq.zip",
-        "Multi",
-        [["表", "ひょう", ["table"]], ["表", "おもて", ["surface"]]],
-    )
-    freq = dicthelp.meta_zip(
-        tmp_path / "fr.zip",
-        "Freq",
-        "freq",
-        [
-            ["表", {"reading": "おもて", "frequency": 500}],
-            ["表", {"reading": "ひょう", "frequency": 9000}],
-        ],
-    )
-    ds = dicthelp.load_set([d], [freq])
-    tok = Token(surface="表", lemma="表", reading="", pos="名詞", start=0, end=1)
-    card = ds.card_for(tok)
-    assert card.reading == "おもて"
-
-
-def test_cards_for_returns_one_card_per_reading_best_first(tmp_path):
-    """The per-entry mine choices: one CardData per distinct (term, reading), ordered best-first —
-    退いた's contextual reading のいた puts のく ahead of the first-listed しりぞく, and each card carries
-    only its own reading's glosses. cards_for[0] is card_for's default."""
-    d = dicthelp.term_zip(
-        tmp_path / "cff.zip",
-        "Multi",
-        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    cards = ds.cards_for(tok)
-    assert [(c.reading, c.glosses) for c in cards] == [
-        ("のく", ("to step aside",)),
-        ("しりぞく", ("to retreat",)),
-    ]
-    assert cards[0] == ds.card_for(tok)  # default == first offered
-
-
-def test_entry_for_builds_stacked_groups_for_multi_reading(tmp_path):
-    """entry_for exposes one EntryGroup per distinct reading, ordered like cards_for (退いた context →
-    のく first), each carrying its card_index for the per-entry ⊕ and only its reading's definition."""
-    d = dicthelp.term_zip(
-        tmp_path / "grp.zip",
-        "Multi",
-        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    entry = ds.entry_for(tok)
-    assert [(g.reading, g.card_index) for g in entry.groups] == [("のく", 0), ("しりぞく", 1)]
-    cards = ds.cards_for(tok)
-    # each group's card_index points at its own entry in cards_for
-    assert all(cards[g.card_index].reading == g.reading for g in entry.groups)
-    assert "to step aside" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
-    assert "to retreat" not in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
-    assert entry.reading == entry.groups[0].reading == "のく"
-    assert entry.headword == entry.groups[0].headword
 
 
 def test_stacked_entry_group_defs_preload_media(tmp_path):
@@ -345,74 +177,6 @@ def test_stacked_entry_group_defs_preload_media(tmp_path):
     assert len(entry.groups) == 2  # のく / しりぞく stacked
     for g in entry.groups:
         assert g.defs and all(d.media for d in g.defs)  # every stacked def preloaded its img media
-
-
-def test_entry_for_stacks_phrase_terms_longest_first(tmp_path):
-    """A multi-token phrase (数ある) passed as an extra term stacks ABOVE the bare word (数), longest
-    first — Yomitan shows the longest match first. Hovering 数 in 数ある must surface 数ある, not just 数."""
-    d = dicthelp.term_zip(
-        tmp_path / "ph.zip",
-        "Phrase",
-        [["数ある", "かずある", ["many; numerous"]], ["数", "かず", ["number"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="数", lemma="数", reading="かず", pos="名詞", start=0, end=1)
-    entry = ds.entry_for(tok, extra_terms=("数ある",))
-    assert [g.reading for g in entry.groups] == ["かずある", "かず"]  # phrase first, then bare word
-    assert "many; numerous" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
-    assert entry.reading == "かずある"  # fused header tracks the longest (top) entry
-
-
-def test_entry_for_stacks_honorific_phrase_from_the_content_word(tmp_path):
-    """お休み splits into お(prefix)+休み; hovering 休み folds the leading お back in, so passing お休み as
-    an extra term stacks it ABOVE the bare 休み — the natural hover (the kanji, not the tiny お) surfaces
-    the whole word."""
-    d = dicthelp.term_zip(
-        tmp_path / "oy.zip",
-        "Honorific",
-        [["お休み", "おやすみ", ["rest; good night"]], ["休み", "やすみ", ["holiday"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="休み", lemma="休む", reading="やすみ", pos="動詞", start=1, end=3)
-    entry = ds.entry_for(tok, extra_terms=("お休み",))
-    assert [g.reading for g in entry.groups] == ["おやすみ", "やすみ"]  # お休み first, then 休み
-    assert "rest; good night" in json.dumps(entry.groups[0].defs[0].content, ensure_ascii=False)
-
-
-def test_phrase_cards_align_with_groups_for_mining(tmp_path):
-    """The per-entry ⊕ mines cards_for(...)[card_index]; with phrase terms the card list must span the
-    same stacked entries in the same order, so a group's ⊕ mines that exact entry (phrase default first)."""
-    d = dicthelp.term_zip(
-        tmp_path / "phm.zip",
-        "Phrase",
-        [["数ある", "かずある", ["many"]], ["数", "かず", ["number"]]],
-    )
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="数", lemma="数", reading="かず", pos="名詞", start=0, end=1)
-    entry = ds.entry_for(tok, extra_terms=("数ある",))
-    cards = ds.cards_for(tok, extra_terms=("数ある",))
-    assert cards[0].expression == "数ある"  # default mine is the longest match
-    assert all(cards[g.card_index].reading == g.reading for g in entry.groups)
-
-
-def test_entry_for_single_reading_has_no_groups(tmp_path):
-    """A single-reading word keeps the fused single-header panel (no stacking) — groups is empty."""
-    d = dicthelp.term_zip(tmp_path / "one.zip", "One", [["読む", "よむ", ["to read"]]])
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="読む", lemma="読む", reading="よむ", pos="動詞", start=0, end=2)
-    assert ds.entry_for(tok).groups == []
-
-
-def test_card_for_miss_returns_empty_glossary(tmp_path):
-    """A word in no configured dict → expression-only card with empty glossary_html, so the miner
-    can fall back to the JMdict/jamdict source."""
-    d = dicthelp.term_zip(tmp_path / "cf2.zip", "TestDict", [["猫", "ねこ", ["cat"]]])
-    ds = dicthelp.load_set([d])
-    tok = Token(surface="犬", lemma="犬", reading="いぬ", pos="名詞", start=0, end=1)
-    card = ds.card_for(tok)
-    assert ds.cards_for(tok) == []
-    assert card.expression == "犬"  # from the token
-    assert card.glossary_html == ""
 
 
 def test_dictionary_dedupes_kanji_and_kana_duplicate_rows(tmp_path):
