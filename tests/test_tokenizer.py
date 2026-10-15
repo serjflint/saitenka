@@ -194,16 +194,6 @@ def test_swapped_tokenizer_reroutes_nested_popup_link_lookup(make_session, tmp_p
     assert (nested.word, nested.state.reading) == ("特別", "とくべつ")
 
 
-def test_unidic_is_content_matches_pos_whitelist():
-    """Negative control: the JP strategy's content-ness is exactly the unidic POS whitelist — a 名詞 is
-    content, a 助詞 (particle) is not — so nothing about Japanese classification moved."""
-    tok = UnidicTokenizer()
-    assert tok.is_content(Token("本", "本", "ほん", "名詞", 0, 1))
-    assert not tok.is_content(Token("は", "は", "は", "助詞", 0, 1))
-    assert tok.is_skippable(Token("。", "。", "", "補助記号", 0, 1))
-    assert not tok.is_skippable(Token("本", "本", "ほん", "名詞", 0, 1))
-
-
 class _ParticleContentTokenizer(_FakeTokenizer):
     """Inverts the JP partition: only 助詞 (particles) count as content. A tokenizer is free to define
     content-ness however it likes — the mine path must follow whatever strategy the reader holds."""

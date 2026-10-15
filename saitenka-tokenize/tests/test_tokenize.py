@@ -85,6 +85,10 @@ def test_content_and_skippable_are_not_complements():
     particle = _tok("を", pos="助詞")
     assert not tokenizer.is_content(particle)
     assert not tokenizer.is_skippable(particle)
+    noun = _tok("本", pos="名詞")
+    punctuation = _tok("。", pos="補助記号")
+    assert tokenizer.is_content(noun) and not tokenizer.is_skippable(noun)
+    assert not tokenizer.is_content(punctuation) and tokenizer.is_skippable(punctuation)
 
 
 def test_attestation_is_a_callable_so_the_package_stays_dictionary_free():

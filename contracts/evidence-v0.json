@@ -129,6 +129,15 @@
       "mismatch": "the French preset retained the JP reading field and lost Glossary"
     },
     {
+      "id": "package-tokenizer-punctuation-partition",
+      "scenario_id": "saitenka-tokenize-pos-partition",
+      "path": "saitenka-tokenize/src/saitenka_tokenize/japanese.py",
+      "find": "SKIP_POS = {\"補助記号\", \"記号\", \"空白\"}",
+      "replace": "SKIP_POS = {\"記号\", \"空白\"}",
+      "command": "uv run pytest -q saitenka-tokenize/tests/test_tokenize.py::test_content_and_skippable_are_not_complements",
+      "mismatch": "Japanese punctuation stopped being classified as skippable"
+    },
+    {
       "id": "config-attach-layout",
       "scenario_id": "attach-overrides",
       "path": "src/saitenka/app/commands/attach.py",
