@@ -105,3 +105,11 @@ raster buckets, caps, nested-popup height, clamping, and side selection without 
 objects. Hit-testing scenarios map frame coordinates to interactive token indices while respecting cue
 origins and noninteractive tokens. Font rasterization, cross-engine hit-map agreement, hover concurrency,
 and interaction state stay native tests. Rows conform to `schema/tooltip-v0.json`.
+
+## History v0 protocol
+
+`saitenka.history/v0` uses capability `history-v0`. Backlog scenarios drive captures, media relocation,
+explicit relinking, status changes, text export, and privacy-safe summaries in an isolated store. Session
+history scenarios drive clocked playback events and return normalized aggregates and summaries. Storage
+migrations, async writer scheduling, and assembled bookmark input stay native tests. Rows conform to
+`schema/history-v0.json`.

@@ -550,6 +550,42 @@
       "replace": "    if False:",
       "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[persistent-config-policy]'",
       "mismatch": "OTEL_SDK_DISABLED=true no longer overrode enabled telemetry config"
+    },
+    {
+      "id": "history-backlog-unicode-identity",
+      "scenario_id": "backlog-persistence-policy",
+      "path": "src/saitenka/app/backlog.py",
+      "find": "    return unicodedata.normalize(\"NFC\", Path(path).name).casefold()",
+      "replace": "    return Path(path).name.casefold()",
+      "command": "uv run pytest -q 'tests/contracts/test_history_corpus.py::test_history_contract[backlog-persistence-policy]'",
+      "mismatch": "composed and decomposed accented basenames no longer shared an identity"
+    },
+    {
+      "id": "history-backlog-basename-relocation",
+      "scenario_id": "backlog-persistence-policy",
+      "path": "src/saitenka/app/backlog.py",
+      "find": "        if len(by_name) == 1:",
+      "replace": "        if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_history_corpus.py::test_history_contract[backlog-persistence-policy]'",
+      "mismatch": "a uniquely moved episode no longer matched its saved capture by basename"
+    },
+    {
+      "id": "history-cue-deduplication",
+      "scenario_id": "session-history-aggregation",
+      "path": "src/saitenka/app/session_stats.py",
+      "find": "        if identity == self._last_cue:\n            return False",
+      "replace": "        if False:\n            return False",
+      "command": "uv run pytest -q 'tests/contracts/test_history_corpus.py::test_history_contract[session-history-aggregation]'",
+      "mismatch": "the same cue was counted twice in the session summary"
+    },
+    {
+      "id": "history-language-time-attribution",
+      "scenario_id": "session-history-aggregation",
+      "path": "src/saitenka/app/session_stats.py",
+      "find": "            if self._last_language == SECOND_LANG:",
+      "replace": "            if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_history_corpus.py::test_history_contract[session-history-aggregation]'",
+      "mismatch": "second-language watch time was charged to Japanese"
     }
   ]
 }

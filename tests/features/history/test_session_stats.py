@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from dataclasses import replace
-from types import SimpleNamespace
 
 from saitenka.app.features.history.history_owner import HistoryOwner
 from saitenka.app.session_stats import (
@@ -10,9 +8,6 @@ from saitenka.app.session_stats import (
     SessionRecorder,
     SessionSnapshot,
     SessionStore,
-    analysis_snapshot,
-    start,
-    summary,
 )
 
 
@@ -26,54 +21,6 @@ class FakeWriter:
 
     def close(self, _timeout=2.0):
         self.closed = True
-
-
-def test_recorder_aggregates_events_and_language_time():
-    monotonic = iter((0.0, 2.0, 7.0, 10.0))
-    wall = iter((100.0, 110.0))
-    writer = FakeWriter()
-    recorder = SessionRecorder(
-        "/anime/[Grp] Nippon Sangoku - 07 [1080p].mkv",
-        clock=lambda: next(monotonic),
-        wall_clock=lambda: next(wall),
-        writer=writer,
-    )
-    initial = writer.snapshots[0]
-    assert (initial.title, initial.title_match, initial.episode) == (
-        "Nippon Sangoku",
-        "nippon sangoku",
-        7,
-    )
-
-    recorder.accrue(paused=False, language="jp")
-    recorder.accrue(paused=False, language="en")
-    recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
-    recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
-    recorder.record_lookup()
-    recorder.record_capture()
-    recorder.record_mined(2)
-    result = recorder.finish()
-
-    assert result == replace(
-        result,
-        media_name="[Grp] Nippon Sangoku - 07 [1080p].mkv",
-        title="Nippon Sangoku",
-        title_match="nippon sangoku",
-        episode=7,
-        ended_at=110.0,
-        completed=True,
-        watch_seconds=8.0,
-        jp_seconds=5.0,
-        en_seconds=3.0,
-        cue_count=1,
-        lookup_count=1,
-        capture_count=1,
-        mined_count=2,
-    )
-    assert writer.closed
-    assert summary(result) == (
-        "0.1 min watched · 1 cues · 1 lookups · 1 captures · 2 cards · JP 0.1 min / EN 0.1 min"
-    )
 
 
 def test_async_writer_persists_distinct_and_incomplete_sessions(tmp_path):
@@ -103,21 +50,6 @@ def test_async_writer_persists_distinct_and_incomplete_sessions(tmp_path):
         ("first", False, 0),
     ]
     assert (rows[0].title, rows[0].title_match, rows[0].episode) == ("Show", "show", 12)
-
-
-def test_recorder_revision_updates_dedup_identity_without_counting_another_cue():
-    recorder = SessionRecorder(
-        "/anime/Show 01.mkv",
-        clock=lambda: 0.0,
-        wall_clock=lambda: 0.0,
-        writer=FakeWriter(),
-    )
-    recorder.record_cue(("jp", 1.0, 2.0, "字幕"))
-
-    recorder.revise_cue(("jp", 3.0, 4.0, "字幕"))
-    recorder.record_cue(("jp", 3.0, 4.0, "字幕"))
-
-    assert recorder.snapshot.cue_count == 1
 
 
 def test_store_migrates_pre_episode_schema(tmp_path):
@@ -150,37 +82,6 @@ def test_store_migrates_pre_episode_schema(tmp_path):
     store.close()
 
     assert (row.session_id, row.title, row.episode) == ("old", "", None)
-
-
-def test_analysis_snapshot_reuses_shared_result_without_cues():
-    result = SimpleNamespace(
-        content_token_count=10,
-        known_token_coverage=0.8,
-        known_type_coverage=0.6,
-        unique_kanji=frozenset("日本"),
-        unique_lemmas=frozenset(("日本", "行く")),
-        unknown_lemmas=frozenset(("行く",)),
-    )
-
-    assert json.loads(analysis_snapshot(result)) == {
-        "content_tokens": 10,
-        "known_token_coverage": 0.8,
-        "known_type_coverage": 0.6,
-        "unique_kanji": 2,
-        "unique_lemmas": 2,
-        "unknown_lemmas": 1,
-    }
-
-
-def test_disabled_stats_does_not_touch_ipc():
-    recorder = start(
-        current=None,
-        enabled=False,
-        path=lambda: (_ for _ in ()).throw(AssertionError("IPC touched")),
-        arm=lambda _seconds: None,
-    )
-
-    assert recorder is None
 
 
 def test_history_owner_finish_retires_recorder_before_restart(monkeypatch):
