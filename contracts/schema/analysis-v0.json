@@ -7,7 +7,7 @@
   "required": ["scenario_id", "mode", "cases", "expect"],
   "properties": {
     "scenario_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "mode": {"const": "episode"},
+    "mode": {"enum": ["episode", "lifecycle"]},
     "cases": {"type": "array", "minItems": 1, "items": {"type": "object"}},
     "expect": {"type": "array", "minItems": 1}
   }

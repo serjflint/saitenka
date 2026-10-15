@@ -86,8 +86,10 @@ adapter in another language receives inputs but no answers. Rows conform to `sch
 ## Analysis v0 protocol
 
 `saitenka.analysis/v0` uses capability `analysis-v0`. It evaluates whole-track lexical metrics and cache
-identity from JSON cues and vocabulary snapshots. Controller scheduling and history persistence remain
-native concurrency and storage contracts. Rows conform to `schema/analysis-v0.json`.
+identity from JSON cues and vocabulary snapshots. Lifecycle rows drive the assembled analysis command and
+observe visible state, availability, background completion, dependency deferral, and playback neutrality.
+Worker interleavings and history persistence remain native concurrency and storage contracts. Rows conform
+to `schema/analysis-v0.json`.
 
 ## Dictionary v0 protocol
 

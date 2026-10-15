@@ -595,6 +595,51 @@
       "replace": "            return current",
       "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[editor-session-dispatches-value-prompts]'",
       "mismatch": "choosing taffy left layout_engine at its previous default value"
+    },
+    {
+      "id": "analysis-language-eligibility",
+      "scenario_id": "episode-analysis-lifecycle",
+      "path": "src/saitenka/app/features/analysis/analysis_controller.py",
+      "find": "        if inputs.language != MAIN_LANG or inputs.index is None:",
+      "replace": "        if inputs.language != MAIN_LANG and inputs.index is None:",
+      "command": "uv run pytest -q 'tests/contracts/test_analysis_corpus.py::test_analysis_contract[episode-analysis-lifecycle]'",
+      "mismatch": "an English track entered analysis instead of its terminal unavailable state"
+    },
+    {
+      "id": "analysis-dependency-deferral",
+      "scenario_id": "episode-analysis-lifecycle",
+      "path": "src/saitenka/app/features/analysis/analysis_controller.py",
+      "find": "        if inputs.loading:",
+      "replace": "        if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_analysis_corpus.py::test_analysis_contract[episode-analysis-lifecycle]'",
+      "mismatch": "analysis became unsettled before profile dependencies were available"
+    },
+    {
+      "id": "analysis-closed-background-publication",
+      "scenario_id": "episode-analysis-lifecycle",
+      "path": "src/saitenka/app/features/analysis/analysis_controller.py",
+      "find": "        if not state.open:\n            return",
+      "replace": "        if False:\n            return",
+      "command": "uv run pytest -q 'tests/contracts/test_analysis_corpus.py::test_analysis_contract[episode-analysis-lifecycle]'",
+      "mismatch": "a background result painted the analysis overlay while it was closed"
+    },
+    {
+      "id": "analysis-cache-reopen",
+      "scenario_id": "episode-analysis-lifecycle",
+      "path": "src/saitenka/app/features/analysis/analysis_controller.py",
+      "find": "        cached = state.cache.get(key)",
+      "replace": "        cached = None",
+      "command": "uv run pytest -q 'tests/contracts/test_analysis_corpus.py::test_analysis_contract[episode-analysis-lifecycle]'",
+      "mismatch": "reopening a completed analysis started another job instead of returning ready immediately"
+    },
+    {
+      "id": "analysis-vocabulary-cache-invalidation",
+      "scenario_id": "episode-analysis-lifecycle",
+      "path": "src/saitenka/app/features/analysis/analysis_controller.py",
+      "find": "        if vocabulary_changed:\n            state.cache.clear()",
+      "replace": "        if False:\n            state.cache.clear()",
+      "command": "uv run pytest -q 'tests/contracts/test_analysis_corpus.py::test_analysis_contract[episode-analysis-lifecycle]'",
+      "mismatch": "a vocabulary change reused the old ready result instead of reanalyzing"
     }
   ]
 }
