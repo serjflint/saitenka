@@ -307,6 +307,24 @@
       "replace": "    return ()",
       "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
       "mismatch": "the externally visible hidden and shown transitions disappeared"
+    },
+    {
+      "id": "annotation-stale-completion-fence",
+      "scenario_id": "assembled-annotation-controller",
+      "path": "src/saitenka/app/features/annotation/jobs.py",
+      "find": "        return AnnotationDisposition.STALE_CUE",
+      "replace": "        return AnnotationDisposition.PUBLISH",
+      "command": "uv run pytest -q tests/features/annotation/test_annotation_controller.py::test_stale_completion_cannot_publish_into_a_replacement_cue",
+      "mismatch": "a stale annotation completion published into the replacement cue"
+    },
+    {
+      "id": "subtitle-navigation-late-due-fence",
+      "scenario_id": "assembled-session-controller",
+      "path": "src/saitenka/app/subnav_settle.py",
+      "find": "        if identity.revision != self.revision:",
+      "replace": "        if False:",
+      "command": "uv run pytest -q tests/session/test_session_controller.py::test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open",
+      "mismatch": "a superseded due event closed the current navigation window"
     }
   ]
 }
