@@ -406,6 +406,15 @@
       "replace": "    language = validate_language_code(str(raw.get(\"language\", MAIN_LANG)))",
       "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-identity-ja]'",
       "mismatch": "the ja alias published ja instead of the canonical jp identity"
+    },
+    {
+      "id": "analysis-n-plus-two-threshold",
+      "scenario_id": "episode-analysis-laws",
+      "path": "src/saitenka/app/features/analysis/episode_analysis.py",
+      "find": "        sum(len(profile.unknown_indices) == 2 for profile in eligible),",
+      "replace": "        sum(len(profile.unknown_indices) == 3 for profile in eligible),",
+      "command": "uv run pytest -q tests/contracts/test_analysis_corpus.py",
+      "mismatch": "a two-unknown sentence stopped counting as N+2"
     }
   ]
 }

@@ -77,3 +77,9 @@ adapter.
 `saitenka.wordstate/v0` uses capability `wordstate-v0`. It evaluates JSON numeric cases for FSRS
 retrievability and frequency/rareness laws. The reference-vector expectations stay with the runner, so an
 adapter in another language receives inputs but no answers. Rows conform to `schema/wordstate-v0.json`.
+
+## Analysis v0 protocol
+
+`saitenka.analysis/v0` uses capability `analysis-v0`. It evaluates whole-track lexical metrics and cache
+identity from JSON cues and vocabulary snapshots. Controller scheduling and history persistence remain
+native concurrency and storage contracts. Rows conform to `schema/analysis-v0.json`.

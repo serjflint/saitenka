@@ -7,6 +7,7 @@ from pathlib import Path
 
 if __package__:
     from . import (
+        analysis_adapter,
         cli_adapter,
         config_adapter,
         saitenka_session_adapter,
@@ -16,6 +17,7 @@ if __package__:
     from . import protocol as session_protocol
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import analysis_adapter
     import cli_adapter
     import config_adapter
     import protocol as session_protocol
@@ -25,6 +27,7 @@ else:
 
 Adapter = tuple[str, Callable[[dict], object]]
 ADAPTERS: dict[str, Adapter] = {
+    analysis_adapter.PROTOCOL: (analysis_adapter.CAPABILITY, analysis_adapter.evaluate),
     saitenka_session_adapter.PROTOCOL: (
         session_protocol.CAPABILITY,
         saitenka_session_adapter.execute,
