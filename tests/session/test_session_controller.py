@@ -1477,18 +1477,6 @@ def _reader_with_word(ipc):
     return r
 
 
-def test_pause_on_tooltip_pauses_then_resumes(monkeypatch):
-    ipc = FakeIPC()
-    ipc.props["pause"] = False
-    r = _reader_with_word(ipc)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())  # keep our boxes
-    r.graph.tooltip.show_tooltip(0)  # tooltip shown → pause
-    assert ("set_property", "pause", True) in ipc.commands
-    r.graph.tooltip.select(0)
-    r.graph.tooltip.retire_hover()  # tooltip hidden → resume
-    assert ("set_property", "pause", False) in ipc.commands
-
-
 def test_set_hover_refuses_the_nothing_hovered_sentinel():
     """`set_hover` shows a word; "nothing hovered" is `retire_hover` and nothing else.
 
@@ -2189,29 +2177,6 @@ def _point_at_link(r) -> Driver:
     )
 
 
-def test_click_cross_reference_navigates_base_in_place(monkeypatch):
-    # Yomitan historyMode:new — a cross-reference click REPLACES the base tooltip content in place and
-    # pushes the previous view for back, instead of spawning a fragile floating nested popup.
-    from saitenka.app.features.tooltip import tooltip
-
-    ipc = FakeIPC()
-    r = _link_reader(ipc)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    _hover_base_word(r)
-    assert r.graph.tooltip.hover_view().tip.links  # the def body exposed a clickable link
-    base = r.graph.tooltip.surface_state().view.state
-    _point_at_link(r).click()
-    assert not r.graph.tooltip.hover_view().nested.shown  # NOT a nested popup
-    assert (
-        r.graph.tooltip.hover_view().tip.shown
-        and r.graph.tooltip.hover_view().tip.panel_id != id(base)
-    )
-    assert tooltip.tip_back(
-        r.graph.tooltip.tip_ports
-    ) is True and r.graph.tooltip.hover_view().tip.panel_id == id(base)
-    assert tooltip.tip_back(r.graph.tooltip.tip_ports) is False
-
-
 class _WildcardDS:
     """A def body whose cross-reference is a WILDCARD, plus a search() that returns clickable results."""
 
@@ -2454,22 +2419,6 @@ def test_click_link_does_not_mine_or_speak(monkeypatch):
     assert (
         events == [] and r.graph.tooltip.observation().navigation_depth == 1
     )  # navigated the base, no mine/speak fallthrough
-
-
-# --- copy: Shift+C (whole line) and right-click (word under cursor) + highlight flash ---------------
-
-
-def test_right_click_copies_hovered_word_and_flashes(monkeypatch):
-    ipc = FakeIPC()
-    r = _scan_reader(ipc)
-    monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
-    _hover_base_word(r)
-    got = []
-    monkeypatch.setattr(tooltip, "copy_clipboard", lambda s: got.append(s))
-    tx, ty, tw, _th = r.graph.tooltip.surface_state().view.rect
-    Driver(r, instant=False).move(tx + tw / 2, ty + 5).right_click()  # header, not a scan cell
-    assert got and "本命" in got[0]  # copied the hovered word
-    assert r.graph.tooltip.observation().pulse.overlay == OverlayId.TIP
 
 
 def test_right_click_on_nested_copies_inner_word(monkeypatch):

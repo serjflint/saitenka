@@ -7,3 +7,4 @@ interaction state machine stay native boundaries.
 
 Ignoring a positive user scale override makes `tooltip-scale-and-placement` fail at both 1080p and 4K.
 Ignoring the subtitle origin makes `tooltip-token-hit-testing` resolve no token for an offset cue.
+Dropping word copy, link navigation, or pause ownership makes `tooltip-core-interaction` fail.

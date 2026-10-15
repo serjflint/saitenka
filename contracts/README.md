@@ -107,7 +107,9 @@ and user-scale inputs and return only visible sizes and coordinates. The contrac
 raster buckets, caps, nested-popup height, clamping, and side selection without exposing controller or cache
 objects. Hit-testing scenarios map frame coordinates to interactive token indices while respecting cue
 origins and noninteractive tokens. Font rasterization, cross-engine hit-map agreement, hover concurrency,
-and interaction state stay native tests. Rows conform to `schema/tooltip-v0.json`.
+and interaction state stay native tests. Interaction scenarios cover hover presentation, word copy, link
+navigation, and pause ownership through the assembled surface router. Rows conform to
+`schema/tooltip-v0.json`.
 
 ## History v0 protocol
 

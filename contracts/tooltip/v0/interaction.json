@@ -1,0 +1,1 @@
+[{"scenario_id":"tooltip-core-interaction","mode":"interaction","cases":[{"op":"hover-copy"},{"op":"link-navigation"},{"op":"pause-ownership"}],"expect":[{"shown":true,"selected":0,"copied":["本命【ほんめい】"],"pulse":"4"},{"navigation_depth":1,"shown":true},{"pause_commands":[true],"owned_before_leave":true,"owned_after_leave":false}]}]

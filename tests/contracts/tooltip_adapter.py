@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import sys
 from itertools import starmap
+from pathlib import Path
 
 PROTOCOL = "saitenka.tooltip/v0"
 CAPABILITY = "tooltip-v0"
 ANSWER_KEYS = frozenset({"expect"})
-MODES = frozenset({"geometry", "hit-testing"})
+MODES = frozenset({"geometry", "hit-testing", "interaction"})
 
 
 def scenario_request(scenario: dict) -> dict:
@@ -36,6 +38,8 @@ def evaluate(request: dict) -> list[object]:
     validate_request(request)
     if request["mode"] == "hit-testing":
         return [_hit_test(case) for case in request["cases"]]
+    if request["mode"] == "interaction":
+        return [_interaction(case) for case in request["cases"]]
     return [_evaluate_case(case) for case in request["cases"]]
 
 
@@ -50,6 +54,76 @@ def _hit_test(case: dict) -> int:
         tuple(case["origin"]),
         is_skippable=skippable.__contains__,
     )
+
+
+def _interaction(case: dict) -> object:
+    tests = Path(__file__).resolve().parents[1]
+    if str(tests) not in sys.path:
+        sys.path.insert(0, str(tests))
+    from driver import Driver
+    from tip_fakes import hidpi_reader
+
+    from saitenka.app.features.tooltip import tooltip, tooltip_panel
+    from saitenka.app.subtitle_render import NullRenderer
+
+    session = hidpi_reader(1.0)
+    graph = session.graph
+    graph.subtitle_presentation.renderer = NullRenderer()
+    driver = Driver(session, instant=False)
+    copied: list[str] = []
+    original_copy = tooltip.copy_clipboard
+    tooltip.copy_clipboard = copied.append
+    try:
+        driver.move_to_word(0)
+        op = case["op"]
+        if op == "hover-copy":
+            rect = graph.tooltip.surface_state().view.rect
+            assert rect is not None
+            driver.move(rect[0] + rect[2] / 2, rect[1] + 5).right_click()
+            return {
+                "shown": graph.tooltip.hover_view().tip.shown,
+                "selected": graph.tooltip.observation().selected,
+                "copied": copied,
+                "pulse": str(graph.tooltip.observation().pulse.overlay),
+            }
+        if op == "link-navigation":
+            view = graph.tooltip.surface_state().view
+            panel, scale, scroll = tooltip_panel.hit_target(
+                graph.tooltip.surface_state().nest,
+                view.state,
+                view.scroll,
+                graph.tooltip.scale().raster,
+                nested=False,
+            )
+            assert panel is not None and view.xy is not None
+            panel.windowed.viewport(0, 1_000_000)
+            link = next(
+                box for box in panel.windowed.link_boxes() if not box.query.startswith("kanji:")
+            )
+            x = view.xy[0] + (link.x + link.w / 2) * scale
+            y = view.xy[1] + (link.y + link.h / 2 - scroll) * scale
+            driver.move(x, y).click()
+            return {
+                "navigation_depth": graph.tooltip.observation().navigation_depth,
+                "shown": graph.tooltip.hover_view().tip.shown,
+            }
+        if op == "pause-ownership":
+            paused = [
+                command[2]
+                for command in graph.ipc.commands
+                if command[:2] == ("set_property", "pause")
+            ]
+            owned_before = graph.tooltip.observation().pause.held
+            graph.tooltip.retire_hover()
+            return {
+                "pause_commands": paused,
+                "owned_before_leave": owned_before,
+                "owned_after_leave": graph.tooltip.observation().pause.held,
+            }
+        raise ValueError(f"unknown tooltip interaction operation: {op!r}")
+    finally:
+        tooltip.copy_clipboard = original_copy
+        session.close()
 
 
 def _evaluate_case(case: dict) -> object:

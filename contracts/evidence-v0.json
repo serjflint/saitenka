@@ -721,6 +721,33 @@
       "replace": "        actions.seek(\"sidebar-seek-cue\", view.index.cues[hit.value].end)",
       "command": "uv run pytest -q 'tests/contracts/test_sidebar_corpus.py::test_sidebar_contract[sidebar-navigation-interaction]'",
       "mismatch": "clicking cue seven sought to 7.8 seconds instead of its 7.0-second start"
+    },
+    {
+      "id": "tooltip-word-copy",
+      "scenario_id": "tooltip-core-interaction",
+      "path": "src/saitenka/app/features/tooltip/tooltip.py",
+      "find": "    copy_clipboard(token_clip(t))",
+      "replace": "    pass",
+      "command": "uv run pytest -q 'tests/contracts/test_tooltip_corpus.py::test_tooltip_contract[tooltip-core-interaction]'",
+      "mismatch": "right-clicking the hovered word produced no clipboard text"
+    },
+    {
+      "id": "tooltip-link-navigation",
+      "scenario_id": "tooltip-core-interaction",
+      "path": "src/saitenka/app/features/tooltip/tooltip.py",
+      "find": "            navigate_tip(ports, panel, lb.query)",
+      "replace": "            pass",
+      "command": "uv run pytest -q 'tests/contracts/test_tooltip_corpus.py::test_tooltip_contract[tooltip-core-interaction]'",
+      "mismatch": "clicking a dictionary cross-reference left navigation depth at zero"
+    },
+    {
+      "id": "tooltip-pause-ownership",
+      "scenario_id": "tooltip-core-interaction",
+      "path": "src/saitenka/runtime/hover_pause.py",
+      "find": "    return PauseTurn(PauseClaim(held=True))",
+      "replace": "    return PauseTurn(PauseClaim())",
+      "command": "uv run pytest -q 'tests/contracts/test_tooltip_corpus.py::test_tooltip_contract[tooltip-core-interaction]'",
+      "mismatch": "the tooltip paused playback without recording that it owed the resume"
     }
   ]
 }
