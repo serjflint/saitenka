@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791813635309,
+  "lastUpdate": 1792051664803,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18533,6 +18533,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.128825,
             "range": "3 replicas; min 1.06511; max 3.37854; MAD 0.063714; worst 3.37854",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2030a90ff1b75a58e1fc22e9e4b125964b6a3e27",
+          "message": "Merge pull request #556 from serjflint/audit/core-test-trim-20261011\n\nrefactor(core): replace obsolete seams with portable behavior contracts",
+          "timestamp": "2026-10-15T11:04:07+03:00",
+          "tree_id": "6e2296de33f81ea943e39b01b2b502b1e84569d1",
+          "url": "https://github.com/serjflint/saitenka/commit/2030a90ff1b75a58e1fc22e9e4b125964b6a3e27"
+        },
+        "date": 1792051663822,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 4.982149,
+            "range": "3 replicas; min 3.66039; max 6.67485; MAD 1.32176",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.042347,
+            "range": "3 replicas; min 7.20442; max 9.47922; MAD 0.436877; worst 9.47922",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.833889,
+            "range": "3 replicas; min 10.4153; max 21.7574; MAD 4.41854",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.90876,
+            "range": "3 replicas; min 10.7679; max 21.8996; MAD 4.14087; worst 21.8996",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 10.889047,
+            "range": "3 replicas; min 10.6958; max 13.7671; MAD 0.193238",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.069803,
+            "range": "3 replicas; min 0.049285; max 0.124583; MAD 0.020518; worst 0.124583",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 30.607638,
+            "range": "3 replicas; min 29.8567; max 43.0943; MAD 0.750928; worst 43.0943",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.872778,
+            "range": "3 replicas; min 2.87784; max 6.67616; MAD 0.994937; worst 6.67616",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 0.933205,
+            "range": "3 replicas; min 0.908074; max 1.33652; MAD 0.025131; worst 1.33652",
             "unit": "ms"
           }
         ]
