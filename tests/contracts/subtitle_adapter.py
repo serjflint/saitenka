@@ -8,6 +8,7 @@ ANSWER_KEYS = frozenset({"expect"})
 MODE_KEYS = {
     "render-inputs": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "renderer-state": frozenset({"scenario_id", "mode", "cases", "expect"}),
+    "selection-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
 }
 BASELINE_SETTINGS = {
     "sub-ass-override": "no",
@@ -134,5 +135,64 @@ def _renderer_state(case: dict) -> dict:
 
 def evaluate(request: dict) -> object:
     validate_request(request)
+    if request["mode"] == "selection-policy":
+        return [_selection_policy(case) for case in request["cases"]]
     evaluator = _render_inputs if request["mode"] == "render-inputs" else _renderer_state
     return [evaluator(case) for case in request["cases"]]
+
+
+def _selection_policy(case: dict) -> object:
+    from saitenka.app.subtitle_selection import (
+        SubtitleTracks,
+        discover,
+        fetch_action,
+        initial,
+        language_name,
+        matches_target_language,
+        primary_role,
+        selects_background_japanese,
+        toggle_target,
+    )
+
+    op = case["op"]
+    if op == "discover":
+        tracks = discover(case["tracks"], case["primary"])
+        return {"jp_sid": tracks.jp_sid, "en_sid": tracks.en_sid}
+    if op == "initial":
+        startup = initial(case["tracks"], case["primary"], case["secondary"])
+        return {
+            "tracks": {"jp_sid": startup.tracks.jp_sid, "en_sid": startup.tracks.en_sid},
+            "active": startup.active,
+        }
+    if op == "toggle":
+        decision = toggle_target(
+            SubtitleTracks(case["jp_sid"], case["en_sid"]),
+            active_sid=case["active_sid"],
+            language=case["language"],
+        )
+        return {"target": decision.target, "sid": decision.sid, "available": decision.available}
+    if op == "role":
+        return primary_role(
+            case["sid"],
+            SubtitleTracks(case["jp_sid"], case["en_sid"]),
+            track_lang=case["track_lang"],
+            sample=case["sample"],
+            primary_slang=case.get("primary", "ja,jpn,jp"),
+            second_slang=case.get("secondary", "en"),
+        )
+    if op == "language-name":
+        return language_name(case["language"])
+    if op == "fetch":
+        return fetch_action(
+            path_available=case["path_available"],
+            force_select=case["force_select"],
+            replace=case["replace"],
+            language=case["language"],
+        ).value
+    if op == "background-select":
+        return selects_background_japanese(
+            **{key: value for key, value in case.items() if key != "op"}
+        )
+    if op == "matches-language":
+        return matches_target_language(case["tag"], case["target"])
+    raise ValueError(f"unknown selection policy operation: {op!r}")

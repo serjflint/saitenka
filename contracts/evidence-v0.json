@@ -361,6 +361,15 @@
       "replace": "    return ()",
       "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[sidebar-and-analysis-toggle-visible-surfaces]'",
       "mismatch": "the sidebar and analysis panel surface lifecycles disappeared"
+    },
+    {
+      "id": "subtitle-known-track-role",
+      "scenario_id": "subtitle-selection-policy",
+      "path": "src/saitenka/app/subtitle_selection.py",
+      "find": "    if sid == tracks.en_sid:\n        return SECOND_LANG",
+      "replace": "    if sid == tracks.en_sid:\n        return MAIN_LANG",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-selection-policy]'",
+      "mismatch": "a known English SID was classified as the Japanese role"
     }
   ]
 }

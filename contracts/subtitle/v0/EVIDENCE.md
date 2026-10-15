@@ -9,3 +9,4 @@ Representative fault checks:
 - accepting `sub-scale=1.5` under the unscaled authored profile fails the refusal matrix;
 - retaining the window margins while `blend-subtitles=yes` fails the normalized frame and origin;
 - reading `sub-scale-signs` without inversion fails the renderer-state matrix.
+- classifying a known English SID as Japanese fails the selection-policy matrix.
