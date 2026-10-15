@@ -116,3 +116,10 @@ explicit relinking, status changes, text export, and privacy-safe summaries in a
 history scenarios drive clocked playback events and return normalized aggregates and summaries. Storage
 migrations, async writer scheduling, and assembled bookmark input stay native tests. Rows conform to
 `schema/history-v0.json`.
+
+## Picker v0 protocol
+
+`saitenka.picker/v0` uses capability `picker-v0`. Interaction cases supply provider candidates, warnings,
+failures and pointer actions, then observe normalized visible rows, panel capture, scroll, selected downloads,
+and close state. Provider scheduling and render geometry stay native tests. Rows conform to
+`schema/picker-v0.json`.

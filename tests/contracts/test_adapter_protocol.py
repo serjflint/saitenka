@@ -14,6 +14,7 @@ from . import (
     config_adapter,
     dictionary_adapter,
     history_adapter,
+    picker_adapter,
     subtitle_adapter,
     tooltip_adapter,
     wordstate_adapter,
@@ -89,6 +90,7 @@ def test_contract_schemas_are_machine_readable() -> None:
         "analysis-v0.json": load_row_corpus(ROOT / "contracts/analysis/v0"),
         "dictionary-v0.json": load_row_corpus(ROOT / "contracts/dictionary/v0"),
         "history-v0.json": load_row_corpus(ROOT / "contracts/history/v0"),
+        "picker-v0.json": load_row_corpus(ROOT / "contracts/picker/v0"),
         "tooltip-v0.json": load_row_corpus(ROOT / "contracts/tooltip/v0"),
     }
     for name, rows in corpora.items():
@@ -142,6 +144,7 @@ def _json_rows(path: str) -> list[dict]:
         "dictionary",
         "tooltip",
         "history",
+        "picker",
     ],
 )
 def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus: str) -> None:
@@ -190,10 +193,14 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
         scenarios = load_row_corpus(ROOT / "contracts/tooltip/v0")
         protocol, capability = tooltip_adapter.PROTOCOL, tooltip_adapter.CAPABILITY
         requests = [tooltip_adapter.scenario_request(row) for row in scenarios]
-    else:
+    elif corpus == "history":
         scenarios = load_row_corpus(ROOT / "contracts/history/v0")
         protocol, capability = history_adapter.PROTOCOL, history_adapter.CAPABILITY
         requests = [history_adapter.scenario_request(row) for row in scenarios]
+    else:
+        scenarios = load_row_corpus(ROOT / "contracts/picker/v0")
+        protocol, capability = picker_adapter.PROTOCOL, picker_adapter.CAPABILITY
+        requests = [picker_adapter.scenario_request(row) for row in scenarios]
 
     results = run_protocol(
         [sys.executable, str(Path(__file__).with_name("default_adapter.py"))],

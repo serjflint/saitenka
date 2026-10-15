@@ -667,6 +667,33 @@
       "replace": "        if False:",
       "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-switch-policy]'",
       "mismatch": "a same-track profile change stopped retokenizing the visible cue"
+    },
+    {
+      "id": "picker-explicit-selection",
+      "scenario_id": "subtitle-picker-interaction",
+      "path": "src/saitenka/app/features/picker/sub_picker.py",
+      "find": "        force_select=True,",
+      "replace": "        force_select=False,",
+      "command": "uv run pytest -q 'tests/contracts/test_picker_corpus.py::test_picker_contract[subtitle-picker-interaction]'",
+      "mismatch": "an explicitly clicked subtitle was submitted as an unattended background selection"
+    },
+    {
+      "id": "picker-scroll-pointer-gate",
+      "scenario_id": "subtitle-picker-interaction",
+      "path": "src/saitenka/app/features/picker/picker_controller.py",
+      "find": "    def scroll(self, wheel: WheelStep, steps: int) -> bool:\n        state = self.state\n        if not state.open:\n            return False\n        if not claims_pointer(self.panel.rect, wheel.pointer, open_=state.open):\n            return False",
+      "replace": "    def scroll(self, wheel: WheelStep, steps: int) -> bool:\n        state = self.state\n        if not state.open:\n            return False",
+      "command": "uv run pytest -q 'tests/contracts/test_picker_corpus.py::test_picker_contract[subtitle-picker-interaction]'",
+      "mismatch": "wheel input outside the picker scrolled it and doubled the offset"
+    },
+    {
+      "id": "picker-hover-pointer-gate",
+      "scenario_id": "subtitle-picker-interaction",
+      "path": "src/saitenka/app/features/picker/picker_controller.py",
+      "find": "    def suppress_hover(self, suppression: HoverSuppression) -> bool:\n        state = self.state\n        if not state.open:\n            return False\n        if not claims_pointer(self.panel.rect, suppression.pointer, open_=state.open):\n            return False",
+      "replace": "    def suppress_hover(self, suppression: HoverSuppression) -> bool:\n        state = self.state\n        if not state.open:\n            return False",
+      "command": "uv run pytest -q 'tests/contracts/test_picker_corpus.py::test_picker_contract[subtitle-picker-interaction]'",
+      "mismatch": "the picker suppressed subtitle hover while the pointer was outside its panel"
     }
   ]
 }
