@@ -12,13 +12,12 @@ from __future__ import annotations
 import pytest
 from saitenka_subtitles import CueIndex, parse_srt
 from saitenka_tokenize.japanese import Token
-from saitenka_tokenize.languages import MAIN_LANG, ReaderLanguages
+from saitenka_tokenize.languages import ReaderLanguages
 from saitenka_tokenize.registry import register_tokenizer
 from session_builder import TestSession, build_session
-from util import FakeIPC, await_ready, keybind_registry, press, session_gateway
+from util import FakeIPC, await_ready, session_gateway
 
 from saitenka.app import bindings as app_bindings
-from saitenka.app.config import ReaderOptions
 from saitenka.app.features.profiles.profile_controller import ProfileSwitchStatus
 from saitenka.app.profiles import DEFAULT_PROFILE, Profile
 from saitenka.app.session.factory import (
@@ -26,7 +25,6 @@ from saitenka.app.session.factory import (
     SessionInfrastructure,
     SessionServices,
 )
-from saitenka.app.subtitle_providers import enabled_providers_for, register_provider
 from saitenka.app.subtitle_render import NullRenderer
 from saitenka.runtime.events import SubtitleLanguageChanged
 
@@ -118,89 +116,6 @@ def _headless(request, profile=None, profiles=None) -> TestSession:
     return reader
 
 
-def test_cycle_is_a_noop_with_a_single_profile(request):
-    reader = _headless(request)
-    ipc = reader.graph.ipc
-    key = ReaderOptions().keys.profile_cycle_key
-    reader.graph.commands.install_input()
-    assert keybind_registry(ipc).get(key) == app_bindings.PROFILE_CYCLE_MSG
-    before = (
-        reader.graph.profile.profile.tokenizer.name,
-        reader.graph.profile.profile.langs.main,
-        reader.graph.profile.profile.profile,
-        reader.graph.annotation.token_generation,
-    )
-
-    press(reader, ipc, key)
-
-    assert (
-        reader.graph.profile.profile.tokenizer.name,
-        reader.graph.profile.profile.langs.main,
-        reader.graph.profile.profile.profile,
-        reader.graph.annotation.token_generation,
-    ) == before
-
-
-# --- cycling: the key rotates the identity observably (tokenizer + langs + provider gating) ---------
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-@pytest.mark.parametrize(
-    ("count", "initial", "expected"), [(2, 0, 1), (2, 1, 0), (3, 1, 2), (3, 2, 0)]
-)
-def test_pressing_the_key_cycles_the_reading_identity(
-    monkeypatch, make_session, count, initial, expected
-):
-    import saitenka.app.subtitle_providers as prov
-
-    monkeypatch.setattr(prov, "_REGISTRY", {})
-    register_provider(_stub_provider("jimaku", frozenset({"jp"})))
-    register_provider(_stub_provider("universal", frozenset()))
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    flags = (("jimaku", True), ("universal", True))
-    english = Profile(name="en", langs=ReaderLanguages(main="en", second="jp"), tokenizer="latin")
-    profiles = (DEFAULT_PROFILE, _FR, english)[:count]
-    ipc = FakeIPC()
-    options = ReaderOptions()
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
-        options=options,
-        identity=SessionIdentity(profile=profiles[initial]),
-    )
-    reader.graph.profile.profile.configure_cycle(profiles)
-    reader.graph.screen.osd = (1280, 720)
-    reader.graph.commands.install_input()
-
-    press(reader, ipc, options.keys.profile_cycle_key)
-
-    selected = profiles[expected]
-    active = reader.graph.profile.profile
-    assert (active.profile, active.tokenizer.name, active.langs) == (
-        selected,
-        selected.tokenizer,
-        selected.langs,
-    )
-    assert enabled_providers_for(active.langs.main, flags) == (
-        ("jimaku", "universal") if selected.langs.main == "jp" else ("universal",)
-    )
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_same_track_cycle_retokenizes_the_observed_cue(request):
-    register_tokenizer("latin", lambda: _TaggedTokenizer("new"))
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR])
-    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
-    reader.graph.profile.profile.use_tokenizer(_TaggedTokenizer("old"))
-    reader.graph.playback.observe("sub-text", "本")
-    reader.pump()
-
-    reader.command(app_bindings.PROFILE_CYCLE_MSG)
-    reader.pump()
-
-    assert reader.graph.subtitle_presentation.cue.current.tokens[0].lemma == "new"
-
-
 def test_dictionary_replacement_retires_tooltip_work_and_cached_panels(request):
     reader = _headless(request)
     reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
@@ -213,87 +128,6 @@ def test_dictionary_replacement_retires_tooltip_work_and_cached_panels(request):
 
     assert reader.graph.tooltip_preparation.generation > generation
     assert reader.graph.tooltip.cache_totals() == (0, 0)
-
-
-# --- the track re-selection that makes the cycle a FULL switch (the reported gap) ------------------
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_selects_the_new_profiles_language_track(request, monkeypatch):
-    """The reported bug: cycling to French swapped the engine but left mpv on the JP track, so lookups
-    missed. A profile with its own slang now re-selects THAT language's track (into the target slot, so
-    it colors + scans) exactly as a ``--profile french`` launch does."""
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
-    reader.graph.ipc.props["track-list"] = _JA_FR_TRACKS
-    retokenized: list[bool] = []
-    monkeypatch.setattr(
-        type(reader.graph.profile_integration),
-        "retokenize_current_cue",
-        lambda _self: retokenized.append(True),
-    )
-
-    reader.command(app_bindings.PROFILE_CYCLE_MSG)  # → fr
-
-    assert ("set_property", "sid", 6) in reader.graph.ipc.commands  # the fr track is now primary
-    assert reader.graph.track_commands.current().slang == "fr"
-    assert (
-        reader.graph.track_commands.current().language == MAIN_LANG
-    )  # target role → colored + scanned, not the secondary
-    assert retokenized == []
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_to_a_language_without_a_track_keeps_the_current_track_and_swaps_the_engine(
-    request, monkeypatch
-):
-    register_tokenizer("latin", lambda: _TaggedTokenizer("new"))
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_SUBS])
-    reader.graph.ipc.props["track-list"] = [{"type": "sub", "id": 1, "lang": "jpn"}]
-    reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
-    reader.graph.profile.profile.use_tokenizer(_TaggedTokenizer("old"))
-    reader.graph.playback.observe("sub-text", "本")
-    reader.pump()
-    notices: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        reader.graph.notifications,
-        "show",
-        lambda text, kind="ok", _seconds=2.8: notices.append((text, kind)),
-    )
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-    reader.pump()
-
-    assert reader.graph.profile.profile.langs.main == "fr"
-    assert reader.graph.track_commands.current().slang == "fr"
-    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
-    assert reader.graph.subtitle_presentation.cue.current.tokens[0].lemma == "new"
-    assert outcome.status is ProfileSwitchStatus.DEGRADED
-    assert any("no 'fr' subtitle track" in text and kind == "warn" for text, kind in notices)
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_degraded_cycle_reconfigures_only_the_translation_language(request):
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
-    reader.graph.ipc.props["track-list"] = [
-        {"type": "sub", "id": 1, "lang": "jpn"},
-        {"type": "sub", "id": 7, "lang": "eng"},
-        {"type": "sub", "id": 8, "lang": "deu"},
-    ]
-    reader.graph.profile_integration.select_subtitle_track("ja,jpn,jp", "en")
-    reader.graph.ipc.commands.clear()
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-
-    tracks = reader.graph.track_commands.current()
-    assert (
-        outcome.status,
-        tracks.slang,
-        tracks.second_slang,
-        tracks.en_sid,
-    ) == (ProfileSwitchStatus.DEGRADED, "fr", "de", 8)
-    assert not any(cmd[:2] == ("set_property", "sid") for cmd in reader.graph.ipc.commands)
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -375,49 +209,6 @@ def test_degraded_cycle_retires_the_unavailable_main_when_secondary_is_unchanged
     assert ("FR subtitles unavailable", "warn") in notices
 
 
-def test_untagged_track_does_not_claim_a_new_profile_language(request):
-    reader = _headless(request, profile=DEFAULT_PROFILE, profiles=[DEFAULT_PROFILE, _FR_DE_SUBS])
-    reader.graph.ipc.props["track-list"] = [
-        {"type": "sub", "id": 1},
-        {"type": "sub", "id": 8, "lang": "deu"},
-    ]
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-
-    assert outcome.status is ProfileSwitchStatus.DEGRADED
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-def test_cycle_back_to_the_default_reselects_its_track_via_base_slang(request, make_session):
-    """Wrapping back to the slang-less JP default re-selects its track using the launcher's base slang,
-    proving that the fallback is not hard-coded to the default string."""
-    register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
-    ipc = FakeIPC()
-    gateway = session_gateway(ipc)  # selection issues correlated commands
-    request.addfinalizer(gateway.close)
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(renderer=NullRenderer()),
-        identity=SessionIdentity(
-            profile=DEFAULT_PROFILE,
-        ),
-    )
-    request.addfinalizer(reader.close)
-    reader.graph.profile.profile.configure_cycle([DEFAULT_PROFILE, _FR_SUBS], base_slang="jpn")
-    reader.graph.screen.osd = (1280, 720)
-    reader.graph.ipc.props["track-list"] = _JA_FR_TRACKS
-
-    reader.command(app_bindings.PROFILE_CYCLE_MSG)  # → fr (sid 6)
-    assert reader.graph.track_commands.current().slang == "fr"
-
-    reader.command(
-        app_bindings.PROFILE_CYCLE_MSG
-    )  # wraps → JP default; effective slang = base_slang "jpn" → the jpn track
-
-    assert reader.graph.track_commands.current().slang == "jpn"
-    assert ("set_property", "sid", 1) in reader.graph.ipc.commands
-
-
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 @pytest.mark.parametrize(
     ("initial", "target", "secondary_sid"),
@@ -465,43 +256,6 @@ def test_cycle_that_switches_tracks_clears_the_translation_secondary_mirror(
         secondary_sid,
     )
     assert secondary[-1] == secondary_sid
-
-
-@pytest.mark.usefixtures("_restore_tokenizer_registry")
-@pytest.mark.parametrize(("slang", "translation_sid"), [("fr", 8), ("fra", None)])
-def test_cycle_reconfigures_translation_when_only_the_second_language_changes(
-    request, slang, translation_sid
-):
-    old = Profile("fr", ReaderLanguages("fr", "en"), "oldtok", slang="fr")
-    new = Profile("target", ReaderLanguages("fr", "de"), "newtok", slang=slang)
-    register_tokenizer("oldtok", lambda: _TaggedTokenizer("old"))
-    register_tokenizer("newtok", lambda: _TaggedTokenizer("new"))
-    reader = _headless(request, profile=old, profiles=[old, new])
-    reader.graph.ipc.props["track-list"] = [{"type": "sub", "id": 6, "lang": slang}]
-    if translation_sid is not None:
-        reader.graph.ipc.props["track-list"].extend(
-            [
-                {"type": "sub", "id": 7, "lang": "eng"},
-                {"type": "sub", "id": translation_sid, "lang": "de"},
-            ]
-        )
-    reader.graph.profile_integration.select_subtitle_track("fr", "en")
-    reader.graph.playback.observe("sub-text", "bonjour")
-    reader.pump()
-
-    outcome = reader.graph.profile.profile.switch_to(1)
-    reader.pump()
-
-    tracks = reader.graph.track_commands.current()
-    assert (
-        outcome.status,
-        reader.graph.profile.profile.langs.second,
-        tracks.slang,
-        tracks.second_slang,
-        tracks.primary_sid,
-        tracks.translation_sid,
-        reader.graph.subtitle_presentation.cue.current.tokens[0].lemma,
-    ) == (ProfileSwitchStatus.COMMITTED, "de", slang, "de", 6, translation_sid, "new")
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")

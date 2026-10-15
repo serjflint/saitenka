@@ -35,3 +35,7 @@ geometry cache to the forward window, or bypassing the OTel kill switch makes `p
 
 The scripted editor session exercises boolean, choice, and invalid-number prompt dispatch through the public
 editor loop. Returning the old value for a selected choice makes `editor-session-dispatches-value-prompts` fail.
+
+Profile-switch rows own single-profile no-op, deterministic cycling, tokenizer commit, primary and secondary
+subtitle selection, degraded missing-track fallback, retokenization, warming, and notification. Detailed
+track-role integration and generation fencing remain native.

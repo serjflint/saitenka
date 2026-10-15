@@ -63,6 +63,7 @@ MODE_KEYS = {
     "profile-identity": (frozenset({"scenario_id", "mode", "config", "expect"}), False),
     "profile-policy": (frozenset({"scenario_id", "mode", "cases", "expect"}), False),
     "config-policy": (frozenset({"scenario_id", "mode", "cases", "expect"}), False),
+    "profile-switch": (frozenset({"scenario_id", "mode", "cases", "expect"}), False),
 }
 
 
@@ -114,6 +115,8 @@ def evaluate(scenario: dict) -> object:
         return [_evaluate_profile_policy(case) for case in scenario["cases"]]
     if scenario["mode"] == "config-policy":
         return [_evaluate_config_policy(case) for case in scenario["cases"]]
+    if scenario["mode"] == "profile-switch":
+        return [_evaluate_profile_switch(case) for case in scenario["cases"]]
     if scenario["mode"] == "run":
         options = _build_run_options(
             scenario["config"], replace(BASE_FLAGS, **scenario.get("flags", {}))
@@ -297,6 +300,91 @@ def _evaluate_config_policy(case: dict) -> object:
             else:
                 os.environ[name] = value
     raise ValueError(f"unknown config policy operation: {op!r}")
+
+
+def _evaluate_profile_switch(case: dict) -> object:
+    from saitenka_tokenize import registry
+    from saitenka_tokenize.languages import ReaderLanguages
+    from saitenka_tokenize.registry import register_tokenizer
+
+    from saitenka import fonts
+    from saitenka.app.features.profiles.profile_controller import (
+        ProfileAftermath,
+        ProfileController,
+        ProfileInvalidation,
+        ProfileSubtitles,
+        next_profile_index,
+    )
+    from saitenka.app.profiles import Profile
+
+    class Tokenizer:
+        name = "latin"
+
+        def tokenize(self, *_args, **_kwargs):
+            return []
+
+    saved = dict(registry._FACTORIES)
+    register_tokenizer("latin", Tokenizer)
+    calls: list[list[object]] = []
+    notices: list[list[str]] = []
+    profiles = [
+        Profile(
+            item["name"],
+            ReaderLanguages(item["main"], item.get("second", "en")),
+            item.get("tokenizer", "latin"),
+            item.get("slang"),
+        )
+        for item in case["profiles"]
+    ]
+    available = frozenset(case.get("available", []))
+    controller = ProfileController(
+        profiles[case.get("initial", 0)],
+        None,
+        ProfileInvalidation(
+            lambda: calls.append(["invalidate-tokenizer"]),
+            lambda: calls.append(["invalidate-dictionary"]),
+            lambda: calls.append(["reset-warm"]),
+        ),
+        ProfileSubtitles(
+            current_subtitle_slang=lambda: case.get("current_slang", "ja,jpn,jp"),
+            current_second_slang=lambda: case.get("current_second", "en"),
+            has_subtitle_track=lambda slang: slang in available,
+            select_subtitle_track=lambda slang: calls.append(["select-primary", slang]),
+            retokenize_current_cue=lambda: calls.append(["retokenize"]),
+            select_subtitle_languages=lambda slang, second: (
+                calls.append(["select-languages", slang, second]) or case.get("selection_changed")
+            ),
+            select_translation_track=lambda second: calls.append(["select-translation", second]),
+            select_degraded_subtitle_languages=lambda slang, second: calls.append(
+                ["select-degraded", slang, second]
+            ),
+        ),
+        ProfileAftermath(
+            warm_episode=lambda: calls.append(["warm"]),
+            notify=lambda text, kind: notices.append([text, kind]),
+        ),
+    )
+    controller.configure_cycle(profiles, base_slang=case.get("base_slang", "ja,jpn,jp"))
+    try:
+        if case.get("action") == "cycle":
+            target = next_profile_index(len(profiles), controller.profile_index)
+            status = "no-op" if target is None else controller.switch_to(target).status.value
+        else:
+            status = controller.switch_to(case["target"]).status.value
+        return {
+            "status": status,
+            "profile": controller.profile.name,
+            "main": controller.langs.main,
+            "second": controller.langs.second,
+            "tokenizer": controller.tokenizer.name,
+            "index": controller.profile_index,
+            "calls": calls,
+            "notices": notices,
+        }
+    finally:
+        registry._FACTORIES.clear()
+        registry._FACTORIES.update(saved)
+        fonts.set_primary_font(None)
 
 
 def _evaluate_editor(scenario: dict):

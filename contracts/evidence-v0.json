@@ -640,6 +640,33 @@
       "replace": "        if False:\n            state.cache.clear()",
       "command": "uv run pytest -q 'tests/contracts/test_analysis_corpus.py::test_analysis_contract[episode-analysis-lifecycle]'",
       "mismatch": "a vocabulary change reused the old ready result instead of reanalyzing"
+    },
+    {
+      "id": "config-profile-switch-single-noop",
+      "scenario_id": "profile-switch-policy",
+      "path": "src/saitenka/app/features/profiles/profile_controller.py",
+      "find": "    if profile_count <= 1:",
+      "replace": "    if profile_count < 1:",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-switch-policy]'",
+      "mismatch": "cycling a single profile invalidated and rewarmed the same identity instead of doing nothing"
+    },
+    {
+      "id": "config-profile-switch-missing-track",
+      "scenario_id": "profile-switch-policy",
+      "path": "src/saitenka/app/features/profiles/profile_controller.py",
+      "find": "        if not primary_unchanged and not self._subtitles.has_subtitle_track(slang):",
+      "replace": "        if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-switch-policy]'",
+      "mismatch": "a missing French track committed normally instead of reporting degraded fallback"
+    },
+    {
+      "id": "config-profile-switch-retokenization",
+      "scenario_id": "profile-switch-policy",
+      "path": "src/saitenka/app/features/profiles/profile_controller.py",
+      "find": "        if track is not _TrackSwitch.SWITCHED:",
+      "replace": "        if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-switch-policy]'",
+      "mismatch": "a same-track profile change stopped retokenizing the visible cue"
     }
   ]
 }

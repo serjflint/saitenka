@@ -77,6 +77,7 @@ def test_contract_schemas_are_machine_readable() -> None:
                 "config-policy.json",
                 "options.json",
                 "profile-policy.json",
+                "profile-switch.json",
                 "profiles.json",
                 "resolution.json",
             )
@@ -157,6 +158,7 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
                 "config-policy.json",
                 "options.json",
                 "profile-policy.json",
+                "profile-switch.json",
                 "profiles.json",
                 "resolution.json",
             )
