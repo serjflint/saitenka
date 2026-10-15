@@ -58,7 +58,16 @@ ADAPTERS: dict[str, Adapter] = {
 
 
 def _result(protocol: str, request: dict, execute: Callable[[dict], object]) -> dict:
-    result = execute(request)
+    try:
+        result = execute(request)
+    except Exception as exc:  # noqa: BLE001 - the protocol reports adapter failures to its judge
+        return {
+            "type": "result",
+            "protocol": protocol,
+            "scenario_id": request["scenario_id"],
+            "status": "error",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
     if isinstance(result, dict) and result.get("type") == "result":
         return result
     return {

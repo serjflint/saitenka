@@ -147,7 +147,10 @@ def run_protocol(
         assert result.get("type") == "result"
         assert result.get("protocol") == protocol
         assert result.get("scenario_id") == request["scenario_id"]
-        assert result.get("status") == "ok"
+        if result.get("status") != "ok":
+            raise AssertionError(
+                f"adapter-failure scenario_id={request['scenario_id']} error={result.get('error')}"
+            )
         assert "observations" in result
     return results
 
@@ -259,8 +262,9 @@ def run_corpus(
             else:
                 assert actual == scenario["expect"]
         except (AssertionError, KeyError) as exc:
-            exc.add_note(f"scenario_id={scenario['scenario_id']}")
-            raise
+            raise AssertionError(
+                f"contract-mismatch scenario_id={scenario['scenario_id']}"
+            ) from exc
 
 
 def main(argv: Sequence[str] | None = None) -> int:

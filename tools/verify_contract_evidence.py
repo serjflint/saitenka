@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "contracts/evidence-v0.json"
+COMMAND_TIMEOUT = 30
 
 
 def _selected_witnesses(ids: set[str]) -> list[dict[str, str]]:
@@ -36,6 +37,24 @@ def _require_clean(path: Path) -> None:
         raise RuntimeError(f"refusing to mutate modified file: {relative}")
 
 
+def _run_command(command: str) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory() as directory:
+        temporary = Path(directory)
+        env = os.environ | {
+            "PYTHONPYCACHEPREFIX": str(temporary / "pycache"),
+            "SAITENKA_CONFIG": str(temporary / "overlay.toml"),
+        }
+        return subprocess.run(
+            shlex.split(command),
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=COMMAND_TIMEOUT,
+        )
+
+
 def _run_witness(witness: dict[str, str]) -> str | None:
     path = ROOT / witness["path"]
     _require_clean(path)
@@ -45,27 +64,28 @@ def _run_witness(witness: dict[str, str]) -> str | None:
     if count != 1:
         return f"expected one source match, found {count}"
 
+    try:
+        baseline = _run_command(witness["command"])
+    except subprocess.TimeoutExpired:
+        return "baseline command timed out"
+    if baseline.returncode != 0:
+        return "baseline command failed"
+
     path.write_bytes(source.replace(witness["find"], witness["replace"], 1).encode("utf-8"))
     try:
-        with tempfile.TemporaryDirectory() as directory:
-            temporary = Path(directory)
-            env = os.environ | {
-                "PYTHONPYCACHEPREFIX": str(temporary / "pycache"),
-                "SAITENKA_CONFIG": str(temporary / "overlay.toml"),
-            }
-            completed = subprocess.run(
-                shlex.split(witness["command"]),
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+        try:
+            completed = _run_command(witness["command"])
+        except subprocess.TimeoutExpired:
+            return "mutated command timed out"
     finally:
         path.write_bytes(original)
 
     if completed.returncode == 0:
         return "focused command passed with the fault applied"
+    output = completed.stdout + completed.stderr
+    expected_failure = witness.get("failure_contains")
+    if not expected_failure or expected_failure not in output:
+        return "command failed without the expected failure discriminator"
     command = shlex.split(witness["command"])
     if "tests/contracts/protocol.py" in command:
         scenario_index = command.index("--scenario") + 1
