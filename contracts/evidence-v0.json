@@ -280,6 +280,15 @@
       "replace": "        retired = ()",
       "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
       "mismatch": "same-batch commands copied the retired cue and became externally visible"
+    },
+    {
+      "id": "session-subtitle-navigation-effects",
+      "scenario_id": "subtitle-navigation-emits-seeks",
+      "path": "src/saitenka/app/subtitle_intents.py",
+      "find": "        return (SeekCue(delta, inputs.cue_revision),)",
+      "replace": "        return ()",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[subtitle-navigation-emits-seeks]'",
+      "mismatch": "all three externally visible subtitle seek commands disappeared"
     }
   ]
 }
