@@ -9,6 +9,7 @@ MODE_KEYS = {
     "render-inputs": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "renderer-state": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "selection-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
+    "navigation-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
 }
 BASELINE_SETTINGS = {
     "sub-ass-override": "no",
@@ -137,6 +138,8 @@ def evaluate(request: dict) -> object:
     validate_request(request)
     if request["mode"] == "selection-policy":
         return [_selection_policy(case) for case in request["cases"]]
+    if request["mode"] == "navigation-policy":
+        return [_navigation_policy(case) for case in request["cases"]]
     evaluator = _render_inputs if request["mode"] == "render-inputs" else _renderer_state
     return [evaluator(case) for case in request["cases"]]
 
@@ -196,3 +199,35 @@ def _selection_policy(case: dict) -> object:
     if op == "matches-language":
         return matches_target_language(case["tag"], case["target"])
     raise ValueError(f"unknown selection policy operation: {op!r}")
+
+
+def _navigation_policy(case: dict) -> object:
+    from saitenka_subtitles import Cue, CueIndex
+
+    from saitenka.app.subnav_policy import cue_is_on_screen, filters_can_drop_a_cue, resolve_target
+
+    op = case["op"]
+    if op == "on-screen":
+        cue = Cue(**case["cue"])
+        return cue_is_on_screen(
+            cue,
+            text=case["text"],
+            sub_start=case["sub_start"],
+            time_pos=case["time_pos"],
+        )
+    if op == "resolve":
+        index = CueIndex([Cue(**cue) for cue in case["cues"]])
+        chosen = resolve_target(
+            index,
+            delta=case["delta"],
+            text=case["text"],
+            sub_start=case["sub_start"],
+            time_pos=case["time_pos"],
+            nav_idx=case["nav_idx"],
+        )
+        if chosen is None:
+            return None
+        return {"start": chosen.cue.start, "text": chosen.cue.text}
+    if op == "filters-can-drop":
+        return filters_can_drop_a_cue(case["settings"])
+    raise ValueError(f"unknown navigation policy operation: {op!r}")

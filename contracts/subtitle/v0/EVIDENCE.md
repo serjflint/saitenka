@@ -10,3 +10,4 @@ Representative fault checks:
 - retaining the window margins while `blend-subtitles=yes` fails the normalized frame and origin;
 - reading `sub-scale-signs` without inversion fails the renderer-state matrix.
 - classifying a known English SID as Japanese fails the selection-policy matrix.
+- treating a cue's end timestamp as inclusive fails the navigation-policy matrix.

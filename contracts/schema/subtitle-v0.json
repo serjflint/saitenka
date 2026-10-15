@@ -11,7 +11,7 @@
       "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
     },
     "mode": {
-      "enum": ["render-inputs", "renderer-state", "selection-policy"]
+      "enum": ["render-inputs", "renderer-state", "selection-policy", "navigation-policy"]
     },
     "cases": {
       "type": "array",

@@ -370,6 +370,15 @@
       "replace": "    if sid == tracks.en_sid:\n        return MAIN_LANG",
       "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-selection-policy]'",
       "mismatch": "a known English SID was classified as the Japanese role"
+    },
+    {
+      "id": "subtitle-navigation-exclusive-end",
+      "scenario_id": "subtitle-navigation-policy",
+      "path": "src/saitenka/app/subnav_policy.py",
+      "find": "    if sub_start is not None and cue.start <= sub_start < cue.end:",
+      "replace": "    if sub_start is not None and cue.start <= sub_start <= cue.end:",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-navigation-policy]'",
+      "mismatch": "a cue remained on screen at its exclusive end timestamp"
     }
   ]
 }
