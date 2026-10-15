@@ -74,6 +74,7 @@ def test_contract_schemas_are_machine_readable() -> None:
                 "editor-session.json",
                 "editor.json",
                 "options.json",
+                "profile-policy.json",
                 "profiles.json",
                 "resolution.json",
             )
@@ -141,6 +142,7 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
                 "editor-session.json",
                 "editor.json",
                 "options.json",
+                "profile-policy.json",
                 "profiles.json",
                 "resolution.json",
             )

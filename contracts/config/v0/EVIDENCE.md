@@ -21,3 +21,10 @@ next field's offered default must preserve the on-disk `cache_size_kib` sibling 
 
 The profile identity rows reject an uncanonicalized Japanese alias: `ja`, `jpn`, and `japanese` must all
 publish the same `jp` language and provider eligibility as the default profile.
+
+Profile policy rows own named-profile overlays, language validation and canonicalization, scoped dictionary
+and mining configuration, deterministic cycle order, launch identity, and script font selection. The native
+suite retains assembled-session tokenizer and dictionary-swap wiring.
+
+Ignoring the named-profile overlay, dropping scoped dictionary lists, or reversing profile cycle order each
+makes `profile-configuration-policy` fail.

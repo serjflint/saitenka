@@ -469,6 +469,33 @@
       "replace": "        len(term),",
       "command": "uv run pytest -q tests/contracts/test_dictionary_corpus.py",
       "mismatch": "the bare word outranked its longer phrase as the visible and mineable default"
+    },
+    {
+      "id": "config-profile-named-overlay",
+      "scenario_id": "profile-configuration-policy",
+      "path": "src/saitenka/app/profiles.py",
+      "find": "            raw.update(named)  # named overlay on top of the default table",
+      "replace": "            pass",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-configuration-policy]'",
+      "mismatch": "the selected French profile resolved to the Japanese default identity"
+    },
+    {
+      "id": "config-profile-scoped-lists",
+      "scenario_id": "profile-configuration-policy",
+      "path": "src/saitenka/app/profiles.py",
+      "find": "    out.update(lists)",
+      "replace": "    pass",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-configuration-policy]'",
+      "mismatch": "the French profile retained the top-level Japanese dictionary and frequency lists"
+    },
+    {
+      "id": "config-profile-cycle-order",
+      "scenario_id": "profile-configuration-policy",
+      "path": "src/saitenka/app/profiles.py",
+      "find": "    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_named_profiles(cfg)))",
+      "replace": "    profiles.extend(resolve_profile(cfg, override=name) for name in reversed(sorted(_named_profiles(cfg))))",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-configuration-policy]'",
+      "mismatch": "named profiles cycled in reverse lexical order"
     }
   ]
 }

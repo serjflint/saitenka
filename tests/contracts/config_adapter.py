@@ -60,6 +60,7 @@ MODE_KEYS = {
         False,
     ),
     "profile-identity": (frozenset({"scenario_id", "mode", "config", "expect"}), False),
+    "profile-policy": (frozenset({"scenario_id", "mode", "cases", "expect"}), False),
 }
 
 
@@ -107,6 +108,8 @@ def evaluate(scenario: dict) -> object:
         return _evaluate_run_config(scenario)
     if scenario["mode"] == "profile-identity":
         return _evaluate_profile_identity(scenario["config"])
+    if scenario["mode"] == "profile-policy":
+        return [_evaluate_profile_policy(case) for case in scenario["cases"]]
     if scenario["mode"] == "run":
         options = _build_run_options(
             scenario["config"], replace(BASE_FLAGS, **scenario.get("flags", {}))
@@ -171,6 +174,68 @@ def _evaluate_profile_identity(config: dict) -> dict[str, object]:
         }
     finally:
         providers._REGISTRY = original
+
+
+def _profile_value(profile) -> dict[str, object]:
+    return {
+        "name": profile.name,
+        "main_language": profile.langs.main,
+        "second_language": profile.langs.second,
+        "tokenizer": profile.tokenizer,
+        "slang": profile.slang,
+    }
+
+
+def _evaluate_profile_policy(case: dict) -> object:
+    from saitenka.app.launch.run import _resolvemine_target, defaultmine_target
+    from saitenka.app.mining_config import mine_config_from
+    from saitenka.app.profiles import (
+        configured_profiles,
+        primary_font_for,
+        resolve_launch_identity,
+        resolve_profile,
+        scope_config,
+        validate_language_code,
+    )
+
+    op = case["op"]
+    try:
+        if op == "resolve":
+            return _profile_value(resolve_profile(case["config"], override=case.get("override")))
+        if op == "scope":
+            return scope_config(case["config"], override=case.get("override"))
+        if op == "configured":
+            return [_profile_value(profile) for profile in configured_profiles(case["config"])]
+        if op == "validate-language":
+            return validate_language_code(case["language"])
+        if op == "launch":
+            identity = resolve_launch_identity(
+                case["config"], profile_override=case.get("override"), slang=case["slang"]
+            )
+            return {
+                "profile": _profile_value(identity.profile),
+                "language": identity.language,
+                "slang": identity.slang,
+                "config": identity.cfg,
+            }
+        if op == "primary-font":
+            return primary_font_for(case["language"])
+        if op == "mine-config":
+            scoped = scope_config(case["config"], override=case.get("override"))
+            mine = mine_config_from(scoped.get("mine", {}))
+            return {"deck": mine.deck, "model": mine.model, "fields": mine.fields}
+        if op == "mine-target":
+            return list(defaultmine_target(case["mine"]))
+        if op == "run-mine-target":
+            identity = resolve_launch_identity(
+                case["config"], profile_override=case.get("override"), slang=case["slang"]
+            )
+            return list(
+                _resolvemine_target(identity.cfg, case.get("mine_deck"), case.get("mine_model"))
+            )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    raise ValueError(f"unknown profile policy operation: {op!r}")
 
 
 def _evaluate_editor(scenario: dict):
