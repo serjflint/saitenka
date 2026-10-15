@@ -289,6 +289,24 @@
       "replace": "        return ()",
       "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[subtitle-navigation-emits-seeks]'",
       "mismatch": "all three externally visible subtitle seek commands disappeared"
+    },
+    {
+      "id": "session-mining-intent-wiring",
+      "scenario_id": "mining-adds-one-note",
+      "path": "src/saitenka/app/features/mining/mine_intents.py",
+      "find": "    return _REDUCERS[command](inputs)",
+      "replace": "    return ()",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[mining-adds-one-note]'",
+      "mismatch": "the mining command never reached the external Anki boundary"
+    },
+    {
+      "id": "session-overlay-intent-wiring",
+      "scenario_id": "cue-change-rejects-same-batch-command",
+      "path": "src/saitenka/app/session/intents.py",
+      "find": "    return _REDUCERS[command](inputs)",
+      "replace": "    return ()",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
+      "mismatch": "the externally visible hidden and shown transitions disappeared"
     }
   ]
 }
