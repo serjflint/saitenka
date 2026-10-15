@@ -352,6 +352,15 @@
       "replace": "    return ToggleDecision(SECOND_LANG, tracks.en_sid)",
       "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[language-toggle-returns-to-primary]'",
       "mismatch": "the player kept English SID 1 instead of returning to Japanese SID 2"
+    },
+    {
+      "id": "session-panel-intent-wiring",
+      "scenario_id": "sidebar-and-analysis-toggle-visible-surfaces",
+      "path": "src/saitenka/app/session/panel_intents.py",
+      "find": "    return _REDUCERS[command](inputs)",
+      "replace": "    return ()",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[sidebar-and-analysis-toggle-visible-surfaces]'",
+      "mismatch": "the sidebar and analysis panel surface lifecycles disappeared"
     }
   ]
 }

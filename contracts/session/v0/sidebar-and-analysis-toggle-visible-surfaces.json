@@ -1,0 +1,28 @@
+{
+  "protocol": "saitenka.session/v0",
+  "scenario_id": "sidebar-and-analysis-toggle-visible-surfaces",
+  "requires": ["session-v0"],
+  "given": {
+    "capture": ["surface", "termination"],
+    "mpv_properties": {"osd-dimensions": {"w": 1280, "h": 720}}
+  },
+  "when": [
+    {"action": "start"},
+    {"action": "drain_until_quiescent", "max_steps": 8},
+    {"action": "command", "name": "saitenka-toggle-sidebar"},
+    {"action": "command", "name": "saitenka-toggle-sidebar"},
+    {"action": "command", "name": "saitenka-toggle-analysis"},
+    {"action": "command", "name": "saitenka-toggle-analysis"}
+  ],
+  "expect": {
+    "mode": "exact",
+    "observations": [
+      {"source": "mpv", "kind": "command", "value": ["surface-present", "surface-1"]},
+      {"source": "mpv", "kind": "command", "value": ["surface-absent", "surface-1"]},
+      {"source": "mpv", "kind": "command", "value": ["surface-present", "surface-2"]},
+      {"source": "mpv", "kind": "command", "value": ["surface-absent", "surface-2"]},
+      {"source": "mpv", "kind": "command", "value": ["surface-absent", "surface-2"]},
+      {"source": "adapter", "kind": "terminated"}
+    ]
+  }
+}
