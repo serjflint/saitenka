@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from saitenka_card import MineConfig
+
 TESTS = Path(__file__).resolve().parents[1]
 if str(TESTS) not in sys.path:
     sys.path.insert(0, str(TESTS))
@@ -20,7 +22,7 @@ from util import FakeIPC, session_gateway  # noqa: E402
 
 from saitenka.app import subtitle_adapter  # noqa: E402
 from saitenka.app.config import KeyOptions, ReaderOptions  # noqa: E402
-from saitenka.app.session.factory import SessionInfrastructure  # noqa: E402
+from saitenka.app.session.factory import SessionInfrastructure, SessionServices  # noqa: E402
 from saitenka.app.subtitle_render import NullRenderer  # noqa: E402
 from saitenka.runtime import ConnectionLost, ConnectionReady, ConnectionReplaced  # noqa: E402
 
@@ -48,6 +50,8 @@ class SaitenkaSessionAdapter:
         self._binding_sections: dict[str, tuple[str | None, dict[str, str], bool]] = {}
         self._legacy_bindings: dict[str, str] = {}
         self._bindings_reported = False
+        self.anki = _BoundaryAnki() if "mining" in given else None
+        self._anki_cursor = 0
         self.gateway = session_gateway(self.ipc)
         options = ReaderOptions(keys=KeyOptions(**given.get("key_options", {}))).with_overrides(
             prefetch=False
@@ -55,6 +59,14 @@ class SaitenkaSessionAdapter:
         self.session = build_session(
             self.ipc,
             options=options,
+            services=(
+                SessionServices(
+                    anki=self.anki,
+                    mining=MineConfig(**given["mining"].get("config", {})),
+                )
+                if self.anki is not None
+                else SessionServices()
+            ),
             infrastructure=SessionInfrastructure(renderer=NullRenderer()),
         )
         self.observations: list[dict] = []
@@ -122,6 +134,17 @@ class SaitenkaSessionAdapter:
                 else:
                     observation.update(section=found[0], message=found[1], status="present")
                 self._append("binding", observation)
+        self._collect_anki()
+
+    def _collect_anki(self) -> None:
+        if self.anki is None:
+            return
+        for note in self.anki.added[self._anki_cursor :]:
+            self._append(
+                "anki",
+                {"source": "anki", "kind": "add-note", "note": _json_value(note)},
+            )
+        self._anki_cursor = len(self.anki.added)
 
     def _surface_id(self, raw: object) -> str:
         return self._surface_ids.setdefault(raw, f"surface-{len(self._surface_ids) + 1}")
@@ -197,6 +220,14 @@ class SaitenkaSessionAdapter:
                     break
             else:
                 raise RuntimeError("session did not become boundary-quiescent")
+        elif name == "await_notes":
+            for _ in range(action["max_steps"]):
+                self.session.pump(0.01)
+                self._collect_anki()
+                if self.anki is not None and len(self.anki.added) >= action["count"]:
+                    break
+            else:
+                raise RuntimeError("mining did not reach the Anki boundary")
         elif name == "close":
             self.close()
         elif name == "checkpoint":
@@ -227,6 +258,29 @@ class SaitenkaSessionAdapter:
         finally:
             subtitle_adapter.copy_clipboard = self._original_copy
             self.gateway.close()
+
+
+class _BoundaryAnki:
+    def __init__(self) -> None:
+        self.added: list[dict] = []
+        self.stored: list[str] = []
+
+    def find_notes(self, _query: str) -> list[int]:
+        return []
+
+    def notes_info(self, _ids: list[int]) -> list[dict]:
+        return []
+
+    def can_add(self, _note: dict) -> bool:
+        return True
+
+    def add_note(self, note: dict) -> int:
+        self.added.append(note)
+        return len(self.added)
+
+    def store_media(self, name: str, _path: object) -> str:
+        self.stored.append(name)
+        return name
 
 
 def execute(request: dict) -> dict:

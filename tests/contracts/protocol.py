@@ -24,6 +24,7 @@ ACTION_KEYS = {
     "drain_until_quiescent": frozenset({"action", "max_steps"}),
     "close": frozenset({"action"}),
     "checkpoint": frozenset({"action", "name"}),
+    "await_notes": frozenset({"action", "count", "max_steps"}),
 }
 
 

@@ -102,6 +102,15 @@
       "mismatch": "the required global section enablement observation disappeared"
     },
     {
+      "id": "session-mining-external-commit",
+      "scenario_id": "mining-adds-one-note",
+      "path": "src/saitenka/app/features/mining/miner.py",
+      "find": "                note_id = p.anki.add_note(note)",
+      "replace": "                note_id = 0",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[mining-adds-one-note]'",
+      "mismatch": "no note reached the Anki boundary before the bounded settlement expired"
+    },
+    {
       "id": "config-attach-layout",
       "scenario_id": "attach-overrides",
       "path": "src/saitenka/app/commands/attach.py",

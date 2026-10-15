@@ -569,38 +569,6 @@ def test_a_timed_out_screenshot_keeps_its_destination_until_the_real_reply(tmp_p
     assert not directory.exists()
 
 
-def test_mine_token_adds_note_with_fields(monkeypatch, make_session):
-    from util import FakeIPC
-
-    ipc = FakeIPC()
-    ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
-    ipc.props["time-pos"] = 63
-    anki = _FakeAnki()
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.graph.cue.set_subtitle("本を読む")
-    # media capture: no real mpv/ffmpeg — stub the capture step
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    shown = []
-    monkeypatch.setattr(
-        PreviewController,
-        "present_mined",
-        lambda _owner, _ports, _source, _toast, card, _tok, _video, _st="mined", **_options: (
-            shown.append(card.expression)
-        ),
-    )
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert len(anki.added) == 1
-    note = anki.added[0]
-    assert note["fields"]["Expression"] == "読む"
-    assert "<b>読む</b>" in note["fields"]["Sentence"]
-    assert "saitenka::mined" in note["tags"]
-    assert shown == ["読む"]
-    assert "WordAudio" not in note["fields"]
-    assert anki.stored == []
-
-
 def _capture_reader(*, animated_enabled: bool):
     from util import FakeIPC
 
