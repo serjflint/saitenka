@@ -28,3 +28,7 @@ suite retains assembled-session tokenizer and dictionary-swap wiring.
 
 Ignoring the named-profile overlay, dropping scoped dictionary lists, or reversing profile cycle order each
 makes `profile-configuration-policy` fail.
+
+Persistent config rows own TOML absence and parse failure, environment precedence, path expansion, telemetry,
+retired settings, subtitle geometry, and scoring validation. Ignoring `native_formats`, shrinking the derived
+geometry cache to the forward window, or bypassing the OTel kill switch makes `persistent-config-policy` fail.

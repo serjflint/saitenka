@@ -73,6 +73,7 @@ def test_contract_schemas_are_machine_readable() -> None:
             for name in (
                 "editor-session.json",
                 "editor.json",
+                "config-policy.json",
                 "options.json",
                 "profile-policy.json",
                 "profiles.json",
@@ -141,6 +142,7 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
             for name in (
                 "editor-session.json",
                 "editor.json",
+                "config-policy.json",
                 "options.json",
                 "profile-policy.json",
                 "profiles.json",

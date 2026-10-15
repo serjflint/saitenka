@@ -54,8 +54,9 @@ request contains `scenario_id`, `mode`, `config`, optional `flags` or `mine`, an
 values stay with the runner. The adapter returns those normalized dotted paths in `observations`. This makes
 run/attach configuration parity a product contract without exposing `ReaderOptions` or Python dataclasses.
 Profile-policy rows expose resolved identities, scoped configuration, deterministic cycle order, launch and
-mining targets, and script font selection as JSON values. Corpus rows conform to `schema/config-v0.json`;
-the runner strips answers and validates mode-specific keys.
+mining targets, and script font selection as JSON values. Config-policy rows exercise persistent TOML,
+environment precedence, telemetry, retired settings, subtitle geometry, and scoring validation. Corpus rows
+conform to `schema/config-v0.json`; the runner strips answers and validates mode-specific keys.
 
 ## CLI v0 protocol
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import tomllib
 from contextlib import redirect_stdout
@@ -61,6 +62,7 @@ MODE_KEYS = {
     ),
     "profile-identity": (frozenset({"scenario_id", "mode", "config", "expect"}), False),
     "profile-policy": (frozenset({"scenario_id", "mode", "cases", "expect"}), False),
+    "config-policy": (frozenset({"scenario_id", "mode", "cases", "expect"}), False),
 }
 
 
@@ -110,6 +112,8 @@ def evaluate(scenario: dict) -> object:
         return _evaluate_profile_identity(scenario["config"])
     if scenario["mode"] == "profile-policy":
         return [_evaluate_profile_policy(case) for case in scenario["cases"]]
+    if scenario["mode"] == "config-policy":
+        return [_evaluate_config_policy(case) for case in scenario["cases"]]
     if scenario["mode"] == "run":
         options = _build_run_options(
             scenario["config"], replace(BASE_FLAGS, **scenario.get("flags", {}))
@@ -236,6 +240,63 @@ def _evaluate_profile_policy(case: dict) -> object:
     except ValueError as exc:
         return {"error": str(exc)}
     raise ValueError(f"unknown profile policy operation: {op!r}")
+
+
+def _evaluate_config_policy(case: dict) -> object:
+    from dataclasses import asdict
+
+    from saitenka.app.config import (
+        config_path,
+        expand_paths,
+        load_config,
+        resolve_jlpt_underlines,
+        resolve_resync_split_penalty,
+        resolve_telemetry,
+        subtitle_geometry_options,
+        warn_retired,
+    )
+
+    op = case["op"]
+    previous = {name: os.environ.get(name) for name in ("SAITENKA_CONFIG", "OTEL_SDK_DISABLED")}
+    try:
+        for name, value in case.get("env", {}).items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        if op == "resync-split":
+            return resolve_resync_split_penalty(case["config"])
+        if op == "expand-paths":
+            return expand_paths(case["paths"])
+        if op == "telemetry":
+            return asdict(resolve_telemetry(case["config"]))
+        if op == "retired":
+            return warn_retired(case["config"])
+        if op == "geometry":
+            return asdict(subtitle_geometry_options(case["config"]))
+        if op == "jlpt":
+            try:
+                return resolve_jlpt_underlines(case["config"])
+            except TypeError as exc:
+                return {"error": str(exc)}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            if op == "load":
+                path = root / "overlay.toml"
+                if case.get("content") is not None:
+                    path.write_text(case["content"], encoding="utf-8")
+                return load_config(path)
+            if op == "config-path":
+                os.environ["SAITENKA_CONFIG"] = str(root / "env.toml")
+                chosen = config_path(root / "explicit.toml" if case["explicit"] else None)
+                return chosen.name
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    raise ValueError(f"unknown config policy operation: {op!r}")
 
 
 def _evaluate_editor(scenario: dict):

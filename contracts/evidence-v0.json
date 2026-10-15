@@ -523,6 +523,33 @@
       "replace": "    table: dict = {\"language\": language, \"tokenizer\": tokenizer or \"unidic\"}",
       "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[profile-cli-commands]'",
       "mismatch": "a French profile defaulted to the Japanese unidic tokenizer"
+    },
+    {
+      "id": "config-native-formats-loader",
+      "scenario_id": "persistent-config-policy",
+      "path": "src/saitenka/app/config.py",
+      "find": "        native_formats=native_formats,",
+      "replace": "        native_formats=defaults.native_formats,",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[persistent-config-policy]'",
+      "mismatch": "native_formats=all silently reverted to authored-ass"
+    },
+    {
+      "id": "config-geometry-cache-window",
+      "scenario_id": "persistent-config-policy",
+      "path": "src/saitenka/app/config.py",
+      "find": "max(defaults.cache_max, 2 * lookahead + 1)",
+      "replace": "max(defaults.cache_max, lookahead + 1)",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[persistent-config-policy]'",
+      "mismatch": "lookahead four derived a cache bound of six instead of nine"
+    },
+    {
+      "id": "config-telemetry-environment-kill-switch",
+      "scenario_id": "persistent-config-policy",
+      "path": "src/saitenka/app/config.py",
+      "find": "    if os.environ.get(\"OTEL_SDK_DISABLED\", \"\").strip().lower() in {\"true\", \"1\"}:",
+      "replace": "    if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[persistent-config-policy]'",
+      "mismatch": "OTEL_SDK_DISABLED=true no longer overrode enabled telemetry config"
     }
   ]
 }
