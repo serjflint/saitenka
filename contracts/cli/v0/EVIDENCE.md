@@ -11,6 +11,9 @@ executable corpus:
 | `jimaku-fetch-policy` | remove the explicit-fetch override | an explicit `--jimaku` request stopped fetching |
 | `mpv-launch-subtitle-order` | move the video before runtime and subtitle arguments | the complete argv transcript changed order |
 | `native-geometry-version-floor` | change the inclusive 0.40 floor to exclusive | mpv 0.40 became unsupported |
+| `profile-cli-commands` | restore ambient reader defaults on the profile editor | a French profile inherited Japanese dictionaries and pitch data |
+| `profile-cli-commands` | leave the selector after removing its active profile | `active_profile` pointed at a missing table |
+| `profile-cli-commands` | default every language to `unidic` | a French profile selected the Japanese tokenizer |
 
 The registry-driven all-command help check and legacy wrapper subprocess remain separate: they cover an
 open command set and a real compatibility process boundary rather than finite parser examples.

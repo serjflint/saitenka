@@ -62,6 +62,8 @@ the runner strips answers and validates mode-specific keys.
 `saitenka.cli/v0` uses capability `cli-v0`. Inventory scenarios return the actual run-help flags and
 registered commands; parser scenarios return only named bound arguments. Config scenarios materialize an
 isolated TOML file before parsing, so the corpus covers default precedence without reading a user's config.
+Profile-command scenarios run the public add/use/remove/list/show surface against an isolated TOML file and
+return normalized config and terminal output.
 The open-ended all-command help check and the legacy wrapper process remain native tests because their sets
 and process boundary cannot be represented by a finite scenario list without weakening them.
 Corpus rows conform to `schema/cli-v0.json`; the runner strips answers and validates mode-specific keys.

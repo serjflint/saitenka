@@ -26,7 +26,7 @@
     {
       "type": "object", "additionalProperties": false,
       "required": ["scenario_id", "mode", "cases", "expect"],
-      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"enum": ["resolve-names", "jimaku-decision"]}, "cases": {"type": "array", "items": {"type": "object"}}, "expect": {"type": "array"}}
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"enum": ["resolve-names", "jimaku-decision", "profile-commands"]}, "cases": {"type": "array", "items": {"type": "object"}}, "expect": {"type": "array"}}
     },
     {
       "type": "object", "additionalProperties": false,

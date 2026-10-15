@@ -496,6 +496,33 @@
       "replace": "    profiles.extend(resolve_profile(cfg, override=name) for name in reversed(sorted(_named_profiles(cfg))))",
       "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-configuration-policy]'",
       "mismatch": "named profiles cycled in reverse lexical order"
+    },
+    {
+      "id": "cli-profile-editor-isolation",
+      "scenario_id": "profile-cli-commands",
+      "path": "src/saitenka/app/features/profiles/profile_cli.py",
+      "find": "    config=(),",
+      "replace": "",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[profile-cli-commands]'",
+      "mismatch": "a new French profile inherited the ambient Japanese dictionaries and pitch data"
+    },
+    {
+      "id": "cli-profile-remove-active-selector",
+      "scenario_id": "profile-cli-commands",
+      "path": "src/saitenka/app/features/profiles/profile_cli.py",
+      "find": "    if cfg.get(\"active_profile\") == name:",
+      "replace": "    if False:",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[profile-cli-commands]'",
+      "mismatch": "removing the active profile left a dangling active_profile selector"
+    },
+    {
+      "id": "cli-profile-language-tokenizer-default",
+      "scenario_id": "profile-cli-commands",
+      "path": "src/saitenka/app/features/profiles/profile_cli.py",
+      "find": "    table: dict = {\"language\": language, \"tokenizer\": tokenizer or default_tokenizer_for(canon)}",
+      "replace": "    table: dict = {\"language\": language, \"tokenizer\": tokenizer or \"unidic\"}",
+      "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[profile-cli-commands]'",
+      "mismatch": "a French profile defaulted to the Japanese unidic tokenizer"
     }
   ]
 }

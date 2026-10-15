@@ -6,6 +6,7 @@ import io
 import os
 import re
 import tempfile
+import tomllib
 from pathlib import Path
 
 PROTOCOL = "saitenka.cli/v0"
@@ -33,6 +34,7 @@ MODE_KEYS = {
         }
     ),
     "native-geometry-version": frozenset({"scenario_id", "mode", "versions", "expect"}),
+    "profile-commands": frozenset({"scenario_id", "mode", "cases", "expect"}),
 }
 
 
@@ -168,4 +170,45 @@ def evaluate(scenario: dict) -> object:
         from saitenka.mpvio.launch import supports_native_geometry_profile
 
         return [supports_native_geometry_profile(version) for version in scenario["versions"]]
+    if scenario["mode"] == "profile-commands":
+        return [_profile_command(case) for case in scenario["cases"]]
     raise ValueError(f"unknown cli-v0 mode: {scenario['mode']!r}")
+
+
+def _profile_command(case: dict) -> dict[str, object]:
+    cli = _cli()
+    previous = os.environ.get("SAITENKA_CONFIG")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "overlay.toml"
+        if case.get("config") is not None:
+            path.write_text(case["config"], encoding="utf-8")
+        os.environ["SAITENKA_CONFIG"] = str(path)
+        importlib.reload(cli)
+        output = io.StringIO()
+        error: str | None = None
+        result: object = None
+        try:
+            with contextlib.redirect_stdout(output):
+                try:
+                    result = cli.create_app()(
+                        case["args"], exit_on_error=False, result_action="return_value"
+                    )
+                except (TypeError, ValueError) as exc:
+                    error = str(exc)
+        finally:
+            if previous is None:
+                os.environ.pop("SAITENKA_CONFIG", None)
+            else:
+                os.environ["SAITENKA_CONFIG"] = previous
+            importlib.reload(cli)
+        raw = path.read_text(encoding="utf-8") if path.exists() else ""
+        stdout = [
+            "backed up existing config" if line.startswith("backed up existing config") else line
+            for line in output.getvalue().splitlines()
+        ]
+        return {
+            "exit_code": result,
+            "error": error,
+            "config": tomllib.loads(raw) if raw else None,
+            "stdout": stdout,
+        }
