@@ -8,49 +8,6 @@ from dataclasses import fields
 import pytest
 
 from saitenka.app import config_editor as ce
-from saitenka.app import prompt
-
-# --- schema introspection (the #254 baton): types + choices + help come from config.py, not a 2nd list ---
-
-
-# --- default precedence: current value wins over the built-in default -----------------------------
-
-
-# --- coercion: bool via confirm, Literal rejects out-of-set, numeric parse+validate ---------------
-
-
-# --- prompt_value: right primitive per kind; an invalid reply keeps the current value -------------
-
-
-def test_prompt_value_bool_uses_confirm(monkeypatch):
-    spec = next(s for s in ce.catalog() if s.label == "render_cache")
-    seen = {}
-
-    def _confirm(_message, *, default):
-        seen["default"] = default
-        return False
-
-    monkeypatch.setattr(prompt, "confirm", _confirm)
-    assert ce.prompt_value(spec, current=True) is False
-    assert seen["default"] is True  # current offered as the default
-
-
-def test_prompt_value_select_returns_the_choice(monkeypatch):
-    spec = next(s for s in ce.catalog() if s.label == "layout_engine")
-    monkeypatch.setattr(prompt, "select", lambda *_a, **_k: "taffy")
-    assert ce.prompt_value(spec, "default") == "taffy"
-
-
-def test_prompt_value_keeps_current_on_bad_number(monkeypatch):
-    spec = next(s for s in ce.catalog() if s.label == "max_bulk")
-    monkeypatch.setattr(prompt, "text", lambda *_a, **_k: "not-a-number")
-    assert ce.prompt_value(spec, 37) == 37  # rejected, non-default config preserved
-
-
-# --- end-to-end: a scripted session round-trips through write_config, preserving comments ---------
-
-
-# --- drift guard: the catalog is derived from fields(); a new config.py knob can't go silently missing --
 
 
 @pytest.mark.parametrize(("section", "dc", "_table"), ce._DC_SECTIONS)

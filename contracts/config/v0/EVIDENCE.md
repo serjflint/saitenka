@@ -32,3 +32,6 @@ makes `profile-configuration-policy` fail.
 Persistent config rows own TOML absence and parse failure, environment precedence, path expansion, telemetry,
 retired settings, subtitle geometry, and scoring validation. Ignoring `native_formats`, shrinking the derived
 geometry cache to the forward window, or bypassing the OTel kill switch makes `persistent-config-policy` fail.
+
+The scripted editor session exercises boolean, choice, and invalid-number prompt dispatch through the public
+editor loop. Returning the old value for a selected choice makes `editor-session-dispatches-value-prompts` fail.

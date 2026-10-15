@@ -586,6 +586,15 @@
       "replace": "            if False:",
       "command": "uv run pytest -q 'tests/contracts/test_history_corpus.py::test_history_contract[session-history-aggregation]'",
       "mismatch": "second-language watch time was charged to Japanese"
+    },
+    {
+      "id": "config-editor-select-dispatch",
+      "scenario_id": "editor-session-dispatches-value-prompts",
+      "path": "src/saitenka/app/config_editor.py",
+      "find": "            return coerce(spec, picked)",
+      "replace": "            return current",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[editor-session-dispatches-value-prompts]'",
+      "mismatch": "choosing taffy left layout_engine at its previous default value"
     }
   ]
 }

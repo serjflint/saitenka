@@ -342,17 +342,29 @@ def _evaluate_editor_session(scenario: dict) -> dict[str, object]:
         path = Path(directory) / "overlay.toml"
         if scenario["initial"] is not None:
             path.write_text(scenario["initial"], encoding="utf-8")
-        selects = iter(
-            [item for edit in scenario["edits"] for item in (edit["section"], edit["field"])]
-            + [config_editor._DONE]
-        )
-        values = iter(edit["value"] for edit in scenario["edits"])
+        by_label = {spec.label: spec for spec in config_editor.catalog()}
+        selections: list[object] = []
+        values: list[object] = []
+        bools: dict[str, bool] = {}
+        for edit in scenario["edits"]:
+            selections.extend((edit["section"], edit["field"]))
+            kind = by_label[edit["field"]].kind
+            if kind == "select":
+                selections.append(edit["value"])
+            elif kind == "bool":
+                bools[edit["field"]] = edit["value"]
+            else:
+                values.append(edit["value"])
+        selects = iter([*selections, config_editor._DONE])
+        texts = iter(values)
         original = prompt.select, prompt.text, prompt.confirm
         prompt.select = lambda *_args, **_kwargs: next(selects)
         prompt.text = lambda *_args, default, **_kwargs: (
-            default if (value := next(values)) is None else value
+            default if (value := next(texts)) is None else value
         )
-        prompt.confirm = lambda *_args, **_kwargs: True
+        prompt.confirm = lambda message, **_kwargs: next(
+            (value for label, value in bools.items() if message.startswith(label)), True
+        )
         try:
             with redirect_stdout(StringIO()):
                 exit_code = config_editor.run_editor(path)

@@ -37,7 +37,7 @@
     {
       "type": "object", "additionalProperties": false,
       "required": ["scenario_id", "mode", "initial", "edits", "observe_comments", "expect"],
-      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "editor-session"}, "initial": {"type": ["string", "null"]}, "edits": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["section", "field", "value"], "properties": {"section": {"type": "string"}, "field": {"type": "string"}, "value": {"type": ["string", "null"]}}}}, "observe_comments": {"type": "array", "items": {"type": "string"}}, "expect": {"type": "object"}}
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "editor-session"}, "initial": {"type": ["string", "null"]}, "edits": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["section", "field", "value"], "properties": {"section": {"type": "string"}, "field": {"type": "string"}, "value": {"type": ["string", "boolean", "null"]}}}}, "observe_comments": {"type": "array", "items": {"type": "string"}}, "expect": {"type": "object"}}
     },
     {
       "type": "object", "additionalProperties": false,
