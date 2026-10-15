@@ -11,3 +11,4 @@ Representative fault checks:
 - reading `sub-scale-signs` without inversion fails the renderer-state matrix.
 - classifying a known English SID as Japanese fails the selection-policy matrix.
 - treating a cue's end timestamp as inclusive fails the navigation-policy matrix.
+- admitting every registered provider regardless of language fails the provider-policy matrix.

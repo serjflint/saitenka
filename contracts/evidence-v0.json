@@ -379,6 +379,15 @@
       "replace": "    if sub_start is not None and cue.start <= sub_start <= cue.end:",
       "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-navigation-policy]'",
       "mismatch": "a cue remained on screen at its exclusive end timestamp"
+    },
+    {
+      "id": "subtitle-provider-language-capability",
+      "scenario_id": "subtitle-provider-policy",
+      "path": "src/saitenka/app/subtitle_providers.py",
+      "find": "        and (not p.languages or accepted.intersection(code.lower() for code in p.languages))",
+      "replace": "        and True",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-provider-policy]'",
+      "mismatch": "Japanese-only providers were admitted into a French session"
     }
   ]
 }

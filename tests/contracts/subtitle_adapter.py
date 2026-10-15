@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 PROTOCOL = "saitenka.subtitle/v0"
@@ -10,6 +11,7 @@ MODE_KEYS = {
     "renderer-state": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "selection-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "navigation-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
+    "provider-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
 }
 BASELINE_SETTINGS = {
     "sub-ass-override": "no",
@@ -140,6 +142,8 @@ def evaluate(request: dict) -> object:
         return [_selection_policy(case) for case in request["cases"]]
     if request["mode"] == "navigation-policy":
         return [_navigation_policy(case) for case in request["cases"]]
+    if request["mode"] == "provider-policy":
+        return [_provider_policy(case) for case in request["cases"]]
     evaluator = _render_inputs if request["mode"] == "render-inputs" else _renderer_state
     return [evaluator(case) for case in request["cases"]]
 
@@ -231,3 +235,84 @@ def _navigation_policy(case: dict) -> object:
     if op == "filters-can-drop":
         return filters_can_drop_a_cue(case["settings"])
     raise ValueError(f"unknown navigation policy operation: {op!r}")
+
+
+def _provider_policy(case: dict) -> object:
+    import saitenka.app.subtitle_providers as providers
+    from saitenka.app.subtitle_providers import ProviderContext, SubtitleProvider
+
+    op = case["op"]
+    if op == "fetch-first":
+        calls: list[str] = []
+
+        def attempt(item: dict):
+            def run():
+                calls.append(item["name"])
+                path = Path(item["path"]) if item["path"] is not None else None
+                return path, item["status"]
+
+            return item["name"], run
+
+        path, status = providers.fetch_first(tuple(attempt(item) for item in case["attempts"]))
+        return {"calls": calls, "path": str(path) if path is not None else None, "status": status}
+    if op == "context-default":
+        return ProviderContext().language
+
+    original = providers._REGISTRY
+    providers._REGISTRY = {}
+    try:
+        for item in case.get("providers", []):
+            provider = SubtitleProvider(
+                name=item["name"],
+                languages=frozenset(item["languages"]),
+                candidates=lambda _video, _context: ([], []),
+                fetch_attempt=lambda _video, _context: lambda: (None, "stub"),
+            )
+            providers.register_provider(provider)
+        if op == "providers-for-language":
+            candidates = case.get("candidates")
+            return list(
+                providers.providers_for_language(
+                    case["language"],
+                    candidates=tuple(candidates) if candidates is not None else None,
+                )
+            )
+        if op == "enabled-providers":
+            return list(
+                providers.enabled_providers_for(
+                    case["language"], tuple((name, enabled) for name, enabled in case["flags"])
+                )
+            )
+        if op == "get-provider":
+            return providers.get_provider(case["name"]) is not None
+        if op == "duplicate-register":
+            duplicate = case["duplicate"]
+            try:
+                providers.register_provider(
+                    SubtitleProvider(
+                        name=duplicate["name"],
+                        languages=frozenset(duplicate["languages"]),
+                        candidates=lambda _video, _context: ([], []),
+                        fetch_attempt=lambda _video, _context: lambda: (None, "stub"),
+                    )
+                )
+            except ValueError:
+                return "ValueError"
+            return "accepted"
+        if op == "launch-builtins":
+            from saitenka.app.launch import run
+
+            names = run._enabled_provider_names(
+                "episode.mkv",
+                jimaku=case["jimaku"],
+                jimaku_cfg={},
+                tsukihime_cfg={"enabled": case["tsukihime"]},
+                language=case["language"],
+            )
+            return {
+                "names": list(names),
+                "tsukihime_registered": providers.get_provider("tsukihime") is not None,
+            }
+        raise ValueError(f"unknown provider policy operation: {op!r}")
+    finally:
+        providers._REGISTRY = original
