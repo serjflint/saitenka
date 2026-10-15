@@ -694,6 +694,33 @@
       "replace": "    def suppress_hover(self, suppression: HoverSuppression) -> bool:\n        state = self.state\n        if not state.open:\n            return False",
       "command": "uv run pytest -q 'tests/contracts/test_picker_corpus.py::test_picker_contract[subtitle-picker-interaction]'",
       "mismatch": "the picker suppressed subtitle hover while the pointer was outside its panel"
+    },
+    {
+      "id": "sidebar-centred-open",
+      "scenario_id": "sidebar-navigation-interaction",
+      "path": "src/saitenka/runtime/sidebar.py",
+      "find": "    return max(0, active - capacity // 2)",
+      "replace": "    return max(0, active)",
+      "command": "uv run pytest -q 'tests/contracts/test_sidebar_corpus.py::test_sidebar_contract[sidebar-navigation-interaction]'",
+      "mismatch": "opening showed rows after the active cue instead of centering it"
+    },
+    {
+      "id": "sidebar-manual-hold-expiry",
+      "scenario_id": "sidebar-navigation-interaction",
+      "path": "src/saitenka/app/features/sidebar/sidebar_controller.py",
+      "find": "            self.store.dispatch(events.SidebarHoldReleased())\n            self.follow()",
+      "replace": "            self.store.dispatch(events.SidebarHoldReleased())",
+      "command": "uv run pytest -q 'tests/contracts/test_sidebar_corpus.py::test_sidebar_contract[sidebar-navigation-interaction]'",
+      "mismatch": "manual-scroll expiry left the sidebar at its held offset without redrawing the active cue"
+    },
+    {
+      "id": "sidebar-cue-seek-start",
+      "scenario_id": "sidebar-navigation-interaction",
+      "path": "src/saitenka/app/features/sidebar/sidebar.py",
+      "find": "        actions.seek(\"sidebar-seek-cue\", view.index.cues[hit.value].start)",
+      "replace": "        actions.seek(\"sidebar-seek-cue\", view.index.cues[hit.value].end)",
+      "command": "uv run pytest -q 'tests/contracts/test_sidebar_corpus.py::test_sidebar_contract[sidebar-navigation-interaction]'",
+      "mismatch": "clicking cue seven sought to 7.8 seconds instead of its 7.0-second start"
     }
   ]
 }

@@ -74,63 +74,6 @@ def _capture_render(monkeypatch):
     return calls
 
 
-def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
-    reader, ipc = _reader(active=12, props={"sub-start": 120.2, "time-pos": 120.3})
-    cues = [
-        dataclasses.replace(cue, start=float(i * 10), end=float(i * 10) + 0.8)
-        for i, cue in enumerate(reader.graph.track_commands.navigation.current.sub_index.cues)
-    ]
-    cues[3] = dataclasses.replace(cues[3], text="same line")
-    cues[12] = dataclasses.replace(cues[12], text="same line")
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(cues)
-    reader.graph.playback.install_seed({"sub-text": "same line"})
-    calls = _capture_render(monkeypatch)
-
-    (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
-
-    assert reader.graph.sidebar.state.open is True
-    assert [row.value for row in calls[-1][0]] == list(range(8, 17))
-    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
-
-
-def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
-    """The hold ends on its own deadline, and that deadline re-runs the follow itself. Waiting for
-    the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
-    reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
-    calls = _capture_render(monkeypatch)
-    (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
-    reader.graph.sidebar.panel.rect = (900, 50, 360, 600)
-
-    assert reader.graph.sidebar.scroll(reader.graph.interaction.wheel_step(), -3) is True
-    held_scroll = reader.graph.sidebar.state.scroll
-    reader.graph.playback.install_seed({"sub-text": "cue 18"})
-    sidebar.follow(reader.graph.sidebar.view())
-    assert reader.graph.sidebar.state.scroll == held_scroll
-
-    before_expiry = len(calls)
-    assert ipc.fire_runtime_timer("lifecycle:sidebar-manual-hold")
-
-    assert reader.graph.sidebar.state.scroll == 14
-    assert len(calls) == before_expiry + 1
-
-
-def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch):
-    reader, ipc = _reader(active=3)
-    _capture_render(monkeypatch)
-    reader.graph.sidebar.store.dispatch(
-        events.SidebarShown(
-            reader.graph.sidebar.view().active,
-            reader.graph.sidebar.view().capacity,
-        )
-    )
-    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
-    reader.graph.sidebar.panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
-
-    assert reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110) is True
-    assert ("set_property", "time-pos", 7.0) in ipc.commands
-    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
-
-
 @pytest.mark.parametrize(
     ("kind", "command", "active"),
     [

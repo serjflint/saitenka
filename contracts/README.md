@@ -123,3 +123,10 @@ migrations, async writer scheduling, and assembled bookmark input stay native te
 failures and pointer actions, then observe normalized visible rows, panel capture, scroll, selected downloads,
 and close state. Provider scheduling and render geometry stay native tests. Rows conform to
 `schema/picker-v0.json`.
+
+## Sidebar v0 protocol
+
+`saitenka.sidebar/v0` uses capability `sidebar-v0`. Interaction cases supply cue timelines, active cue and
+pointer actions, then observe visible row windows, manual-scroll expiry, seek commands and playback neutrality.
+Row analysis, persistence boundaries and composition stay native tests. Rows conform to
+`schema/sidebar-v0.json`.
