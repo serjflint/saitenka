@@ -63,3 +63,11 @@ isolated TOML file before parsing, so the corpus covers default precedence witho
 The open-ended all-command help check and the legacy wrapper process remain native tests because their sets
 and process boundary cannot be represented by a finite scenario list without weakening them.
 Corpus rows conform to `schema/cli-v0.json`; the runner strips answers and validates mode-specific keys.
+
+## Subtitle v0 protocol
+
+`saitenka.subtitle/v0` uses capability `subtitle-v0`. Render-profile scenarios supply normalized mpv
+settings and frame geometry, then observe either portable geometry fields or the setting that makes exact
+hit geometry unsafe. Renderer-state scenarios expose the libass scaling values that must match mpv. Corpus
+rows conform to `schema/subtitle-v0.json`; Python classes, cache keys, and ownership state stay behind the
+adapter.

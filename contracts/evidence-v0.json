@@ -244,6 +244,33 @@
       "replace": "    return version is not None and version > NATIVE_GEOMETRY_MPV_MIN",
       "command": "uv run pytest -q 'tests/contracts/test_cli_corpus.py::test_cli_contract[native-geometry-version-floor]'",
       "mismatch": "the supported 0.40 boundary became unsupported"
+    },
+    {
+      "id": "subtitle-render-scale-refusal",
+      "scenario_id": "render-profile-refusals-and-geometry",
+      "path": "src/saitenka/app/native_subtitles.py",
+      "find": "        \"sub-scale\": scaled or settings[\"sub-scale\"] == 1.0,",
+      "replace": "        \"sub-scale\": True,",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[render-profile-refusals-and-geometry]'",
+      "mismatch": "sub-scale=1.5 was accepted instead of naming the unsafe setting"
+    },
+    {
+      "id": "subtitle-blend-space",
+      "scenario_id": "render-profile-refusals-and-geometry",
+      "path": "src/saitenka/app/native_subtitles.py",
+      "find": "    return _BlendSpace((width, height), _pixel_aspect({\"par\": 1.0}, video), (left, top))",
+      "replace": "    return _BlendSpace(frame_size, _pixel_aspect({\"par\": 1.0}, video), (0, 0))",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[render-profile-refusals-and-geometry]'",
+      "mismatch": "the blend surface retained the window frame and lost its letterbox origin"
+    },
+    {
+      "id": "subtitle-selective-font-scale",
+      "scenario_id": "renderer-state-follows-mpv-scale-semantics",
+      "path": "src/saitenka/app/native_subtitles.py",
+      "find": "        selective_font_scale=not scale.scale_signs and scale.font_scale != 1.0,",
+      "replace": "        selective_font_scale=scale.scale_signs and scale.font_scale != 1.0,",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[renderer-state-follows-mpv-scale-semantics]'",
+      "mismatch": "the selective font scale bit followed sub-scale-signs instead of inverting it"
     }
   ]
 }

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import tempfile
 import tomllib
+from contextlib import redirect_stdout
 from dataclasses import replace
+from io import StringIO
 from pathlib import Path
 
 from saitenka.app import config_editor
@@ -192,7 +194,8 @@ def _evaluate_editor_session(scenario: dict) -> dict[str, object]:
         )
         prompt.confirm = lambda *_args, **_kwargs: True
         try:
-            exit_code = config_editor.run_editor(path)
+            with redirect_stdout(StringIO()):
+                exit_code = config_editor.run_editor(path)
         finally:
             prompt.select, prompt.text, prompt.confirm = original
         exists = path.exists()

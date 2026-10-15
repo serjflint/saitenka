@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
-from . import cli_adapter, config_adapter
+from . import cli_adapter, config_adapter, subtitle_adapter
 from .protocol import (
     PROTOCOL,
     assert_observations,
@@ -62,10 +62,11 @@ def test_contract_schemas_are_machine_readable() -> None:
         "session-v0.json": load_scenarios(ROOT / "contracts/session/v0"),
         "config-v0.json": [
             row
-            for name in ("editor.json", "options.json", "resolution.json")
+            for name in ("editor-session.json", "editor.json", "options.json", "resolution.json")
             for row in _json_rows(f"contracts/config/v0/{name}")
         ],
         "cli-v0.json": load_row_corpus(ROOT / "contracts/cli/v0"),
+        "subtitle-v0.json": load_row_corpus(ROOT / "contracts/subtitle/v0"),
     }
     for name, rows in corpora.items():
         schema = json.loads((ROOT / "contracts/schema" / name).read_text(encoding="utf-8"))
@@ -108,7 +109,7 @@ def _json_rows(path: str) -> list[dict]:
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "corpus",
-    ["session", "config", "cli"],
+    ["session", "config", "cli", "subtitle"],
 )
 def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus: str) -> None:
     if corpus == "session":
@@ -118,15 +119,19 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
     elif corpus == "config":
         scenarios = [
             row
-            for name in ("editor.json", "options.json", "resolution.json")
+            for name in ("editor-session.json", "editor.json", "options.json", "resolution.json")
             for row in _json_rows(f"contracts/config/v0/{name}")
         ]
         protocol, capability = config_adapter.PROTOCOL, config_adapter.CAPABILITY
         requests = [config_adapter.scenario_request(row) for row in scenarios]
-    else:
+    elif corpus == "cli":
         scenarios = load_row_corpus(ROOT / "contracts/cli/v0")
         protocol, capability = cli_adapter.PROTOCOL, cli_adapter.CAPABILITY
         requests = [cli_adapter.scenario_request(row) for row in scenarios]
+    else:
+        scenarios = load_row_corpus(ROOT / "contracts/subtitle/v0")
+        protocol, capability = subtitle_adapter.PROTOCOL, subtitle_adapter.CAPABILITY
+        requests = [subtitle_adapter.scenario_request(row) for row in scenarios]
 
     results = run_protocol(
         [sys.executable, str(Path(__file__).with_name("default_adapter.py"))],
