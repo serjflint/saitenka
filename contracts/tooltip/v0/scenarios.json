@@ -1,0 +1,290 @@
+[
+  {
+    "scenario_id": "tooltip-scale-and-placement",
+    "mode": "geometry",
+    "cases": [
+      {
+        "op": "scale",
+        "osd_h": 1080,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 2160,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 1080,
+        "override": 1.5,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 2160,
+        "override": 1.5,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 2161,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 2159,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 1621,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      {
+        "op": "scale",
+        "osd_h": 1080,
+        "override": 1.53,
+        "max_frac": 0.4
+      },
+      {
+        "op": "cap",
+        "fraction": 0.9
+      },
+      {
+        "op": "cap",
+        "fraction": 0.5
+      },
+      {
+        "op": "cap",
+        "fraction": 1.0
+      },
+      {
+        "op": "nested-height",
+        "full_h": 800,
+        "word_y": 246,
+        "osd_h": 1080,
+        "max_frac": 1.0
+      },
+      {
+        "op": "nested-height",
+        "full_h": 800,
+        "word_y": 205,
+        "osd_h": 1080,
+        "max_frac": 1.0
+      },
+      {
+        "op": "nested-height",
+        "full_h": 10000,
+        "word_y": 10000,
+        "osd_h": 1080,
+        "max_frac": 0.5
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 100,
+        "word_y": 600,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 100,
+        "word_y": 40,
+        "word_h": 40,
+        "height": 400,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 0,
+        "word_y": 0,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 1919,
+        "word_y": 1079,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 0,
+        "word_y": 1079,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 1919,
+        "word_y": 0,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 900,
+        "word_y": 900,
+        "word_h": 40,
+        "height": 300,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 900,
+        "word_y": 900,
+        "word_h": 40,
+        "height": 300,
+        "scale": 2.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      {
+        "op": "place",
+        "width": 300,
+        "word_x": 900,
+        "word_y": 560,
+        "word_h": 40,
+        "height": 520,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      }
+    ],
+    "expect": [
+      {
+        "display": 1.0,
+        "raster": 1.0,
+        "cap": 432
+      },
+      {
+        "display": 2.0,
+        "raster": 2.0,
+        "cap": 432
+      },
+      {
+        "display": 1.5,
+        "raster": 1.5,
+        "cap": 432
+      },
+      {
+        "display": 1.5,
+        "raster": 1.5,
+        "cap": 432
+      },
+      {
+        "display": 2.0009259259259258,
+        "raster": 2.0,
+        "cap": 432
+      },
+      {
+        "display": 1.999074074074074,
+        "raster": 2.0,
+        "cap": 432
+      },
+      {
+        "display": 1.500925925925926,
+        "raster": 1.5,
+        "cap": 432
+      },
+      {
+        "display": 1.53,
+        "raster": 1.55,
+        "cap": 432
+      },
+      972,
+      540,
+      972,
+      180,
+      800,
+      540,
+      [
+        100,
+        388
+      ],
+      [
+        100,
+        92
+      ],
+      [
+        54,
+        54
+      ],
+      [
+        1566,
+        826
+      ],
+      [
+        54,
+        826
+      ],
+      [
+        1566,
+        54
+      ],
+      [
+        900,
+        588
+      ],
+      [
+        900,
+        288
+      ],
+      [
+        900,
+        54
+      ]
+    ]
+  }
+]

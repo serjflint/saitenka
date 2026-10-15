@@ -14,6 +14,7 @@ from . import (
     config_adapter,
     dictionary_adapter,
     subtitle_adapter,
+    tooltip_adapter,
     wordstate_adapter,
 )
 from .protocol import (
@@ -83,6 +84,7 @@ def test_contract_schemas_are_machine_readable() -> None:
         "wordstate-v0.json": load_row_corpus(ROOT / "contracts/wordstate/v0"),
         "analysis-v0.json": load_row_corpus(ROOT / "contracts/analysis/v0"),
         "dictionary-v0.json": load_row_corpus(ROOT / "contracts/dictionary/v0"),
+        "tooltip-v0.json": load_row_corpus(ROOT / "contracts/tooltip/v0"),
     }
     for name, rows in corpora.items():
         schema = json.loads((ROOT / "contracts/schema" / name).read_text(encoding="utf-8"))
@@ -125,7 +127,7 @@ def _json_rows(path: str) -> list[dict]:
 @pytest.mark.timeout(10)
 @pytest.mark.parametrize(
     "corpus",
-    ["session", "config", "cli", "subtitle", "wordstate", "analysis", "dictionary"],
+    ["session", "config", "cli", "subtitle", "wordstate", "analysis", "dictionary", "tooltip"],
 )
 def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus: str) -> None:
     if corpus == "session":
@@ -162,10 +164,14 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
         scenarios = load_row_corpus(ROOT / "contracts/analysis/v0")
         protocol, capability = analysis_adapter.PROTOCOL, analysis_adapter.CAPABILITY
         requests = [analysis_adapter.scenario_request(row) for row in scenarios]
-    else:
+    elif corpus == "dictionary":
         scenarios = load_row_corpus(ROOT / "contracts/dictionary/v0")
         protocol, capability = dictionary_adapter.PROTOCOL, dictionary_adapter.CAPABILITY
         requests = [dictionary_adapter.scenario_request(row) for row in scenarios]
+    else:
+        scenarios = load_row_corpus(ROOT / "contracts/tooltip/v0")
+        protocol, capability = tooltip_adapter.PROTOCOL, tooltip_adapter.CAPABILITY
+        requests = [tooltip_adapter.scenario_request(row) for row in scenarios]
 
     results = run_protocol(
         [sys.executable, str(Path(__file__).with_name("default_adapter.py"))],

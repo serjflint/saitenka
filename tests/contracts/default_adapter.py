@@ -13,6 +13,7 @@ if __package__:
         dictionary_adapter,
         saitenka_session_adapter,
         subtitle_adapter,
+        tooltip_adapter,
         wordstate_adapter,
     )
     from . import protocol as session_protocol
@@ -25,6 +26,7 @@ else:
     import protocol as session_protocol
     import saitenka_session_adapter
     import subtitle_adapter
+    import tooltip_adapter
     import wordstate_adapter
 
 Adapter = tuple[str, Callable[[dict], object]]
@@ -38,6 +40,7 @@ ADAPTERS: dict[str, Adapter] = {
     dictionary_adapter.PROTOCOL: (dictionary_adapter.CAPABILITY, dictionary_adapter.evaluate),
     cli_adapter.PROTOCOL: (cli_adapter.CAPABILITY, cli_adapter.evaluate),
     subtitle_adapter.PROTOCOL: (subtitle_adapter.CAPABILITY, subtitle_adapter.evaluate),
+    tooltip_adapter.PROTOCOL: (tooltip_adapter.CAPABILITY, tooltip_adapter.evaluate),
     wordstate_adapter.PROTOCOL: (wordstate_adapter.CAPABILITY, wordstate_adapter.evaluate),
 }
 

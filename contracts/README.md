@@ -90,3 +90,11 @@ native concurrency and storage contracts. Rows conform to `schema/analysis-v0.js
 isolated adapter store and returns normalized entry, reading-group, term-reachability, and mining-card
 observations. Archive, media, telemetry, and connection lifetimes stay native boundaries. Rows conform to
 `schema/dictionary-v0.json`.
+
+## Tooltip v0 protocol
+
+`saitenka.tooltip/v0` uses capability `tooltip-v0`. Geometry scenarios supply viewport, word-box, panel,
+and user-scale inputs and return only visible sizes and coordinates. The contract covers scale preference,
+raster buckets, caps, nested-popup height, clamping, and side selection without exposing controller or cache
+objects. Font rasterization, hit-map agreement, hover concurrency, and interaction state stay native tests.
+Rows conform to `schema/tooltip-v0.json`.

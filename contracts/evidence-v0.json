@@ -424,6 +424,15 @@
       "replace": "        return entries",
       "command": "uv run pytest -q tests/contracts/test_dictionary_corpus.py",
       "mismatch": "an exact term lookup merged a reading-only homophone into its definitions"
+    },
+    {
+      "id": "tooltip-user-scale-override",
+      "scenario_id": "tooltip-scale-and-placement",
+      "path": "src/saitenka/app/features/tooltip/prefetch.py",
+      "find": "    display = override if override > 0 else osd_h / REF_H",
+      "replace": "    display = osd_h / REF_H",
+      "command": "uv run pytest -q tests/contracts/test_tooltip_corpus.py",
+      "mismatch": "a fixed 1.5 user scale reverted to the viewport-derived 1.0 at 1080p"
     }
   ]
 }
