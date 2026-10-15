@@ -27,7 +27,7 @@ Sharpen owns edits to existing assertions; adequacy coordinates still enter thro
 ## Decision tree (walk it before typing)
 
 0. **Where does the contract live?**
-   - User-visible behavior spanning components → add a row to the versioned corpus under `contracts/`;
+   - User-visible behavior spanning components → add a row under `tests/contracts/corpus/`;
      expected answers stay outside the executable adapter request.
    - Stable package/math law → test the public package seam, preferably as a property or conformance row.
    - Real external boundary, deterministic interleaving, production-path parity, or composition totality →

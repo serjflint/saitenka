@@ -14,7 +14,9 @@ import pytest
 INVENTORY = next(
     row
     for row in json.loads(
-        (Path(__file__).parents[1] / "contracts/cli/v0/scenarios.json").read_text(encoding="utf-8")
+        (Path(__file__).parent / "contracts/corpus/cli/v0/scenarios.json").read_text(
+            encoding="utf-8"
+        )
     )
     if row["scenario_id"] == "help-inventory"
 )["expect_contains"]

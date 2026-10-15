@@ -20,7 +20,8 @@ from .protocol import (
     scenario_request,
 )
 
-ROOT = Path(__file__).resolve().parents[2]
+HERE = Path(__file__).resolve().parent
+CORPUS = HERE / "corpus"
 
 
 @pytest.mark.integration
@@ -38,7 +39,7 @@ def test_non_python_adapter_obeys_framing_without_receiving_the_answer_key() -> 
         },
     }
 
-    [reply] = run_executable([str(ROOT / "contracts/examples/session-v0-adapter.sh")], [scenario])
+    [reply] = run_executable([str(HERE / "examples/session-v0-adapter.sh")], [scenario])
 
     assert reply["scenario_id"] == scenario["scenario_id"]
     assert_observations(scenario["expect"], reply["observations"])
@@ -59,7 +60,7 @@ def test_comparator_rejects_a_representative_broken_observation() -> None:
 
 
 def test_manifest_rejects_removing_a_nested_case_with_its_answer(tmp_path: Path) -> None:
-    source = ROOT / "contracts/tooltip/v0"
+    source = CORPUS / "tooltip/v0"
     shutil.copy(source / "manifest.lock", tmp_path / "manifest.lock")
     rows = json.loads((source / "interaction.json").read_text(encoding="utf-8"))
     rows[0]["cases"].pop()
@@ -71,7 +72,7 @@ def test_manifest_rejects_removing_a_nested_case_with_its_answer(tmp_path: Path)
 
 
 def test_manifest_rejects_removing_an_expected_observation(tmp_path: Path) -> None:
-    source = ROOT / "contracts/journey/v0"
+    source = CORPUS / "journey/v0"
     shutil.copy(source / "manifest.lock", tmp_path / "manifest.lock")
     rows = json.loads((source / "scenarios.json").read_text(encoding="utf-8"))
     rows[0]["expect"].pop()
@@ -109,11 +110,9 @@ print(json.dumps({'type': 'result', 'protocol': request['protocol'], 'scenario_i
 
 def test_contract_schemas_are_machine_readable() -> None:
     for corpus in CORPORA:
-        directory = ROOT / "contracts" / corpus / "v0"
+        directory = CORPUS / corpus / "v0"
         rows = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
-        schema = json.loads(
-            (ROOT / "contracts/schema" / f"{corpus}-v0.json").read_text(encoding="utf-8")
-        )
+        schema = json.loads((HERE / "schema" / f"{corpus}-v0.json").read_text(encoding="utf-8"))
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         Draft202012Validator.check_schema(schema)
         validator = Draft202012Validator(schema)
@@ -126,7 +125,7 @@ def test_contract_schemas_are_machine_readable() -> None:
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 def test_default_adapter_rejects_an_answer_key() -> None:
-    scenario = load_scenarios(ROOT / "contracts/session/v0")[0]
+    scenario = load_scenarios(CORPUS / "session/v0")[0]
     request = scenario_request(scenario) | {"expect": scenario["expect"]}
     wire = [
         {"type": "hello", "protocol": PROTOCOL, "requires": ["session-v0"]},

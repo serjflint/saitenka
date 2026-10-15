@@ -238,9 +238,9 @@ def run_corpus(
     scenario_id: str | None = None,
 ) -> None:
     """Judge one committed corpus against any JSONL adapter executable."""
-    base = root or Path(__file__).resolve().parents[2]
+    base = root or Path(__file__).resolve().parent / "corpus"
     protocol, capability = CORPORA[corpus]
-    directory = base / "contracts" / corpus / "v0"
+    directory = base / corpus / "v0"
     scenarios = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
     if scenario_id is not None:
         scenarios = [scenario for scenario in scenarios if scenario["scenario_id"] == scenario_id]

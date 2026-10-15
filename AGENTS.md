@@ -188,8 +188,8 @@ assert); their exact flags and marker exclusions live in `[tool.poe.tasks]` (SSO
 unit suite is its own contract: see **Mutation auditing** and **Fuzzing & symbolic checks** below.
 
 Permanent tests are compatibility assets. User-visible multi-component behavior belongs in the portable
-scenario corpus under `contracts/`; public package laws, real external boundaries, deterministic schedule
-controls, and composition-totality checks remain at their stable seams. A test of a reducer, controller,
+scenario corpus under `tests/contracts/corpus/`; public package laws, real external boundaries,
+deterministic schedule controls, and composition-totality checks remain at their stable seams. A test of a reducer, controller,
 helper, or private state is temporary scaffolding unless it names the invariant owner and its retirement
 condition. The `write-test` skill owns the classification procedure.
 
