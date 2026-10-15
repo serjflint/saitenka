@@ -3799,7 +3799,7 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
     reason: mpv defaults it to `yes`, so `True is None` refused native geometry outright on
     mpv < 0.41, and 0.41 removed the option and made the row read green.
     """
-    from saitenka.app.native_subtitles import _unsupported_render_inputs
+    from saitenka.app.native_subtitles import unsupported_render_settings
 
     plausible = (0, 0.0, 1.0, 100.0, "", (), False, True, "no", "yes", "all", "auto")
 
@@ -3810,7 +3810,7 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
             candidate
             for candidate in plausible
             if name
-            not in _unsupported_render_inputs(
+            not in unsupported_render_settings(
                 {**_SUPPORTED_SETTINGS, name: candidate}, authored=True
             )
         ]
