@@ -19,6 +19,7 @@ run failed and the source file was restored byte for byte.
 | `input-registration-publishes-effective-bindings` | emit `disable-section` instead of `enable-section` | the required global enablement observation disappeared |
 | `mining-adds-one-note` | skip the bulk miner's external `add_note` commit | no note reached the Anki boundary within the declared bound |
 | `language-toggle-selects-secondary` | force every toggle back to the Japanese track | the observed `sid` write stayed on 2 instead of selecting English SID 1 |
+| `language-toggle-returns-to-primary` | force every toggle to the English track | the observed `sid` write stayed on 1 instead of returning to Japanese SID 2 |
 
 `tests/contracts/test_adapter_protocol.py` also feeds a deliberately wrong transcript to the comparator and
 requires it to fail. `contracts/evidence-v0.json` is the tracked witness ledger: it records the exact base,

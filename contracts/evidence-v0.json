@@ -343,6 +343,15 @@
       "replace": "    return ToggleDecision(MAIN_LANG, tracks.jp_sid)",
       "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[language-toggle-selects-secondary]'",
       "mismatch": "the player wrote Japanese SID 2 instead of selecting English SID 1"
+    },
+    {
+      "id": "session-language-toggle-return",
+      "scenario_id": "language-toggle-returns-to-primary",
+      "path": "src/saitenka/app/subtitle_selection.py",
+      "find": "    return ToggleDecision(target, tracks.en_sid if target == SECOND_LANG else tracks.jp_sid)",
+      "replace": "    return ToggleDecision(SECOND_LANG, tracks.en_sid)",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[language-toggle-returns-to-primary]'",
+      "mismatch": "the player kept English SID 1 instead of returning to Japanese SID 2"
     }
   ]
 }
