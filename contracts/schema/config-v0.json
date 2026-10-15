@@ -6,13 +6,13 @@
   "oneOf": [
     {
       "type": "object", "additionalProperties": false,
-      "required": ["scenario_id", "mode", "config", "flags", "expect"],
-      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "run"}, "config": {"type": "object"}, "flags": {"type": "object"}, "expect": {"type": "object"}}
+      "required": ["scenario_id", "mode", "config", "flags", "observe", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "run"}, "config": {"type": "object"}, "flags": {"type": "object"}, "observe": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}, "expect": {"type": "object"}}
     },
     {
       "type": "object", "additionalProperties": false,
-      "required": ["scenario_id", "mode", "config", "mine", "expect"],
-      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "attach"}, "config": {"type": "object"}, "mine": {"type": "object"}, "expect": {"type": "object"}}
+      "required": ["scenario_id", "mode", "config", "mine", "observe", "expect"],
+      "properties": {"scenario_id": {"$ref": "#/$defs/id"}, "mode": {"const": "attach"}, "config": {"type": "object"}, "mine": {"type": "object"}, "observe": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}, "expect": {"type": "object"}}
     },
     {
       "type": "object", "additionalProperties": false,

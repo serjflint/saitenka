@@ -37,8 +37,14 @@ PROTOCOL = "saitenka.config/v0"
 CAPABILITY = "config-v0"
 ANSWER_KEYS = frozenset({"expect", "expect_contains"})
 MODE_KEYS = {
-    "run": (frozenset({"scenario_id", "mode", "config", "flags", "expect"}), True),
-    "attach": (frozenset({"scenario_id", "mode", "config", "mine", "expect"}), True),
+    "run": (
+        frozenset({"scenario_id", "mode", "config", "flags", "observe", "expect"}),
+        False,
+    ),
+    "attach": (
+        frozenset({"scenario_id", "mode", "config", "mine", "observe", "expect"}),
+        False,
+    ),
     "editor-catalog": (frozenset({"scenario_id", "mode", "fields", "expect"}), False),
     "editor-defaults": (frozenset({"scenario_id", "mode", "checks", "expect"}), False),
     "editor-coerce": (frozenset({"scenario_id", "mode", "checks", "expect"}), False),
@@ -73,8 +79,6 @@ def scenario_request(scenario: dict) -> dict:
     if spec is None or set(scenario) != spec[0]:
         raise ValueError(f"invalid config-v0 scenario keys for {mode!r}")
     payload = {key: value for key, value in scenario.items() if key not in ANSWER_KEYS}
-    if spec[1]:
-        payload["observe"] = list(scenario["expect"])
     return {"type": "run", "protocol": PROTOCOL, **payload}
 
 

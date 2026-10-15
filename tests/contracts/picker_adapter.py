@@ -10,7 +10,7 @@ ANSWER_KEYS = frozenset({"expect"})
 
 def scenario_request(scenario: dict) -> dict:
     if (
-        set(scenario) != {"scenario_id", "mode", "cases", "expect"}
+        set(scenario) != {"scenario_id", "mode", "given", "cases", "expect"}
         or scenario.get("mode") != "interaction"
     ):
         raise ValueError("invalid picker-v0 scenario")
@@ -27,17 +27,17 @@ def validate_request(request: dict) -> None:
         or request.get("type") != "run"
         or request.get("protocol") != PROTOCOL
         or request.get("mode") != "interaction"
-        or set(request) != {"type", "protocol", "scenario_id", "mode", "cases"}
+        or set(request) != {"type", "protocol", "scenario_id", "mode", "given", "cases"}
     ):
         raise ValueError("invalid picker-v0 request envelope")
 
 
 def evaluate(request: dict) -> list[object]:
     validate_request(request)
-    return [_evaluate_case(case) for case in request["cases"]]
+    return [_evaluate_case(case, request["given"]) for case in request["cases"]]
 
 
-def _evaluate_case(case: dict) -> object:
+def _evaluate_case(case: dict, given: dict) -> object:
     tests = Path(__file__).resolve().parents[1]
     if str(tests) not in sys.path:
         sys.path.insert(0, str(tests))
@@ -57,19 +57,20 @@ def _evaluate_case(case: dict) -> object:
             return super().command(*args)
 
     ipc = IPC()
-    ipc.props.update({"path": "/v/Show - 01.mkv", "osd-dimensions": {"w": 1920, "h": 1080}})
+    width, height = given["viewport"]
+    ipc.props.update({"path": given["video"], "osd-dimensions": {"w": width, "h": height}})
     reader = build_session(ipc)
-    reader.graph.screen.osd = (1920, 1080)
+    reader.graph.screen.osd = (width, height)
     downloaded: list[str] = []
 
     def candidate(item: dict) -> SubtitleCandidate:
         name = item["name"]
         return SubtitleCandidate(
-            provider=item.get("provider", "jimaku"),
+            provider=item["provider"],
             name=name,
-            size=item.get("size", 1000),
-            match=item.get("match", False),
-            language=item.get("language"),
+            size=item["size"],
+            match=item["match"],
+            language=item["language"],
             download=lambda: (downloaded.append(name) or f"/tmp/{name}", "ok"),
         )
 

@@ -201,7 +201,7 @@ def _selection_policy(case: dict) -> object:
         ).value
     if op == "background-select":
         return selects_background_japanese(
-            **{key: value for key, value in case.items() if key != "op"}
+            **{key: value for key, value in case.items() if key not in {"case_id", "op"}}
         )
     if op == "matches-language":
         return matches_target_language(case["tag"], case["target"])

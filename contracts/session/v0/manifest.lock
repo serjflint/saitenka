@@ -1,1 +1,7 @@
-{"count":11,"key_sha256":"6a960cede9d6e70131a57f5a1ec32fbf8a5c5c1013554b493edeec1de8306000"}
+{
+  "count": 11,
+  "key_sha256": "6a960cede9d6e70131a57f5a1ec32fbf8a5c5c1013554b493edeec1de8306000",
+  "vector_count": 11,
+  "vector_key_sha256": "6a960cede9d6e70131a57f5a1ec32fbf8a5c5c1013554b493edeec1de8306000",
+  "input_sha256": "12830df2e33540469ac4038506ea28fa26e1b3e02e81d7be2d3e028cba4a5d11"
+}

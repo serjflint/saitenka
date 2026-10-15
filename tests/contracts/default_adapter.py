@@ -12,6 +12,7 @@ if __package__:
         config_adapter,
         dictionary_adapter,
         history_adapter,
+        journey_adapter,
         picker_adapter,
         saitenka_session_adapter,
         sidebar_adapter,
@@ -27,6 +28,7 @@ else:
     import config_adapter
     import dictionary_adapter
     import history_adapter
+    import journey_adapter
     import picker_adapter
     import protocol as session_protocol
     import saitenka_session_adapter
@@ -45,6 +47,7 @@ ADAPTERS: dict[str, Adapter] = {
     config_adapter.PROTOCOL: (config_adapter.CAPABILITY, config_adapter.evaluate),
     dictionary_adapter.PROTOCOL: (dictionary_adapter.CAPABILITY, dictionary_adapter.evaluate),
     history_adapter.PROTOCOL: (history_adapter.CAPABILITY, history_adapter.evaluate),
+    journey_adapter.PROTOCOL: (journey_adapter.CAPABILITY, journey_adapter.evaluate),
     picker_adapter.PROTOCOL: (picker_adapter.CAPABILITY, picker_adapter.evaluate),
     sidebar_adapter.PROTOCOL: (sidebar_adapter.CAPABILITY, sidebar_adapter.evaluate),
     cli_adapter.PROTOCOL: (cli_adapter.CAPABILITY, cli_adapter.evaluate),

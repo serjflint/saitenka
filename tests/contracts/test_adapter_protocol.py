@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -8,19 +9,8 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator, ValidationError
 
-from . import (
-    analysis_adapter,
-    cli_adapter,
-    config_adapter,
-    dictionary_adapter,
-    history_adapter,
-    picker_adapter,
-    sidebar_adapter,
-    subtitle_adapter,
-    tooltip_adapter,
-    wordstate_adapter,
-)
 from .protocol import (
+    CORPORA,
     PROTOCOL,
     assert_observations,
     load_row_corpus,
@@ -68,35 +58,51 @@ def test_comparator_rejects_a_representative_broken_observation() -> None:
         )
 
 
-def test_contract_schemas_are_machine_readable() -> None:
-    corpora = {
-        "session-v0.json": load_scenarios(ROOT / "contracts/session/v0"),
-        "config-v0.json": [
-            row
-            for name in (
-                "editor-session.json",
-                "editor.json",
-                "config-policy.json",
-                "options.json",
-                "profile-policy.json",
-                "profile-switch.json",
-                "profiles.json",
-                "resolution.json",
-            )
-            for row in _json_rows(f"contracts/config/v0/{name}")
-        ],
-        "cli-v0.json": load_row_corpus(ROOT / "contracts/cli/v0"),
-        "subtitle-v0.json": load_row_corpus(ROOT / "contracts/subtitle/v0"),
-        "wordstate-v0.json": load_row_corpus(ROOT / "contracts/wordstate/v0"),
-        "analysis-v0.json": load_row_corpus(ROOT / "contracts/analysis/v0"),
-        "dictionary-v0.json": load_row_corpus(ROOT / "contracts/dictionary/v0"),
-        "history-v0.json": load_row_corpus(ROOT / "contracts/history/v0"),
-        "picker-v0.json": load_row_corpus(ROOT / "contracts/picker/v0"),
-        "sidebar-v0.json": load_row_corpus(ROOT / "contracts/sidebar/v0"),
-        "tooltip-v0.json": load_row_corpus(ROOT / "contracts/tooltip/v0"),
+def test_manifest_rejects_removing_a_nested_case_with_its_answer(tmp_path: Path) -> None:
+    source = ROOT / "contracts/tooltip/v0"
+    shutil.copy(source / "manifest.lock", tmp_path / "manifest.lock")
+    rows = json.loads((source / "interaction.json").read_text(encoding="utf-8"))
+    rows[0]["cases"].pop()
+    rows[0]["expect"].pop()
+    (tmp_path / "interaction.json").write_text(json.dumps(rows), encoding="utf-8")
+
+    with pytest.raises(AssertionError):
+        load_row_corpus(tmp_path)
+
+
+def test_runner_rejects_a_result_for_the_wrong_scenario() -> None:
+    program = """
+import json, sys
+hello = json.loads(sys.stdin.readline())
+request = json.loads(sys.stdin.readline())
+print(json.dumps({'type': 'hello', 'protocol': hello['protocol'], 'capabilities': hello['requires']}))
+print(json.dumps({'type': 'result', 'protocol': request['protocol'], 'scenario_id': 'wrong', 'status': 'ok', 'observations': []}))
+"""
+    request = {
+        "type": "run",
+        "protocol": PROTOCOL,
+        "scenario_id": "right",
+        "requires": ["session-v0"],
+        "given": {},
+        "when": [],
     }
-    for name, rows in corpora.items():
-        schema = json.loads((ROOT / "contracts/schema" / name).read_text(encoding="utf-8"))
+
+    with pytest.raises(AssertionError):
+        run_protocol(
+            [sys.executable, "-c", program],
+            protocol=PROTOCOL,
+            capability="session-v0",
+            requests=[request],
+        )
+
+
+def test_contract_schemas_are_machine_readable() -> None:
+    for corpus in CORPORA:
+        directory = ROOT / "contracts" / corpus / "v0"
+        rows = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
+        schema = json.loads(
+            (ROOT / "contracts/schema" / f"{corpus}-v0.json").read_text(encoding="utf-8")
+        )
         assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
         Draft202012Validator.check_schema(schema)
         validator = Draft202012Validator(schema)
@@ -126,103 +132,23 @@ def test_default_adapter_rejects_an_answer_key() -> None:
     assert completed.returncode == 2
 
 
-def _json_rows(path: str) -> list[dict]:
-    import json
-
-    return json.loads((ROOT / path).read_text(encoding="utf-8"))
-
-
 @pytest.mark.integration
 @pytest.mark.timeout(10)
-@pytest.mark.parametrize(
-    "corpus",
-    [
-        "session",
-        "config",
-        "cli",
-        "subtitle",
-        "wordstate",
-        "analysis",
-        "dictionary",
-        "tooltip",
-        "history",
-        "picker",
-        "sidebar",
-    ],
-)
+@pytest.mark.parametrize("corpus", CORPORA)
 def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus: str) -> None:
-    if corpus == "session":
-        scenarios = load_scenarios(ROOT / "contracts/session/v0")
-        protocol, capability = PROTOCOL, "session-v0"
-        requests = [scenario_request(row) for row in scenarios]
-    elif corpus == "config":
-        scenarios = [
-            row
-            for name in (
-                "editor-session.json",
-                "editor.json",
-                "config-policy.json",
-                "options.json",
-                "profile-policy.json",
-                "profile-switch.json",
-                "profiles.json",
-                "resolution.json",
-            )
-            for row in _json_rows(f"contracts/config/v0/{name}")
-        ]
-        protocol, capability = config_adapter.PROTOCOL, config_adapter.CAPABILITY
-        requests = [config_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "cli":
-        scenarios = load_row_corpus(ROOT / "contracts/cli/v0")
-        protocol, capability = cli_adapter.PROTOCOL, cli_adapter.CAPABILITY
-        requests = [cli_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "subtitle":
-        scenarios = load_row_corpus(ROOT / "contracts/subtitle/v0")
-        protocol, capability = subtitle_adapter.PROTOCOL, subtitle_adapter.CAPABILITY
-        requests = [subtitle_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "wordstate":
-        scenarios = load_row_corpus(ROOT / "contracts/wordstate/v0")
-        protocol, capability = wordstate_adapter.PROTOCOL, wordstate_adapter.CAPABILITY
-        requests = [wordstate_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "analysis":
-        scenarios = load_row_corpus(ROOT / "contracts/analysis/v0")
-        protocol, capability = analysis_adapter.PROTOCOL, analysis_adapter.CAPABILITY
-        requests = [analysis_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "dictionary":
-        scenarios = load_row_corpus(ROOT / "contracts/dictionary/v0")
-        protocol, capability = dictionary_adapter.PROTOCOL, dictionary_adapter.CAPABILITY
-        requests = [dictionary_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "tooltip":
-        scenarios = load_row_corpus(ROOT / "contracts/tooltip/v0")
-        protocol, capability = tooltip_adapter.PROTOCOL, tooltip_adapter.CAPABILITY
-        requests = [tooltip_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "history":
-        scenarios = load_row_corpus(ROOT / "contracts/history/v0")
-        protocol, capability = history_adapter.PROTOCOL, history_adapter.CAPABILITY
-        requests = [history_adapter.scenario_request(row) for row in scenarios]
-    elif corpus == "picker":
-        scenarios = load_row_corpus(ROOT / "contracts/picker/v0")
-        protocol, capability = picker_adapter.PROTOCOL, picker_adapter.CAPABILITY
-        requests = [picker_adapter.scenario_request(row) for row in scenarios]
-    else:
-        scenarios = load_row_corpus(ROOT / "contracts/sidebar/v0")
-        protocol, capability = sidebar_adapter.PROTOCOL, sidebar_adapter.CAPABILITY
-        requests = [sidebar_adapter.scenario_request(row) for row in scenarios]
-
-    results = run_protocol(
-        [sys.executable, str(Path(__file__).with_name("default_adapter.py"))],
-        protocol=protocol,
-        capability=capability,
-        requests=requests,
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(Path(__file__).with_name("protocol.py")),
+            "--corpus",
+            corpus,
+            "--",
+            sys.executable,
+            str(Path(__file__).with_name("default_adapter.py")),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=10,
     )
-
-    for scenario, request, result in zip(scenarios, requests, results, strict=True):
-        assert not {"expect", "expect_contains"} & request.keys()
-        observations = result["observations"]
-        if corpus == "session":
-            assert_observations(scenario["expect"], observations)
-        elif "expect_contains" in scenario:
-            for key, expected in scenario["expect_contains"].items():
-                assert set(expected) <= set(observations[key])
-        else:
-            assert observations == scenario["expect"]
+    assert completed.returncode == 0, completed.stderr

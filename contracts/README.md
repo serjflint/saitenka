@@ -6,8 +6,16 @@ judges the returned boundary transcript.
 
 The reference executable is `tests/contracts/default_adapter.py`. It exposes every capability below over
 the same JSON Lines transport; a replacement may use any language and process model as long as it
-implements the negotiated capability. `tests/contracts/test_adapter_protocol.py` sends the same corpus
-requests through that boundary without any `expect` or `expect_contains` field.
+implements the negotiated capability. Run any implementation with:
+
+```console
+uv run python tests/contracts/protocol.py --corpus journey -- ./path/to/adapter
+```
+
+The runner sends no `expect` or `expect_contains` field. It validates every result envelope and judges the
+observations outside the adapter. A replacement can implement one capability at a time; conformance means
+the named v0 capabilities it advertises, not unlisted UI behavior. Card-preview controls, kanji popup
+navigation, native font rasterization, and live mpv remain native retained contracts in this version.
 
 ## Session v0 protocol
 
@@ -44,7 +52,8 @@ an observation. Symbolic IDs replace process IDs, addresses, timestamps, and imp
 
 Each scenario file conforms to `schema/session-v0.json`. The reference runner also enforces the same closed
 request vocabulary before execution. Scenario IDs are stable API keys. The committed
-manifest locks their count and key-set hash so a re-vendor or cleanup cannot silently shrink the contract.
+manifest locks scenario IDs, content-derived nested-vector identities, vector count, and the complete
+answer-free input payload, so a re-vendor or cleanup cannot silently remove or rewrite behavior.
 The test runner validates every committed row against the published Draft 2020-12 schemas.
 
 ## Config v0 protocol
@@ -132,3 +141,12 @@ and close state. Provider scheduling and render geometry stay native tests. Rows
 pointer actions, then observe visible row windows, manual-scroll expiry, seek commands and playback neutrality.
 Row analysis, persistence boundaries and composition stay native tests. Rows conform to
 `schema/sidebar-v0.json`.
+
+## Journey v0 protocol
+
+`saitenka.journey/v0` composes the flagship path instead of accepting isolated subsystem answers. Its
+declared cue, FSRS snapshot, dictionary entry, pointer action, capture results, and mining format must
+produce maturity-colored subtitle tokens, the hovered dictionary tooltip, one media capture, and the final
+Anki note for that same selected word. This is the portable wiring proof that connects the subtitle,
+word-state, dictionary, tooltip, mining, media, and Anki capabilities. Rows conform to
+`schema/journey-v0.json`.

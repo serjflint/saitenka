@@ -9,7 +9,13 @@
       "tooltip.tip_scale": 0.0,
       "panels.scale": 1.0,
       "mining.show_preview": true
-    }
+    },
+    "observe": [
+      "tooltip.scan_delay",
+      "tooltip.tip_scale",
+      "panels.scale",
+      "mining.show_preview"
+    ]
   },
   {
     "scenario_id": "run-overrides",
@@ -26,9 +32,16 @@
       "help_key": "Ctrl+h",
       "subtitle_retry_key": "Ctrl+r",
       "annotation_mode": "hover",
-      "stats": {"enabled": true, "summary": false}
+      "stats": {
+        "enabled": true,
+        "summary": false
+      }
     },
-    "flags": {"layout_engine": "taffy", "tip_scale": 1.5, "mine_preview": false},
+    "flags": {
+      "layout_engine": "taffy",
+      "tip_scale": 1.5,
+      "mine_preview": false
+    },
     "expect": {
       "tooltip.scan_delay": 1.5,
       "tooltip.layout_engine": "taffy",
@@ -46,7 +59,25 @@
       "keys.subtitle_retry_key": "Ctrl+r",
       "stats.enabled": true,
       "stats.summary": false
-    }
+    },
+    "observe": [
+      "tooltip.scan_delay",
+      "tooltip.layout_engine",
+      "tooltip.tip_scale",
+      "tooltip.annotation_mode",
+      "panels.scale",
+      "mining.show_preview",
+      "keys.hover_pause_key",
+      "keys.subtitle_language_key",
+      "keys.bookmark_key",
+      "keys.sidebar_key",
+      "keys.analysis_key",
+      "keys.annotation_key",
+      "keys.help_key",
+      "keys.subtitle_retry_key",
+      "stats.enabled",
+      "stats.summary"
+    ]
   },
   {
     "scenario_id": "attach-overrides",
@@ -65,9 +96,14 @@
       "help_key": "Ctrl+h",
       "subtitle_retry_key": "Ctrl+r",
       "annotation_mode": "hover",
-      "stats": {"enabled": true, "summary": false}
+      "stats": {
+        "enabled": true,
+        "summary": false
+      }
     },
-    "mine": {"preview": false},
+    "mine": {
+      "preview": false
+    },
     "expect": {
       "tooltip.layout_engine": "taffy",
       "tooltip.tip_scale": 1.5,
@@ -85,6 +121,24 @@
       "keys.subtitle_retry_key": "Ctrl+r",
       "stats.enabled": true,
       "stats.summary": false
-    }
+    },
+    "observe": [
+      "tooltip.layout_engine",
+      "tooltip.tip_scale",
+      "tooltip.pause_on_tooltip",
+      "tooltip.annotation_mode",
+      "panels.scale",
+      "mining.show_preview",
+      "keys.hover_pause_key",
+      "keys.subtitle_language_key",
+      "keys.bookmark_key",
+      "keys.sidebar_key",
+      "keys.analysis_key",
+      "keys.annotation_key",
+      "keys.help_key",
+      "keys.subtitle_retry_key",
+      "stats.enabled",
+      "stats.summary"
+    ]
   }
 ]

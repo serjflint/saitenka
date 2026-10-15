@@ -3,14 +3,28 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
-    from pathlib import Path
 
 PROTOCOL = "saitenka.session/v0"
 CAPABILITY = "session-v0"
+CORPORA = {
+    "analysis": ("saitenka.analysis/v0", "analysis-v0"),
+    "cli": ("saitenka.cli/v0", "cli-v0"),
+    "config": ("saitenka.config/v0", "config-v0"),
+    "dictionary": ("saitenka.dictionary/v0", "dictionary-v0"),
+    "history": ("saitenka.history/v0", "history-v0"),
+    "journey": ("saitenka.journey/v0", "journey-v0"),
+    "picker": ("saitenka.picker/v0", "picker-v0"),
+    "session": (PROTOCOL, CAPABILITY),
+    "sidebar": ("saitenka.sidebar/v0", "sidebar-v0"),
+    "subtitle": ("saitenka.subtitle/v0", "subtitle-v0"),
+    "tooltip": ("saitenka.tooltip/v0", "tooltip-v0"),
+    "wordstate": ("saitenka.wordstate/v0", "wordstate-v0"),
+}
 SCENARIO_KEYS = frozenset({"protocol", "scenario_id", "requires", "given", "when", "expect"})
 EXPECT_KEYS = frozenset({"mode", "observations"})
 MODES = frozenset({"exact", "contains_in_order"})
@@ -128,12 +142,45 @@ def run_protocol(
         "capabilities": [capability],
     }
     assert len(replies) == len(wire)
-    return replies[1:]
+    results = replies[1:]
+    for request, result in zip(requests, results, strict=True):
+        assert result.get("type") == "result"
+        assert result.get("protocol") == protocol
+        assert result.get("scenario_id") == request["scenario_id"]
+        assert result.get("status") == "ok"
+        assert "observations" in result
+    return results
 
 
 def scenario_key_hash(ids: Iterable[str]) -> str:
     payload = "\n".join(sorted(ids)).encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def _request_payload(row: dict) -> dict:
+    return {key: value for key, value in row.items() if key not in {"expect", "expect_contains"}}
+
+
+def _manifest(rows: Sequence[dict]) -> dict:
+    ids = [row["scenario_id"] for row in rows]
+    vector_ids = [
+        hashlib.sha256(compact_json(case).encode()).hexdigest()
+        for row in rows
+        for case in row.get("cases", ())
+    ]
+    input_payload = "\n".join(compact_json(_request_payload(row)) for row in rows).encode()
+    return {
+        "count": len(ids),
+        "key_sha256": scenario_key_hash(ids),
+        "vector_count": len(vector_ids) or len(ids),
+        "vector_key_sha256": scenario_key_hash(vector_ids or ids),
+        "input_sha256": hashlib.sha256(input_payload).hexdigest(),
+    }
+
+
+def expected_manifest(rows: Sequence[dict]) -> dict:
+    """Return the deliberate-rebless value for a corpus directory."""
+    return _manifest(rows)
 
 
 def load_scenarios(directory: Path) -> list[dict]:
@@ -146,7 +193,7 @@ def load_scenarios(directory: Path) -> list[dict]:
     if len(ids) != len(set(ids)):
         raise ValueError("scenario IDs must be unique")
     manifest = json.loads((directory / "manifest.lock").read_text(encoding="utf-8"))
-    assert manifest == {"count": len(ids), "key_sha256": scenario_key_hash(ids)}
+    assert manifest == _manifest(scenarios)
     return scenarios
 
 
@@ -159,6 +206,55 @@ def load_row_corpus(directory: Path) -> list[dict]:
     ids = [row["scenario_id"] for row in rows]
     if len(ids) != len(set(ids)):
         raise ValueError("scenario IDs must be unique")
+    for row in rows:
+        cases = row.get("cases")
+        if cases is None:
+            continue
+        expected = row.get("expect")
+        if not isinstance(expected, list) or len(cases) != len(expected):
+            raise ValueError(f"{row['scenario_id']}: cases and expect must have equal length")
     manifest = json.loads((directory / "manifest.lock").read_text(encoding="utf-8"))
-    assert manifest == {"count": len(ids), "key_sha256": scenario_key_hash(ids)}
+    assert manifest == _manifest(rows)
     return rows
+
+
+def run_corpus(command: Sequence[str], corpus: str, *, root: Path | None = None) -> None:
+    """Judge one committed corpus against any JSONL adapter executable."""
+    base = root or Path(__file__).resolve().parents[2]
+    protocol, capability = CORPORA[corpus]
+    directory = base / "contracts" / corpus / "v0"
+    scenarios = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
+    requests = [
+        {"type": "run", "protocol": protocol, **_request_payload(scenario)}
+        for scenario in scenarios
+    ]
+    results = run_protocol(command, protocol=protocol, capability=capability, requests=requests)
+    for scenario, result in zip(scenarios, results, strict=True):
+        actual = result["observations"]
+        if corpus == "session":
+            assert_observations(scenario["expect"], actual)
+        elif "expect_contains" in scenario:
+            for key, expected in scenario["expect_contains"].items():
+                assert set(expected) <= set(actual[key])
+        else:
+            assert actual == scenario["expect"]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Judge a Saitenka compatibility corpus")
+    parser.add_argument("--corpus", choices=sorted(CORPORA), required=True)
+    parser.add_argument("adapter", nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    command = list(args.adapter)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        parser.error("adapter command is required after --")
+    run_corpus(command, args.corpus)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

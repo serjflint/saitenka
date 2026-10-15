@@ -4,11 +4,6 @@
   "title": "Saitenka sidebar compatibility scenario v0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["scenario_id", "mode", "cases", "expect"],
-  "properties": {
-    "scenario_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "mode": {"const": "interaction"},
-    "cases": {"type": "array", "minItems": 1, "items": {"type": "object"}},
-    "expect": {"type": "array", "minItems": 1}
-  }
+  "required": ["scenario_id","mode","given","cases","expect"],
+  "properties": {"scenario_id":{"type":"string","pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$"},"mode":{"const":"interaction"},"given":{"type":"object","additionalProperties":false,"required":["viewport","panel_rect"],"properties":{"viewport":{"type":"array","prefixItems":[{"type":"integer"},{"type":"integer"}],"items":false},"panel_rect":{"type":"array","prefixItems":[{"type":"number"},{"type":"number"},{"type":"number"},{"type":"number"}],"items":false}}},"cases":{"type":"array","minItems":1,"items":{"oneOf":[{"type":"object","additionalProperties":false,"required":["op","active","cue_count","step","duplicate_text","props"],"properties":{"op":{"const":"toggle"},"active":{"type":"integer"},"cue_count":{"type":"integer"},"step":{"type":"number"},"duplicate_text":{"type":["array","null"],"items":{"type":"integer"}},"props":{"type":"object"}}},{"type":"object","additionalProperties":false,"required":["op","active","cue_count","step","duplicate_text","props","steps","next_active"],"properties":{"op":{"const":"manual-scroll"},"active":{"type":"integer"},"cue_count":{"type":"integer"},"step":{"type":"number"},"duplicate_text":{"type":["array","null"],"items":{"type":"integer"}},"props":{"type":"object"},"steps":{"type":"integer"},"next_active":{"type":"integer"}}},{"type":"object","additionalProperties":false,"required":["op","active","cue_count","step","duplicate_text","props","target"],"properties":{"op":{"const":"click-seek"},"active":{"type":"integer"},"cue_count":{"type":"integer"},"step":{"type":"number"},"duplicate_text":{"type":["array","null"],"items":{"type":"integer"}},"props":{"type":"object"},"target":{"type":"integer"}}}]}},"expect":{"type":"array","minItems":1}}
 }

@@ -11,7 +11,7 @@ ANSWER_KEYS = frozenset({"expect"})
 
 def scenario_request(scenario: dict) -> dict:
     if (
-        set(scenario) != {"scenario_id", "mode", "cases", "expect"}
+        set(scenario) != {"scenario_id", "mode", "given", "cases", "expect"}
         or scenario.get("mode") != "interaction"
     ):
         raise ValueError("invalid sidebar-v0 scenario")
@@ -28,17 +28,17 @@ def validate_request(request: dict) -> None:
         or request.get("type") != "run"
         or request.get("protocol") != PROTOCOL
         or request.get("mode") != "interaction"
-        or set(request) != {"type", "protocol", "scenario_id", "mode", "cases"}
+        or set(request) != {"type", "protocol", "scenario_id", "mode", "given", "cases"}
     ):
         raise ValueError("invalid sidebar-v0 request envelope")
 
 
 def evaluate(request: dict) -> list[object]:
     validate_request(request)
-    return [_evaluate_case(case) for case in request["cases"]]
+    return [_evaluate_case(case, request["given"]) for case in request["cases"]]
 
 
-def _evaluate_case(case: dict) -> object:
+def _evaluate_case(case: dict, given: dict) -> object:
     tests = Path(__file__).resolve().parents[1]
     if str(tests) not in sys.path:
         sys.path.insert(0, str(tests))
@@ -54,6 +54,7 @@ def _evaluate_case(case: dict) -> object:
     ipc = FakeIPC()
     ipc.props.update(case.get("props", {}))
     reader = build_session(ipc)
+    reader.graph.screen.osd = tuple(given["viewport"])
     cues = [
         Cue(
             float(index * case.get("step", 1)),
@@ -63,7 +64,7 @@ def _evaluate_case(case: dict) -> object:
         for index in range(case.get("cue_count", 20))
     ]
     active = case.get("active", 0)
-    if case.get("duplicate_text"):
+    if case["duplicate_text"]:
         cues[case["duplicate_text"][0]] = dataclasses.replace(
             cues[case["duplicate_text"][0]], text="same line"
         )
@@ -100,7 +101,7 @@ def _evaluate_case(case: dict) -> object:
                     reader.graph.sidebar.view().active, reader.graph.sidebar.view().capacity
                 )
             )
-        reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+        reader.graph.sidebar.panel.rect = tuple(given["panel_rect"])
         if op == "click-seek":
             reader.graph.sidebar.panel.hits = (
                 SidebarHitBox("seek", case["target"], 0, 0, 200, 40),
@@ -126,11 +127,12 @@ def _evaluate_case(case: dict) -> object:
             reader.graph.playback.install_seed({"sub-text": f"cue {case['next_active']}"})
             sidebar.follow(reader.graph.sidebar.view())
             before = len(rendered)
+            before_expiry = reader.graph.sidebar.state.scroll
             fired = ipc.fire_runtime_timer("lifecycle:sidebar-manual-hold")
             return {
                 "accepted": accepted,
                 "held": held,
-                "before_expiry": reader.graph.sidebar.state.scroll if not fired else held,
+                "before_expiry": before_expiry,
                 "fired": fired,
                 "after": reader.graph.sidebar.state.scroll,
                 "redraws": len(rendered) - before,

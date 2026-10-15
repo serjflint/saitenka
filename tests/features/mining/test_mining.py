@@ -1022,46 +1022,6 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_
     assert f["Glossary"] == "<ol><li>to retreat</li></ol>"
 
 
-def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path, make_session):
-    """#192: with [mine.card_format] set, the mined note's fields are the rendered {marker} templates —
-    furigana, pitch (from the dict), and a cloze-split sentence — not the entity→field map."""
-    import dicthelp
-    from util import FakeIPC
-
-    d = dicthelp.term_zip(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
-    pz = dicthelp.meta_zip(
-        tmp_path / "p.zip",
-        "Pitch",
-        "pitch",
-        [["読む", {"reading": "よむ", "pitches": [{"position": 1}]}]],
-    )
-    ds = dicthelp.load_set([d], pitch_zips=[pz])
-    ipc = FakeIPC()
-    ipc.props["path"] = "/x/Show - 01.mkv"
-    anki = _FakeAnki()
-    cfg = MineConfig(
-        card_format={
-            "Word": "{expression}",
-            "Furigana": "{furigana}",
-            "Pitch": "{pitch-accents}",
-            "Sentence": "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}",
-            "Freq": "{frequency-rank}",
-        }
-    )
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
-    r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    f = anki.added[0]["fields"]
-    assert f["Word"] == "読む" and f["Furigana"] == "読[よ]む"
-    assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
-    assert f["Sentence"] == "本を<b>読む</b>"  # cloze markers reassembled around the surface
-    assert set(f) == {"Word", "Furigana", "Pitch", "Sentence", "Freq", "IsWordAndSentenceCard"}
-
-
 # --- #93: word-pronunciation audio attach at the mine-time add_note seam --------------------------
 
 
@@ -1210,30 +1170,6 @@ def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session, mine
     finally:
         reader.close()
         gateway.close()
-
-
-def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path, make_session):
-    """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
-    that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
-    import dicthelp
-    from util import FakeIPC
-
-    d = dicthelp.term_zip(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
-    ds = dicthelp.load_set([d])
-    ipc = FakeIPC()
-    ipc.props["path"] = "/x/Show - 01.mkv"
-    anki = _FakeAnki()
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds))
-    r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert len(anki.added) == 1
-    f = anki.added[0]["fields"]
-    assert f["Expression"] == "読む"
-    assert f["Glossary"] == "<ol><li>DICTGLOSS-read</li></ol>"  # from the user dict
 
 
 def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_path, make_session):

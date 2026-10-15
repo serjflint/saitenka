@@ -12,7 +12,11 @@ MODES = frozenset({"geometry", "hit-testing", "interaction"})
 
 def scenario_request(scenario: dict) -> dict:
     if (
-        set(scenario) != {"scenario_id", "mode", "cases", "expect"}
+        set(scenario)
+        not in (
+            {"scenario_id", "mode", "cases", "expect"},
+            {"scenario_id", "mode", "given", "cases", "expect"},
+        )
         or scenario.get("mode") not in MODES
     ):
         raise ValueError("invalid tooltip-v0 scenario")
@@ -29,7 +33,11 @@ def validate_request(request: dict) -> None:
         or request.get("type") != "run"
         or request.get("protocol") != PROTOCOL
         or request.get("mode") not in MODES
-        or set(request) != {"type", "protocol", "scenario_id", "mode", "cases"}
+        or set(request)
+        not in (
+            {"type", "protocol", "scenario_id", "mode", "cases"},
+            {"type", "protocol", "scenario_id", "mode", "given", "cases"},
+        )
     ):
         raise ValueError("invalid tooltip-v0 request envelope")
 
@@ -39,7 +47,7 @@ def evaluate(request: dict) -> list[object]:
     if request["mode"] == "hit-testing":
         return [_hit_test(case) for case in request["cases"]]
     if request["mode"] == "interaction":
-        return [_interaction(case) for case in request["cases"]]
+        return [_interaction(case, request["given"]) for case in request["cases"]]
     return [_evaluate_case(case) for case in request["cases"]]
 
 
@@ -56,18 +64,54 @@ def _hit_test(case: dict) -> int:
     )
 
 
-def _interaction(case: dict) -> object:
+def _interaction(case: dict, given: dict) -> object:
     tests = Path(__file__).resolve().parents[1]
     if str(tests) not in sys.path:
         sys.path.insert(0, str(tests))
     from driver import Driver
-    from tip_fakes import hidpi_reader
+    from saitenka_tokenize.japanese import Token
+    from session_builder import build_session
+    from util import FakeIPC
 
+    from saitenka.app.config import ReaderOptions
     from saitenka.app.features.tooltip import tooltip, tooltip_panel
+    from saitenka.app.session.factory import SessionServices
     from saitenka.app.subtitle_render import NullRenderer
+    from saitenka.app.subtitles import WordBox
+    from saitenka.panel import Definition, Entry
 
-    session = hidpi_reader(1.0)
+    class Dictionary:
+        def entry_for(self, _token, inflected=None, *, extra_terms=()):  # noqa: ARG002
+            return Entry(
+                headword=given["dictionary"]["headword"],
+                reading=given["dictionary"]["reading"],
+                defs=[
+                    Definition(item["source"], item["content"])
+                    for item in given["dictionary"]["definitions"]
+                ],
+            )
+
+        def search(self, _pattern):
+            return self.entry_for(None)
+
+        def rareness_rank(self, _token):
+            return None
+
+    session = build_session(
+        FakeIPC(),
+        services=SessionServices(dictionaries=Dictionary()),
+        options=ReaderOptions().with_overrides(scan_delay=0.0),
+    )
     graph = session.graph
+    graph.screen.osd = tuple(given["viewport"])
+    graph.subtitle_presentation.cue.replace_tokenized(
+        tokens=[Token(**token) for token in given["cue"]["tokens"]]
+    )
+    graph.subtitle_presentation.cue.replace_geometry(
+        origin=tuple(given["cue"]["origin"]),
+        boxes=list(starmap(WordBox, given["cue"]["boxes"])),
+    )
+    graph.tooltip.visual.crisp = given["crisp"]
     graph.subtitle_presentation.renderer = NullRenderer()
     driver = Driver(session, instant=False)
     copied: list[str] = []

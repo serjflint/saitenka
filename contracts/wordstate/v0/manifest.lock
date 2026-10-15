@@ -1,1 +1,7 @@
-{"count":2,"key_sha256":"5a79734378da11d042afebbc1dc528905738001565377bdc66ae569e550ae19c"}
+{
+  "count": 2,
+  "key_sha256": "5a79734378da11d042afebbc1dc528905738001565377bdc66ae569e550ae19c",
+  "vector_count": 189,
+  "vector_key_sha256": "cc9b1c2ded652c5d33d24741d60b0fedd75801fa63f161849eeebce997e48aae",
+  "input_sha256": "9620f354e7a6e5e7b38246862fc4d427922f4b472a83ffe3df3468dc28df3620"
+}
