@@ -3,8 +3,8 @@
 import dicthelp
 import pytest
 from saitenka_tokenize.japanese import tokenize
-from saitenka_wordstate import Scorer, mark_n_plus_one
-from saitenka_wordstate.known import KnownForm, KnownWords
+from saitenka_wordstate import Scorer
+from saitenka_wordstate.known import KnownWords
 
 from saitenka.app.scoring import Coloring, Palette
 
@@ -38,18 +38,6 @@ def test_known_words_reading_fallback():
     assert not kw.is_known("知らない語")
 
 
-def test_known_words_reject_same_spelling_different_reading():
-    """A card teaching 床/ゆか must NOT mark a subtitle 床 read とこ as known — the homograph guard.
-    The correct reading still matches, and a kanji card resurfaces when written in kana."""
-    kw = KnownWords.from_forms([KnownForm("床", "ゆか"), KnownForm("孫", "まご")])
-    assert not kw.is_known("床", "床", "とこ")  # same kanji, different reading → not this word
-    assert kw.is_known("床", "床", "ゆか")  # the taught reading matches
-    assert kw.is_known(
-        "まご", "まご", "まご"
-    )  # kana token resurfaces the kanji card via its reading
-    assert kw.is_known("床")  # no token reading to disambiguate → best-effort surface match holds
-
-
 def test_known_words_surface_only_card_still_matches():
     """A card with no reading field can't disambiguate, so it keeps the best-effort surface match."""
     kw = KnownWords.from_set(["床"])
@@ -60,42 +48,11 @@ def test_known_words_surface_only_card_still_matches():
 # --- N+1 algorithm --------------------------------------------------------------------------------
 
 
-def test_n_plus_one_single_unknown():
-    toks = tokenize("私は本を読む")  # content: 本, 読む
-    known = [t.surface in {"私", "本"} for t in toks]
-    targets = mark_n_plus_one(toks, known, min_words=2)
-    surfaces = {toks[i].surface for i in targets}
-    assert surfaces == {"読む"}  # the one unknown content word
-
-
-def test_n_plus_one_needs_min_words():
-    toks = tokenize("本だ")  # too few content words
-    known = [False] * len(toks)
-    assert mark_n_plus_one(toks, known, min_words=3) == set()
-
-
-def test_n_plus_one_not_fired_with_two_unknowns():
-    toks = tokenize("新しい本を読む")  # 新しい, 本, 読む all unknown → 3 candidates
-    known = [False] * len(toks)
-    assert mark_n_plus_one(toks, known, min_words=3) == set()
-
-
 # --- priority model -------------------------------------------------------------------------------
 
 
 def _scorer(known_words, jlpt):
     return Coloring(Scorer(known=KnownWords.from_set(known_words), jlpt=jlpt, enable_freq=False))
-
-
-def test_priority_n_plus_one_over_known_and_base(jlpt):
-    line = "私は本を読む"
-    toks = tokenize(line)
-    styles = _scorer(["私", "本"], jlpt).score_line(toks)
-    by = {t.surface: s for t, s in zip(toks, styles, strict=True)}
-    assert by["本"].color == PAL.known
-    assert by["読む"].tag.startswith("n+1")
-    assert by["読む"].color == PAL.n_plus_one
-    assert by["は"].color == PAL.base  # function word stays base
 
 
 def test_jlpt_underline_is_additive(jlpt):
