@@ -59,6 +59,7 @@ MODE_KEYS = {
         ),
         False,
     ),
+    "profile-identity": (frozenset({"scenario_id", "mode", "config", "expect"}), False),
 }
 
 
@@ -104,6 +105,8 @@ def evaluate(scenario: dict) -> object:
         return [resolve_mine_model(config) for config in scenario["configs"]]
     if scenario["mode"] == "run-effective":
         return _evaluate_run_config(scenario)
+    if scenario["mode"] == "profile-identity":
+        return _evaluate_profile_identity(scenario["config"])
     if scenario["mode"] == "run":
         options = _build_run_options(
             scenario["config"], replace(BASE_FLAGS, **scenario.get("flags", {}))
@@ -137,6 +140,37 @@ def _evaluate_run_config(scenario: dict) -> dict[str, object]:
     )
     effective = _run_effective_config(request)
     return {key: effective[key] for key in scenario["observe"]}
+
+
+def _evaluate_profile_identity(config: dict) -> dict[str, object]:
+    import saitenka.app.subtitle_providers as providers
+    from saitenka.app.profiles import resolve_profile
+    from saitenka.app.subtitle_providers import SubtitleProvider
+
+    original = providers._REGISTRY
+    providers._REGISTRY = {}
+    try:
+        for name, languages in (("jimaku", {"jp"}), ("tsukihime", set())):
+            providers.register_provider(
+                SubtitleProvider(
+                    name=name,
+                    languages=frozenset(languages),
+                    candidates=lambda _video, _context: ([], []),
+                    fetch_attempt=lambda _video, _context: lambda: (None, "stub"),
+                )
+            )
+        profile = resolve_profile(config)
+        enabled = providers.enabled_providers_for(
+            profile.langs.main, (("jimaku", True), ("tsukihime", True))
+        )
+        return {
+            "tokenizer": profile.tokenizer,
+            "main_language": profile.langs.main,
+            "second_language": profile.langs.second,
+            "providers": list(enabled),
+        }
+    finally:
+        providers._REGISTRY = original
 
 
 def _evaluate_editor(scenario: dict):

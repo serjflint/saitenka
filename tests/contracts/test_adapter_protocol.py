@@ -62,7 +62,13 @@ def test_contract_schemas_are_machine_readable() -> None:
         "session-v0.json": load_scenarios(ROOT / "contracts/session/v0"),
         "config-v0.json": [
             row
-            for name in ("editor-session.json", "editor.json", "options.json", "resolution.json")
+            for name in (
+                "editor-session.json",
+                "editor.json",
+                "options.json",
+                "profiles.json",
+                "resolution.json",
+            )
             for row in _json_rows(f"contracts/config/v0/{name}")
         ],
         "cli-v0.json": load_row_corpus(ROOT / "contracts/cli/v0"),
@@ -120,7 +126,13 @@ def test_default_adapter_runs_every_corpus_row_without_receiving_answers(corpus:
     elif corpus == "config":
         scenarios = [
             row
-            for name in ("editor-session.json", "editor.json", "options.json", "resolution.json")
+            for name in (
+                "editor-session.json",
+                "editor.json",
+                "options.json",
+                "profiles.json",
+                "resolution.json",
+            )
             for row in _json_rows(f"contracts/config/v0/{name}")
         ]
         protocol, capability = config_adapter.PROTOCOL, config_adapter.CAPABILITY

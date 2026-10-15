@@ -18,3 +18,6 @@ The exact substitutions, commands, scenarios, and mismatches are tracked in
 
 The durable editor corpus also kills a shallow nested-table merge: after editing `mmap_size`, accepting the
 next field's offered default must preserve the on-disk `cache_size_kib` sibling rather than its built-in value.
+
+The profile identity rows reject an uncanonicalized Japanese alias: `ja`, `jpn`, and `japanese` must all
+publish the same `jp` language and provider eligibility as the default profile.

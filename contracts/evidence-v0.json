@@ -397,6 +397,15 @@
       "replace": "        return \".srt\", (\"-c:s\", \"copy\")",
       "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-artifact-policy]'",
       "mismatch": "an authored ASS stream was extracted under an SRT suffix"
+    },
+    {
+      "id": "config-profile-language-canonicalization",
+      "scenario_id": "profile-identity-ja",
+      "path": "src/saitenka/app/profiles.py",
+      "find": "    language = canonical_language(validate_language_code(str(raw.get(\"language\", MAIN_LANG))))",
+      "replace": "    language = validate_language_code(str(raw.get(\"language\", MAIN_LANG)))",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[profile-identity-ja]'",
+      "mismatch": "the ja alias published ja instead of the canonical jp identity"
     }
   ]
 }
