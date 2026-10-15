@@ -23,12 +23,25 @@ CARD = CardData("読む", "よむ", "<ol><li>to read</li></ol>", idseq="1234")
 
 def test_a_preset_writes_only_the_fields_it_maps() -> None:
     """The silent-empty-note trap runs the other way too: an unmapped logical entity must not appear."""
-    note = build_note(MineConfig.from_preset("Lapis"), CARD, CardContent(sentence_html="本を読む"))
+    from saitenka_card.note import _entity_values
 
+    content = CardContent(
+        sentence_html="本を<b>読む</b>", picture="p.jpg", audio="a.mp3", misc="ep10 · 10:03"
+    )
+    note = build_note(MineConfig.from_preset("Lapis"), CARD, content)
+
+    assert set(_entity_values(CARD, content)) == set(KNOWN_ENTITIES)
     assert note["deckName"] == "Saitenka::Mining"
+    assert note["modelName"] == "Lapis"
     assert note["fields"]["Expression"] == "読む"
-    assert note["fields"]["Sentence"] == "本を読む"
+    assert note["fields"]["ExpressionReading"] == "よむ"
+    assert note["fields"]["Sentence"] == "本を<b>読む</b>"
+    assert note["fields"]["Picture"] == '<img src="p.jpg">'
+    assert note["fields"]["SentenceAudio"] == "[sound:a.mp3]"
+    assert note["fields"]["MiscInfo"] == "ep10 · 10:03"
     assert note["fields"]["IsWordAndSentenceCard"] == "1"
+    assert note["options"]["allowDuplicate"] is False
+    assert "saitenka" in note["tags"]
 
 
 def test_the_french_preset_has_no_reading_field() -> None:
@@ -41,12 +54,14 @@ def test_the_french_preset_has_no_reading_field() -> None:
 def test_a_card_format_wins_wholesale_over_the_field_map() -> None:
     """Not merged — the two ways of describing a card are exclusive, and a merge would write fields
     the user did not ask for."""
-    cfg = MineConfig(card_format={"Word": "{expression}", "Gloss": "{glossary}"})
+    cfg = MineConfig(
+        card_format={"Word": "{expression}", "Key": "{expression}", "Gloss": "{glossary}"}
+    )
 
     note = build_note(cfg, CARD)
 
-    assert set(note["fields"]) == {"Word", "Gloss", *cfg.flags}
-    assert note["fields"]["Word"] == "読む"
+    assert set(note["fields"]) == {"Word", "Key", "Gloss", *cfg.flags}
+    assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
 
 
 def test_the_expression_field_is_found_through_a_template() -> None:

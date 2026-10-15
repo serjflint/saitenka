@@ -9,7 +9,6 @@ from saitenka_card import (
     AnimatedClip,
     CardContent,
     MineConfig,
-    bold_word,
     build_note,
 )
 from saitenka_tokenize.japanese import tokenize
@@ -46,41 +45,6 @@ def test_card_data_from_token():
     assert card.idseq.isdigit()  # JMdict ent_seq
     assert "to read" in card.glossary_html
     assert card.glossary_html.startswith("<ol>")
-
-
-def test_known_entities_match_entity_values_keys():
-    """KNOWN_ENTITIES (what doctor validates a [mine.fields] map against) must stay in lockstep with
-    the actual entities build_note writes — else doctor flags a valid key or misses a bogus one."""
-    from saitenka_card import KNOWN_ENTITIES, CardData
-    from saitenka_card.note import _entity_values
-
-    values = _entity_values(CardData("x", "y", ""), CardContent())
-    assert set(values) == set(KNOWN_ENTITIES)
-
-
-def test_build_note_maps_lapis_fields():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(),
-        card_for(tok),
-        CardContent(
-            sentence_html="本を<b>読む</b>", picture="p.jpg", audio="a.mp3", misc="ep10 · 10:03"
-        ),
-    )
-    f = note["fields"]
-    assert note["modelName"] == "Lapis"
-    assert note["deckName"] == "Saitenka::Mining"
-    assert f["Expression"] == "読む"
-    assert f["ExpressionReading"] == "よむ"
-    assert f["Sentence"] == "本を<b>読む</b>"
-    assert f["Picture"] == '<img src="p.jpg">'
-    assert f["SentenceAudio"] == "[sound:a.mp3]"
-    assert f["MiscInfo"] == "ep10 · 10:03"
-    assert (
-        f["IsWordAndSentenceCard"] == "1"
-    )  # default card kind (word-and-sentence, SubMiner default)
-    assert note["options"]["allowDuplicate"] is False
-    assert "saitenka" in note["tags"]
 
 
 def test_build_note_writes_idseq_into_the_default_id_field():
@@ -151,14 +115,6 @@ def test_build_note_card_kind_none_sets_no_marker():
     tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
     note = build_note(MineConfig(card_kind="none"), card_for(tok), CardContent(sentence_html="s"))
     assert not any(m in note["fields"] for m in KNOWN_MARKERS)  # no card-template marker at all
-
-
-def test_build_note_card_format_fans_one_entity_into_two_fields():
-    # the capability the entity→field map couldn't express: one marker in several fields
-    cfg = MineConfig(card_format={"Word": "{expression}", "Key": "{expression}"})
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), CardContent(sentence_html="s"))
-    assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
 
 
 def test_dedupe_allows_add_when_card_format_has_no_expression_field():
@@ -363,21 +319,6 @@ def test_toast_renders_each_kind():
 
 
 # --- Stage 3: HTML escaping in Anki fields --------------------------------------------------------
-
-
-def test_bold_word_escapes_html_in_sentence():
-    """bold_word must HTML-escape the sentence to prevent raw HTML injection into Anki fields."""
-    # subtitle with < > & — should be escaped, not passed through as raw HTML
-    sentence = "<漢字> & more"
-    result = bold_word(sentence, "漢字")
-    assert "&lt;" in result or "<b>漢字</b>" in result
-    # The sentence must not contain a raw unescaped '<' from the original (the surface is wrapped in <b>)
-    # but the surrounding '<' and '&' should be escaped.
-    assert (
-        "&amp;" in result
-        or "&#38;" in result
-        or result.count("<") <= result.count("<b>") + result.count("</b>")
-    )
 
 
 def test_dedupe_escapes_special_chars_in_query():

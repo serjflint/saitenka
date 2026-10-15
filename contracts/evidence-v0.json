@@ -111,6 +111,15 @@
       "mismatch": "no note reached the Anki boundary before the bounded settlement expired"
     },
     {
+      "id": "package-card-picture-field",
+      "scenario_id": "saitenka-card-note-shape",
+      "path": "saitenka-card/src/saitenka_card/note.py",
+      "find": "    \"picture\": \"Picture\",",
+      "replace": "    \"picture\": \"Wrong\",",
+      "command": "uv run pytest -q saitenka-card/tests/test_card.py::test_a_preset_writes_only_the_fields_it_maps",
+      "mismatch": "the consolidated package owner lost the Picture field"
+    },
+    {
       "id": "config-attach-layout",
       "scenario_id": "attach-overrides",
       "path": "src/saitenka/app/commands/attach.py",
