@@ -442,6 +442,33 @@
       "replace": "        if box.contains(point[0], point[1]):",
       "command": "uv run pytest -q 'tests/contracts/test_tooltip_corpus.py::test_tooltip_contract[tooltip-token-hit-testing]'",
       "mismatch": "an offset subtitle cue resolved no token at the frame-space pointer"
+    },
+    {
+      "id": "dictionary-profile-inflection-language",
+      "scenario_id": "dictionary-lookup-laws",
+      "path": "src/saitenka/app/dictionary.py",
+      "find": "            return inflection_chain(surface, *targets, language=language_base(self.language))",
+      "replace": "            return inflection_chain(surface, *targets, language=\"jp\")",
+      "command": "uv run pytest -q tests/contracts/test_dictionary_corpus.py",
+      "mismatch": "the French present-indicative chain disappeared when routed through Japanese rules"
+    },
+    {
+      "id": "dictionary-japanese-lemma-authority",
+      "scenario_id": "dictionary-lookup-laws",
+      "path": "src/saitenka/app/dictionary.py",
+      "find": "        if language in _JP_LANGS or not lemma:",
+      "replace": "        if not lemma:",
+      "command": "uv run pytest -q tests/contracts/test_dictionary_corpus.py",
+      "mismatch": "a Japanese surface was deinflected past its tokenizer lemma into an unrelated hit"
+    },
+    {
+      "id": "dictionary-longest-phrase-rank",
+      "scenario_id": "dictionary-lookup-laws",
+      "path": "src/saitenka/app/dictionary_surface.py",
+      "find": "        -len(term),",
+      "replace": "        len(term),",
+      "command": "uv run pytest -q tests/contracts/test_dictionary_corpus.py",
+      "mismatch": "the bare word outranked its longer phrase as the visible and mineable default"
     }
   ]
 }

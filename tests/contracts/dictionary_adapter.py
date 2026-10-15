@@ -84,7 +84,9 @@ def _evaluate_case(case: dict) -> dict:
             )
             for i, item in enumerate(case.get("frequencies", []))
         ]
-        dictionaries = DictionarySet.from_rows(db, dict_rows, freq_rows, [])
+        dictionaries = DictionarySet.from_rows(
+            db, dict_rows, freq_rows, [], language=case.get("language", "jp")
+        )
         token = Token(**case["token"])
         extra_terms = tuple(case.get("extra_terms", []))
         entry = dictionaries.entry_for(token, extra_terms=extra_terms)
@@ -103,6 +105,8 @@ def _evaluate_case(case: dict) -> dict:
                     {"dictionary": definition.dict_name, "content": definition.content}
                     for definition in entry.defs
                 ]
+            elif key == "inflection-chain":
+                observed[key] = list(entry.inflection_chain)
             elif key == "groups":
                 observed[key] = [
                     {

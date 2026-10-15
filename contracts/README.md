@@ -88,7 +88,8 @@ native concurrency and storage contracts. Rows conform to `schema/analysis-v0.js
 
 `saitenka.dictionary/v0` uses capability `dictionary-v0`. It imports abstract Yomitan rows into an
 isolated adapter store and returns normalized entry, reading-group, term-reachability, and mining-card
-observations. Archive, media, telemetry, and connection lifetimes stay native boundaries. Rows conform to
+observations. Cases may select a profile language to exercise missing-entry text and inflection routing.
+Archive, media, telemetry, and connection lifetimes stay native boundaries. Rows conform to
 `schema/dictionary-v0.json`.
 
 ## Tooltip v0 protocol
