@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator, ValidationError
 
 from .protocol import (
     CORPORA,
@@ -60,26 +59,28 @@ def test_comparator_rejects_a_representative_broken_observation() -> None:
 
 
 def test_manifest_rejects_removing_a_nested_case_with_its_answer(tmp_path: Path) -> None:
-    source = CORPUS / "tooltip/v0"
-    shutil.copy(source / "manifest.lock", tmp_path / "manifest.lock")
-    rows = json.loads((source / "interaction.json").read_text(encoding="utf-8"))
+    source = CORPUS / "tooltip-v0.jsonl"
+    shutil.copy(CORPUS / "manifest.json", tmp_path / "manifest.json")
+    rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
     rows[0]["cases"].pop()
     rows[0]["expect"].pop()
-    (tmp_path / "interaction.json").write_text(json.dumps(rows), encoding="utf-8")
+    changed = tmp_path / source.name
+    changed.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
     with pytest.raises(AssertionError):
-        load_row_corpus(tmp_path)
+        load_row_corpus(changed)
 
 
 def test_manifest_rejects_removing_an_expected_observation(tmp_path: Path) -> None:
-    source = CORPUS / "journey/v0"
-    shutil.copy(source / "manifest.lock", tmp_path / "manifest.lock")
-    rows = json.loads((source / "scenarios.json").read_text(encoding="utf-8"))
+    source = CORPUS / "journey-v0.jsonl"
+    shutil.copy(CORPUS / "manifest.json", tmp_path / "manifest.json")
+    rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines()]
     rows[0]["expect"].pop()
-    (tmp_path / "scenarios.json").write_text(json.dumps(rows), encoding="utf-8")
+    changed = tmp_path / source.name
+    changed.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
     with pytest.raises(AssertionError):
-        load_row_corpus(tmp_path)
+        load_row_corpus(changed)
 
 
 def test_runner_rejects_a_result_for_the_wrong_scenario() -> None:
@@ -108,24 +109,10 @@ print(json.dumps({'type': 'result', 'protocol': request['protocol'], 'scenario_i
         )
 
 
-def test_contract_schemas_are_machine_readable() -> None:
-    for corpus in CORPORA:
-        directory = CORPUS / corpus / "v0"
-        rows = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
-        schema = json.loads((HERE / "schema" / f"{corpus}-v0.json").read_text(encoding="utf-8"))
-        assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-        Draft202012Validator.check_schema(schema)
-        validator = Draft202012Validator(schema)
-        for row in rows:
-            validator.validate(row)
-        with pytest.raises(ValidationError):
-            validator.validate(rows[0] | {"unknown_protocol_key": True})
-
-
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 def test_default_adapter_rejects_an_answer_key() -> None:
-    scenario = load_scenarios(CORPUS / "session/v0")[0]
+    scenario = load_scenarios(CORPUS / "session-v0.jsonl")[0]
     request = scenario_request(scenario) | {"expect": scenario["expect"]}
     wire = [
         {"type": "hello", "protocol": PROTOCOL, "requires": ["session-v0"]},

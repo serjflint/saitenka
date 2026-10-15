@@ -1,9 +1,0 @@
-{
-  "count": 6,
-  "key_sha256": "9a567f0927c95c958aea061d4506b123f6ba82cdd1577d455e6630f85e730f28",
-  "vector_count": 186,
-  "vector_key_sha256": "5922c065a6f74ff0d151fb1e30cc74ce2fee737b734911ac8300b5d1571fc941",
-  "input_sha256": "630956ddd5a7ad28c277019cd1edbb218e7ef2c0a740929d5817bbc84df0a3eb",
-  "oracle_count": 186,
-  "oracle_sha256": "d0d074bf426a6858959fb2410a7416144ac870d8d92e9e4961795ad936a24349"
-}

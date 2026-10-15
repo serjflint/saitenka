@@ -1,8 +1,0 @@
-[
-  {"scenario_id":"profile-identity-default","mode":"profile-identity","config":{},"expect":{"tokenizer":"unidic","main_language":"jp","second_language":"en","providers":["jimaku","tsukihime"]}},
-  {"scenario_id":"profile-identity-jp","mode":"profile-identity","config":{"profile":{"language":"jp"}},"expect":{"tokenizer":"unidic","main_language":"jp","second_language":"en","providers":["jimaku","tsukihime"]}},
-  {"scenario_id":"profile-identity-ja","mode":"profile-identity","config":{"profile":{"language":"ja"}},"expect":{"tokenizer":"unidic","main_language":"jp","second_language":"en","providers":["jimaku","tsukihime"]}},
-  {"scenario_id":"profile-identity-jpn","mode":"profile-identity","config":{"profile":{"language":"jpn"}},"expect":{"tokenizer":"unidic","main_language":"jp","second_language":"en","providers":["jimaku","tsukihime"]}},
-  {"scenario_id":"profile-identity-japanese","mode":"profile-identity","config":{"profile":{"language":"japanese"}},"expect":{"tokenizer":"unidic","main_language":"jp","second_language":"en","providers":["jimaku","tsukihime"]}},
-  {"scenario_id":"profile-identity-french","mode":"profile-identity","config":{"profile":{"language":"fr","tokenizer":"latin"}},"expect":{"tokenizer":"latin","main_language":"fr","second_language":"en","providers":["tsukihime"]}}
-]

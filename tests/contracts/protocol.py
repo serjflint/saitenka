@@ -190,31 +190,26 @@ def _manifest(rows: Sequence[dict]) -> dict:
     }
 
 
-def expected_manifest(rows: Sequence[dict]) -> dict:
-    """Return the deliberate-rebless value for a corpus directory."""
-    return _manifest(rows)
+def _load_jsonl(path: Path) -> list[dict]:
+    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    manifest = json.loads((path.parent / "manifest.json").read_text(encoding="utf-8"))
+    corpus = path.stem.removesuffix("-v0")
+    assert manifest[corpus] == _manifest(rows)
+    return rows
 
 
-def load_scenarios(directory: Path) -> list[dict]:
-    scenarios = [
-        json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("*.json"))
-    ]
+def load_scenarios(path: Path) -> list[dict]:
+    scenarios = _load_jsonl(path)
     for scenario in scenarios:
         validate_scenario(scenario)
     ids = [scenario["scenario_id"] for scenario in scenarios]
     if len(ids) != len(set(ids)):
         raise ValueError("scenario IDs must be unique")
-    manifest = json.loads((directory / "manifest.lock").read_text(encoding="utf-8"))
-    assert manifest == _manifest(scenarios)
     return scenarios
 
 
-def load_row_corpus(directory: Path) -> list[dict]:
-    rows = [
-        row
-        for path in sorted(directory.glob("*.json"))
-        for row in json.loads(path.read_text(encoding="utf-8"))
-    ]
+def load_row_corpus(path: Path) -> list[dict]:
+    rows = _load_jsonl(path)
     ids = [row["scenario_id"] for row in rows]
     if len(ids) != len(set(ids)):
         raise ValueError("scenario IDs must be unique")
@@ -225,8 +220,6 @@ def load_row_corpus(directory: Path) -> list[dict]:
         expected = row.get("expect")
         if not isinstance(expected, list) or len(cases) != len(expected):
             raise ValueError(f"{row['scenario_id']}: cases and expect must have equal length")
-    manifest = json.loads((directory / "manifest.lock").read_text(encoding="utf-8"))
-    assert manifest == _manifest(rows)
     return rows
 
 
@@ -240,8 +233,8 @@ def run_corpus(
     """Judge one committed corpus against any JSONL adapter executable."""
     base = root or Path(__file__).resolve().parent / "corpus"
     protocol, capability = CORPORA[corpus]
-    directory = base / corpus / "v0"
-    scenarios = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
+    path = base / f"{corpus}-v0.jsonl"
+    scenarios = load_scenarios(path) if corpus == "session" else load_row_corpus(path)
     if scenario_id is not None:
         scenarios = [scenario for scenario in scenarios if scenario["scenario_id"] == scenario_id]
         if not scenarios:
