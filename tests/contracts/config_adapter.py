@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import tempfile
+import tomllib
 from dataclasses import replace
+from pathlib import Path
 
 from saitenka.app import config_editor
 from saitenka.app.command_defaults import resolve_mine_model
@@ -41,6 +44,19 @@ MODE_KEYS = {
         frozenset({"scenario_id", "mode", "scoped_config", "cli", "observe", "expect"}),
         False,
     ),
+    "editor-session": (
+        frozenset(
+            {
+                "scenario_id",
+                "mode",
+                "initial",
+                "edits",
+                "observe_comments",
+                "expect",
+            }
+        ),
+        False,
+    ),
 }
 
 
@@ -78,6 +94,8 @@ def validate_request(request: dict) -> None:
 
 def evaluate(scenario: dict) -> object:
     validate_request(scenario)
+    if scenario["mode"] == "editor-session":
+        return _evaluate_editor_session(scenario)
     if scenario["mode"].startswith("editor-"):
         return _evaluate_editor(scenario)
     if scenario["mode"] == "mine-model":
@@ -153,6 +171,38 @@ def _evaluate_editor(scenario: dict):
                 results.append({"error": "ValueError"})
         return results
     raise ValueError(f"unknown editor mode: {scenario['mode']!r}")
+
+
+def _evaluate_editor_session(scenario: dict) -> dict[str, object]:
+    from saitenka.app import prompt
+
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "overlay.toml"
+        if scenario["initial"] is not None:
+            path.write_text(scenario["initial"], encoding="utf-8")
+        selects = iter(
+            [item for edit in scenario["edits"] for item in (edit["section"], edit["field"])]
+            + [config_editor._DONE]
+        )
+        values = iter(edit["value"] for edit in scenario["edits"])
+        original = prompt.select, prompt.text, prompt.confirm
+        prompt.select = lambda *_args, **_kwargs: next(selects)
+        prompt.text = lambda *_args, default, **_kwargs: (
+            default if (value := next(values)) is None else value
+        )
+        prompt.confirm = lambda *_args, **_kwargs: True
+        try:
+            exit_code = config_editor.run_editor(path)
+        finally:
+            prompt.select, prompt.text, prompt.confirm = original
+        exists = path.exists()
+        raw = path.read_text(encoding="utf-8") if exists else ""
+        return {
+            "exit_code": exit_code,
+            "exists": exists,
+            "config": tomllib.loads(raw) if raw else None,
+            "comments": {comment: comment in raw for comment in scenario["observe_comments"]},
+        }
 
 
 def _read_path(value: object, path: str) -> object:

@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 if __package__:
     from . import cli_adapter, config_adapter, saitenka_session_adapter
     from . import protocol as session_protocol
 else:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
     import cli_adapter
     import config_adapter
     import protocol as session_protocol

@@ -183,6 +183,15 @@
       "mismatch": "palette, FSRS, and scoring tables disappeared"
     },
     {
+      "id": "config-editor-recursive-merge",
+      "scenario_id": "editor-session-preserves-a-sibling-default",
+      "path": "src/saitenka/app/config_editor.py",
+      "find": "            out[key] = _deep_merge(existing, value)",
+      "replace": "            out[key] = value",
+      "command": "uv run pytest -q 'tests/contracts/test_config_corpus.py::test_effective_options_contract[editor-session-preserves-a-sibling-default]'",
+      "mismatch": "the untouched cache_size_kib sibling reverted from 222 to the built-in default"
+    },
+    {
       "id": "cli-default-language",
       "scenario_id": "legacy-run-defaults",
       "path": "src/saitenka/app/commands/run.py",

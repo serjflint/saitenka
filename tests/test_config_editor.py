@@ -50,44 +50,6 @@ def test_prompt_value_keeps_current_on_bad_number(monkeypatch):
 # --- end-to-end: a scripted session round-trips through write_config, preserving comments ---------
 
 
-def _script(monkeypatch, *, selects: list[str], texts: list[str]) -> None:
-    """Drive the interactive loop deterministically: each ``prompt.*`` pops its next scripted answer."""
-    sel, txt = iter(selects), iter(texts)
-    monkeypatch.setattr(prompt, "select", lambda *_a, **_k: next(sel))
-    monkeypatch.setattr(prompt, "text", lambda *_a, **_k: next(txt))
-    monkeypatch.setattr(prompt, "confirm", lambda *_a, **_k: True)
-
-
-def test_run_editor_round_trips_and_preserves_untouched_keys_and_comments(tmp_path, monkeypatch):
-    cfg = tmp_path / "overlay.toml"
-    cfg.write_text(
-        '# my hand-written config\nslang = "ja,jpn,jp"  # keep me\n\n[mine]\ndeck = "Saitenka::Mining"\n',
-        encoding="utf-8",
-    )
-    _script(
-        monkeypatch,
-        selects=["tooltip", "tip_scale", "keys", "key", ce._DONE],
-        texts=["2.5", "Ctrl+n"],
-    )
-    assert ce.run_editor(cfg) == 0
-
-    import tomllib
-
-    written = cfg.read_text(encoding="utf-8")
-    doc = tomllib.loads(written)
-    assert doc["tip_scale"] == 2.5  # the edit landed
-    assert doc["mine"]["key"] == "Ctrl+n"
-    assert doc["slang"] == "ja,jpn,jp" and doc["mine"]["deck"] == "Saitenka::Mining"  # untouched
-    assert "# my hand-written config" in written and "# keep me" in written  # comments survive
-
-
-def test_run_editor_writes_nothing_when_no_edits(tmp_path, monkeypatch):
-    cfg = tmp_path / "overlay.toml"
-    _script(monkeypatch, selects=[ce._DONE], texts=[])
-    assert ce.run_editor(cfg) == 0
-    assert not cfg.exists()  # declined at the section menu → no file created
-
-
 # --- drift guard: the catalog is derived from fields(); a new config.py knob can't go silently missing --
 
 
@@ -117,31 +79,6 @@ def test_non_config_wired_fields_stay_unexposed():
     assert ("crisp_upscale",) not in paths
     assert ("token_cache_max",) not in paths
     assert ("sub_picker_key",) not in paths
-
-
-def test_run_editor_offers_on_disk_sibling_after_an_edit(tmp_path, monkeypatch):
-    cfg = tmp_path / "overlay.toml"
-    cfg.write_text(
-        "[dictdb]\nmmap_size = 111\ncache_size_kib = 222\ndexie_chunk_size = 333\n",
-        encoding="utf-8",
-    )
-    selects = iter(["dictdb", "mmap_size", "dictdb", "cache_size_kib", ce._DONE])
-    defaults: list[str] = []
-
-    monkeypatch.setattr(prompt, "select", lambda *_a, **_k: next(selects))
-
-    def answer(_message, *, default):
-        defaults.append(default)
-        return "999" if len(defaults) == 1 else default
-
-    monkeypatch.setattr(prompt, "text", answer)
-    monkeypatch.setattr(prompt, "confirm", lambda *_a, **_k: True)
-    assert ce.run_editor(cfg) == 0
-    import tomllib
-
-    doc = tomllib.loads(cfg.read_text(encoding="utf-8"))
-    assert defaults == ["111", "222"]
-    assert doc["dictdb"] == {"mmap_size": 999, "cache_size_kib": 222, "dexie_chunk_size": 333}
 
 
 def test_run_editor_non_tty_makes_no_changes(tmp_path, monkeypatch):
