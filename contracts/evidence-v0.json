@@ -388,6 +388,15 @@
       "replace": "        and True",
       "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-provider-policy]'",
       "mismatch": "Japanese-only providers were admitted into a French session"
+    },
+    {
+      "id": "subtitle-authored-ass-artifact",
+      "scenario_id": "subtitle-artifact-policy",
+      "path": "src/saitenka/app/subtitle_artifact.py",
+      "find": "        return \".ass\", (\"-c:s\", \"copy\")",
+      "replace": "        return \".srt\", (\"-c:s\", \"copy\")",
+      "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[subtitle-artifact-policy]'",
+      "mismatch": "an authored ASS stream was extracted under an SRT suffix"
     }
   ]
 }

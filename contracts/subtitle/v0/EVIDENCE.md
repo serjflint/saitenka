@@ -12,3 +12,4 @@ Representative fault checks:
 - classifying a known English SID as Japanese fails the selection-policy matrix.
 - treating a cue's end timestamp as inclusive fails the navigation-policy matrix.
 - admitting every registered provider regardless of language fails the provider-policy matrix.
+- extracting authored ASS as SRT fails the artifact-policy matrix.

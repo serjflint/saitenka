@@ -12,6 +12,7 @@ MODE_KEYS = {
     "selection-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "navigation-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
     "provider-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
+    "artifact-policy": frozenset({"scenario_id", "mode", "cases", "expect"}),
 }
 BASELINE_SETTINGS = {
     "sub-ass-override": "no",
@@ -144,6 +145,8 @@ def evaluate(request: dict) -> object:
         return [_navigation_policy(case) for case in request["cases"]]
     if request["mode"] == "provider-policy":
         return [_provider_policy(case) for case in request["cases"]]
+    if request["mode"] == "artifact-policy":
+        return [_artifact_policy(case) for case in request["cases"]]
     evaluator = _render_inputs if request["mode"] == "render-inputs" else _renderer_state
     return [evaluator(case) for case in request["cases"]]
 
@@ -316,3 +319,30 @@ def _provider_policy(case: dict) -> object:
         raise ValueError(f"unknown provider policy operation: {op!r}")
     finally:
         providers._REGISTRY = original
+
+
+def _artifact_policy(case: dict) -> object:
+    from saitenka.app.subtitle_artifact import (
+        ArtifactUnavailable,
+        EmbeddedArtifact,
+        ExternalArtifact,
+        extract_spec,
+        resolve,
+    )
+
+    if case["op"] == "extract":
+        suffix, args = extract_spec(case["codec"])
+        return {"suffix": suffix, "args": list(args)}
+    artifact = resolve(case["track"], media_path=case["media_path"])
+    if isinstance(artifact, ExternalArtifact):
+        return {"kind": "external", "path": artifact.path}
+    if isinstance(artifact, EmbeddedArtifact):
+        return {
+            "kind": "embedded",
+            "media_path": artifact.media_path,
+            "stream_index": artifact.ff_index,
+            "codec": artifact.codec,
+        }
+    if isinstance(artifact, ArtifactUnavailable):
+        return {"unavailable": artifact.value}
+    raise TypeError(f"unknown artifact result: {artifact!r}")
