@@ -227,26 +227,40 @@ def load_row_corpus(directory: Path) -> list[dict]:
     return rows
 
 
-def run_corpus(command: Sequence[str], corpus: str, *, root: Path | None = None) -> None:
+def run_corpus(
+    command: Sequence[str],
+    corpus: str,
+    *,
+    root: Path | None = None,
+    scenario_id: str | None = None,
+) -> None:
     """Judge one committed corpus against any JSONL adapter executable."""
     base = root or Path(__file__).resolve().parents[2]
     protocol, capability = CORPORA[corpus]
     directory = base / "contracts" / corpus / "v0"
     scenarios = load_scenarios(directory) if corpus == "session" else load_row_corpus(directory)
+    if scenario_id is not None:
+        scenarios = [scenario for scenario in scenarios if scenario["scenario_id"] == scenario_id]
+        if not scenarios:
+            raise ValueError(f"unknown {corpus} scenario: {scenario_id}")
     requests = [
         {"type": "run", "protocol": protocol, **_request_payload(scenario)}
         for scenario in scenarios
     ]
     results = run_protocol(command, protocol=protocol, capability=capability, requests=requests)
     for scenario, result in zip(scenarios, results, strict=True):
-        actual = result["observations"]
-        if corpus == "session":
-            assert_observations(scenario["expect"], actual)
-        elif "expect_contains" in scenario:
-            for key, expected in scenario["expect_contains"].items():
-                assert set(expected) <= set(actual[key])
-        else:
-            assert actual == scenario["expect"]
+        try:
+            actual = result["observations"]
+            if corpus == "session":
+                assert_observations(scenario["expect"], actual)
+            elif "expect_contains" in scenario:
+                for key, expected in scenario["expect_contains"].items():
+                    assert set(expected) <= set(actual[key])
+            else:
+                assert actual == scenario["expect"]
+        except (AssertionError, KeyError) as exc:
+            exc.add_note(f"scenario_id={scenario['scenario_id']}")
+            raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -254,6 +268,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="Judge a Saitenka compatibility corpus")
     parser.add_argument("--corpus", choices=sorted(CORPORA), required=True)
+    parser.add_argument("--scenario", help="run one scenario by its stable id")
     parser.add_argument("adapter", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     command = list(args.adapter)
@@ -261,7 +276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         command = command[1:]
     if not command:
         parser.error("adapter command is required after --")
-    run_corpus(command, args.corpus)
+    run_corpus(command, args.corpus, scenario_id=args.scenario)
     return 0
 
 

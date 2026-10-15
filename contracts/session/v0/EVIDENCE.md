@@ -23,5 +23,6 @@ run failed and the source file was restored byte for byte.
 | `sidebar-and-analysis-toggle-visible-surfaces` | drop every panel intent effect | both visible panel lifecycles disappeared |
 
 `tests/contracts/test_adapter_protocol.py` also feeds a deliberately wrong transcript to the comparator and
-requires it to fail. `contracts/evidence-v0.json` is the tracked witness ledger: it records the exact base,
-production substitution, command, scenario, and observed mismatch for every reversible fault above.
+requires it to fail. `contracts/evidence-v0.json` records a self-contained production substitution, command,
+scenario, and observed mismatch for every reversible fault above; `tools/verify_contract_evidence.py`
+replays them against the checked-out revision.

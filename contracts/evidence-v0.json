@@ -1,6 +1,7 @@
 {
-  "base_sha": "e1daa025",
-  "method": "Each exact text substitution was applied once, the named focused command failed on the named scenario, and the original bytes were restored in a finally block.",
+  "source_revision": "HEAD",
+  "verifier": "tools/verify_contract_evidence.py",
+  "method": "The tracked verifier applies each self-contained exact substitution once to the checked-out revision, requires the named focused command to fail on the named scenario, and restores the original bytes in a finally block.",
   "witnesses": [
     {
       "id": "session-disconnected-command-guard",
@@ -8,7 +9,7 @@
       "path": "src/saitenka/app/session/command_runtime.py",
       "find": "if not self._ports.connection.current.ready:",
       "replace": "if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario loss-suspends-command-until-replacement -- python tests/contracts/default_adapter.py",
       "mismatch": "help surface appeared before the lost-command checkpoint"
     },
     {
@@ -17,7 +18,7 @@
       "path": "src/saitenka/app/session/playback_observation.py",
       "find": "target.retire_cue(delta.reason.value)",
       "replace": "pass",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario cue-change-rejects-same-batch-command -- python tests/contracts/default_adapter.py",
       "mismatch": "old cue commands were accepted and the new clipboard write was absent"
     },
     {
@@ -26,7 +27,7 @@
       "path": "src/saitenka/mpvio/osd.py",
       "find": "return self.ipc.command(\"overlay-remove\", physical_oid)",
       "replace": "return {\"error\": \"success\"}",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario close-retires-visible-surface -- python tests/contracts/default_adapter.py",
       "mismatch": "surface-absent was missing before adapter termination"
     },
     {
@@ -35,7 +36,7 @@
       "path": "src/saitenka/app/subtitle_intents.py",
       "find": "SubtitleCommand.NAVIGATE_NEXT: _navigate(1)",
       "replace": "SubtitleCommand.NAVIGATE_NEXT: _navigate(-1)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario subtitle-navigation-emits-seeks -- python tests/contracts/default_adapter.py",
       "mismatch": "sub-seek 1 became a second sub-seek -1"
     },
     {
@@ -44,7 +45,7 @@
       "path": "src/saitenka/app/session/assembly.py",
       "find": "(HELP_NEXT_MSG, HelpCommand.NEXT)",
       "replace": "(HELP_NEXT_MSG, HelpCommand.PREVIOUS)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario help-opens-pages-and-closes -- python tests/contracts/default_adapter.py",
       "mismatch": "the second help page presentation was absent"
     },
     {
@@ -53,7 +54,7 @@
       "path": "src/saitenka/app/runtime/commands.py",
       "find": "handler()",
       "replace": "pass",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario help-opens-pages-and-closes -- python tests/contracts/default_adapter.py",
       "mismatch": "the visible help transcript disappeared"
     },
     {
@@ -62,7 +63,7 @@
       "path": "src/saitenka/app/runtime/commands.py",
       "find": "requires_cue=name not in _CUE_INDEPENDENT",
       "replace": "requires_cue=True",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario cue-change-rejects-same-batch-command -- python tests/contracts/default_adapter.py",
       "mismatch": "the cue-independent hidden notice disappeared"
     },
     {
@@ -71,7 +72,7 @@
       "path": "src/saitenka/app/runtime/commands.py",
       "find": "cue_state == CueCommandState.RETIRED_AFTER_ACTIVE",
       "replace": "cue_state != CueCommandState.RETIRED_AFTER_ACTIVE",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario cue-change-rejects-same-batch-command -- python tests/contracts/default_adapter.py",
       "mismatch": "retired-cue commands ran while active-cue commands were rejected"
     },
     {
@@ -80,7 +81,7 @@
       "path": "src/saitenka/app/features/preview/miner_ui.py",
       "find": "return [\"\".join(token.surface for token in line) for line in lines]",
       "replace": "return [\"\".join(token.surface for line in lines for token in line)]",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario cue-change-rejects-same-batch-command -- python tests/contracts/default_adapter.py",
       "mismatch": "the clipboard flattened new-line into newline"
     },
     {
@@ -89,7 +90,7 @@
       "path": "src/saitenka/app/session/command_runtime.py",
       "find": "                \"force\",",
       "replace": "                \"default\",",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario input-registration-publishes-effective-bindings -- python tests/contracts/default_adapter.py",
       "mismatch": "the global binding section reported default priority instead of force"
     },
     {
@@ -98,7 +99,7 @@
       "path": "src/saitenka/app/session/command_runtime.py",
       "find": "                \"enable-section\",",
       "replace": "                \"disable-section\",",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario input-registration-publishes-effective-bindings -- python tests/contracts/default_adapter.py",
       "mismatch": "the required global section enablement observation disappeared"
     },
     {
@@ -107,7 +108,7 @@
       "path": "src/saitenka/app/features/mining/miner.py",
       "find": "                note_id = p.anki.add_note(note)",
       "replace": "                note_id = 0",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario mining-adds-one-note -- python tests/contracts/default_adapter.py",
       "mismatch": "no note reached the Anki boundary before the bounded settlement expired"
     },
     {
@@ -132,8 +133,8 @@
       "id": "package-tokenizer-punctuation-partition",
       "scenario_id": "saitenka-tokenize-pos-partition",
       "path": "saitenka-tokenize/src/saitenka_tokenize/japanese.py",
-      "find": "SKIP_POS = {\"補助記号\", \"記号\", \"空白\"}",
-      "replace": "SKIP_POS = {\"記号\", \"空白\"}",
+      "find": "SKIP_POS = {\"\u88dc\u52a9\u8a18\u53f7\", \"\u8a18\u53f7\", \"\u7a7a\u767d\"}",
+      "replace": "SKIP_POS = {\"\u8a18\u53f7\", \"\u7a7a\u767d\"}",
       "command": "uv run pytest -q saitenka-tokenize/tests/test_tokenize.py::test_content_and_skippable_are_not_complements",
       "mismatch": "Japanese punctuation stopped being classified as skippable"
     },
@@ -143,7 +144,7 @@
       "path": "src/saitenka/app/commands/attach.py",
       "find": "layout_engine=cfg.get(\"layout_engine\", tt.layout_engine)",
       "replace": "layout_engine=tt.layout_engine",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario attach-overrides -- python tests/contracts/default_adapter.py",
       "mismatch": "layout engine was default instead of taffy"
     },
     {
@@ -152,7 +153,7 @@
       "path": "src/saitenka/app/config_editor.py",
       "find": "return spec.default if got is _UNSET else got",
       "replace": "return spec.default",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario editor-default-precedence -- python tests/contracts/default_adapter.py",
       "mismatch": "top-level and nested on-disk values became built-in defaults"
     },
     {
@@ -161,7 +162,7 @@
       "path": "src/saitenka/app/config_editor.py",
       "find": "text = raw.strip()",
       "replace": "text = raw",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario editor-value-coercion -- python tests/contracts/default_adapter.py",
       "mismatch": "blank optional input and trimmed string coercion changed"
     },
     {
@@ -170,7 +171,7 @@
       "path": "src/saitenka/app/launch/run.py",
       "find": "model = mine.get(\"model\") or mine.get(\"preset\") or \"Lapis\"",
       "replace": "model = mine.get(\"model\") or \"Lapis\"",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario mine-model-precedence -- python tests/contracts/default_adapter.py",
       "mismatch": "Kiku preset resolved to Lapis"
     },
     {
@@ -179,7 +180,7 @@
       "path": "src/saitenka/app/launch/run.py",
       "find": "**req.scoped_cfg,",
       "replace": "",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario run-effective-config-preserves-tables -- python tests/contracts/default_adapter.py",
       "mismatch": "palette, FSRS, and scoring tables disappeared"
     },
     {
@@ -188,7 +189,7 @@
       "path": "src/saitenka/app/config_editor.py",
       "find": "            out[key] = _deep_merge(existing, value)",
       "replace": "            out[key] = value",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario editor-session-preserves-a-sibling-default -- python tests/contracts/default_adapter.py",
       "mismatch": "the untouched cache_size_kib sibling reverted from 222 to the built-in default"
     },
     {
@@ -197,7 +198,7 @@
       "path": "src/saitenka/app/commands/run.py",
       "find": "] = \"ja,jpn,jp\"",
       "replace": "] = \"en\"",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario legacy-run-defaults -- python tests/contracts/default_adapter.py",
       "mismatch": "slang changed from ja,jpn,jp to en"
     },
     {
@@ -206,7 +207,7 @@
       "path": "src/saitenka/app/cli.py",
       "find": "config_path(), must_exist=False",
       "replace": "Path(\"/nonexistent\"), must_exist=False",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario toml-feeds-cli-defaults -- python tests/contracts/default_adapter.py",
       "mismatch": "configured defaults disappeared"
     },
     {
@@ -215,7 +216,7 @@
       "path": "src/saitenka/app/launch/run.py",
       "find": "return list(flag_vals or []) or list(cfg.get(key) or [])",
       "replace": "return list(cfg.get(key) or [])",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario resource-name-precedence -- python tests/contracts/default_adapter.py",
       "mismatch": "configured dictionary replaced the explicit flag value"
     },
     {
@@ -224,7 +225,7 @@
       "path": "src/saitenka/app/launch/run.py",
       "find": "if explicit_flag:\n        return True",
       "replace": "if False:\n        return True",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario jimaku-fetch-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "an explicit jimaku request stopped fetching"
     },
     {
@@ -233,7 +234,7 @@
       "path": "src/saitenka/mpvio/launch.py",
       "find": "    cmd.append(str(video_path))",
       "replace": "    cmd.insert(1, str(video_path))",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario mpv-launch-subtitle-order -- python tests/contracts/default_adapter.py",
       "mismatch": "the video moved ahead of runtime and subtitle arguments"
     },
     {
@@ -242,7 +243,7 @@
       "path": "src/saitenka/mpvio/launch.py",
       "find": "    return version is not None and version >= NATIVE_GEOMETRY_MPV_MIN",
       "replace": "    return version is not None and version > NATIVE_GEOMETRY_MPV_MIN",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario native-geometry-version-floor -- python tests/contracts/default_adapter.py",
       "mismatch": "the supported 0.40 boundary became unsupported"
     },
     {
@@ -251,7 +252,7 @@
       "path": "src/saitenka/app/native_subtitles.py",
       "find": "        \"sub-scale\": scaled or settings[\"sub-scale\"] == 1.0,",
       "replace": "        \"sub-scale\": True,",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario render-profile-refusals-and-geometry -- python tests/contracts/default_adapter.py",
       "mismatch": "sub-scale=1.5 was accepted instead of naming the unsafe setting"
     },
     {
@@ -260,7 +261,7 @@
       "path": "src/saitenka/app/native_subtitles.py",
       "find": "    return _BlendSpace((width, height), _pixel_aspect({\"par\": 1.0}, video), (left, top))",
       "replace": "    return _BlendSpace(frame_size, _pixel_aspect({\"par\": 1.0}, video), (0, 0))",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario render-profile-refusals-and-geometry -- python tests/contracts/default_adapter.py",
       "mismatch": "the blend surface retained the window frame and lost its letterbox origin"
     },
     {
@@ -269,7 +270,7 @@
       "path": "src/saitenka/app/native_subtitles.py",
       "find": "        selective_font_scale=not scale.scale_signs and scale.font_scale != 1.0,",
       "replace": "        selective_font_scale=scale.scale_signs and scale.font_scale != 1.0,",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario renderer-state-follows-mpv-scale-semantics -- python tests/contracts/default_adapter.py",
       "mismatch": "the selective font scale bit followed sub-scale-signs instead of inverting it"
     },
     {
@@ -278,7 +279,7 @@
       "path": "src/saitenka/runtime/playback.py",
       "find": "        state, retired = self._retire_conflict(state, name, data)",
       "replace": "        retired = ()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario cue-change-rejects-same-batch-command -- python tests/contracts/default_adapter.py",
       "mismatch": "same-batch commands copied the retired cue and became externally visible"
     },
     {
@@ -287,7 +288,7 @@
       "path": "src/saitenka/app/subtitle_intents.py",
       "find": "        return (SeekCue(delta, inputs.cue_revision),)",
       "replace": "        return ()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario subtitle-navigation-emits-seeks -- python tests/contracts/default_adapter.py",
       "mismatch": "all three externally visible subtitle seek commands disappeared"
     },
     {
@@ -296,7 +297,7 @@
       "path": "src/saitenka/app/features/mining/mine_intents.py",
       "find": "    return _REDUCERS[command](inputs)",
       "replace": "    return ()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario mining-adds-one-note -- python tests/contracts/default_adapter.py",
       "mismatch": "the mining command never reached the external Anki boundary"
     },
     {
@@ -305,7 +306,7 @@
       "path": "src/saitenka/app/session/intents.py",
       "find": "    return _REDUCERS[command](inputs)",
       "replace": "    return ()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario cue-change-rejects-same-batch-command -- python tests/contracts/default_adapter.py",
       "mismatch": "the externally visible hidden and shown transitions disappeared"
     },
     {
@@ -332,7 +333,7 @@
       "path": "saitenka-wordstate/src/saitenka_wordstate/fsrs.py",
       "find": "    factor = 0.9 ** (1.0 / decay) - 1.0",
       "replace": "    factor = 0.8 ** (1.0 / decay) - 1.0",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[wordstate]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus wordstate --scenario fsrs-retrievability-reference-vectors -- python tests/contracts/default_adapter.py",
       "mismatch": "the vendored py-fsrs vector at elapsed equal to stability changed from 0.9 to 0.8"
     },
     {
@@ -341,7 +342,7 @@
       "path": "src/saitenka/app/subtitle_selection.py",
       "find": "    return ToggleDecision(target, tracks.en_sid if target == SECOND_LANG else tracks.jp_sid)",
       "replace": "    return ToggleDecision(MAIN_LANG, tracks.jp_sid)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario language-toggle-selects-secondary -- python tests/contracts/default_adapter.py",
       "mismatch": "the player wrote Japanese SID 2 instead of selecting English SID 1"
     },
     {
@@ -350,7 +351,7 @@
       "path": "src/saitenka/app/subtitle_selection.py",
       "find": "    return ToggleDecision(target, tracks.en_sid if target == SECOND_LANG else tracks.jp_sid)",
       "replace": "    return ToggleDecision(SECOND_LANG, tracks.en_sid)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario language-toggle-returns-to-primary -- python tests/contracts/default_adapter.py",
       "mismatch": "the player kept English SID 1 instead of returning to Japanese SID 2"
     },
     {
@@ -359,7 +360,7 @@
       "path": "src/saitenka/app/session/panel_intents.py",
       "find": "    return _REDUCERS[command](inputs)",
       "replace": "    return ()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[session]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus session --scenario sidebar-and-analysis-toggle-visible-surfaces -- python tests/contracts/default_adapter.py",
       "mismatch": "the sidebar and analysis panel surface lifecycles disappeared"
     },
     {
@@ -368,7 +369,7 @@
       "path": "src/saitenka/app/subtitle_selection.py",
       "find": "    if sid == tracks.en_sid:\n        return SECOND_LANG",
       "replace": "    if sid == tracks.en_sid:\n        return MAIN_LANG",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario subtitle-selection-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "a known English SID was classified as the Japanese role"
     },
     {
@@ -377,7 +378,7 @@
       "path": "src/saitenka/app/subnav_policy.py",
       "find": "    if sub_start is not None and cue.start <= sub_start < cue.end:",
       "replace": "    if sub_start is not None and cue.start <= sub_start <= cue.end:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario subtitle-navigation-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "a cue remained on screen at its exclusive end timestamp"
     },
     {
@@ -386,7 +387,7 @@
       "path": "src/saitenka/app/subtitle_providers.py",
       "find": "        and (not p.languages or accepted.intersection(code.lower() for code in p.languages))",
       "replace": "        and True",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario subtitle-provider-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "Japanese-only providers were admitted into a French session"
     },
     {
@@ -395,7 +396,7 @@
       "path": "src/saitenka/app/subtitle_artifact.py",
       "find": "        return \".ass\", (\"-c:s\", \"copy\")",
       "replace": "        return \".srt\", (\"-c:s\", \"copy\")",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[subtitle]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus subtitle --scenario subtitle-artifact-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "an authored ASS stream was extracted under an SRT suffix"
     },
     {
@@ -404,7 +405,7 @@
       "path": "src/saitenka/app/profiles.py",
       "find": "    language = canonical_language(validate_language_code(str(raw.get(\"language\", MAIN_LANG))))",
       "replace": "    language = validate_language_code(str(raw.get(\"language\", MAIN_LANG)))",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-identity-ja -- python tests/contracts/default_adapter.py",
       "mismatch": "the ja alias published ja instead of the canonical jp identity"
     },
     {
@@ -413,7 +414,7 @@
       "path": "src/saitenka/app/features/analysis/episode_analysis.py",
       "find": "        sum(len(profile.unknown_indices) == 2 for profile in eligible),",
       "replace": "        sum(len(profile.unknown_indices) == 3 for profile in eligible),",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[analysis]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus analysis --scenario episode-analysis-laws -- python tests/contracts/default_adapter.py",
       "mismatch": "a two-unknown sentence stopped counting as N+2"
     },
     {
@@ -422,7 +423,7 @@
       "path": "src/saitenka/app/source_adapter.py",
       "find": "        return exact or entries",
       "replace": "        return entries",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[dictionary]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus dictionary --scenario dictionary-lookup-laws -- python tests/contracts/default_adapter.py",
       "mismatch": "an exact term lookup merged a reading-only homophone into its definitions"
     },
     {
@@ -431,7 +432,7 @@
       "path": "src/saitenka/app/features/tooltip/prefetch.py",
       "find": "    display = override if override > 0 else osd_h / REF_H",
       "replace": "    display = osd_h / REF_H",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[tooltip]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus tooltip --scenario tooltip-scale-and-placement -- python tests/contracts/default_adapter.py",
       "mismatch": "a fixed 1.5 user scale reverted to the viewport-derived 1.0 at 1080p"
     },
     {
@@ -440,7 +441,7 @@
       "path": "src/saitenka/app/subtitles.py",
       "find": "        if box.contains(point[0] - origin_x, point[1] - origin_y):",
       "replace": "        if box.contains(point[0], point[1]):",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[tooltip]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus tooltip --scenario tooltip-token-hit-testing -- python tests/contracts/default_adapter.py",
       "mismatch": "an offset subtitle cue resolved no token at the frame-space pointer"
     },
     {
@@ -449,7 +450,7 @@
       "path": "src/saitenka/app/dictionary.py",
       "find": "            return inflection_chain(surface, *targets, language=language_base(self.language))",
       "replace": "            return inflection_chain(surface, *targets, language=\"jp\")",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[dictionary]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus dictionary --scenario dictionary-lookup-laws -- python tests/contracts/default_adapter.py",
       "mismatch": "the French present-indicative chain disappeared when routed through Japanese rules"
     },
     {
@@ -458,7 +459,7 @@
       "path": "src/saitenka/app/dictionary.py",
       "find": "        if language in _JP_LANGS or not lemma:",
       "replace": "        if not lemma:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[dictionary]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus dictionary --scenario dictionary-lookup-laws -- python tests/contracts/default_adapter.py",
       "mismatch": "a Japanese surface was deinflected past its tokenizer lemma into an unrelated hit"
     },
     {
@@ -467,7 +468,7 @@
       "path": "src/saitenka/app/dictionary_surface.py",
       "find": "        -len(term),",
       "replace": "        len(term),",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[dictionary]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus dictionary --scenario dictionary-lookup-laws -- python tests/contracts/default_adapter.py",
       "mismatch": "the bare word outranked its longer phrase as the visible and mineable default"
     },
     {
@@ -476,7 +477,7 @@
       "path": "src/saitenka/app/profiles.py",
       "find": "            raw.update(named)  # named overlay on top of the default table",
       "replace": "            pass",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-configuration-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "the selected French profile resolved to the Japanese default identity"
     },
     {
@@ -485,7 +486,7 @@
       "path": "src/saitenka/app/profiles.py",
       "find": "    out.update(lists)",
       "replace": "    pass",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-configuration-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "the French profile retained the top-level Japanese dictionary and frequency lists"
     },
     {
@@ -494,7 +495,7 @@
       "path": "src/saitenka/app/profiles.py",
       "find": "    profiles.extend(resolve_profile(cfg, override=name) for name in sorted(_named_profiles(cfg)))",
       "replace": "    profiles.extend(resolve_profile(cfg, override=name) for name in reversed(sorted(_named_profiles(cfg))))",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-configuration-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "named profiles cycled in reverse lexical order"
     },
     {
@@ -503,7 +504,7 @@
       "path": "src/saitenka/app/features/profiles/profile_cli.py",
       "find": "    config=(),",
       "replace": "",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario profile-cli-commands -- python tests/contracts/default_adapter.py",
       "mismatch": "a new French profile inherited the ambient Japanese dictionaries and pitch data"
     },
     {
@@ -512,7 +513,7 @@
       "path": "src/saitenka/app/features/profiles/profile_cli.py",
       "find": "    if cfg.get(\"active_profile\") == name:",
       "replace": "    if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario profile-cli-commands -- python tests/contracts/default_adapter.py",
       "mismatch": "removing the active profile left a dangling active_profile selector"
     },
     {
@@ -521,7 +522,7 @@
       "path": "src/saitenka/app/features/profiles/profile_cli.py",
       "find": "    table: dict = {\"language\": language, \"tokenizer\": tokenizer or default_tokenizer_for(canon)}",
       "replace": "    table: dict = {\"language\": language, \"tokenizer\": tokenizer or \"unidic\"}",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[cli]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus cli --scenario profile-cli-commands -- python tests/contracts/default_adapter.py",
       "mismatch": "a French profile defaulted to the Japanese unidic tokenizer"
     },
     {
@@ -530,7 +531,7 @@
       "path": "src/saitenka/app/config.py",
       "find": "        native_formats=native_formats,",
       "replace": "        native_formats=defaults.native_formats,",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario persistent-config-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "native_formats=all silently reverted to authored-ass"
     },
     {
@@ -539,7 +540,7 @@
       "path": "src/saitenka/app/config.py",
       "find": "max(defaults.cache_max, 2 * lookahead + 1)",
       "replace": "max(defaults.cache_max, lookahead + 1)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario persistent-config-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "lookahead four derived a cache bound of six instead of nine"
     },
     {
@@ -548,7 +549,7 @@
       "path": "src/saitenka/app/config.py",
       "find": "    if os.environ.get(\"OTEL_SDK_DISABLED\", \"\").strip().lower() in {\"true\", \"1\"}:",
       "replace": "    if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario persistent-config-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "OTEL_SDK_DISABLED=true no longer overrode enabled telemetry config"
     },
     {
@@ -557,7 +558,7 @@
       "path": "src/saitenka/app/backlog.py",
       "find": "    return unicodedata.normalize(\"NFC\", Path(path).name).casefold()",
       "replace": "    return Path(path).name.casefold()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[history]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus history --scenario backlog-persistence-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "composed and decomposed accented basenames no longer shared an identity"
     },
     {
@@ -566,7 +567,7 @@
       "path": "src/saitenka/app/backlog.py",
       "find": "        if len(by_name) == 1:",
       "replace": "        if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[history]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus history --scenario backlog-persistence-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "a uniquely moved episode no longer matched its saved capture by basename"
     },
     {
@@ -575,7 +576,7 @@
       "path": "src/saitenka/app/session_stats.py",
       "find": "        if identity == self._last_cue:\n            return False",
       "replace": "        if False:\n            return False",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[history]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus history --scenario session-history-aggregation -- python tests/contracts/default_adapter.py",
       "mismatch": "the same cue was counted twice in the session summary"
     },
     {
@@ -584,7 +585,7 @@
       "path": "src/saitenka/app/session_stats.py",
       "find": "            if self._last_language == SECOND_LANG:",
       "replace": "            if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[history]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus history --scenario session-history-aggregation -- python tests/contracts/default_adapter.py",
       "mismatch": "second-language watch time was charged to Japanese"
     },
     {
@@ -593,7 +594,7 @@
       "path": "src/saitenka/app/config_editor.py",
       "find": "            return coerce(spec, picked)",
       "replace": "            return current",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario editor-session-dispatches-value-prompts -- python tests/contracts/default_adapter.py",
       "mismatch": "choosing taffy left layout_engine at its previous default value"
     },
     {
@@ -602,7 +603,7 @@
       "path": "src/saitenka/app/features/analysis/analysis_controller.py",
       "find": "        if inputs.language != MAIN_LANG or inputs.index is None:",
       "replace": "        if inputs.language != MAIN_LANG and inputs.index is None:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[analysis]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus analysis --scenario episode-analysis-lifecycle -- python tests/contracts/default_adapter.py",
       "mismatch": "an English track entered analysis instead of its terminal unavailable state"
     },
     {
@@ -611,7 +612,7 @@
       "path": "src/saitenka/app/features/analysis/analysis_controller.py",
       "find": "        if inputs.loading:",
       "replace": "        if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[analysis]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus analysis --scenario episode-analysis-lifecycle -- python tests/contracts/default_adapter.py",
       "mismatch": "analysis became unsettled before profile dependencies were available"
     },
     {
@@ -620,7 +621,7 @@
       "path": "src/saitenka/app/features/analysis/analysis_controller.py",
       "find": "        if not state.open:\n            return",
       "replace": "        if False:\n            return",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[analysis]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus analysis --scenario episode-analysis-lifecycle -- python tests/contracts/default_adapter.py",
       "mismatch": "a background result painted the analysis overlay while it was closed"
     },
     {
@@ -629,7 +630,7 @@
       "path": "src/saitenka/app/features/analysis/analysis_controller.py",
       "find": "        cached = state.cache.get(key)",
       "replace": "        cached = None",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[analysis]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus analysis --scenario episode-analysis-lifecycle -- python tests/contracts/default_adapter.py",
       "mismatch": "reopening a completed analysis started another job instead of returning ready immediately"
     },
     {
@@ -638,7 +639,7 @@
       "path": "src/saitenka/app/features/analysis/analysis_controller.py",
       "find": "        if vocabulary_changed:\n            state.cache.clear()",
       "replace": "        if False:\n            state.cache.clear()",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[analysis]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus analysis --scenario episode-analysis-lifecycle -- python tests/contracts/default_adapter.py",
       "mismatch": "a vocabulary change reused the old ready result instead of reanalyzing"
     },
     {
@@ -647,7 +648,7 @@
       "path": "src/saitenka/app/features/profiles/profile_controller.py",
       "find": "    if profile_count <= 1:",
       "replace": "    if profile_count < 1:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-switch-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "cycling a single profile invalidated and rewarmed the same identity instead of doing nothing"
     },
     {
@@ -656,7 +657,7 @@
       "path": "src/saitenka/app/features/profiles/profile_controller.py",
       "find": "        if not primary_unchanged and not self._subtitles.has_subtitle_track(slang):",
       "replace": "        if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-switch-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "a missing French track committed normally instead of reporting degraded fallback"
     },
     {
@@ -665,7 +666,7 @@
       "path": "src/saitenka/app/features/profiles/profile_controller.py",
       "find": "        if track is not _TrackSwitch.SWITCHED:",
       "replace": "        if False:",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[config]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus config --scenario profile-switch-policy -- python tests/contracts/default_adapter.py",
       "mismatch": "a same-track profile change stopped retokenizing the visible cue"
     },
     {
@@ -674,7 +675,7 @@
       "path": "src/saitenka/app/features/picker/sub_picker.py",
       "find": "        force_select=True,",
       "replace": "        force_select=False,",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[picker]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus picker --scenario subtitle-picker-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "an explicitly clicked subtitle was submitted as an unattended background selection"
     },
     {
@@ -683,7 +684,7 @@
       "path": "src/saitenka/app/features/picker/picker_controller.py",
       "find": "    def scroll(self, wheel: WheelStep, steps: int) -> bool:\n        state = self.state\n        if not state.open:\n            return False\n        if not claims_pointer(self.panel.rect, wheel.pointer, open_=state.open):\n            return False",
       "replace": "    def scroll(self, wheel: WheelStep, steps: int) -> bool:\n        state = self.state\n        if not state.open:\n            return False",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[picker]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus picker --scenario subtitle-picker-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "wheel input outside the picker scrolled it and doubled the offset"
     },
     {
@@ -692,7 +693,7 @@
       "path": "src/saitenka/app/features/picker/picker_controller.py",
       "find": "    def suppress_hover(self, suppression: HoverSuppression) -> bool:\n        state = self.state\n        if not state.open:\n            return False\n        if not claims_pointer(self.panel.rect, suppression.pointer, open_=state.open):\n            return False",
       "replace": "    def suppress_hover(self, suppression: HoverSuppression) -> bool:\n        state = self.state\n        if not state.open:\n            return False",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[picker]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus picker --scenario subtitle-picker-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "the picker suppressed subtitle hover while the pointer was outside its panel"
     },
     {
@@ -701,7 +702,7 @@
       "path": "src/saitenka/runtime/sidebar.py",
       "find": "    return max(0, active - capacity // 2)",
       "replace": "    return max(0, active)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[sidebar]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus sidebar --scenario sidebar-navigation-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "opening showed rows after the active cue instead of centering it"
     },
     {
@@ -710,7 +711,7 @@
       "path": "src/saitenka/app/features/sidebar/sidebar_controller.py",
       "find": "            self.store.dispatch(events.SidebarHoldReleased())\n            self.follow()",
       "replace": "            self.store.dispatch(events.SidebarHoldReleased())",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[sidebar]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus sidebar --scenario sidebar-navigation-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "manual-scroll expiry left the sidebar at its held offset without redrawing the active cue"
     },
     {
@@ -719,7 +720,7 @@
       "path": "src/saitenka/app/features/sidebar/sidebar.py",
       "find": "        actions.seek(\"sidebar-seek-cue\", view.index.cues[hit.value].start)",
       "replace": "        actions.seek(\"sidebar-seek-cue\", view.index.cues[hit.value].end)",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[sidebar]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus sidebar --scenario sidebar-navigation-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "clicking cue seven sought to 7.8 seconds instead of its 7.0-second start"
     },
     {
@@ -728,7 +729,7 @@
       "path": "src/saitenka/app/features/tooltip/tooltip.py",
       "find": "    copy_clipboard(token_clip(t))",
       "replace": "    pass",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[tooltip]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus tooltip --scenario tooltip-core-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "right-clicking the hovered word produced no clipboard text"
     },
     {
@@ -737,7 +738,7 @@
       "path": "src/saitenka/app/features/tooltip/tooltip.py",
       "find": "            navigate_tip(ports, panel, lb.query)",
       "replace": "            pass",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[tooltip]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus tooltip --scenario tooltip-core-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "clicking a dictionary cross-reference left navigation depth at zero"
     },
     {
@@ -746,7 +747,7 @@
       "path": "src/saitenka/runtime/hover_pause.py",
       "find": "    return PauseTurn(PauseClaim(held=True))",
       "replace": "    return PauseTurn(PauseClaim())",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[tooltip]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus tooltip --scenario tooltip-core-interaction -- python tests/contracts/default_adapter.py",
       "mismatch": "the tooltip paused playback without recording that it owed the resume"
     },
     {
@@ -755,7 +756,7 @@
       "path": "src/saitenka/app/scoring.py",
       "find": "        if verdict.is_content and verdict.fsrs_state in MATURITY_STATES:\n",
       "replace": "        if False:\n",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus journey --scenario watch-hover-mine-rich-card -- python tests/contracts/default_adapter.py",
       "mismatch": "learning and young FSRS tokens lost their visible maturity roles and colors"
     },
     {
@@ -764,8 +765,8 @@
       "path": "src/saitenka/app/features/mining/mining_controller.py",
       "find": "        token = context.encounter.cue.tokens[index]\n",
       "replace": "        token = context.encounter.cue.tokens[0]\n",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
-      "mismatch": "the hovered 読む selection mined 本 instead of the displayed dictionary entry"
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus journey --scenario watch-hover-mine-rich-card -- python tests/contracts/default_adapter.py",
+      "mismatch": "the hovered \u8aad\u3080 selection mined \u672c instead of the displayed dictionary entry"
     },
     {
       "id": "journey-screenshot-reaches-note",
@@ -773,7 +774,7 @@
       "path": "saitenka-card/src/saitenka_card/markers.py",
       "find": "    Marker(\"screenshot\", \"ship\", \"scene image, `<img>`-wrapped\", lambda c: _img(c.picture)),\n",
       "replace": "    Marker(\"screenshot\", \"ship\", \"scene image, `<img>`-wrapped\", lambda c: c.picture),\n",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus journey --scenario watch-hover-mine-rich-card -- python tests/contracts/default_adapter.py",
       "mismatch": "the Anki Picture field lost its image markup while the media capture still succeeded"
     },
     {
@@ -782,7 +783,7 @@
       "path": "src/saitenka/app/session/playback_observation.py",
       "find": "        elif isinstance(delta, playback.CueObservationChanged):\n            target.observe_cue(delta.cue)\n",
       "replace": "        elif isinstance(delta, playback.CueObservationChanged):\n            pass\n",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus journey --scenario watch-hover-mine-rich-card -- python tests/contracts/default_adapter.py",
       "mismatch": "the observed sub-text never reached cue presentation, so no matching render request existed"
     },
     {
@@ -791,7 +792,7 @@
       "path": "src/saitenka/app/subtitle_render.py",
       "find": "            surfaces.present(\n                sr.image, ox, oy, oid=SUB_ID, owner=Owner.SUBTITLE, on_settled=on_settled\n            ),\n",
       "replace": "            None,\n",
-      "command": "uv run pytest -q 'tests/contracts/test_adapter_protocol.py::test_default_adapter_runs_every_corpus_row_without_receiving_answers[journey]'",
+      "command": "uv run --no-sync python tests/contracts/protocol.py --corpus journey --scenario watch-hover-mine-rich-card -- python tests/contracts/default_adapter.py",
       "mismatch": "the renderer computed styled tokens but emitted no subtitle overlay boundary write"
     },
     {

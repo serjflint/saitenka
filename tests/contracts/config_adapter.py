@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-import os
 import tempfile
 import tomllib
 from contextlib import redirect_stdout
 from dataclasses import replace
 from io import StringIO
 from pathlib import Path
+
+import pytest
 
 from saitenka.app import config_editor
 from saitenka.app.command_defaults import resolve_mine_model
@@ -264,13 +265,12 @@ def _evaluate_config_policy(case: dict) -> object:
     )
 
     op = case["op"]
-    previous = {name: os.environ.get(name) for name in ("SAITENKA_CONFIG", "OTEL_SDK_DISABLED")}
-    try:
+    with pytest.MonkeyPatch.context() as patch:
         for name, value in case.get("env", {}).items():
             if value is None:
-                os.environ.pop(name, None)
+                patch.delenv(name, raising=False)
             else:
-                os.environ[name] = value
+                patch.setenv(name, value)
         if op == "resync-split":
             return resolve_resync_split_penalty(case["config"])
         if op == "expand-paths":
@@ -294,15 +294,9 @@ def _evaluate_config_policy(case: dict) -> object:
                     path.write_text(case["content"], encoding="utf-8")
                 return load_config(path)
             if op == "config-path":
-                os.environ["SAITENKA_CONFIG"] = str(root / "env.toml")
+                patch.setenv("SAITENKA_CONFIG", str(root / "env.toml"))
                 chosen = config_path(root / "explicit.toml" if case["explicit"] else None)
                 return chosen.name
-    finally:
-        for name, value in previous.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
     raise ValueError(f"unknown config policy operation: {op!r}")
 
 

@@ -3,11 +3,12 @@ from __future__ import annotations
 import contextlib
 import importlib
 import io
-import os
 import re
 import tempfile
 import tomllib
 from pathlib import Path
+
+import pytest
 
 PROTOCOL = "saitenka.cli/v0"
 CAPABILITY = "cli-v0"
@@ -97,19 +98,15 @@ def _parse(scenario: dict) -> dict[str, object]:
 
 def _parse_with_config(scenario: dict) -> dict[str, object]:
     cli = _cli()
-    previous = os.environ.get("SAITENKA_CONFIG")
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "overlay.toml"
         path.write_text(scenario["config"], encoding="utf-8")
-        os.environ["SAITENKA_CONFIG"] = str(path)
-        importlib.reload(cli)
         try:
-            return _parse(scenario)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("SAITENKA_CONFIG", str(path))
+                importlib.reload(cli)
+                return _parse(scenario)
         finally:
-            if previous is None:
-                os.environ.pop("SAITENKA_CONFIG", None)
-            else:
-                os.environ["SAITENKA_CONFIG"] = previous
             importlib.reload(cli)
 
 
@@ -177,29 +174,25 @@ def evaluate(scenario: dict) -> object:
 
 def _profile_command(case: dict) -> dict[str, object]:
     cli = _cli()
-    previous = os.environ.get("SAITENKA_CONFIG")
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "overlay.toml"
         if case.get("config") is not None:
             path.write_text(case["config"], encoding="utf-8")
-        os.environ["SAITENKA_CONFIG"] = str(path)
-        importlib.reload(cli)
         output = io.StringIO()
         error: str | None = None
         result: object = None
         try:
-            with contextlib.redirect_stdout(output):
-                try:
-                    result = cli.create_app()(
-                        case["args"], exit_on_error=False, result_action="return_value"
-                    )
-                except (TypeError, ValueError) as exc:
-                    error = str(exc)
+            with pytest.MonkeyPatch.context() as patch:
+                patch.setenv("SAITENKA_CONFIG", str(path))
+                importlib.reload(cli)
+                with contextlib.redirect_stdout(output):
+                    try:
+                        result = cli.create_app()(
+                            case["args"], exit_on_error=False, result_action="return_value"
+                        )
+                    except (TypeError, ValueError) as exc:
+                        error = str(exc)
         finally:
-            if previous is None:
-                os.environ.pop("SAITENKA_CONFIG", None)
-            else:
-                os.environ["SAITENKA_CONFIG"] = previous
             importlib.reload(cli)
         raw = path.read_text(encoding="utf-8") if path.exists() else ""
         stdout = [
