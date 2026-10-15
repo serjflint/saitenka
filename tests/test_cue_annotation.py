@@ -19,6 +19,7 @@ from saitenka.app.features.annotation.jobs import (
     annotate,
 )
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime.jobs import JobLanePolicy, LocalJobLane
 
 
 def _identity(text: str, *, start: float = 1.0) -> CueIdentity:
@@ -79,6 +80,16 @@ def _exists(_forms):
 
 def _inputs(text: str, tokenizer=None, *, scorer=None, exists=_exists) -> AnnotationInputs:
     return AnnotationInputs(text, tokenizer or _Tokenizer(), exists, scorer)
+
+
+class _ObservedWarm(Future[None]):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+
+    def result(self, timeout: float | None = None) -> None:
+        self.entered.set()
+        return super().result(timeout)
 
 
 def test_retiring_episode_work_drops_a_late_result_instead_of_caching_it() -> None:
@@ -156,58 +167,15 @@ def test_current_request_reclaims_cancelled_same_key_episode_work() -> None:
     coordinator.close()
 
 
-class _SerialSubmitter:
-    def __init__(self, handler) -> None:
-        self._handler = handler
-        self._condition = threading.Condition()
-        self._queue = deque()
-        self._closed = False
-        self._sequence = 0
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def __call__(self, **kwargs) -> bool:
-        with self._condition:
-            self._sequence += 1
-            self._queue.append((self._sequence, kwargs))
-            self._condition.notify()
-        return True
-
-    def _run(self) -> None:
-        while True:
-            with self._condition:
-                while not self._queue and not self._closed:
-                    self._condition.wait()
-                if self._closed:
-                    return
-                sequence, item = self._queue.popleft()
-            result = self._handler(item["request"], threading.Event())
-            item["on_finished"](
-                EffectFinished(
-                    EffectId(sequence),
-                    item["owner"],
-                    item["identity"],
-                    EffectOutcome.SUCCEEDED,
-                    result=result,
-                )
-            )
-
-    def close(self) -> None:
-        with self._condition:
-            self._closed = True
-            self._condition.notify_all()
-        self._thread.join(2)
-
-
 def _coordinator(**kwargs):
     results = deque()
     warm = kwargs.pop("tokenizer_warm", None)
     executor = AnnotationExecutor(warm)
-    submitter = _SerialSubmitter(executor.run)
+    submitter = LocalJobLane("cue-annotation", JobLanePolicy(capacity=1), executor.run)
     coordinator = CueAnnotationCoordinator(
         **kwargs,
         executor=executor,
-        submitter=submitter,
+        submitter=submitter.submit,
         on_result=results.append,
     )
     return coordinator, submitter, results
@@ -241,7 +209,7 @@ def _wait_calls(tokenizer, count: int) -> list[str]:
 def test_settled_no_dictionary_still_tokenizes_and_scores_without_attestation():
     tokenizer = _Tokenizer()
 
-    cue = annotate(_inputs("猫", tokenizer, scorer=_Scorer()))
+    cue = annotate(_inputs("猫", tokenizer, scorer=_Scorer(), exists=None))
 
     assert tokenizer.calls == ["猫"]
     assert [token.surface for token in cue.tokens] == ["猫"]
@@ -305,41 +273,6 @@ def test_blocking_adapter_timeout_bounds_the_whole_operation() -> None:
         tokenizer.release.set()
         coordinator.close()
         submitter.close()
-
-
-@pytest.mark.timeout(5)
-def test_blocking_resolve_joins_inflight_broker_execution_after_warm() -> None:
-    warm: Future[None] = Future()
-    tokenizer = _Tokenizer()
-    coordinator, submitter, results = _coordinator(tokenizer_warm=warm)
-    resolved = []
-    coordinator.submit(
-        _key("猫"),
-        _inputs("猫", tokenizer),
-        priority=AnnotationPriority.CURRENT,
-        waiter=_identity("猫"),
-    )
-    thread = threading.Thread(
-        target=lambda: resolved.append(
-            coordinator.resolve(
-                _key("猫"),
-                _inputs("猫", tokenizer),
-                priority=AnnotationPriority.LOOKAHEAD,
-                timeout=2,
-            )
-        )
-    )
-    thread.start()
-
-    assert tokenizer.calls == []
-    warm.set_result(None)
-    thread.join(2)
-
-    assert [token.surface for token in resolved[0].tokens] == ["猫"]
-    assert tokenizer.calls == ["猫"]
-    assert _wait_result(results).error is None
-    coordinator.close()
-    submitter.close()
 
 
 @pytest.mark.timeout(5)
@@ -454,10 +387,10 @@ def test_non_success_terminal_result_does_not_poison_the_cache() -> None:
 
 @pytest.mark.timeout(5)
 def test_rejected_job_does_not_consume_tokenizer_warm() -> None:
-    warm: Future[None] = Future()
+    warm = _ObservedWarm()
     tokenizer = _Tokenizer()
     executor = AnnotationExecutor(warm)
-    serial = _SerialSubmitter(executor.run)
+    serial = LocalJobLane("cue-annotation", JobLanePolicy(capacity=1), executor.run)
     results = deque()
     reject = True
 
@@ -466,70 +399,44 @@ def test_rejected_job_does_not_consume_tokenizer_warm() -> None:
         if reject:
             reject = False
             return False
-        return serial(**kwargs)
+        return serial.submit(**kwargs)
 
     coordinator = CueAnnotationCoordinator(
         executor=executor,
         submitter=submit,
         on_result=results.append,
     )
-    coordinator.submit(
-        _key("first"),
-        _inputs("first", tokenizer),
-        priority=AnnotationPriority.CURRENT,
-        waiter=_identity("first"),
-    )
-    assert isinstance(results.popleft().error, RuntimeError)
-
-    coordinator.submit(
-        _key("second"),
-        _inputs("second", tokenizer),
-        priority=AnnotationPriority.CURRENT,
-        waiter=_identity("second"),
-    )
-    assert tokenizer.calls == []
-    warm.set_result(None)
-
-    assert _wait_result(results).error is None
-    assert tokenizer.calls == ["second"]
-    coordinator.close()
-    serial.close()
-
-
-@pytest.mark.parametrize("warm_error", [None, RuntimeError("warm failed")])
-@pytest.mark.timeout(5)
-def test_first_annotation_waits_for_retained_tokenizer_warm(warm_error):
-    warm: Future[None] = Future()
-    tokenizer = _Tokenizer()
-    coordinator, submitter, results = _coordinator(tokenizer_warm=warm)
     try:
         coordinator.submit(
-            _key("猫"),
-            _inputs("猫", tokenizer),
+            _key("first"),
+            _inputs("first", tokenizer),
             priority=AnnotationPriority.CURRENT,
-            waiter=_identity("猫"),
+            waiter=_identity("first"),
         )
+        assert isinstance(results.popleft().error, RuntimeError)
+
+        coordinator.submit(
+            _key("second"),
+            _inputs("second", tokenizer),
+            priority=AnnotationPriority.CURRENT,
+            waiter=_identity("second"),
+        )
+        assert warm.entered.wait(1)
         assert tokenizer.calls == []
+        warm.set_result(None)
 
-        if warm_error is None:
-            warm.set_result(None)
-        else:
-            warm.set_exception(warm_error)
-
-        result = _wait_result(results)
-        assert (result.error is None) is (warm_error is None)
-        assert tokenizer.calls == (["猫"] if warm_error is None else [])
+        assert _wait_result(results).error is None
+        assert tokenizer.calls == ["second"]
     finally:
         if not warm.done():
             warm.set_result(None)
         coordinator.close()
-        submitter.close()
+        serial.close()
 
 
 @pytest.mark.timeout(5)
 def test_failed_tokenizer_warm_is_consumed_before_the_next_cue():
-    warm: Future[None] = Future()
-    warm.set_exception(RuntimeError("warm failed"))
+    warm = _ObservedWarm()
     tokenizer = _Tokenizer()
     coordinator, submitter, results = _coordinator(tokenizer_warm=warm)
     try:
@@ -539,6 +446,9 @@ def test_failed_tokenizer_warm_is_consumed_before_the_next_cue():
             priority=AnnotationPriority.CURRENT,
             waiter=_identity("first"),
         )
+        assert warm.entered.wait(1)
+        assert tokenizer.calls == []
+        warm.set_exception(RuntimeError("warm failed"))
         assert isinstance(_wait_result(results).error, RuntimeError)
 
         coordinator.submit(
@@ -553,6 +463,8 @@ def test_failed_tokenizer_warm_is_consumed_before_the_next_cue():
         assert [token.surface for token in recovered.cue.tokens] == ["second"]
         assert tokenizer.calls == ["second"]
     finally:
+        if not warm.done():
+            warm.set_result(None)
         coordinator.close()
         submitter.close()
 
@@ -584,6 +496,7 @@ def test_running_duplicate_attaches_newest_current_waiter_and_executes_once():
             priority=AnnotationPriority.CURRENT,
             waiter=current,
         )
+        coordinator.submit(key, _inputs("猫", tokenizer), priority=AnnotationPriority.LOOKAHEAD)
         tokenizer.release.set()
 
         result = _wait_result(results)

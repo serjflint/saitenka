@@ -82,24 +82,6 @@ def test_attachment_acceptance_mirrors_mpv(
     assert subtitle_fonts.attachment_is_font(name, mimetype, size) is accepted
 
 
-def test_an_empty_sub_fonts_dir_means_the_config_directory_not_no_fonts(tmp_path: Path) -> None:
-    """The defect this replaced: the render-input gate read an empty `--sub-fonts-dir` as "no extra
-    fonts", when mpv reads it as "use the config dir's `fonts`" — so a user with faces there got
-    boxes measured without them, and nothing said so."""
-    fonts = tmp_path / "fonts"
-    fonts.mkdir()
-
-    resolved = subtitle_fonts.resolve(
-        expand=expander(tmp_path),
-        settings={"sub-fonts-dir": "", "embeddedfonts": False, "sub-font-provider": "auto"},
-        video=None,
-        cache_dir=tmp_path / "cache",
-    )
-
-    assert resolved.setup.fonts_dir == str(fonts)
-    assert resolved.sources == ("system", "fonts-dir")
-
-
 def test_a_config_directory_without_a_fonts_folder_adds_nothing(tmp_path: Path) -> None:
     resolved = subtitle_fonts.resolve(
         expand=expander(tmp_path),
@@ -174,6 +156,7 @@ def test_embeddedfonts_off_reaches_neither_in_container_source(tmp_path: Path) -
 
     assert resolved.setup.extract_fonts is False
     assert resolved.attachments == ()
+    assert not resolved.osd_unreachable(frozenset({"signs"})).blocks("signs")
 
 
 def test_an_option_change_after_resolution_is_visible_in_the_snapshot(tmp_path: Path) -> None:
@@ -216,18 +199,6 @@ def test_dumping_the_attachments_does_not_transcode_the_episode(
     ) == (("sign.ttf", b"face-bytes"),)
     dump = next(command for command, _kwargs in calls if "-dump_attachment:t:0" in command)
     assert dump[dump.index("-t") + 1] == "0"
-
-
-def test_every_attachment_subprocess_is_bounded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Both run on the reader thread at every track load, so an unreachable share or a wedged
-    ffmpeg would hold the session there with no way out. Asserted over every call rather than by
-    name: an unbounded third one would be the same defect."""
-    calls = fake_attachment_tools(monkeypatch)
-
-    subtitle_fonts.container_fonts(one_attachment_container(tmp_path), cache_dir=tmp_path / "cache")
-
     assert calls
     assert all(kwargs.get("timeout") for _command, kwargs in calls)
 
@@ -253,7 +224,9 @@ def test_a_wedged_attachment_dump_costs_the_faces_not_the_session(
 
 @pytest.mark.integration
 @pytest.mark.timeout(60)
-def test_a_containers_font_attachment_is_dumped_and_cached(tmp_path: Path) -> None:
+def test_a_containers_font_attachment_is_dumped_cached_and_qualified(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         pytest.skip("test requires ffmpeg and ffprobe")
     video = tmp_path / "episode.mkv"
@@ -272,12 +245,25 @@ def test_a_containers_font_attachment_is_dumped_and_cached(tmp_path: Path) -> No
     cache = tmp_path / "cache"
 
     dumped = subtitle_fonts.container_fonts(video, cache_dir=cache)
-    # A second call must answer from the manifest; deleting the tool would break a re-dump.
+    monkeypatch.setattr(
+        subtitle_fonts,
+        "_dump_container_fonts",
+        lambda *_args, **_kwargs: pytest.fail("cached attachment was dumped again"),
+    )
     cached = subtitle_fonts.container_fonts(video, cache_dir=cache)
+    monkeypatch.setattr(subtitle_fonts, "_osd_installed_families", lambda *_args: frozenset())
+    resolved = subtitle_fonts.resolve(
+        expand=expander(tmp_path),
+        settings={"embeddedfonts": True, "sub-font-provider": "auto"},
+        video=video,
+        cache_dir=cache,
+    )
 
     assert dumped == cached
     assert [name for name, _data in dumped] == [REPO_FONT.name]
     assert dumped[0][1] == REPO_FONT.read_bytes()
+    assert resolved.osd_unreachable().blocks("noto sans")
+    assert not resolved.osd_unreachable().blocks("helvetica")
 
 
 @pytest.mark.integration
@@ -322,19 +308,6 @@ def test_an_in_document_face_is_one_the_osd_library_can_never_load(tmp_path: Pat
     assert resolved.osd_unreachable(frozenset({"signs"})).blocks("signs")
 
 
-def test_a_document_face_is_reachable_again_once_mpv_stops_extracting_them(tmp_path: Path) -> None:
-    """`--embeddedfonts=no` makes mpv ignore the `[Fonts]` section, so its subtitle renderer resolves
-    that family the same way the OSD one does — from the system. Nothing to stand down for."""
-    resolved = subtitle_fonts.resolve(
-        expand=expander(tmp_path),
-        settings={"embeddedfonts": False, "sub-font-provider": "auto"},
-        video=None,
-        cache_dir=tmp_path / "cache",
-    )
-
-    assert not resolved.osd_unreachable(frozenset({"signs"})).blocks("signs")
-
-
 def test_a_fonts_dir_only_the_subtitle_library_reads_costs_its_families(tmp_path: Path) -> None:
     """`mp_ass_init` takes `fonts_dir` off the style GROUP it is handed (`ass_mp.c:128-138`), and
     the OSD library is handed `osd_style`. So `--sub-fonts-dir` without a matching `--osd-fonts-dir`
@@ -375,6 +348,7 @@ def test_the_same_directory_on_both_sides_costs_nothing(tmp_path: Path) -> None:
     )
 
     assert resolved.setup.fonts_dir == str(fonts)
+    assert resolved.sources == ("system", "fonts-dir")
     assert not resolved.osd_unreachable().blocks("embedded signs")
 
 
@@ -395,42 +369,6 @@ def test_two_different_font_providers_make_every_family_unsafe(tmp_path: Path) -
 
     assert resolved.osd_unreachable().all_unsafe
     assert resolved.osd_unreachable().blocks("any family at all")
-
-
-@pytest.mark.integration
-@pytest.mark.timeout(60)
-def test_an_attachments_own_family_name_is_what_the_overprint_stands_down_on(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The whole point of naming families rather than counting sources: a release whose dialogue is
-    a system font and whose signs are attachment-only must lose the color on its signs only."""
-    # Whether this host has Noto Sans installed is not what this test is about.
-    monkeypatch.setattr(subtitle_fonts, "_osd_installed_families", lambda *_args: frozenset())
-    if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-        pytest.skip("test requires ffmpeg and ffprobe")
-    video = tmp_path / "episode.mkv"
-    subprocess.run(
-        [
-            "ffmpeg", "-v", "error", "-y",
-            "-f", "lavfi", "-i", "color=c=black:s=64x64:d=1",
-            "-attach", str(REPO_FONT),
-            "-metadata:s:t:0", "mimetype=application/x-truetype-font",
-            "-metadata:s:t:0", f"filename={REPO_FONT.name}",
-            "-c:v", "libx264", str(video),
-        ],
-        check=True,
-        capture_output=True,
-    )  # fmt: skip
-
-    resolved = subtitle_fonts.resolve(
-        expand=expander(tmp_path),
-        settings={"embeddedfonts": True, "sub-font-provider": "auto"},
-        video=video,
-        cache_dir=tmp_path / "cache",
-    )
-
-    assert resolved.osd_unreachable().blocks("noto sans")
-    assert not resolved.osd_unreachable().blocks("helvetica")
 
 
 def test_osd_fallback_family_is_part_of_resolved_environment(tmp_path):

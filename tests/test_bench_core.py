@@ -19,11 +19,27 @@ def _core_module():
         sys.path.remove(examples)
 
 
-def test_subtitle_benchmark_exercises_parse_index_and_tokenize():
-    result = _core_module().benchmark_subtitles(cues=6, reps=1)
+def test_subtitle_benchmark_exercises_parse_index_and_tokenize(monkeypatch):
+    core = _core_module()
+    counts = {"locate": 0, "tokenize": 0}
+    locate, tokenize = core.CueIndex.locate, core.tokenize
+
+    def counted_locate(self, **kwargs):
+        counts["locate"] += 1
+        return locate(self, **kwargs)
+
+    def counted_tokenize(*args, **kwargs):
+        counts["tokenize"] += 1
+        return tokenize(*args, **kwargs)
+
+    monkeypatch.setattr(core.CueIndex, "locate", counted_locate)
+    monkeypatch.setattr(core, "tokenize", counted_tokenize)
+
+    result = core.benchmark_subtitles(cues=6, reps=1)
 
     assert set(result) == {"median_ms", "p95_ms"}
     assert all(math.isfinite(value) and value >= 0 for value in result.values())
+    assert counts == {"locate": 12, "tokenize": 12}
 
 
 def test_dictionary_benchmark_imports_and_queries_generated_archive(tmp_path):

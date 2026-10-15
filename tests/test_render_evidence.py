@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 from saitenka_subtitles.geometry import FontProvider, FontSetup, RendererState
 from telemetry_helpers import enable_telemetry
+from test_report import _hermetic
 from test_report_metadata import _environment
 from test_subtitle_pipeline import FakeCurrentRenderer, FakeGeometryBackend, request
 
@@ -106,6 +107,8 @@ def test_delayed_cue_decision_uses_subtitle_timestamp(monkeypatch, tmp_path):
         decisions = [row for row in rows if row.get("event") == "decision"]
         targets = [row for row in rows if row.get("event") == "subtitle_color_target"]
         assert decisions[-1]["cue_start_ms"] == targets[-1]["cue_start_ms"] == 1000
+        assert targets[-1]["text_hash"] == decisions[-1]["text_hash"]
+        assert targets[-1]["text_hash"] != "猫を見る"
     finally:
         session.close()
 
@@ -113,6 +116,7 @@ def test_delayed_cue_decision_uses_subtitle_timestamp(monkeypatch, tmp_path):
 def _setup(monkeypatch, tmp_path):
     from saitenka import session
 
+    _hermetic(monkeypatch, tmp_path)
     config = _environment(monkeypatch, tmp_path)
     monkeypatch.setattr(session, "session_id", lambda: "runtime-test")
     (tmp_path / "overlay.log").write_text('{"session":"runtime-test"}\n')

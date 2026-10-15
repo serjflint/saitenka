@@ -14,7 +14,7 @@ prebuilt ``mask-atlas.sqlite`` reads it LAZILY, one glyph at a time (:func:`get_
 live misses; no prebuilt atlas → nothing loads. The per-thread ``fonts.glyph_mask`` LRU fronts the atlas,
 so a PK lookup happens at most once per ``(glyph, phase, thread)`` — a session touches only a few thousand
 unique glyphs, so lazy reads cost far less than deserializing all N masks, and startup no longer stalls on
-a full ~GB load into RAM (the earlier design; :func:`load_into` is kept for prewarm/tests). The alpha bytes
+a full ~GB load into RAM (the earlier design). The alpha bytes
 round-trip byte-identically (``Image.frombytes(mode, size, data).im``), so a loaded mask draws
 pixel-for-pixel identically to a fresh ``getmask2`` — proven in ``tests/test_mask_atlas``.
 """
@@ -27,14 +27,10 @@ import sqlite3
 import threading
 import zlib
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from PIL import Image
 
 from saitenka.sqlite_pool import ThreadLocalConnections, open_wal
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
 
 log = logging.getLogger(__name__)
 
@@ -74,16 +70,16 @@ def _phase(start: tuple[float, float]) -> tuple[int, int]:
     return (int(start[0] * _PHASE) % _PHASE, int(start[1] * _PHASE) % _PHASE)
 
 
-def serialize_core(core) -> tuple[int, int, bytes]:
+def _serialize_core(core) -> tuple[int, int, bytes]:
     """A ``getmask2`` core → ``(w, h, raw-alpha-bytes)``. ``bytes(core)`` is the raw stencil; the
-    reconstruction in :func:`deserialize_core` is byte-identical (the atlas round-trip contract)."""
+    reconstruction in :func:`_deserialize_core` is byte-identical (the atlas round-trip contract)."""
     w, h = core.size
     return w, h, bytes(core)
 
 
-def deserialize_core(w: int, h: int, mode: str, data: bytes):
+def _deserialize_core(w: int, h: int, mode: str, data: bytes):
     """Rebuild a draw-ready ``ImagingCore`` (in the glyph's render ``mode``, "L" for AA text) from
-    :func:`serialize_core` output — byte-identical to the original ``getmask2`` core, so ``draw_bitmap``
+    :func:`_serialize_core` output — byte-identical to the original ``getmask2`` core, so ``draw_bitmap``
     of it is pixel-for-pixel identical to a fresh raster."""
     return Image.frombytes(mode, (w, h), data).im
 
@@ -92,7 +88,7 @@ class MaskAtlas:
     """A bounded, opt-in SQLite store of ``getmask2`` alpha bitmaps. Best-effort: any :class:`sqlite3.Error`
     degrades to live rasterisation. Per-thread connections (WAL). Runtime reads are LAZY and per-glyph
     (:meth:`get_one`, fronted by the per-thread ``glyph_mask`` LRU) — a session pays only for the glyphs it
-    draws, with no bulk load into RAM. :meth:`load_into` (bulk one-pass) is retained for prewarm/tests."""
+    draws, with no bulk load into RAM."""
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -133,7 +129,7 @@ class MaskAtlas:
         needs a rebuild anyway (bump the cache dir), not a silent per-write refresh."""
         try:
             core, (offx, offy) = mask
-            w, h, data = serialize_core(core)
+            w, h, data = _serialize_core(core)
             sx, sy = _phase(start)
             conn = self._conn()
             cur = conn.execute(
@@ -203,35 +199,6 @@ class MaskAtlas:
         except sqlite3.Error:  # pragma: no cover
             return 0
 
-    def load_into(self, mem: dict, *, font_ids: Iterable[str] | None = None) -> int:
-        """Bulk-reconstruct every stored mask into ``mem`` (a shared read-only dict keyed
-        ``(font_id, text, mode, sx, sy)`` → ``(core, offset)``) in one pass — the only read path (a
-        per-glyph query would be slower than re-rasterising). Optionally restrict to ``font_ids``.
-        Returns the count loaded. Call once at startup; ``mem`` is then read-only (free-threading-safe)."""
-        try:
-            conn = self._conn()
-            if font_ids is None:
-                rows = conn.execute(
-                    "SELECT font_id, text, mode, sx, sy, offx, offy, w, h, alpha FROM masks"
-                )
-            else:
-                ids = list(font_ids)
-                q = ",".join("?" * len(ids))
-                rows = conn.execute(
-                    f"SELECT font_id, text, mode, sx, sy, offx, offy, w, h, alpha FROM masks "  # noqa: S608 — only ?-placeholder count interpolated
-                    f"WHERE font_id IN ({q})",
-                    ids,
-                )
-            n = 0
-            for font_id, text, mode, sx, sy, offx, offy, w, h, alpha in rows:
-                core = deserialize_core(w, h, mode, zlib.decompress(alpha))
-                mem[font_id, text, mode, sx, sy] = (core, (offx, offy))
-                n += 1
-            return n
-        except (sqlite3.Error, ValueError):  # pragma: no cover — garbled blob won't reconstruct
-            log.debug("mask atlas load failed", exc_info=True)
-            return 0
-
     # A batched `get_many((keys)) → one `... WHERE (font_id,text,mode,sx,sy) IN (…)` is the documented
     # escape hatch IF query dispatch ever dominates — but measured it does NOT: the cost is the first-touch
     # disk page-in (~125 µs/glyph on an 864 MB atlas), which a batched query faults in identically; dispatch
@@ -239,14 +206,13 @@ class MaskAtlas:
     # PREDICTIVE background warm (per the tokenized-subs idea), not batching. Not built until it pays.
     def get_one(self, font_id: str, text: str, mode: str, start: tuple[float, float]):
         """Lazy single-glyph read: one primary-key ``SELECT`` + deserialize → ``(core, offset)``, or
-        ``None`` on miss/error. The runtime alternative to :meth:`load_into` — the per-thread
+        ``None`` on miss/error. The per-thread
         ``fonts.glyph_mask`` LRU fronts it, so the atlas is queried at most once per
         ``(glyph, phase, thread)`` and a session pays only for the glyphs it actually draws (a few
         thousand), never deserializing all N up front. Measured ~6 µs PK lookup + ~150 µs deserialize on
         an 864 MB / 587k-mask atlas — fine for this second-tier miss path, and it removes the ~9 s / GB
         bulk-load-into-RAM startup stall. Per-thread WAL connection (:meth:`_conn`) → free-threading-safe
-        under concurrent prefetch-worker reads. Byte-identical to a fresh ``getmask2`` (same round-trip as
-        :meth:`load_into`)."""
+        under concurrent prefetch-worker reads. Byte-identical to a fresh ``getmask2``."""
         try:
             sx, sy = _phase(start)
             row = (
@@ -261,7 +227,7 @@ class MaskAtlas:
             if row is None:
                 return None
             offx, offy, w, h, alpha = row
-            return deserialize_core(w, h, mode, zlib.decompress(alpha)), (offx, offy)
+            return _deserialize_core(w, h, mode, zlib.decompress(alpha)), (offx, offy)
         except (sqlite3.Error, ValueError):  # pragma: no cover — degrade to live raster (safe)
             log.debug("mask atlas get_one failed", exc_info=True)
             return None
@@ -295,10 +261,3 @@ class MaskAtlas:
     def close(self) -> None:
         """Close EVERY thread's connection, not just the caller's — prewarm's workers each hold one."""
         self._conns.close()
-
-
-def mem_key(font_id: str, text: str, mode: str, start: tuple[float, float]) -> tuple:
-    """The in-memory atlas key ``fonts.glyph_mask`` looks up — the same quantisation :meth:`put` stores
-    under, so a live glyph's exact subpixel phase matches its persisted mask."""
-    sx, sy = _phase(start)
-    return (font_id, text, mode, sx, sy)

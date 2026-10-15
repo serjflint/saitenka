@@ -67,19 +67,15 @@ def _coverage(file: str) -> frozenset[int]:
 
 _tls = threading.local()  # FreeType faces aren't thread-safe → one font cache per thread
 
-# Persistent glyph mask atlas (#149 Tier-1), opt-in and default-OFF here: a process that enables it
-# (set_mask_atlas) gets cross-session getmask2 reuse. _ATLAS_MEM is a SHARED read-only dict (bulk-loaded
-# once at startup — free-threading-safe after load) consulted on a per-thread cache miss; _ATLAS_WRITE
-# is the store a live miss writes back to. Both None → the hot path is byte-for-byte the pre-atlas path.
-_ATLAS_MEM: dict | None = None
-_ATLAS_WRITE = None
+# Persistent glyph mask atlas (#149 Tier-1), opt-in and default-OFF here. Runtime reads are lazy and a
+# live miss writes back through the same store. None keeps the pre-atlas hot path.
+_ATLAS = None
 
 
-def set_mask_atlas(mem: dict | None, write) -> None:
-    """Install the shared in-memory mask atlas (read) + the write-back store, or clear with ``(None,
-    None)``. Called once at startup (see the mask-atlas wiring); the ``mem`` dict is read-only afterward."""
-    global _ATLAS_MEM, _ATLAS_WRITE
-    _ATLAS_MEM, _ATLAS_WRITE = mem, write
+def set_mask_atlas(atlas) -> None:
+    """Install the lazy read/write atlas, or clear it with ``None``."""
+    global _ATLAS
+    _ATLAS = atlas
 
 
 def load(spec: FontSpec) -> ImageFont.FreeTypeFont:
@@ -164,8 +160,7 @@ def glyph_mask(
         return hit
     if otel_metrics.glyph_mask_misses is not None:
         otel_metrics.glyph_mask_misses.add(1)
-    gid = getattr(font, "_satk_font_id", None) if (_ATLAS_MEM is not None or _ATLAS_WRITE) else None
-    # Persistent atlas HIT (bulk-loaded at startup): reuse the disk mask, no getmask2 this session.
+    gid = getattr(font, "_satk_font_id", None) if _ATLAS is not None else None
     if gid is not None:
         amask = _atlas_read(gid, text, mode, start)
         if amask is not None:
@@ -188,18 +183,11 @@ def glyph_mask(
 
 def _atlas_read(gid: str, text: str, mode: str, start: tuple[float, float]):
     """A persistent-atlas lookup — the mask, or None if the atlas is off / misses. Counts the atlas
-    hit:miss ratio (the "was the prewarm worth it?" telemetry). Two sources: a bulk-loaded ``_ATLAS_MEM``
-    dict (prewarm/tests) if present, else a LAZY per-glyph ``get_one`` against the write-back atlas — the
-    per-thread ``glyph_mask`` LRU fronts this, so a session queries each glyph at most once per thread and
-    never bulk-loads the whole atlas into RAM."""
-    if _ATLAS_MEM is not None:
-        from saitenka.mask_atlas import mem_key
-
-        amask = _ATLAS_MEM.get(mem_key(gid, text, mode, start))
-    elif _ATLAS_WRITE is not None:
-        amask = _ATLAS_WRITE.get_one(gid, text, mode, start)
-    else:
+    hit:miss ratio (the "was the prewarm worth it?" telemetry). The per-thread ``glyph_mask`` LRU fronts
+    the lazy disk lookup, so a session queries each glyph at most once per thread."""
+    if _ATLAS is None:
         return None
+    amask = _ATLAS.get_one(gid, text, mode, start)
     if amask is not None:
         if otel_metrics.mask_atlas_hits is not None:
             otel_metrics.mask_atlas_hits.add(1)
@@ -211,9 +199,9 @@ def _atlas_read(gid: str, text: str, mode: str, start: tuple[float, float]):
 
 def _atlas_write(gid: str, text: str, mode: str, start: tuple[float, float], hit) -> None:
     """Persist a freshly rasterised mask to the write-back atlas (builds it for a later session)."""
-    if _ATLAS_WRITE is None:
+    if _ATLAS is None:
         return
-    _ATLAS_WRITE.put(gid, text, mode, start, hit)
+    _ATLAS.put(gid, text, mode, start, hit)
     if otel_metrics.mask_atlas_writebacks is not None:
         otel_metrics.mask_atlas_writebacks.add(1)
 

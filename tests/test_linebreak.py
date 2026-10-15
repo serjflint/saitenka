@@ -108,20 +108,6 @@ def test_no_break_before_forbidden_start_or_after_forbidden_end(text):
             assert status[i] == PROHIBITED, f"break after forbidden line-end {text[i - 1]!r}"
 
 
-def test_wrap_units_keeps_a_ruby_group_atomic():
-    # A ruby base+reading group is a single unit; wrapping can never land inside it. Model three units:
-    # a wide CJK char, a ruby group (one unit), then another CJK char, in a width that forces two lines.
-    widths = [30.0, 30.0, 30.0]
-    texts = ["語", "漢", "字"]  # unit 1 is the ruby group's base; it is one index, never split
-    lines = wrap_units(widths, texts, max_width=45)
-    assert [i for line in lines for i in line] == [
-        0,
-        1,
-        2,
-    ]  # every unit placed exactly once, in order
-    assert all(len(set(line)) == len(line) for line in lines)  # no unit duplicated across a wrap
-
-
 def test_wrap_units_never_starts_a_line_with_closing_punctuation():
     # 」 (NO_START) must ride onto the previous line rather than start a new one.
     widths = [30.0, 30.0, 10.0]

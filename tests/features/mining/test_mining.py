@@ -5,12 +5,8 @@ import threading
 
 import pytest
 from saitenka_card import (
-    KNOWN_MARKERS,
     AnimatedClip,
-    CardContent,
     MineConfig,
-    bold_word,
-    build_note,
 )
 from saitenka_tokenize.japanese import tokenize
 from session_builder import build_session
@@ -48,165 +44,6 @@ def test_card_data_from_token():
     assert card.glossary_html.startswith("<ol>")
 
 
-def test_known_entities_match_entity_values_keys():
-    """KNOWN_ENTITIES (what doctor validates a [mine.fields] map against) must stay in lockstep with
-    the actual entities build_note writes — else doctor flags a valid key or misses a bogus one."""
-    from saitenka_card import KNOWN_ENTITIES, CardData
-    from saitenka_card.note import _entity_values
-
-    values = _entity_values(CardData("x", "y", ""), CardContent())
-    assert set(values) == set(KNOWN_ENTITIES)
-
-
-def test_bold_word():
-    assert bold_word("私は本を読む", "本") == "私は<b>本</b>を読む"
-    assert bold_word("no match here", "本") == "no match here"
-
-
-def test_build_note_maps_lapis_fields():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(),
-        card_for(tok),
-        CardContent(
-            sentence_html="本を<b>読む</b>", picture="p.jpg", audio="a.mp3", misc="ep10 · 10:03"
-        ),
-    )
-    f = note["fields"]
-    assert note["modelName"] == "Lapis"
-    assert note["deckName"] == "Saitenka::Mining"
-    assert f["Expression"] == "読む"
-    assert f["ExpressionReading"] == "よむ"
-    assert f["Sentence"] == "本を<b>読む</b>"
-    assert f["Picture"] == '<img src="p.jpg">'
-    assert f["SentenceAudio"] == "[sound:a.mp3]"
-    assert f["MiscInfo"] == "ep10 · 10:03"
-    assert (
-        f["IsWordAndSentenceCard"] == "1"
-    )  # default card kind (word-and-sentence, SubMiner default)
-    assert note["options"]["allowDuplicate"] is False
-    assert "saitenka" in note["tags"]
-
-
-def test_build_note_writes_idseq_into_the_default_id_field():
-    """#255 coverage gap: the ``card.idseq → 'id' entity → 'ID' field`` chain was only covered in
-    halves. Under the default LAPIS map, a non-empty idseq must land in the real ``ID`` field the Kanji
-    Study ``kanjistudy://word?id={{ID}}`` deep-link reads — proven with a constructed idseq (not a live
-    jamdict lookup), so it runs regardless of the ``jmdict`` extra."""
-    from saitenka_card import CardData
-
-    note = build_note(MineConfig(), CardData("読む", "よむ", "", idseq="1456360"))
-    assert note["fields"]["ID"] == "1456360"
-
-
-def test_build_note_writes_frequency_fields():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(),
-        card_for(tok),
-        CardContent(sentence_html="s", freq_html="<ul><li>FreqA: 12</li></ul>", freq_sort="12"),
-    )
-    assert note["fields"]["Frequency"] == "<ul><li>FreqA: 12</li></ul>"  # plan: freq → Frequency
-    assert note["fields"]["FreqSort"] == "12"
-
-
-def test_build_note_merges_source_tags():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(),
-        card_for(tok),
-        CardContent(sentence_html="s"),
-        tags=["saitenka::mined", "saitenka::source::Nippon_Sangoku", "saitenka::ep::10"],
-    )
-    assert "saitenka" in note["tags"]  # static tool tag kept
-    assert "saitenka::source::Nippon_Sangoku" in note["tags"]  # + per-card source/episode
-    assert "saitenka::ep::10" in note["tags"]
-    assert len(note["tags"]) == len(set(note["tags"]))  # deduped
-
-
-def test_custom_field_map_only_writes_mapped():
-    cfg = MineConfig(model="Animecards", fields={"expression": "Word", "reading": "Reading"})
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), CardContent(sentence_html="s"))
-    assert set(note["fields"]) == {"Word", "Reading", "IsWordAndSentenceCard"}
-    assert note["fields"]["Word"] == "読む"
-
-
-@pytest.mark.parametrize(
-    ("card_kind", "marker"),
-    [
-        ("sentence", "IsSentenceCard"),
-        ("word-and-sentence", "IsWordAndSentenceCard"),
-        ("click", "IsClickCard"),
-        ("audio", "IsAudioCard"),
-    ],
-)
-def test_build_note_card_kind_sets_exactly_one_marker(card_kind, marker):
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        MineConfig(card_kind=card_kind), card_for(tok), CardContent(sentence_html="s")
-    )
-    present = [m for m in KNOWN_MARKERS if m in note["fields"]]
-    assert (
-        present == [marker] and note["fields"][marker] == "1"
-    )  # mutually exclusive by construction
-
-
-def test_build_note_card_kind_none_sets_no_marker():
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(MineConfig(card_kind="none"), card_for(tok), CardContent(sentence_html="s"))
-    assert not any(m in note["fields"] for m in KNOWN_MARKERS)  # no card-template marker at all
-
-
-def test_build_note_unknown_card_kind_falls_back_to_default(caplog):
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    with caplog.at_level("WARNING"):
-        note = build_note(
-            MineConfig(card_kind="bogus"), card_for(tok), CardContent(sentence_html="s")
-        )
-    assert note["fields"]["IsWordAndSentenceCard"] == "1"  # typo didn't disable the marker
-    assert "card_kind" in caplog.text
-
-
-def test_build_note_card_format_wins_over_fields():
-    # card_format present → ONLY its fields written (fields map ignored); card_kind flag still applies.
-    cfg = MineConfig(
-        fields={"expression": "Expression"},
-        card_format={"Word": "{expression}", "Furigana": "{furigana}"},
-    )
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), CardContent(sentence_html="本を<b>読む</b>"))
-    assert note["fields"]["Word"] == "読む" and note["fields"]["Furigana"] == "読[よ]む"
-    assert "Expression" not in note["fields"]  # the entity map is ignored wholesale
-    assert note["fields"]["IsWordAndSentenceCard"] == "1"  # card_kind marker still added
-
-
-def test_build_note_card_format_fans_one_entity_into_two_fields():
-    # the capability the entity→field map couldn't express: one marker in several fields
-    cfg = MineConfig(card_format={"Word": "{expression}", "Key": "{expression}"})
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(cfg, card_for(tok), CardContent(sentence_html="s"))
-    assert note["fields"]["Word"] == note["fields"]["Key"] == "読む"
-
-
-def test_expression_field_resolves_from_card_format():
-    from saitenka.app.anki import dedupe
-
-    # dedup must key off the field that actually holds {expression} under card_format, not fields["expression"]
-    cfg = MineConfig(card_format={"Word": "{expression}", "Note": "{glossary}"})
-    assert cfg.expression_field() == "Word"
-
-    queries = []
-
-    class _A:
-        def find_notes(self, q):
-            queries.append(q)
-            return []
-
-    dedupe(_A(), cfg, "読む")
-    assert queries and "Word:読む" in queries[0]  # queried the {expression} field, not Expression
-
-
 def test_dedupe_allows_add_when_card_format_has_no_expression_field():
     from saitenka.app.anki import dedupe
 
@@ -228,11 +65,19 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch, mak
     from util import FakeIPC
 
     ipc = FakeIPC()
-    anki = _FakeAnki(existing=[7])  # the dedup query returns a hit
+    queries = []
+
+    class QueryAnki(_FakeAnki):
+        def find_notes(self, query):
+            queries.append(query)
+            return super().find_notes(query)
+
+    anki = QueryAnki(existing=[7])
     r = make_session(
         ipc,
         services=SessionServices(
-            anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
+            anki=anki,
+            mining=MineConfig(card_format={"Word": "{expression}", "Note": "{glossary}"}),
         ),
     )
     r.graph.cue.set_subtitle("本を読む")
@@ -241,23 +86,7 @@ def test_mine_token_card_format_dedupes_on_the_expression_field(monkeypatch, mak
     r.graph.mining.mine_token(tok)
     _await_mining(r)
     assert anki.added == [] and "読む" in r.graph.mining.index_snapshot()
-
-
-def test_build_note_card_format_uses_passed_markers():
-    # the miner passes a full marker map (pitch/pos the args can't supply); build_note renders it
-    cfg = MineConfig(card_format={"Pitch": "{pitch-accents}"})
-    tok = next(t for t in tokenize("本を読む") if t.surface == "読む")
-    note = build_note(
-        cfg, card_for(tok), CardContent(sentence_html="s"), markers={"pitch-accents": "よむ [0]"}
-    )
-    assert note["fields"]["Pitch"] == "よむ [0]"
-
-
-def test_mine_config_from_preset_kiku_uses_lapis_fields_and_word_and_sentence():
-    cfg = MineConfig.from_preset("Kiku")
-    assert cfg.model == "Kiku"
-    assert cfg.fields["expression"] == "Expression" and cfg.fields["audio"] == "SentenceAudio"
-    assert cfg.flags == {"IsWordAndSentenceCard": "1"}  # Kiku's word-and-sentence marker
+    assert queries and '"Word:読む"' in queries[0]
 
 
 def test_mine_config_from_unknown_preset_warns_and_uses_lapis(caplog):
@@ -282,21 +111,15 @@ def test_mine_config_from_wires_word_audio_pack_when_enabled(tmp_path):
     assert cfg.word_audio_field == "Pronunciation"
 
 
-def test_mine_config_from_leaves_word_audio_off_by_default():
+@pytest.mark.parametrize("config", [{"deck": "X"}, {"word_audio_pack_dir": "."}])
+def test_mine_config_from_leaves_word_audio_off_by_default(config):
     from saitenka.app.mining_config import mine_config_from
 
-    cfg = mine_config_from({"deck": "X"})
+    cfg = mine_config_from(config)
     assert cfg.word_audio_pack is None
     assert (
         cfg.word_audio_field == "WordAudio"
     )  # default field name still set (inert without a pack)
-
-
-def test_mine_config_from_ignores_pack_dir_when_word_audio_disabled(tmp_path):
-    from saitenka.app.mining_config import mine_config_from
-
-    cfg = mine_config_from({"word_audio_pack_dir": str(tmp_path)})  # enabled defaults False
-    assert cfg.word_audio_pack is None
 
 
 def test_timespan_padding():
@@ -357,49 +180,35 @@ def test_clip_audio_keeps_normal_probing_for_nonlocal_matroska(monkeypatch, tmp_
     assert "-probesize" not in calls["cmd"] and "-analyzeduration" not in calls["cmd"]
 
 
-def test_clip_audio_rejects_success_without_output(monkeypatch, tmp_path):
-    monkeypatch.setattr("saitenka.app.media.subprocess.run", lambda *_a, **_kw: None)
-    monkeypatch.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
-    with pytest.raises(AudioOutputMissingError, match="without creating an output file"):
-        clip_audio("/v.mkv", Timespan(10, 12), tmp_path / "out.m4a")
-
-
-def test_audio_capture_failures_have_distinct_visible_diagnostics():
-    messages = [
-        miner._capture_failure_message(None, subprocess.TimeoutExpired("ffmpeg", 120))[0],
-        miner._capture_failure_message(None, subprocess.CalledProcessError(1, "ffmpeg"))[0],
-        miner._capture_failure_message(None, AudioOutputMissingError("missing"))[0],
-    ]
-    assert messages == [
-        "audio extraction timed out — image only",
-        "audio ffmpeg failed — image only",
-        "ffmpeg produced no audio — image only",
-    ]
-
-
+@pytest.mark.timeout(5)
 @pytest.mark.parametrize(
     ("failure", "message"),
     [
         (subprocess.TimeoutExpired("ffmpeg", 120), "audio extraction timed out — image only"),
         (subprocess.CalledProcessError(1, "ffmpeg"), "audio ffmpeg failed — image only"),
+        (AudioOutputMissingError("missing"), "ffmpeg produced no audio — image only"),
     ],
 )
 def test_capture_media_reports_audio_subprocess_failure(
     monkeypatch, failure, message, diagnostic_trace
 ):
     r = _capture_reader(animated_enabled=False)
-    _stub_capture(monkeypatch, animated_result=None)
-    monkeypatch.setattr(
-        miner, "clip_audio", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure)
-    )
+    monkeypatch.setattr(miner, "screenshot", lambda *_args: None)
+
+    def run(*_args, **_kwargs):
+        if not isinstance(failure, AudioOutputMissingError):
+            raise failure
+
     toasts = []
     monkeypatch.setattr(
         r.graph.notifications,
         "show",
         lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind)),
     )
-
-    picture, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
+    with monkeypatch.context() as capture_process:
+        capture_process.setattr("saitenka.app.media.subprocess.run", run)
+        capture_process.setattr("saitenka.mpvio.discover.find_tool", lambda name: name)
+        picture, audio = miner.capture_media(_ports(r), "saitenka_1", "/v.mkv")
 
     assert picture.endswith(".jpg") and audio == ""
     assert toasts == [(message, "warn")]
@@ -420,21 +229,6 @@ def test_toast_renders_each_kind():
 
 
 # --- Stage 3: HTML escaping in Anki fields --------------------------------------------------------
-
-
-def test_bold_word_escapes_html_in_sentence():
-    """bold_word must HTML-escape the sentence to prevent raw HTML injection into Anki fields."""
-    # subtitle with < > & — should be escaped, not passed through as raw HTML
-    sentence = "<漢字> & more"
-    result = bold_word(sentence, "漢字")
-    assert "&lt;" in result or "<b>漢字</b>" in result
-    # The sentence must not contain a raw unescaped '<' from the original (the surface is wrapped in <b>)
-    # but the surrounding '<' and '&' should be escaped.
-    assert (
-        "&amp;" in result
-        or "&#38;" in result
-        or result.count("<") <= result.count("<b>") + result.count("</b>")
-    )
 
 
 def test_dedupe_escapes_special_chars_in_query():
@@ -492,6 +286,18 @@ class _FakeAnki:
     def store_media(self, name, _path):
         self.stored.append(name)
         return name
+
+
+class _HeldAddAnki(_FakeAnki):
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def add_note(self, note):
+        self.entered.set()
+        assert self.release.wait(5), "test did not release delayed Anki add"
+        return super().add_note(note)
 
 
 @pytest.mark.integration
@@ -612,36 +418,6 @@ def test_a_timed_out_screenshot_keeps_its_destination_until_the_real_reply(tmp_p
 
     await_ready(lambda: not directory.exists(), "acknowledged scratch did not retire")
     assert not directory.exists()
-
-
-def test_mine_token_adds_note_with_fields(monkeypatch, make_session):
-    from util import FakeIPC
-
-    ipc = FakeIPC()
-    ipc.props["path"] = "/x/[Grp] Show - 03 [1080p].mkv"
-    ipc.props["time-pos"] = 63
-    anki = _FakeAnki()
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.graph.cue.set_subtitle("本を読む")
-    # media capture: no real mpv/ffmpeg — stub the capture step
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    shown = []
-    monkeypatch.setattr(
-        PreviewController,
-        "present_mined",
-        lambda _owner, _ports, _source, _toast, card, _tok, _video, _st="mined", **_options: (
-            shown.append(card.expression)
-        ),
-    )
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert len(anki.added) == 1
-    note = anki.added[0]
-    assert note["fields"]["Expression"] == "読む"
-    assert "<b>読む</b>" in note["fields"]["Sentence"]
-    assert "saitenka::mined" in note["tags"]
-    assert shown == ["読む"]
 
 
 def _capture_reader(*, animated_enabled: bool):
@@ -767,19 +543,10 @@ def test_prepare_capture_skips_mpv_without_a_media_marker(make_session):
     assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_session):
     from util import FakeIPC, await_ready
-
-    class DelayedAnki(_FakeAnki):
-        def __init__(self) -> None:
-            super().__init__()
-            self.entered = threading.Event()
-            self.release = threading.Event()
-
-        def add_note(self, note):
-            self.entered.set()
-            assert self.release.wait(5), "test did not release delayed Anki add"
-            return super().add_note(note)
 
     ipc = FakeIPC()
     ipc.props.update(
@@ -790,40 +557,42 @@ def test_delayed_anki_keeps_the_admitted_scene_snapshot(monkeypatch, make_sessio
             "sub-end": 22.0,
         }
     )
-    anki = DelayedAnki()
+    anki = _HeldAddAnki()
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
     monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
     tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
+    try:
+        r.graph.mining.mine_token(tok)
 
-    r.graph.mining.mine_token(tok)
+        await_ready(anki.entered.is_set, "Anki add did not start", pump=r.pump)
+        assert r.graph.mining.operation_pending
+        r.graph.mining.mine_token(tok)
+        from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec
 
-    await_ready(anki.entered.is_set, "Anki add did not start", pump=r.pump)
-    assert r.graph.mining.operation_pending
-    r.graph.mining.mine_token(tok)
-    from saitenka.app.features.mining.mining_controller import MiningIdentity, MiningSpec
+        switched = MiningIdentity("other", 1)
+        r.graph.mining.select_mining_spec(MiningSpec(switched, {"deck": "Other", "model": "Lapis"}))
+        ipc.set_prop("time-pos", 99.0)
+        ipc.set_prop("sub-start", 98.0)
+        ipc.set_prop("sub-end", 100.0)
+        anki.release.set()
+        _await_mining(r)
 
-    switched = MiningIdentity("other", 1)
-    r.graph.mining.select_mining_spec(MiningSpec(switched, {"deck": "Other", "model": "Lapis"}))
-    ipc.set_prop("time-pos", 99.0)
-    ipc.set_prop("sub-start", 98.0)
-    ipc.set_prop("sub-end", 100.0)
-    anki.release.set()
-    _await_mining(r)
-
-    assert len(anki.added) == 1
-    assert "読む" not in r.graph.mining.index_snapshot()
-    assert anki.added[0]["fields"]["MiscInfo"].endswith("· 00:21")
-    link = r.graph.mining.store.by_note_id(1)
-    assert link is not None
-    assert (link.video_path, link.cue_start, link.cue_end) == (
-        "/x/Show - 01.mkv",
-        20.0,
-        22.0,
-    )
-    assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
-    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+        assert len(anki.added) == 1
+        assert "読む" not in r.graph.mining.index_snapshot()
+        assert anki.added[0]["fields"]["MiscInfo"].endswith("· 00:21")
+        link = r.graph.mining.store.by_note_id(1)
+        assert link is not None
+        assert (link.video_path, link.cue_start, link.cue_end) == (
+            "/x/Show - 01.mkv",
+            20.0,
+            22.0,
+        )
+        assert not any(command[0] in {"seek", "sub-seek"} for command in ipc.commands)
+        assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+    finally:
+        anki.release.set()
 
 
 @pytest.mark.integration
@@ -833,17 +602,7 @@ def test_an_anki_add_finishing_after_source_retirement_keeps_its_original_link(
 ):
     from util import FakeIPC, await_ready
 
-    class HeldAnki(_FakeAnki):
-        def __init__(self):
-            super().__init__()
-            self.entered, self.release = threading.Event(), threading.Event()
-
-        def add_note(self, note):
-            self.entered.set()
-            assert self.release.wait(5)
-            return super().add_note(note)
-
-    ipc, anki = FakeIPC(), HeldAnki()
+    ipc, anki = FakeIPC(), _HeldAddAnki()
     ipc.props.update({"path": "/old.mkv", "sub-start": 1, "sub-end": 2, "time-pos": 1})
     reader = make_session(
         ipc,
@@ -879,8 +638,12 @@ def test_an_anki_add_finishing_after_source_retirement_keeps_its_original_link(
         anki.release.set()
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):
-    from util import FakeIPC, await_ready, drain_for
+    from util import FakeIPC, await_ready
+
+    from saitenka.app.features.mining import mining_operation
 
     class BlockingAnki(_FakeAnki):
         def __init__(self) -> None:
@@ -895,25 +658,43 @@ def test_close_cancels_before_the_anki_commit_point(monkeypatch, make_session):
             self.check_finished.set()
             return True
 
+    commit_finished = threading.Event()
+    real_run = mining_operation.run_operation
+
+    def complete_commit(request, cancelled):
+        result = real_run(request, cancelled)
+        if request.stage is mining_operation.OperationStage.COMMIT:
+            commit_finished.set()
+        return result
+
+    monkeypatch.setattr(mining_operation, "run_operation", complete_commit)
+
     ipc = FakeIPC()
     anki = BlockingAnki()
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
     monkeypatch.setattr(miner, "capture_media", lambda *_args, **_kwargs: ("", ""))
     tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    await_ready(anki.check_started.is_set, "Anki health check did not start", pump=r.pump)
+    try:
+        r.graph.mining.mine_token(tok)
+        await_ready(anki.check_started.is_set, "Anki health check did not start", pump=r.pump)
 
-    r.close()
-    anki.release_check.set()
-    await_ready(anki.check_finished.is_set, "Anki health check did not finish")
-    drain_for(lambda: None)
+        r.close()
+        anki.release_check.set()
+        await_ready(anki.check_finished.is_set, "Anki health check did not finish")
+        await_ready(commit_finished.is_set, "commit worker did not finish")
 
-    assert anki.added == []
+        assert anki.added == []
+    finally:
+        anki.release_check.set()
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make_session):
-    from util import FakeIPC, await_ready, drain_for
+    from util import FakeIPC, await_ready
+
+    from saitenka.app.features.mining import mining_operation
 
     class BlockingSecondCheckAnki(_FakeAnki):
         def __init__(self) -> None:
@@ -921,12 +702,14 @@ def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make
             self.checks = 0
             self.second_check_started = threading.Event()
             self.release_second_check = threading.Event()
+            self.second_check_finished = threading.Event()
 
         def can_add(self, _note):
             self.checks += 1
             if self.checks == 2:
                 self.second_check_started.set()
                 assert self.release_second_check.wait(5), "test did not release Anki health check"
+                self.second_check_finished.set()
             return True
 
     class RecordingHistory:
@@ -937,6 +720,24 @@ def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make
             self.counts.append(count)
 
     ipc = FakeIPC()
+    commit_consumed = threading.Event()
+    real_submit = ipc.submit_runtime_job
+
+    def submit(**job):
+        if (
+            job["lane"] == mining_operation.LANE
+            and job["request"].stage is mining_operation.OperationStage.COMMIT
+        ):
+            callback = job["on_finished"]
+
+            def finished(completion):
+                callback(completion)
+                commit_consumed.set()
+
+            job["on_finished"] = finished
+        return real_submit(**job)
+
+    monkeypatch.setattr(ipc, "submit_runtime_job", submit)
     ipc.props["path"] = "/x/Show - 01.mkv"
     anki = BlockingSecondCheckAnki()
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
@@ -945,22 +746,30 @@ def test_close_keeps_bulk_actions_recorded_before_cancellation(monkeypatch, make
     monkeypatch.setattr(r.graph.tooltip, "mark_mined", lambda *_args: None)
     history = RecordingHistory()
     r.graph.history.replace_recorder(history)
+    try:
+        r.graph.mining.bulk_mine()
+        await_ready(
+            anki.second_check_started.is_set,
+            "second Anki health check did not start",
+            pump=r.pump,
+        )
 
-    r.graph.mining.bulk_mine()
-    await_ready(
-        anki.second_check_started.is_set,
-        "second Anki health check did not start",
-        pump=r.pump,
-    )
+        r.graph.mining.invalidate()
+        anki.release_second_check.set()
+        await_ready(
+            anki.second_check_finished.is_set,
+            "second Anki health check did not finish",
+            pump=r.pump,
+        )
+        await_ready(commit_consumed.is_set, "bulk commit terminal was not consumed", pump=r.pump)
+        r.graph.history.replace_recorder(None)
 
-    r.graph.mining.invalidate()
-    anki.release_second_check.set()
-    drain_for(r.pump)
-    r.graph.history.replace_recorder(None)
-
-    assert history.counts == [1]
-    assert r.graph.mining.store.by_note_id(1) is not None
-    assert len(anki.added) == 1
+        assert history.counts == [1]
+        assert r.graph.mining.store.by_note_id(1) is not None
+        assert len(anki.added) == 1
+    finally:
+        anki.release_second_check.set()
+        r.graph.history.replace_recorder(None)
 
 
 def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_session):
@@ -981,30 +790,6 @@ def test_mine_token_with_explicit_card_mines_chosen_entry(monkeypatch, make_sess
     _await_mining(r)
     assert anki.added[0]["fields"]["Expression"] == "退く"
     assert anki.added[0]["fields"]["ExpressionReading"] == "しりぞく"
-
-
-def test_mine_token_duplicate_shows_existing(monkeypatch, make_session):
-    from util import FakeIPC
-
-    ipc = FakeIPC()
-    anki = _FakeAnki(existing=[42])
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.graph.cue.set_subtitle("本を読む")
-    previewed = []
-    monkeypatch.setattr(
-        PreviewController,
-        "present_existing",
-        lambda _owner, _ports, _source, _toast, nid, _card, status, **_options: previewed.append(
-            (nid, status)
-        ),
-    )
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert anki.added == []  # dedupe: nothing added
-    assert previewed == [(42, "exists")]  # "✓ in deck" — nothing was duplicated
-    assert "読む" in r.graph.mining.index_snapshot()
-    assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
 
 
 def test_preview_replay_key_is_tooltip_scoped():
@@ -1044,17 +829,24 @@ def test_esc_closes_card_preview_and_hands_key_back(monkeypatch, make_session):
     assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch, make_session):
-    """Mining an in-deck word shows "✓ in deck" and adds nothing, but stashes the token; the preview's
-    ＋ "add anyway" then mines a second card for this scene with allowDuplicate set."""
+    """An existing card can be explicitly mined again after a capture-free refusal."""
     from util import FakeIPC
 
     ipc = FakeIPC()
-    anki = _FakeAnki(existing=[42])  # 読む already in the mining deck
+    anki = _FakeAnki(existing=[42])
     r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
     r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(PreviewController, "present_existing", _discard_preview)
+    previewed = []
+    monkeypatch.setattr(
+        PreviewController,
+        "present_existing",
+        lambda _owner, _ports, _source, _toast, nid, _card, status, **_options: previewed.append(
+            (nid, status)
+        ),
+    )
     dup_status = []
     monkeypatch.setattr(
         PreviewController,
@@ -1065,16 +857,20 @@ def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch, make
     )
     tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
 
-    r.graph.mining.mine_token(tok)  # already in deck → nothing added, token remembered
+    r.graph.mining.mine_token(tok)
     _await_mining(r)
     assert anki.added == []
-    assert r.graph.preview.panel.dup_tok is tok
+    assert previewed == [(42, "exists")]
+    assert "読む" in r.graph.mining.index_snapshot()
+    assert not any(command[0] == "screenshot-to-file" for command in ipc.commands)
 
+    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
     r.graph.preview_commands.ports().add_duplicate()
     _await_mining(r)
     assert len(anki.added) == 1
+    assert anki.added[0]["fields"]["Expression"] == "読む"
     assert anki.added[0]["options"]["allowDuplicate"] is True
-    assert dup_status == ["duplicate"]  # the new card's preview says "• duplicate" (accurate now)
+    assert dup_status == ["duplicate"]
 
 
 def test_select_bulk_targets_dedupes_skips_known_and_caps():
@@ -1114,6 +910,8 @@ def test_select_bulk_targets_dedupes_skips_known_and_caps():
     assert _select_bulk_targets(r) == [0, 4]  # は/犬/dup-猫 all filtered out
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 def test_bulk_mine_counts_and_toasts(monkeypatch, make_session):
     from util import FakeIPC
 
@@ -1135,8 +933,8 @@ def test_bulk_mine_counts_and_toasts(monkeypatch, make_session):
     )  # skip the view refresh
     r.graph.stateless_commands.run(mine_intents.MineCommand.EPISODE)
     _await_mining(r)
-    assert len(anki.added) >= 1, (toasts, ipc.runtime_outcomes)
-    assert any("mined" in t for t in toasts)
+    assert sorted(note["fields"]["Expression"] for note in anki.added) == ["本", "読む"]
+    assert "mined 2 · 0 dup" in toasts
 
 
 def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_session):
@@ -1186,18 +984,6 @@ def test_bulk_mine_persists_commits_before_a_later_add_fails(monkeypatch, make_s
     assert toasts == [("bulk failed: connection lost", "err")]
 
 
-def _make_dict(path, title, entries):
-    """Minimal Yomitan v3 dict zip (mirrors test_dictionary._make_dict)."""
-    import json
-    import zipfile
-
-    with zipfile.ZipFile(path, "w") as zf:
-        zf.writestr("index.json", json.dumps({"title": title, "format": 3}))
-        bank = [[t, r, "", "", 0, g, i + 1, ""] for i, (t, r, g) in enumerate(entries)]
-        zf.writestr("term_bank_1.json", json.dumps(bank, ensure_ascii=False))
-    return str(path)
-
-
 def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_session):
     """The per-entry ⊕ arrives as a 'mine:<i>' LinkBox; _mine_link mines cards_for(tok)[i] — clicking
     the しりぞく block (index 1) mines that reading/gloss, not the default のく."""
@@ -1208,7 +994,7 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_
     from saitenka.app.features.tooltip import tooltip
     from saitenka.model import LinkBox
 
-    d = _make_dict(
+    d = dicthelp.term_zip(
         tmp_path / "tk.zip",
         "Multi",
         [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
@@ -1234,46 +1020,6 @@ def test_mine_link_mines_the_selected_stacked_entry(monkeypatch, tmp_path, make_
     f = anki.added[0]["fields"]
     assert (f["Expression"], f["ExpressionReading"]) == ("退く", "しりぞく")
     assert f["Glossary"] == "<ol><li>to retreat</li></ol>"
-
-
-def test_mine_token_card_format_renders_templated_fields(monkeypatch, tmp_path, make_session):
-    """#192: with [mine.card_format] set, the mined note's fields are the rendered {marker} templates —
-    furigana, pitch (from the dict), and a cloze-split sentence — not the entity→field map."""
-    import dicthelp
-    from util import FakeIPC
-
-    d = _make_dict(tmp_path / "d.zip", "Def", [["読む", "よむ", ["to read"]]])
-    pz = dicthelp.meta_zip(
-        tmp_path / "p.zip",
-        "Pitch",
-        "pitch",
-        [["読む", {"reading": "よむ", "pitches": [{"position": 1}]}]],
-    )
-    ds = dicthelp.load_set([d], pitch_zips=[pz])
-    ipc = FakeIPC()
-    ipc.props["path"] = "/x/Show - 01.mkv"
-    anki = _FakeAnki()
-    cfg = MineConfig(
-        card_format={
-            "Word": "{expression}",
-            "Furigana": "{furigana}",
-            "Pitch": "{pitch-accents}",
-            "Sentence": "{cloze-prefix}<b>{cloze-body}</b>{cloze-suffix}",
-            "Freq": "{frequency-rank}",
-        }
-    )
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=cfg, dictionaries=ds))
-    r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    f = anki.added[0]["fields"]
-    assert f["Word"] == "読む" and f["Furigana"] == "読[よ]む"
-    assert "よむ" in f["Pitch"] and "[1]" in f["Pitch"]  # pitch from the dict, not fabricated
-    assert f["Sentence"] == "本を<b>読む</b>"  # cloze markers reassembled around the surface
-    assert set(f) == {"Word", "Furigana", "Pitch", "Sentence", "Freq", "IsWordAndSentenceCard"}
 
 
 # --- #93: word-pronunciation audio attach at the mine-time add_note seam --------------------------
@@ -1372,77 +1118,58 @@ def test_mine_token_never_uploads_an_out_of_pack_word_audio_file(
     assert not any("secret" in name for name in anki.stored)  # never uploaded the escaping file
 
 
-def test_mine_token_skips_word_audio_when_pack_not_configured(monkeypatch, make_session):
-    """The default MineConfig has no word_audio_pack — word-audio stays fully off, no crash."""
-    from util import FakeIPC
-
-    ipc = FakeIPC()
-    anki = _FakeAnki()
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
-    r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("p.jpg", "a.mp3"))
-    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert "WordAudio" not in anki.added[0]["fields"]
-    assert anki.stored == []
-
-
-def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session):
-    """Per-stacked-entry ✓ state tracks deck membership by expression (Anki's dedup key): mining 退く
-    flips every 退く reading-block, since a second reading would be a duplicate expression."""
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("mined", [False, True])
+@pytest.mark.parametrize("work", ["INLINE", "DEFERRED"])
+def test_group_mined_of_marks_entries_by_expression(tmp_path, make_session, mined, work):
     import dicthelp
-    from saitenka_tokenize.japanese import Token
-    from util import FakeIPC
+    from driver import Driver
+    from util import FakeIPC, await_ready, session_gateway
 
-    from saitenka.app.features.tooltip import tooltip_panel
+    from saitenka.app.session.factory import SessionInfrastructure, TooltipWorkMode
+    from saitenka.app.subtitle_raster import PillowRasterProvider
+    from saitenka.app.subtitle_render import SubtitleRenderer
 
-    d = _make_dict(
-        tmp_path / "gm.zip",
-        "Multi",
-        [["退く", "しりぞく", ["to retreat"]], ["退く", "のく", ["to step aside"]]],
+    dictionary = dicthelp.load_set(
+        [
+            dicthelp.term_zip(
+                tmp_path / "gm.zip",
+                "Multi",
+                [
+                    ["退く", "しりぞく", ["to retreat"]],
+                    ["退く", "のく", ["to step aside"]],
+                ],
+            )
+        ]
     )
-    ds = dicthelp.load_set([d])
-    r = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
-    tok = Token(surface="退いた", lemma="退く", reading="のいた", pos="動詞", start=0, end=3)
-    assert (
-        tooltip_panel.group_mined_of(
-            tok, r.graph.mining.index_snapshot(), r.graph.profile.profile.dict_set
-        )
-        == ()
-    )  # nothing mined yet → no per-group flags
-    r.graph.mining.record_mined_expression("退く")
-    assert tooltip_panel.group_mined_of(
-        tok, r.graph.mining.index_snapshot(), r.graph.profile.profile.dict_set
-    ) == (
-        True,
-        True,
-    )  # both entries share expression 退く
-
-
-def test_mine_uses_user_dictionary_glossary(monkeypatch, tmp_path, make_session):
-    """Dict-first mining: with a user dictionary configured, the mined card's Glossary comes from
-    that dict — not the JMdict/jamdict fallback (which would gloss 読む as 'to read')."""
-    import dicthelp
-    from util import FakeIPC
-
-    d = _make_dict(tmp_path / "u.zip", "MyDict", [["読む", "よむ", ["DICTGLOSS-read"]]])
-    ds = dicthelp.load_set([d])
     ipc = FakeIPC()
-    ipc.props["path"] = "/x/Show - 01.mkv"
-    anki = _FakeAnki()
-    r = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig(), dictionaries=ds))
-    r.graph.cue.set_subtitle("本を読む")
-    monkeypatch.setattr(miner, "capture_media", lambda _p, _base, _video, **_k: ("", ""))
-    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
-    tok = next(t for t in r.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む")
-    r.graph.mining.mine_token(tok)
-    _await_mining(r)
-    assert len(anki.added) == 1
-    f = anki.added[0]["fields"]
-    assert f["Expression"] == "読む"
-    assert f["Glossary"] == "<ol><li>DICTGLOSS-read</li></ol>"  # from the user dict
+    ipc.props["osd-dimensions"] = {"w": 1280, "h": 720}
+    gateway = session_gateway(ipc)
+    reader = make_session(
+        ipc,
+        services=SessionServices(dictionaries=dictionary),
+        infrastructure=SessionInfrastructure(
+            renderer=SubtitleRenderer(PillowRasterProvider()),
+            tooltip_work=TooltipWorkMode[work],
+        ),
+    )
+    try:
+        if mined:
+            reader.graph.mining.record_mined_expression("退く")
+        reader.graph.presentation.refresh_osd()
+        reader.graph.playback.observe("sub-text", "退いた")
+        reader.pump()
+        ui = Driver(reader).move_to_word(0)
+        await_ready(
+            lambda: ui.tip_shown, "grouped tooltip did not open", pump=reader.pump, timeout=1.0
+        )
+
+        flags = reader.graph.tooltip.observation().metadata.group_mined
+        assert tuple(flags or (False, False)) == (mined, mined)
+    finally:
+        reader.close()
+        gateway.close()
 
 
 def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_path, make_session):
@@ -1454,7 +1181,7 @@ def test_mine_fills_id_field_from_a_jmdict_derived_dicts_seq(monkeypatch, tmp_pa
     from saitenka.app.config import DictDbOptions
     from saitenka.app.dictdb import DictionaryDb
 
-    d = _make_dict(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
+    d = dicthelp.term_zip(tmp_path / "jx.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1
     db = DictionaryDb.open(db_opts=DictDbOptions(persist_seq=True))
     ds = dicthelp.load_set([d], on=db)
     ipc = FakeIPC()

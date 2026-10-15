@@ -27,9 +27,10 @@ def test_lua_resolves():
 
 
 def test_existing_loaders_use_the_resolver():
-    """fonts / wordlists must load through the resolver so the wheel path works too."""
+    """Font and wordlist consumers load the bundled resources, not source-tree paths."""
     from saitenka import fonts
     from saitenka.app import dict_meta
 
-    assert fonts.ASSETS.exists()
+    font = fonts.load(fonts.FontSpec(fonts.font_for_char("猫"), 24))
+    assert font.getlength("猫") > 0
     assert dict_meta.bundled_jlpt_zip().exists()

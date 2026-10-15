@@ -18,22 +18,35 @@ import pytest
 from saitenka.app.lifecycle_timers import RuntimeTimerPort
 from saitenka.app.subtitle_render import SubtitleEgress
 from saitenka.mpvio.ipc import MpvIPC
+from saitenka.runtime.connection import SessionRoutePort
+from saitenka.runtime.interaction_slice import InteractionRoutePort
 from saitenka.runtime.jobs import NoSessionRuntime, RuntimeJobPort
+from saitenka.runtime.playback_slice import PlaybackRoutePort
+from saitenka.runtime.presentation_slice import PresentationRoutePort
+from saitenka.runtime.subtitle_slice import SubtitleRoutePort
 
 # Installed by the object that *is* the runtime (`app/session/mpv_gateway.py` hands the transport its mailbox
 # and loop). A stand-in is never passed to `RuntimeGateway`, so refusing these would mean nothing.
 _RUNTIME_OWNER_ONLY = frozenset({"install_runtime_ingress", "register_runtime_observers"})
 
-_PORT_PROTOCOLS = (RuntimeJobPort, RuntimeTimerPort, SubtitleEgress)
+_PORT_PROTOCOLS = (
+    RuntimeJobPort,
+    RuntimeTimerPort,
+    SubtitleEgress,
+    SessionRoutePort,
+    PlaybackRoutePort,
+    SubtitleRoutePort,
+    InteractionRoutePort,
+    PresentationRoutePort,
+)
 
 
 def _is_runtime_port(name: str) -> bool:
     """Does `name` belong to the runtime-session surface, by this repo's naming shape?
 
-    The shape is the denominator because no single declaration owns the surface — three Protocols
-    each carve out a slice and three more ports (`publish_runtime_event`, `deliver_runtime_event`,
-    `receive_session`) are declared by nothing at all. A port named outside the shape escapes this
-    test; that is the stated limit, and the naming is uniform across all eighteen today.
+    The shape is the denominator because no single declaration owns the surface — Protocols carve
+    out slices, while some ports are declared by nothing at all. A port named outside the shape
+    escapes this test; that is the stated limit.
 
     It also draws the line the stand-in is *for*: `SubtitleEgress.query` and `command` are the mpv
     transport, which a stand-in emulates with its own answers rather than refusing.

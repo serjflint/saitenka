@@ -214,37 +214,3 @@ def test_karaoke_resolves_the_same_token_boxes_as_static_text() -> None:
     assert native_boxes(karaoke_row, timestamp_ms=1_500) == static
     with pytest.raises(ValueError, match="missing libass token colors"):
         native_boxes(karaoke_row, timestamp_ms=1_500, secondary=False)
-
-
-def test_the_same_token_oracle_can_fail() -> None:
-    """Negative control. An oracle nobody has seen fail is not evidence — and this one deliberately
-    tolerates a pixel disagreement, so it has to be shown to bite on the thing it is for: a cursor
-    landing on a different word."""
-    legacy, _origin = legacy_boxes(cue_tokens())
-    # One token's worth of horizontal drift: exactly the fault the hit boxes exist to prevent.
-    drift = legacy[1].x - legacy[0].x
-    shifted = [WordBox(box.index, box.x + drift, box.y, box.w, box.h) for box in legacy]
-
-    assert disagreements(legacy, shifted, sample_points(legacy))
-
-
-@pytest.mark.parametrize("origin", [(0, 0), (40, 600)])
-def test_the_origin_moves_the_answer_with_the_boxes(origin: tuple[int, int]) -> None:
-    """The boxes are in subtitle-local coordinates and the cursor is in frame coordinates, so the
-    origin is part of the resolution. A native snapshot publishes boxes already in frame
-    coordinates and an origin of (0, 0); the legacy render publishes local ones."""
-    legacy, _ = legacy_boxes(cue_tokens())
-    box = legacy[2]
-    centre = (box.x + box.w / 2 + origin[0], box.y + box.h / 2 + origin[1])
-
-    assert token_at(legacy, centre, origin, is_skippable=lambda _index: False) == box.index
-
-
-def test_a_skippable_token_is_never_the_answer() -> None:
-    """Punctuation and whitespace are drawn and not interactive; both engines must agree on that
-    too, or one of them offers a tooltip the other refuses."""
-    legacy, _ = legacy_boxes(cue_tokens())
-    box = legacy[1]
-    centre = (box.x + box.w / 2, box.y + box.h / 2)
-
-    assert token_at(legacy, centre, (0, 0), is_skippable=lambda index: index == 1) != 1

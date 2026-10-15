@@ -26,7 +26,7 @@ def test_cache_dir_is_local_appdata_not_roaming_on_windows():
 
 def test_expand_user_and_env(monkeypatch, tmp_path):
     monkeypatch.setenv("SAITENKA_TEST_DIR", str(tmp_path))
-    assert paths.expand("$SAITENKA_TEST_DIR/x") == tmp_path / "x"
+    assert paths.expand("$SAITENKA_TEST_DIR/e\u0301") == tmp_path / "é"
     assert paths.expand("~/y").is_absolute()
 
 
@@ -158,14 +158,3 @@ def test_sanitize_filename_uses_the_host_platform(monkeypatch):
     assert paths.sanitize_filename("a:b?") == "a_b_"
     monkeypatch.setattr(paths, "_windows", lambda: False)
     assert paths.sanitize_filename("a:b?") == "a:b?"
-
-
-def test_nfc_normalizes_decomposed():
-    import unicodedata
-
-    assert paths.nfc(unicodedata.normalize("NFD", "é")) == unicodedata.normalize("NFC", "é")
-
-
-def test_long_path_is_noop_on_posix():
-    if sys.platform != "win32":
-        assert str(paths.long_path("/a/b")) == "/a/b"

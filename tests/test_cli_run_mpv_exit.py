@@ -4,31 +4,26 @@ returncode``) so a crash shows up in overlay.log/report instead of reading as a 
 
 import logging
 
+import pytest
+
 from saitenka.app.launch.run import _log_mpv_exit
 
 
-def test_silent_on_clean_quit(caplog):
+@pytest.mark.parametrize("returncode", [0, None], ids=["clean-quit", "unset-after-force-kill"])
+def test_silent_on_non_failure_exit(caplog, returncode):
     with caplog.at_level(logging.WARNING):
-        _log_mpv_exit(0)
+        _log_mpv_exit(returncode)
     assert caplog.records == []
 
 
-def test_silent_when_returncode_unset():
-    # proc.wait() never completed (the TimeoutExpired/force-kill branch) — nothing to report; that
-    # exit is ours, not mpv's.
-    _log_mpv_exit(None)  # must not raise
-
-
-def test_decodes_the_crash_signal(caplog):
+@pytest.mark.parametrize(
+    ("returncode", "expected"),
+    [(-11, ("signal 11", "SIGSEGV")), (1, ("non-zero status 1",))],
+    ids=["crash-signal", "nonzero-status"],
+)
+def test_reports_mpv_failure(caplog, returncode, expected):
     with caplog.at_level(logging.WARNING):
-        _log_mpv_exit(-11)  # SIGSEGV
+        _log_mpv_exit(returncode)
     assert len(caplog.records) == 1
     msg = caplog.records[0].getMessage()
-    assert "signal 11" in msg and "SIGSEGV" in msg
-
-
-def test_reports_nonzero_status(caplog):
-    with caplog.at_level(logging.WARNING):
-        _log_mpv_exit(1)
-    assert len(caplog.records) == 1
-    assert "non-zero status 1" in caplog.records[0].getMessage()
+    assert all(fragment in msg for fragment in expected)

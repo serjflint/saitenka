@@ -60,6 +60,12 @@ class _FakeReader:
 
 def test_run_session_logs_mode_run_before_the_loop(caplog):
     reader = _FakeReader()
+
+    def enter_loop() -> None:
+        assert "session: mode=run" in caplog.text
+        reader.ran = True
+
+    reader.run = enter_loop
     with caplog.at_level(logging.INFO, logger="saitenka.app.launch.run"):
         cli_run._execute_reader_session(
             reader.session_entry,
@@ -68,7 +74,6 @@ def test_run_session_logs_mode_run_before_the_loop(caplog):
             translate_key="t",
         )
     assert reader.ran  # the branch under test is the one that actually enters the loop
-    assert "session: mode=run" in caplog.text
 
 
 @pytest.mark.timeout(5)
@@ -83,6 +88,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
         def __init__(self) -> None:
             self.tokens = []
             self.hovered = None
+            self.render_space_checked = False
 
         def run(self) -> None:  # pragma: no cover — the demo branch never enters the loop
             raise AssertionError("a demo must not fall through to the interactive loop")
@@ -111,7 +117,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
             )
 
         def refresh_osd(self) -> None:
-            pass
+            self.render_space_checked = True
 
         def _get(self, _name):
             return "猫"
@@ -120,6 +126,7 @@ def test_demo_waits_for_annotation_before_hovering_or_capturing(monkeypatch):
             return {"w": 1280, "h": 720}  # mpv has published its geometry
 
         def prepare_subtitle_blocking(self, _text: str) -> None:
+            assert self.render_space_checked
             started.set()
             assert release.wait(2)
             self.tokens = [Token("猫", "猫", "猫", "名詞", 0, 1)]

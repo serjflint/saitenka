@@ -3,7 +3,7 @@
 The scroll-jank bug these guard: the native compositor originally re-converted every band's full-width
 BGRA on EVERY frame (no memo, unlike the 1× ``_bgra`` path) → ~40 ms scroll frames at 4K. These pin the
 memo contract — converted once, reused, evicted in tandem with its band, never stale, and byte-identical
-warm-vs-cold — plus the separation invariants (per-scale keys, native path doesn't disturb the 1× caches).
+warm-vs-cold — plus scale isolation and render-loop safety.
 """
 
 from __future__ import annotations
@@ -35,17 +35,6 @@ def _measure(wp: WindowedPanel, total: int) -> None:
         wp.viewport(s, _VH)
 
 
-def test_native_bgra_is_memoised_and_reused_across_frames():
-    wp, total = _panel()
-    _measure(wp, total)
-    wp.viewport_bgra(0, _VH, scale=2.0)  # first native compose → converts + memoises each band
-    snap = dict(wp._scaled_bgra)
-    assert snap  # the memo is populated
-    wp.viewport_bgra(0, _VH, scale=2.0)  # second identical compose
-    for k, arr in snap.items():
-        assert wp._scaled_bgra[k] is arr  # SAME array object → not re-converted (the jank fix)
-
-
 def test_native_bgra_memo_never_outlives_its_band():
     wp, total = _panel()
     wp._scaled_cap = 4  # force eviction while scrolling
@@ -56,13 +45,36 @@ def test_native_bgra_memo_never_outlives_its_band():
     assert set(wp._scaled_bgra) <= set(wp._scaled_blocks)  # a memo entry never outlives its band
 
 
-def test_native_compose_caches_bands_per_scale_without_collision():
+def test_native_compose_keeps_scales_isolated(monkeypatch):
+    from saitenka import bgra
+
+    convert, conversions = bgra.to_bgra_array, []
+
+    def counted(image):
+        conversions.append(None)
+        return convert(image)
+
+    monkeypatch.setattr(bgra, "to_bgra_array", counted)
     wp, total = _panel()
     _measure(wp, total)
-    wp.viewport_bgra(0, _VH, scale=1.5)
-    wp.viewport_bgra(0, _VH, scale=2.0)
-    skeys = {k[2] for k in wp._scaled_blocks}
-    assert skeys == {1.5, 2.0}  # bands cached per scale key — 1.5 and 2.0 never collide
+    one_x = wp.viewport_bgra(0, _VH)
+    first = wp.viewport_bgra(0, _VH, scale=1.5)
+    second = wp.viewport_bgra(0, _VH, scale=2.0)
+    cold, cold_total = _panel()
+    _measure(cold, cold_total)
+    cold_second = cold.viewport_bgra(0, _VH, scale=2.0)
+    before_return = len(conversions)
+    assert before_return > 0
+    banded.guard_main_render(on=True)
+    try:
+        first_again = wp.viewport_bgra(0, _VH, scale=1.5)
+    finally:
+        banded.guard_main_render(on=False)
+    one_x_again = wp.viewport_bgra(0, _VH)
+    assert first.shape != second.shape
+    assert np.array_equal(second, cold_second) and np.array_equal(first, first_again)
+    assert np.array_equal(one_x, one_x_again) and wp.last_frame_rasters == 0
+    assert len(conversions) == before_return
 
 
 def test_evicted_native_band_recomposes_byte_identical():
@@ -74,17 +86,6 @@ def test_evicted_native_band_recomposes_byte_identical():
     wp.viewport_bgra(max(0, total - _VH), _VH, scale=2.0)  # scroll away → top bands + memo evicted
     again = wp.viewport_bgra(0, _VH, scale=2.0)  # top re-rastered + re-memoised
     assert np.array_equal(top, again)  # identical — the memo is a pure accelerator
-
-
-def test_native_compose_populates_the_native_band_cache_not_the_1x_one():
-    # The native path is SEPARATE from the 1× band cache: its body bands land in _scaled_blocks keyed by
-    # scale, never in the 1× _blocks (whose keys are 2-tuples). Guards the "1× hot path untouched" claim.
-    wp, total = _panel()
-    _measure(wp, total)
-    wp.viewport_bgra(0, _VH, scale=2.0)
-    assert wp._scaled_blocks  # native bands cached here
-    assert all(len(k) == 3 for k in wp._scaled_blocks)  # (row, band, scale)
-    assert all(len(k) == 2 for k in wp._blocks)  # the 1× cache keeps its (row, band) keys
 
 
 def test_native_raster_on_the_render_loop_raises_when_armed():
@@ -115,19 +116,6 @@ def test_warm_only_never_rasters_on_the_render_loop_even_when_armed():
     finally:
         banded.guard_main_render(on=False)
     assert out.shape == (round(_VH * 2.0), round(_W * 2.0), 4)  # a full (mostly-bg) native frame
-
-
-def test_1x_bgra_memo_still_reused_after_the_shared_counter_change():
-    # Regression: the native memo now shares the bgra_memo otel counters with the 1× path; the 1× memo
-    # itself must still reuse its converted bands (a warm scroll frame is row-copies, not re-converts).
-    wp, total = _panel()
-    _measure(wp, total)
-    wp.viewport_bgra(0, _VH)
-    snap = dict(wp._bgra)
-    assert snap
-    wp.viewport_bgra(0, _VH)
-    for k, arr in snap.items():
-        assert wp._bgra[k] is arr  # 1× per-band BGRA still memoised (unchanged)
 
 
 def test_a_cold_native_frame_is_filled_with_the_theme_background():

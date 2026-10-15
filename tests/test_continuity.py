@@ -61,26 +61,17 @@ def test_resolve_ambiguous_match_is_no_op(tmp_path):
     assert resolve_sibling(tmp_path / "Show 03.mkv", 1) is None
 
 
-def test_resolve_missing_sibling_is_no_op(tmp_path):
-    _touch(tmp_path, "Show 03.mkv")
+@pytest.mark.parametrize(
+    ("current", "others", "delta"),
+    [
+        ("Show 03.mkv", (), 1),
+        ("movie.mkv", ("another.mkv",), 1),
+        ("Show 00.mkv", ("Show 01.mkv",), -1),
+        ("Show 05.mkv", (), 0),
+    ],
+    ids=["missing", "unparseable", "out-of-range", "self"],
+)
+def test_resolve_invalid_target_is_no_op(tmp_path, current, others, delta):
+    _touch(tmp_path, current, *others)
 
-    assert resolve_sibling(tmp_path / "Show 03.mkv", 1) is None
-
-
-def test_resolve_unparseable_name_is_no_op(tmp_path):
-    _touch(tmp_path, "movie.mkv", "another.mkv")
-
-    assert resolve_sibling(tmp_path / "movie.mkv", 1) is None
-
-
-def test_resolve_out_of_range_is_no_op(tmp_path):
-    _touch(tmp_path, "Show 00.mkv", "Show 01.mkv")
-
-    assert resolve_sibling(tmp_path / "Show 00.mkv", -1) is None
-
-
-def test_resolve_self_is_never_returned(tmp_path):
-    # Only the current file present at the target episode → no match, never itself.
-    _touch(tmp_path, "Show 05.mkv")
-
-    assert resolve_sibling(tmp_path / "Show 05.mkv", 0) is None
+    assert resolve_sibling(tmp_path / current, delta) is None

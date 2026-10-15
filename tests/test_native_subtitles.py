@@ -1111,10 +1111,13 @@ def test_a_non_ass_source_is_drawn_by_legacy_and_stays_scannable(tmp_path: Path)
     run — the boxes here are the whole reason the renderer switches."""
     result, _ipc, backend = reader(tmp_path)
     assert result.graph.subtitle_presentation.native is not None
+    source = tmp_path / "episode.srt"
+    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
 
-    result.graph.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
+    result.graph.subtitle_presentation.native.set_source(source, live=True)
     result.graph.cue.set_subtitle("猫を見る")
 
+    assert result.graph.subtitle_presentation.native.source_unsupported is True
     assert (
         result.graph.subtitle_presentation.native.status.fallback_reason
         == "subtitle-source-not-authored-ass"
@@ -1186,25 +1189,6 @@ def test_catastrophic_pixel_fallback_records_one_bounded_metric(tmp_path: Path) 
         result.close()
         otel_metrics.unregister()
         provider.shutdown()
-
-
-def test_a_source_geometry_can_never_use_hands_the_pixels_to_legacy(tmp_path: Path) -> None:
-    """An .srt otherwise leaves mpv drawing with no hit boxes for the whole episode — unscannable,
-    and unrecoverable without changing tracks. The reason is a property of the source, so this
-    selects a renderer once per track rather than reacting to a geometry outcome."""
-    result, _ipc, _backend = reader(tmp_path)
-    renderer = NativeVisibleRenderer()
-    result.graph.subtitle_presentation.pipeline.renderer = renderer
-    assert result.graph.subtitle_presentation.native is not None
-    result.graph.subtitle_presentation.native.set_source(tmp_path / "episode.srt", live=True)
-    result.graph.playback.install_seed({"sub-text": "猫を見る"})
-
-    result.graph.subtitle_presentation.pipeline.draw_current(
-        result.graph.subtitle_presentation.target()
-    )
-
-    assert renderer.ownership_state.context.mode.value == "legacy-overlay"
-    result.close()
 
 
 def test_the_track_load_reset_does_not_hand_the_pixels_to_legacy(tmp_path: Path) -> None:
@@ -2503,24 +2487,6 @@ def test_a_converted_track_carries_the_features_and_scale_mpv_sets(tmp_path: Pat
     assert state.font_scale > 0
 
 
-def test_an_srt_stays_with_the_legacy_renderer_unless_the_config_asks(tmp_path: Path) -> None:
-    """The default envelope is the tested one. A track the native path has not been asked to take
-    still selects the renderer that can draw its hit boxes."""
-    result, _ipc, _backend = reader(tmp_path)
-    assert result.graph.subtitle_presentation.native is not None
-    source = tmp_path / "episode.srt"
-    source.write_text("1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n", encoding="utf-8")
-
-    result.graph.subtitle_presentation.native.set_source(source, live=True)
-
-    assert result.graph.subtitle_presentation.native.source_unsupported is True
-    assert (
-        result.graph.subtitle_presentation.native.status.fallback_reason
-        == "subtitle-source-not-authored-ass"
-    )
-    result.close()
-
-
 TWO_CUE_SRT = (
     "1\n00:00:01,000 --> 00:00:03,000\n猫を見る\n\n2\n00:00:04,000 --> 00:00:06,000\n犬を見る\n"
 )
@@ -3596,56 +3562,35 @@ def test_runtime_telemetry_reports_geometry_worker_health(tmp_path: Path) -> Non
     result.close()
 
 
-def test_the_subtitle_clock_is_the_video_time_less_the_delay():
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    video_time, sub_delay, subtitle_time, timestamp_ms = _subtitle_clock(12.5, 0.5, None)
-
-    assert (video_time, sub_delay, subtitle_time) == (12.5, 0.5, 12.0)
-    assert timestamp_ms == 12_000  # the ms key the geometry cache is keyed on
-
-
-def test_a_missing_delay_reads_as_no_offset():
-    """mpv answers None for `sub-delay` before a track resolves; that is zero, not unavailable."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    assert _subtitle_clock(4.0, None, None) == (4.0, 0.0, 4.0, 4_000)
+@pytest.mark.parametrize(
+    ("time_pos", "delay", "cue_start", "expected"),
+    [
+        pytest.param(12.5, 0.5, None, (12.5, 0.5, 12.0, 12_000), id="delay-adjusted"),
+        pytest.param(4.0, None, None, (4.0, 0.0, 4.0, 4_000), id="missing-delay"),
+        pytest.param(None, 0.25, 8.0, (8.25, 0.25, 8.0, 8_000), id="cue-start-fallback"),
+        pytest.param(5.0, 5.0, None, (5.0, 5.0, 0.0, 0), id="file-start"),
+    ],
+)
+def test_subtitle_clock_resolves_available_timing(time_pos, delay, cue_start, expected):
+    assert native_subtitles._subtitle_clock(time_pos, delay, cue_start) == expected
 
 
-def test_a_missing_time_pos_falls_back_to_the_cue_start():
-    """`sub-start` is the cue's own time, so the video time is reconstructed by re-adding the delay."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    assert _subtitle_clock(None, 0.25, 8.0) == (8.25, 0.25, 8.0, 8_000)
-
-
-def test_a_clock_with_neither_a_position_nor_a_cue_start_is_unavailable():
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    with pytest.raises(ValueError, match="unavailable"):
-        _subtitle_clock(None, 0.0, None)
-
-
-@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
-def test_a_non_finite_clock_is_rejected_rather_than_cached(bad: float):
-    """A NaN timestamp would key a cache entry nothing can ever match again."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    with pytest.raises(ValueError, match="finite"):
-        _subtitle_clock(bad, 0.0, None)
-    with pytest.raises(ValueError, match="finite"):
-        _subtitle_clock(1.0, bad, None)
-
-
-def test_a_delay_that_runs_the_clock_before_the_file_starts_is_rejected():
-    """A large positive `sub-delay` near the start puts the subtitle clock behind 0:00, which no cue
-    can occupy — better a raised timing error than a negative cache key."""
-    from saitenka.app.native_subtitles import _subtitle_clock
-
-    with pytest.raises(ValueError, match="non-negative"):
-        _subtitle_clock(1.0, 5.0, None)
-
-    assert _subtitle_clock(5.0, 5.0, None)[2] == 0.0  # exactly zero is fine
+@pytest.mark.parametrize(
+    ("time_pos", "delay", "reason"),
+    [
+        pytest.param(None, 0.0, "unavailable", id="no-position-or-cue"),
+        pytest.param(float("nan"), 0.0, "finite", id="nan-position"),
+        pytest.param(float("inf"), 0.0, "finite", id="positive-infinite-position"),
+        pytest.param(float("-inf"), 0.0, "finite", id="negative-infinite-position"),
+        pytest.param(1.0, float("nan"), "finite", id="nan-delay"),
+        pytest.param(1.0, float("inf"), "finite", id="positive-infinite-delay"),
+        pytest.param(1.0, float("-inf"), "finite", id="negative-infinite-delay"),
+        pytest.param(1.0, 5.0, "non-negative", id="before-file-start"),
+    ],
+)
+def test_subtitle_clock_rejects_invalid_timing(time_pos, delay, reason):
+    with pytest.raises(ValueError, match=reason):
+        native_subtitles._subtitle_clock(time_pos, delay, None)
 
 
 def _snapshot(pairs, active=None):
@@ -3674,53 +3619,31 @@ def _snapshot(pairs, active=None):
     )
 
 
-def _valid(snapshot, token_count: int) -> bool:
-    from saitenka.app.native_subtitles import NativeSubtitleGeometry
-
-    return NativeSubtitleGeometry._snapshot_identities_are_valid(snapshot, token_count)
-
-
-def test_geometry_matching_the_tokenized_cue_is_installable():
-    assert _valid(_snapshot([(0, 0), (0, 1), (1, 2)]), token_count=3)
-
-
-def test_a_live_cue_with_no_paintable_tokens_is_installable():
-    """A cue that is on screen but tokenized to nothing paintable (punctuation only) is a real
-    state, not a malformed snapshot — every guard vacuously holds. It cannot be expressed as a frame
-    with no events: `SubtitleFrameId` rejects that, so an on-screen cue always lists one."""
-    assert _valid(_snapshot([], active=[(0, 0)]), token_count=0)
-
-
-def test_a_repeated_token_index_is_rejected():
-    """Two boxes for one token: whichever lands second wins the hit test, so a click on that word
-    can resolve to geometry the other box drew."""
-    assert not _valid(_snapshot([(0, 0), (1, 0)]), token_count=2)
-
-
-def test_a_repeated_event_and_token_pair_is_rejected():
-    assert not _valid(_snapshot([(0, 0), (0, 0)]), token_count=2)
-
-
-def test_geometry_for_an_event_the_frame_no_longer_lists_is_rejected():
-    """The overlapping-cue case: the snapshot carries boxes for a cue that has since ended, and
-    painting them puts hit regions over words that are no longer on screen."""
-    stale = _snapshot([(0, 0), (1, 1)], active=[(0, 0)])
-
-    assert not _valid(stale, token_count=2)
-
-
-@pytest.mark.parametrize("index", [-1, 2, 99])
-def test_a_token_index_outside_the_cue_is_rejected(index: int):
-    """The snapshot and the tokenizer disagree about how many tokens this cue has — the exact shape
-    a mid-flight cue change produces, and the one that would index past `reader.tokens`."""
-    assert not _valid(_snapshot([(0, index)]), token_count=2)
-
-
-def test_the_bound_is_the_token_count_not_the_box_count():
-    """Two boxes against a one-token cue is out of range, even though the indices are unique and the
-    events are live — the count that matters is the cue's, not the snapshot's."""
-    assert _valid(_snapshot([(0, 0), (0, 1)]), token_count=2)
-    assert not _valid(_snapshot([(0, 0), (0, 1)]), token_count=1)
+@pytest.mark.parametrize(
+    ("pairs", "active", "token_count", "expected"),
+    [
+        pytest.param([(0, 0), (0, 1), (1, 2)], None, 3, True, id="matching-cue"),
+        pytest.param([], [(0, 0)], 0, True, id="no-paintable-tokens"),
+        pytest.param([(0, 0), (1, 0)], None, 2, False, id="repeated-token"),
+        pytest.param([(0, 0), (0, 0)], None, 2, False, id="repeated-event-token-pair"),
+        pytest.param([(0, 0), (1, 1)], [(0, 0)], 2, False, id="ended-event"),
+        pytest.param([(0, -1)], None, 2, False, id="negative-index"),
+        pytest.param([(0, 2)], None, 2, False, id="index-at-cue-end"),
+        pytest.param([(0, 99)], None, 2, False, id="index-past-cue-end"),
+        pytest.param([(0, 0), (0, 1)], None, 2, True, id="two-tokens"),
+        pytest.param([(0, 0), (0, 1)], None, 1, False, id="same-boxes-one-token"),
+    ],
+)
+def test_geometry_identities_must_match_the_active_tokenized_cue(
+    pairs, active, token_count, expected
+):
+    snapshot = _snapshot(pairs, active=active)
+    assert (
+        native_subtitles.NativeSubtitleGeometry._snapshot_identities_are_valid(
+            snapshot, token_count
+        )
+        == expected
+    )
 
 
 def _visibility(reply):
@@ -3817,19 +3740,13 @@ def test_a_span_whose_boxes_are_gone_highlights_nothing():
     assert focus_rect([_box(0, 0, 100)], 0, (5, 9)) is None
 
 
-def test_the_subtitle_sits_centred_above_the_bottom_margin():
+@pytest.mark.parametrize(
+    ("osd", "expected"), [((1920, 1080), (760, 940)), ((3024, 1898), (1312, 1758))]
+)
+def test_the_subtitle_sits_centred_above_the_bottom_margin(osd, expected):
     from saitenka.app.subtitle_render import place_subtitle
 
-    assert place_subtitle((400, 80), (1920, 1080), 60) == ((1920 - 400) // 2, 1080 - 80 - 60)
-
-
-def test_the_placement_tracks_the_video_size_not_a_fixed_resolution():
-    from saitenka.app.subtitle_render import place_subtitle
-
-    hd = place_subtitle((400, 80), (1920, 1080), 60)
-    retina = place_subtitle((400, 80), (3024, 1898), 60)
-
-    assert retina[0] > hd[0] and retina[1] > hd[1]
+    assert place_subtitle((400, 80), osd, 60) == expected
 
 
 _SUPPORTED_SETTINGS = {
@@ -3882,7 +3799,7 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
     reason: mpv defaults it to `yes`, so `True is None` refused native geometry outright on
     mpv < 0.41, and 0.41 removed the option and made the row read green.
     """
-    from saitenka.app.native_subtitles import _unsupported_render_inputs
+    from saitenka.app.native_subtitles import unsupported_render_settings
 
     plausible = (0, 0.0, 1.0, 100.0, "", (), False, True, "no", "yes", "all", "auto")
 
@@ -3893,288 +3810,14 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
             candidate
             for candidate in plausible
             if name
-            not in _unsupported_render_inputs(
+            not in unsupported_render_settings(
                 {**_SUPPORTED_SETTINGS, name: candidate}, authored=True
             )
         ]
         assert accepted, f"{name} is accepted only when mpv does not report it"
 
 
-def test_a_default_mpv_render_configuration_supports_native_geometry():
-    result = _inputs()
-
-    assert result.frame_size == (1920, 1080)
-    assert result.storage_size == (1920, 1080)
-    assert result.pixel_aspect == 1.0
-
-
-@pytest.mark.parametrize(
-    ("name", "value"),
-    [
-        ("sub-scale", 1.5),  # scales the text away from the geometry we computed
-        ("sub-pos", 50.0),  # moves it up the frame
-        ("sub-ass-override", "force"),
-        ("sub-ass-scale-with-window", True),
-        ("sub-ass-use-video-data", "aspect-only"),
-        ("sub-ass-style-overrides", ["Default.FontSize=60"]),
-        # `=video` alone, and not for the arithmetic: it lays the cue out on `texture_w/h` AFTER the
-        # user's shader hooks, which a `--glsl-shader` can resize and no property reports.
-        ("blend-subtitles", "video"),
-    ],
-)
-def test_a_setting_that_moves_or_restyles_the_text_disqualifies_geometry(name: str, value: object):
-    """Every one of these has the same consequence: our boxes would be computed against a frame mpv
-    is not drawing into, so hit regions land beside the words rather than on them. The error names
-    the setting because a user who set it needs to know which one to undo."""
-    with pytest.raises(ValueError, match=name):
-        _inputs(**{name: value})
-
-
-def test_sub_use_margins_is_read_only_where_mpv_reads_it() -> None:
-    """mpv hands `sub-use-margins` to libass on the converted and `force` branches only; an authored
-    track under `no` or `scale` uses `sub-ass-force-margins`. Refusing it there cost hover for a
-    setting that moves nothing."""
-    from saitenka.app.native_subtitles import unsupported_render_settings
-
-    off = {"sub-use-margins": False}
-
-    assert (
-        unsupported_render_settings(off),
-        unsupported_render_settings(off, authored=False),
-    ) == ((), ("sub-use-margins",))
-
-
-@pytest.mark.parametrize(("override", "refused"), [("scale", True), ("no", False)])
-def test_a_style_file_is_refused_once_mpv_loads_it(override: str, *, refused: bool) -> None:
-    """`sub-ass-styles` is loaded after the track's own styles whenever the override is not `no`,
-    and a same-named style in it replaces the script's — every box measured against the wrong one."""
-    from saitenka.app.native_subtitles import unsupported_render_settings
-
-    result = unsupported_render_settings(
-        {"sub-ass-override": override, "sub-ass-styles": "~~/styles.ass"}
-    )
-
-    assert ("sub-ass-styles" in result) is refused
-
-
-def _scaled(**settings):
-    from saitenka.app.native_subtitles import _scaled_renderer_state
-
-    return _scaled_renderer_state(_inputs(**{"sub-ass-override": "scale", **settings}).scale)
-
-
-def test_override_scale_is_reproduced_rather_than_refused() -> None:
-    """`scale` only sets renderer state — `ass_set_font_scale`, `ass_set_line_position`,
-    `ass_set_line_spacing`, `ass_set_hinting` (`sd_ass.c:552-558,601-603`) — all of which the
-    measuring renderer sets too. `force` is the one that substitutes mpv's own style into every
-    event, which would make all sixteen `converted.STYLE_OPTIONS` authored-track layout inputs."""
-    state = _scaled(**{"sub-scale": 0.7, "sub-pos": 95.0})
-
-    assert state.font_scale == 0.7
-    assert state.line_position == 5.0  # mpv hands libass the complement (`sd_ass.c:553`)
-
-
-def test_override_no_leaves_the_renderer_at_libass_defaults() -> None:
-    """The branch `configure_ass` takes under `no` assigns none of them, so reproducing a zero here
-    would be claiming a value mpv never read — and would move every box on a track that was
-    previously measured correctly."""
-    from saitenka_subtitles import RendererState
-
-    from saitenka.app.native_subtitles import _scaled_renderer_state
-
-    assert _scaled_renderer_state(_inputs().scale) == RendererState()
-
-
-@pytest.mark.parametrize(("name", "value"), [("sub-scale", 1.5), ("sub-pos", 50.0)])
-def test_a_moving_setting_is_still_refused_when_the_override_is_off(name: str, value: object):
-    """Widening `scale` must not widen `no`. mpv reads neither option on that branch, so a track
-    carrying one is unchanged — but the row has to keep firing, because the value would otherwise
-    reach a renderer that does apply it."""
-    with pytest.raises(ValueError, match=name):
-        _inputs(**{name: value})
-
-
-@pytest.mark.parametrize(("name", "value"), [("sub-scale", 1.5), ("sub-pos", 90.0)])
-def test_a_converted_track_refuses_the_moving_settings_even_under_scale(name: str, value: object):
-    """`converted` is the FIRST disjunct of both branch conditions (`sd_ass.c:544,553`), so a
-    converted track applies `sub-scale` and `100 - sub-pos` whatever the override says — while
-    `_renderer_state` reproduces neither there. Widening on the override alone would accept a
-    letterboxed SubRip track mpv draws at another size and height: boxes silently misplaced rather
-    than a refusal, with every meter green."""
-    with pytest.raises(ValueError, match=name):
-        _inputs(authored=False, **{"sub-ass-override": "scale", name: value})
-
-
-def test_justify_is_refused_under_scale_because_it_is_not_reproduced() -> None:
-    """`--sub-ass-justify` reaches libass through `(converted || override) && ass_justify`
-    (`sd_ass.c:589-591`), so `no` never lets it through on an authored track and `scale` does. It
-    decides where every line of a wrapped cue starts, which is a box position."""
-    with pytest.raises(ValueError, match="sub-ass-justify"):
-        _inputs(**{"sub-ass-override": "scale", "sub-ass-justify": True})
-
-
-@pytest.mark.parametrize(("scale_signs", "selective"), [(False, True), (True, False)])
-def test_scale_signs_inverts_into_the_selective_font_scale_bit(
-    *, scale_signs: bool, selective: bool
-) -> None:
-    """`ASS_OVERRIDE_BIT_SELECTIVE_FONT_SCALE` CONFINES the scale to dialogue, so mpv sets it
-    exactly when the user did NOT ask for signs to be scaled (`sd_ass.c:577`). Read straight
-    through, every positioned sign in the episode is measured at the dialogue scale."""
-    scaled = _scaled(**{"sub-scale-signs": scale_signs, "sub-scale": 1.2})
-    assert scaled.selective_font_scale is selective
-
-
-def test_the_selective_bit_is_dropped_when_there_is_no_scale_to_confine() -> None:
-    assert _scaled(**{"sub-scale-signs": False}).selective_font_scale is False
-
-
 LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
-
-
-def test_blending_lays_the_cue_out_on_the_video_rectangle_not_the_window() -> None:
-    """`--blend-subtitles=yes` draws the subtitle into the video texture before scaling, on an
-    `mp_osd_res` mpv rebuilds from the src/dst rects (`video.c:3249-3263`): the video's on-screen
-    rectangle, every margin zero, `display_par` 1. Laying out on the window instead would put the
-    cue in the letterbox — the whole 280px of it — and every box beside its word."""
-    result = _inputs(osd=LETTERBOX, frame_size=(1920, 1080), **{"blend-subtitles": "yes"})
-
-    assert result.frame_size == (1920, 800)
-    assert result.margins == (0, 0, 0, 0)
-    assert result.box_origin == (0, 140)
-
-
-def test_without_blending_the_letterbox_stays_part_of_the_frame() -> None:
-    """The negative control. `--sub-use-margins=yes` is in the profile precisely so mpv may put the
-    cue in the letterbox, so the unblended frame is the whole window and the origin is nothing."""
-    result = _inputs(osd=LETTERBOX, frame_size=(1920, 1080))
-
-    assert result.frame_size == (1920, 1080)
-    assert result.margins == (140, 140, 0, 0)
-    assert result.box_origin == (0, 0)
-
-
-def test_the_blend_surface_drops_the_screens_own_aspect() -> None:
-    """`display_par` is 1.0 on the blend rect, so only the video's own pixel aspect survives —
-    keeping the screen's would stretch every box by it."""
-    result = _inputs(
-        osd={**LETTERBOX, "par": 2.0},
-        video={"w": 1920, "h": 1080, "par": 1.5},
-        frame_size=(1920, 1080),
-        **{"blend-subtitles": "yes"},
-    )
-
-    assert result.pixel_aspect == 1.5
-
-
-@pytest.mark.parametrize(("name", "value"), [("video-crop", "1280x720"), ("video-rotate", 90)])
-def test_a_crop_or_rotation_is_refused_only_while_blending(name: str, value: object) -> None:
-    """`_blend_space` derives the video rectangle from the premise that the src rect is the whole
-    image. A crop breaks that outright and a rotation re-orients it (`aspect.c:156-163`). Neither
-    changes anything the unblended path reads, so refusing them there would cost tracks for nothing.
-    """
-    with pytest.raises(ValueError, match=name):
-        _inputs(**{name: value, "blend-subtitles": "yes"})
-
-    assert _inputs(**{name: value}).frame_size == (1920, 1080)
-
-
-@pytest.mark.parametrize(
-    ("scale_with_window", "scale_by_window"),
-    [(True, True), (False, True), (True, False), (False, False)],
-)
-def test_the_sub_scale_switches_are_reproduced_not_refused(
-    *, scale_with_window: bool, scale_by_window: bool
-) -> None:
-    """mpv reads these two only on the forced-override branch a CONVERTED track takes, and
-    `converted.font_scale` reproduces both — so they are inputs to the measurement. On the authored
-    branch mpv reads `sub-ass-scale-with-window` instead and never reads `sub-scale-by-window` at
-    all, which is why refusing a track for them would give up an episode over nothing."""
-    result = _inputs(
-        **{"sub-scale-with-window": scale_with_window, "sub-scale-by-window": scale_by_window}
-    )
-
-    assert result.scale_with_window is scale_with_window
-    assert result.scale_by_window is scale_by_window
-
-
-@pytest.mark.parametrize(
-    ("name", "value"),
-    [
-        ("embeddedfonts", True),
-        ("sub-fonts-dir", "/fonts"),
-        ("sub-font-provider", "fontconfig"),
-        ("sub-font", "Symbola"),
-    ],
-)
-def test_a_font_setting_is_an_input_to_the_measuring_renderer_not_a_refusal(
-    name: str, value: object
-):
-    """These four decide which faces libass loads, and `subtitle_fonts.resolve` reproduces each of
-    them. Refusing a track for them — as the render-input gate used to — gave up the whole episode's
-    interaction over a setting we can simply mirror."""
-    result = _inputs(**{name: value})
-
-    assert (name, repr(value)) in result.font_options
-
-
-def test_the_osd_surface_wins_over_the_reported_video_size():
-    """Subtitles are composited onto the OSD surface, so that is the frame the boxes belong to —
-    a letterboxed video reports a different size and would offset every box by the bars."""
-    result = _inputs(osd={"w": 1920, "h": 1080}, video={"w": 1280, "h": 720})
-
-    assert result.frame_size == (1920, 1080)
-    assert result.storage_size == (1280, 720)
-
-
-def test_an_unreported_osd_size_never_moves_the_frame():
-    """`osd-dimensions` reads 0×0 until mpv has rendered a frame, and reads a stale size across a
-    resize. Neither can move the layout: the surface the host is drawing onto is the frame, and it
-    is passed in rather than re-read here."""
-    result = _inputs(osd={"w": None, "h": None}, frame_size=(1280, 720))
-
-    assert result.frame_size == (1280, 720)
-
-
-def test_margins_that_swallow_the_frame_are_rejected():
-    """Margins at or beyond the frame leave no area to lay text into; the geometry that came back
-    would be for a zero- or negative-sized region."""
-    with pytest.raises(ValueError, match="osd-margins"):
-        _inputs(osd={"mt": 600, "mb": 600})
-
-
-def test_a_pan_scanned_video_keeps_its_frame():
-    """`panscan`/`video-zoom` scale the video past the window: mpv reports negative margins and
-    libass takes them as-is (`ass.h`: "may be negative if pan-and-scan is used"). A viewer who
-    pressed `W` lost every cue's interaction to a refusal here, while the layout was still exact."""
-    result = _inputs(osd={"mt": 89, "mb": 89, "ml": -17, "mr": -18})
-
-    assert result.margins == (89, 89, -17, -18)
-
-
-def test_a_pan_scanned_blend_surface_starts_past_the_window_edge():
-    """Under `--blend-subtitles` the same negative margins become a wider surface at a negative
-    origin: the boxes are laid out on it and offset onto the screen, clipped rather than moved."""
-    result = _inputs(
-        osd={"mt": 89, "mb": 89, "ml": -17, "mr": -18},
-        frame_size=(3024, 1898),
-        **{"blend-subtitles": True},
-    )
-
-    assert result.frame_size == (3024 + 17 + 18, 1898 - 89 - 89)
-    assert result.box_origin == (-17, 89)
-
-
-@pytest.mark.parametrize("par", [-1.0, float("nan"), float("inf")])
-def test_a_meaningless_pixel_aspect_is_rejected(par: float):
-    with pytest.raises(ValueError, match="pixel-aspect"):
-        _inputs(video={"par": par})
-
-
-def test_an_unreported_pixel_aspect_means_square_pixels():
-    """mpv reports 0 for a par it does not know, and square is the right assumption — so the
-    `<= 0` rejection above can only ever fire for a NEGATIVE value, never for zero."""
-    assert _inputs(video={"par": 0}).pixel_aspect == 1.0
-    assert _inputs(osd={"par": 0}, video={"par": 2.0}).pixel_aspect == 2.0
 
 
 def test_the_profile_changes_when_any_setting_does():

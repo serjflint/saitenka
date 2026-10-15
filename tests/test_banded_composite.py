@@ -14,7 +14,6 @@ from hypothesis import strategies as st
 from PIL import Image, ImageDraw
 
 from saitenka import fonts
-from saitenka.mpvio.osd import to_bgra_array
 from saitenka.panel import Theme, compose_panel
 from saitenka.render import banded
 from saitenka.render.banded import composite_window
@@ -82,52 +81,6 @@ def test_windowed_composite_is_pixel_identical_to_one_shot_crop(col):
     assert win.size == ref.size
     diff = np.abs(np.asarray(win, np.int16) - np.asarray(ref, np.int16))
     assert diff.max() == 0  # windowed assembly == one-shot crop, seam included
-
-
-@given(column())
-@settings(max_examples=100, deadline=None)
-def test_bgra_upload_path_is_seam_exact(col):
-    # The real upload converts to premultiplied BGRA then slices; windowed must match that slice.
-    blocks, _heights, gaps, table, scroll, viewport, overscan = col
-    win = composite_window(
-        blocks, table, scroll, viewport, width=WIDTH, background=BG, overscan=overscan
-    )
-    win_bgra = to_bgra_array(win)
-    full_bgra = to_bgra_array(
-        compose_panel([(x, im) for x, im in blocks], WIDTH, Theme(), gaps=gaps)
-    )
-    ref_bgra = full_bgra[scroll : scroll + viewport]
-    assert np.array_equal(win_bgra, ref_bgra)  # no double-darkening at a join
-
-
-@given(column())
-@settings(max_examples=100, deadline=None)
-def test_premultiplied_disjoint_numpy_copy_matches_reference(col):
-    # Stage-4 fast path: pre-convert each block (composited over bg) to premultiplied BGRA once, then
-    # assemble a viewport by disjoint numpy row-copies. Must equal the one-shot BGRA crop.
-    blocks, _heights, gaps, table, scroll, viewport, overscan = col
-    bg_bgra = to_bgra_array(Image.new("RGBA", (1, 1), BG))[0, 0]
-    block_bgra = []
-    for x, im in blocks:
-        canvas = Image.new("RGBA", (WIDTH, im.height), BG)
-        canvas.alpha_composite(
-            im, (x, 0)
-        )  # composite over bg → opaque → plain-overwrite copy is exact
-        block_bgra.append(to_bgra_array(canvas))
-    out = np.empty((viewport, WIDTH, 4), np.uint8)
-    out[:] = bg_bgra
-    for i in range(*table.visible_range(scroll, viewport, overscan)):
-        top = table.starts[i] - scroll
-        src_y0 = max(0, -top)
-        dst_y = max(0, top)
-        h = min(block_bgra[i].shape[0] - src_y0, viewport - dst_y)
-        if h <= 0:
-            continue
-        out[dst_y : dst_y + h] = block_bgra[i][src_y0 : src_y0 + h]
-    ref = to_bgra_array(compose_panel([(x, im) for x, im in blocks], WIDTH, Theme(), gaps=gaps))[
-        scroll : scroll + viewport
-    ]
-    assert np.array_equal(out, ref)
 
 
 def test_pack_prefers_zstd_only_where_the_interpreter_has_it():

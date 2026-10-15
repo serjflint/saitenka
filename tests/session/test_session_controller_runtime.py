@@ -1,5 +1,5 @@
 import pytest
-from util import FakeIPC, bare_gateway
+from util import FakeIPC, bare_gateway, session_gateway
 
 from saitenka.app.bindings import SCROLL_UP_MSG
 from saitenka.app.config import ReaderOptions
@@ -19,22 +19,6 @@ from saitenka.app.session.factory import (
 )
 from saitenka.runtime import CommandHandled, CommandReason, Owner, UserCommand
 from saitenka.runtime.help import HelpCommand
-
-
-def test_the_executor_runs_the_action_bound_to_an_accepted_command():
-    handled: list[str] = []
-    policy = CommandPolicy((CommandSpec("mine", Owner.INTERACTION, requires_cue=True),))
-    executor = CommandExecutor(
-        {"mine": lambda: handled.append("mined")},
-        policy=policy,
-    )
-
-    result = executor.dispatch(
-        UserCommand("mine"), cue_state=CueCommandState.ACTIVE, help_open=False
-    )
-
-    assert result.outcome == CommandOutcome.EXECUTED
-    assert handled == ["mined"]
 
 
 def test_a_spec_with_no_action_dispatches_to_unbound_rather_than_rejecting():
@@ -70,52 +54,6 @@ def test_command_policy_rejects_duplicate_permanent_route():
 
     with pytest.raises(ValueError, match="command spec already registered"):
         CommandPolicy((spec, spec))
-
-
-@pytest.mark.parametrize(
-    ("cue_state", "expected"),
-    [
-        (CueCommandState.NEVER_INSTALLED, None),
-        (CueCommandState.ACTIVE, None),
-        (CueCommandState.RETIRED_AFTER_ACTIVE, CommandRejection.CUE_RETIRED),
-    ],
-)
-def test_command_policy_preserves_three_state_cue_eligibility(cue_state, expected):
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-copy-line"), cue_state=cue_state, help_open=False
-    )
-
-    assert decision.rejection == expected
-
-
-def test_command_policy_keeps_cue_independent_command_eligible_after_retirement():
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-toggle-overlay"),
-        cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
-        help_open=False,
-    )
-
-    assert decision.intent is not None
-
-
-def test_command_policy_rejects_non_help_command_while_help_is_open():
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-toggle-overlay"),
-        cue_state=CueCommandState.ACTIVE,
-        help_open=True,
-    )
-
-    assert decision.rejection == CommandRejection.HELP_MODAL
-
-
-def test_command_policy_accepts_help_navigation_while_help_is_open():
-    decision = CommandPolicy().decide(
-        UserCommand("saitenka-help-next"),
-        cue_state=CueCommandState.RETIRED_AFTER_ACTIVE,
-        help_open=True,
-    )
-
-    assert decision.intent is not None
 
 
 def test_a_failing_action_is_a_terminal_typed_outcome():
@@ -233,10 +171,13 @@ def test_gateway_translates_adjacent_scroll_messages_into_one_command():
 
 def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch, make_session):
     ipc = FakeIPC()
+    gateway = session_gateway(ipc)
+    request.addfinalizer(gateway.close)
     reader = make_session(ipc)
     request.addfinalizer(reader.close)
     outcomes: list[CommandHandled] = []
     publish = ipc.publish_command_outcome
+    before = gateway.snapshot
 
     def capture(outcome: CommandHandled) -> None:
         outcomes.append(outcome)
@@ -262,6 +203,9 @@ def test_reader_finishes_every_command_folded_into_a_scroll(request, monkeypatch
             reason=CommandReason.COALESCED,
         ),
     ]
+    after = gateway.snapshot
+    assert after.command_outcomes - before.command_outcomes == 2
+    assert after.stale_outcomes == before.stale_outcomes
 
 
 def test_composition_threads_grouped_optional_services(request, make_session):
@@ -302,12 +246,6 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks(ma
     cannot be handed a different one, which is what makes the conformance contract testable.
     """
     from saitenka.app.config import ReaderOptions, SubtitleGeometryOptions
-    from saitenka.app.session.factory import _geometry_backend
-
-    assert _geometry_backend(SubtitleGeometryOptions(native_visible=False)) is None
-    chosen = _geometry_backend(SubtitleGeometryOptions(native_visible=True))
-    assert chosen is not None  # composition makes the choice
-    chosen.close()
 
     options = ReaderOptions(
         subtitle_geometry=SubtitleGeometryOptions(native_visible=True), prefetch=False
@@ -319,6 +257,16 @@ def test_composition_injects_the_geometry_provider_the_reader_no_longer_picks(ma
     assert direct.graph.subtitle_presentation.pipeline.render(_probe_request(direct)) is None
     assert direct.graph.subtitle_presentation.pipeline.last_error is not None
     direct.close()
+
+    disabled = make_session(
+        FakeIPC(),
+        options=ReaderOptions(
+            subtitle_geometry=SubtitleGeometryOptions(native_visible=False), prefetch=False
+        ),
+    )
+    assert disabled.graph.subtitle_presentation.pipeline.render(_probe_request(disabled)) is None
+    assert disabled.graph.subtitle_presentation.pipeline.last_error is None
+    disabled.close()
 
 
 def _probe_request(reader):

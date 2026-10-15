@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from saitenka_card import MineConfig
 
 import saitenka.app.features.profiles.dependencies as reader_deps
@@ -84,24 +85,34 @@ def test_validate_mine_fields_keeps_word_audio_pack_when_field_present(tmp_path)
     assert cfg.word_audio_pack == tmp_path
 
 
-def test_run_warns_in_the_terminal_when_anki_cannot_be_started(monkeypatch):
-    # launch_anki() returns False when Anki isn't found / won't launch → the user gets a distinct
-    # console warning (not the softer 'launching…' note) and a log line.
-    monkeypatch.setattr(anki_mod, "launch_anki", lambda *_a, **_k: False)
-    notes: list[bool] = []
-    reader_deps._maybe_start_anki(
-        {"deck": "D"}, None, mine=True, on_unreachable=lambda launched: notes.append(launched)
-    )
-    assert notes == [False]  # callback told 'could not start', so run prints the warning variant
+@pytest.mark.parametrize("launched", [False, True], ids=["unavailable", "started"])
+def test_run_reports_whether_anki_was_started(monkeypatch, capsys, tmp_path, launched):
+    from saitenka.app.launch import run as cli_run
 
-
-def test_run_reports_launching_when_anki_can_be_started(monkeypatch):
-    monkeypatch.setattr(anki_mod, "launch_anki", lambda *_a, **_k: True)
-    notes: list[bool] = []
-    reader_deps._maybe_start_anki(
-        {"deck": "D"}, None, mine=True, on_unreachable=lambda launched: notes.append(launched)
+    monkeypatch.setenv("SAITENKA_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)
+    monkeypatch.setattr(anki_mod, "launch_anki", lambda: launched)
+    cli_run._build_run_deps(
+        cli_run.RunDepsRequest(
+            mine=True,
+            mine_deck="Mining",
+            mine_model="Mining",
+            mine_key="",
+            mine_all_key="",
+            mine_normalize_audio=False,
+            mine_animated_screenshot=False,
+            raw_mine={"card_format": {"Word": "{expression}"}},
+            known_cfg=None,
+            known="",
+            color=False,
+            dict_titles=[],
+            freq_titles=[],
+            pitch_titles=[],
+        )
     )
-    assert notes == [True]
+
+    stderr = capsys.readouterr().err
+    assert ("launching Anki" if launched else "couldn't be started") in stderr
 
 
 def test_the_suite_default_is_anki_unavailable():

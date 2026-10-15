@@ -66,6 +66,7 @@ def test_a_query_is_looked_up_whole_and_never_segmented():
 
 
 def test_the_registry_serves_a_strategy_by_name_and_rejects_an_unknown_one():
+    assert get_tokenizer().name == "unidic"
     assert get_tokenizer("unidic").name == "unidic"
     assert get_tokenizer("latin").name == "latin"
     with pytest.raises(ValueError, match="unknown tokenizer"):
@@ -84,6 +85,10 @@ def test_content_and_skippable_are_not_complements():
     particle = _tok("を", pos="助詞")
     assert not tokenizer.is_content(particle)
     assert not tokenizer.is_skippable(particle)
+    noun = _tok("本", pos="名詞")
+    punctuation = _tok("。", pos="補助記号")
+    assert tokenizer.is_content(noun) and not tokenizer.is_skippable(noun)
+    assert not tokenizer.is_content(punctuation) and tokenizer.is_skippable(punctuation)
 
 
 def test_attestation_is_a_callable_so_the_package_stays_dictionary_free():

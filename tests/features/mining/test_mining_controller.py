@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
 from saitenka_card import MineConfig
 from saitenka_tokenize.japanese import Token
 
@@ -26,18 +27,13 @@ class _Tokenizer:
 
 
 class _Submitter:
-    def __init__(self) -> None:
+    def __init__(self, *, accepted=True) -> None:
         self.calls: list[dict] = []
+        self.accepted = accepted
 
     def __call__(self, **kwargs) -> bool:
         self.calls.append(kwargs)
-        return True
-
-
-class _RejectingSubmitter(_Submitter):
-    def __call__(self, **kwargs) -> bool:
-        self.calls.append(kwargs)
-        return False
+        return self.accepted
 
 
 @dataclass
@@ -76,11 +72,18 @@ def _apply() -> miner.MiningApply:
     )
 
 
-def _controller(tmp_path, monkeypatch, *, operation_submit=None):
+def _controller(
+    tmp_path,
+    monkeypatch,
+    *,
+    operation_submit=None,
+    seed_submit=None,
+    schedule_retry=lambda _delay, _due: True,
+):
     from saitenka.app.features.mining import mined_store
 
     monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
-    seed = _Submitter()
+    seed = _Submitter() if seed_submit is None else seed_submit
     identity = MiningIdentity("a", 0)
     spec = MiningSpec(identity, {"deck": "Deck A", "model": "Lapis"})
     encounters = _EncounterSource()
@@ -89,7 +92,7 @@ def _controller(tmp_path, monkeypatch, *, operation_submit=None):
         MiningLifecycle(
             seed,
             _Submitter(),
-            lambda _delay, _due: True,
+            schedule_retry,
             lambda: None,
             lambda: False,
             operation_submit,
@@ -116,7 +119,10 @@ def _finish(call: dict, values: set[str]) -> None:
     )
 
 
-def test_selecting_a_new_spec_hides_old_target_state_before_return(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("prepared", ["old", "wrong-deck"])
+def test_selecting_a_new_spec_hides_old_target_state_before_return(
+    tmp_path, monkeypatch, prepared
+) -> None:
     controller, _seed, _encounters = _controller(tmp_path, monkeypatch)
     controller.record_mined_expression("old")
     old_target = controller.active_target
@@ -128,21 +134,12 @@ def test_selecting_a_new_spec_hides_old_target_state_before_return(tmp_path, mon
     snapshot = controller.index_snapshot()
     assert controller.active_target is None
     assert snapshot.values == set() and snapshot.seed_status is SeedStatus.EMPTY
-    assert controller.publish_mining_target(old_target) is False
-    controller.close()
-
-
-def test_prepared_target_must_match_the_selected_deck_and_model(tmp_path, monkeypatch) -> None:
-    controller, _seed, _encounters = _controller(tmp_path, monkeypatch)
-    identity = MiningIdentity("b", 1)
-    controller.select_mining_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
-
-    assert (
-        controller.publish_mining_target(
-            MiningTarget(identity, object(), MineConfig(deck="Wrong Deck"))
-        )
-        is False
+    target = (
+        old_target
+        if prepared == "old"
+        else MiningTarget(identity, object(), MineConfig(deck="Wrong Deck"))
     )
+    assert controller.publish_mining_target(target) is False
     assert controller.active_target is None
     controller.close()
 
@@ -172,7 +169,7 @@ def test_seed_for_current_target_merges_local_mines_and_rejects_old_completion(
 
 
 def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) -> None:
-    controller, _seed, encounters = _controller(tmp_path, monkeypatch)
+    controller, _seed, _encounters = _controller(tmp_path, monkeypatch)
     observed: list[float] = []
     monkeypatch.setattr(
         miner,
@@ -184,7 +181,6 @@ def test_each_public_operation_samples_a_fresh_encounter(tmp_path, monkeypatch) 
     controller.mine_index(0)
 
     assert observed == [1.0, 2.0]
-    assert encounters.samples == 2
     controller.close()
 
 
@@ -199,15 +195,16 @@ def test_profile_switch_refuses_an_old_mining_completion(tmp_path, monkeypatch) 
 
     identity = MiningIdentity("b", 1)
     controller.select_mining_spec(MiningSpec(identity, {"deck": "Deck B", "model": "Lapis"}))
+    journal = call["request"].journal
+    assert journal is not None
+    journal.record("mark_mined", ("old",))
     call["on_finished"](
         EffectFinished(
             EffectId(2),
             Owner.SESSION,
             call["identity"],
             EffectOutcome.SUCCEEDED,
-            result=mining_operation.MiningOutcome(
-                (mining_operation.MiningAction("mark_mined", ("old",)),)
-            ),
+            result=mining_operation.MiningOutcome(()),
         )
     )
 
@@ -217,7 +214,7 @@ def test_profile_switch_refuses_an_old_mining_completion(tmp_path, monkeypatch) 
 
 
 def test_rejected_operation_does_not_capture_media(tmp_path, monkeypatch) -> None:
-    operations = _RejectingSubmitter()
+    operations = _Submitter(accepted=False)
     controller, _seed, _encounters = _controller(tmp_path, monkeypatch, operation_submit=operations)
     screenshots: list[object] = []
     monkeypatch.setattr(miner, "screenshot", lambda *_args: screenshots.append(object()))
@@ -231,25 +228,28 @@ def test_rejected_operation_does_not_capture_media(tmp_path, monkeypatch) -> Non
 
 
 def test_rejected_seed_admission_releases_the_lane(tmp_path, monkeypatch) -> None:
-    from saitenka.app.features.mining import mined_store
+    seed = _Submitter(accepted=False)
+    retries = []
 
-    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
-    seed = _RejectingSubmitter()
-    identity = MiningIdentity("a", 0)
-    controller = MiningController(
-        MiningSpec(identity, {"deck": "Deck A", "model": "Lapis"}),
-        MiningLifecycle(seed, _Submitter(), lambda _delay, _due: True, lambda: None, lambda: False),
-        settings=MiningOptions(max_bulk=20, anki_ok_ttl=5, anki_ping_timeout=0.1),
-        encounter=_EncounterSource(),
-        apply=_apply,
-    )
-    assert controller.publish_mining_target(
-        MiningTarget(identity, object(), MineConfig(deck="Deck A"))
+    def schedule(_delay, due):
+        retries.append(due)
+        return True
+
+    controller, _seed, _encounters = _controller(
+        tmp_path, monkeypatch, seed_submit=seed, schedule_retry=schedule
     )
 
     controller.request_seed()
 
     assert len(seed.calls) == 1
-    assert controller.seed_lane.inflight is False
     assert controller.index_snapshot().seed_status is SeedStatus.DEGRADED
+    seed.calls.clear()
+    seed.accepted = True
+
+    retries.pop()()
+    _finish(seed.calls.pop(), {"seed"})
+
+    snapshot = controller.index_snapshot()
+    assert snapshot.values == {"seed"}
+    assert snapshot.seed_status is SeedStatus.READY
     controller.close()

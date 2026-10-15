@@ -133,12 +133,15 @@ def test_the_pointer_is_the_only_observation_that_coalesces_in_a_batch() -> None
         for x in (1, 2, 3):
             ipc.emit({"event": "property-change", "name": "mouse-pos", "data": {"x": x, "y": 0}})
         ipc.emit({"event": "property-change", "name": "pause", "data": True})
+        ipc.emit({"event": "property-change", "name": "pause", "data": False})
         reader.pump()
         seen = gateway.routing_census()["PropertyObserved"]
         pointer = reader.graph.playback.state.value("mouse-pos")
+        paused = reader.graph.playback.state.value("pause")
     finally:
         reader.close()
         gateway.close()
 
-    assert seen == (2, 2), "three pointer moves collapsed into the newest, the pause stayed its own"
+    assert seen == (3, 3), "three pointer moves collapsed; both pause changes stayed"
     assert pointer == {"x": 3, "y": 0}
+    assert paused is False

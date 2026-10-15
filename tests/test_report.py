@@ -63,11 +63,15 @@ def test_native_fault_is_bundled_redacted(monkeypatch, tmp_path):
     (directory / "faulthandler.log").write_text(
         "Fatal Python error: Segmentation fault\npassword=secretvalue99"
     )
+    (directory / "shutdown-hang-20260822-144132.log").write_text(
+        "Timeout (0:00:03)!\nThread 0x1 …\n"
+    )
 
     members = report.collect(diagnostic_detail=True)
 
     assert "Segmentation fault" in members["crashes/faulthandler.log"]
     assert "secretvalue99" not in members["crashes/faulthandler.log"]
+    assert "Timeout" in members["crashes/shutdown-hang-20260822-144132.log"]
 
 
 def test_trace_selection_matches_log_session_not_newest_file(monkeypatch, tmp_path):
@@ -197,18 +201,6 @@ def _hermetic(monkeypatch, tmp_path):
     return cfg
 
 
-def test_collect_includes_expected_members_and_redacts(monkeypatch, tmp_path):
-    _hermetic(monkeypatch, tmp_path)
-    members = report.collect(include_log=True, diagnostic_detail=True)
-    assert "versions.txt" in members and "doctor.json" in members
-    assert "overlay.toml" in members and "MANIFEST.txt" in members and "overlay.log" in members
-    # secrets gone from both config and log
-    assert "TOPSECRETKEY99" not in members["overlay.toml"]
-    assert "SHOULDVANISH123" not in members["overlay.log"]
-    # manifest carries the privacy note
-    assert "NEVER uploaded" in members["MANIFEST.txt"]
-
-
 def test_doctor_native_output_is_bundled_instead_of_printed(monkeypatch, capfd):
     class Report:
         @staticmethod
@@ -238,27 +230,16 @@ def test_collect_bundles_the_mpv_binding_table(monkeypatch, tmp_path):
     mpv_home = tmp_path / "mpvhome"
     mpv_home.mkdir()
     (mpv_home / "mpv.conf").write_text("hwdec=auto-safe\n")
-    (mpv_home / "input.conf").write_text(f"MBTN_LEFT cycle pause\np run {tmp_path}/tool\n")
+    home = tmp_path / "home"
+    (mpv_home / "input.conf").write_text(f"MBTN_LEFT cycle pause\nF5 run {home}/scripts/thing.sh\n")
 
     members = report.collect(include_log=False, diagnostic_detail=True)
 
-    assert members["mpv/mpvhome.input.conf"].startswith("MBTN_LEFT cycle pause")
-    assert "hwdec=auto-safe" in members["mpv/mpvhome.mpv.conf"]
-
-
-def test_collect_scrubs_home_from_the_binding_table(monkeypatch, tmp_path):
-    """Negative control for the test above: a bind naming a path under $HOME must not ship the
-    username, the same treatment every other bundled text gets."""
-    _hermetic(monkeypatch, tmp_path)
-    mpv_home = tmp_path / "mpvhome"
-    mpv_home.mkdir()
-    home = tmp_path / "home"
-    (mpv_home / "input.conf").write_text(f"F5 run {home}/scripts/thing.sh\n")
-
-    bundled = report.collect(include_log=False, diagnostic_detail=True)["mpv/mpvhome.input.conf"]
-
+    bundled = members["mpv/mpvhome.input.conf"]
+    assert bundled.startswith("MBTN_LEFT cycle pause")
     assert str(home) not in bundled
-    assert "scripts/thing.sh" in bundled  # scrubbed, not dropped
+    assert "scripts/thing.sh" in bundled
+    assert "hwdec=auto-safe" in members["mpv/mpvhome.mpv.conf"]
 
 
 def test_collect_no_log_excludes_log(monkeypatch, tmp_path):
@@ -324,9 +305,17 @@ def test_build_report_bundle_writes_timestamped_zip(monkeypatch, tmp_path):
     dest = report.build_report_bundle(out, timestamp="20260721-160000", diagnostic_detail=True)
     assert dest.name == "saitenka-report-20260721-160000.zip"
     with zipfile.ZipFile(dest) as zf:
-        names = zf.namelist()
-        assert "MANIFEST.txt" in names and "doctor.json" in names
+        names = set(zf.namelist())
+        assert {
+            "versions.txt",
+            "doctor.json",
+            "overlay.toml",
+            "MANIFEST.txt",
+            "overlay.log",
+        } <= names
         assert "TOPSECRETKEY99" not in zf.read("overlay.toml").decode()
+        assert "SHOULDVANISH123" not in zf.read("overlay.log").decode()
+        assert "NEVER uploaded" in zf.read("MANIFEST.txt").decode()
 
 
 def test_scrub_home_replaces_home_path_and_username(monkeypatch):
@@ -376,6 +365,7 @@ def test_collect_bundles_the_players_native_crash_report(monkeypatch, tmp_path):
         tmp_path,
         "mpv-2026-08-22-144118.ips",
         '{"app_name":"mpv"}\n{"exception":{"signal":"SIGBUS"},"key":"LEAKYKEY42",'
+        '"api_key":"zzzzzzzz","token": "abcdef123456",'
         f'"procPath":"{Path.home()}/bin/mpv"}}\n',
     )
 
@@ -386,7 +376,8 @@ def test_collect_bundles_the_players_native_crash_report(monkeypatch, tmp_path):
     assert "SIGBUS" in body, "the faulting signal is the reason this member exists"
     # Same redactor as every other member: home paths scrubbed, JSON-quoted secrets scrubbed.
     assert str(Path.home()) not in body and "<HOME>" in body
-    assert "LEAKYKEY42" not in body
+    assert all(secret not in body for secret in ("LEAKYKEY42", "zzzzzzzz", "abcdef123456"))
+    assert body.count("<redacted>") == 3
 
 
 def test_collect_omits_player_crash_reports_from_another_day(monkeypatch, tmp_path):
@@ -411,30 +402,6 @@ def test_collect_omits_player_crash_reports_off_macos(monkeypatch, tmp_path):
         for m in report.collect(include_log=True, diagnostic_detail=True)
         if m.startswith("crashes/player/")
     ]
-
-
-def test_collect_bundles_a_shutdown_thread_dump(monkeypatch, tmp_path):
-    """A dump file exists only when an exit hung, so carrying it is how the next report says so."""
-    _hermetic(monkeypatch, tmp_path)
-    crashes = tmp_path / "cache" / "crashes"
-    crashes.mkdir(parents=True)
-    (crashes / "shutdown-hang-20260822-144132.log").write_text("Timeout (0:00:03)!\nThread 0x1 …\n")
-
-    members = report.collect(include_log=True, diagnostic_detail=True)
-
-    assert "Timeout" in members["crashes/shutdown-hang-20260822-144132.log"]
-
-
-def test_redact_secrets_scrubs_json_quoted_keys():
-    """`telemetry/trace.json` and mpv's `.ips` are JSON; a name in quotes never reached the separator.
-
-    Scoped to the quoting, not the naming: an underscore-prefixed name (`jimaku_key`) still escapes,
-    in TOML as much as in JSON, because `\\b` does not fall between `u` and `k`. Widening the name
-    set trades that against redacting every `sort_key` in a trace, and is its own decision.
-    """
-    out = report._redact_secrets('{"api_key":"zzzzzzzz", "token": "abcdef123456"}')
-    assert "zzzzzzzz" not in out and "abcdef123456" not in out
-    assert out.count("<redacted>") == 2
 
 
 def _record(session: str, event: str, *, log_format: int = LOG_FORMAT) -> str:

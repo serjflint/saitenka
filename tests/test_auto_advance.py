@@ -78,12 +78,6 @@ def test_advance_fires_once_per_eof_edge(make_session):
     assert calls == [1, 1]
 
 
-def test_advance_is_a_noop_without_a_hook(make_session):
-    reader = make_session(FakeIPC())
-
-    _observe_eof(reader, reached=True)  # attach/SyncPlay installs no hook → nothing, no crash
-
-
 def test_reslot_to_current_rebinds_the_episode_without_reloading(
     tmp_path, monkeypatch, make_session
 ):
@@ -357,26 +351,6 @@ def test_advance_holds_when_no_playlist_and_no_sibling(tmp_path, make_session):
     assert not any(c and c[0] == "loadfile" for c in ipc.commands)
 
 
-def test_watch_hooks_follow_playlists_even_with_auto_advance_off(tmp_path, make_session):
-    # The regression the reactive design fixes: with --use-config, autoload advances the playlist and
-    # the overlay must follow WITHOUT auto_advance — reslot_hook is installed, advance_hook is not.
-    ipc = FakeIPC()
-    reader = make_session(ipc)
-    cli_run._install_watch_hooks(
-        reader.graph.reslot,
-        reader.graph.watch,
-        {},
-        tmp_path / "Show 01.mkv",
-        tmp_path,
-        0,
-        cli_run.RunSubtitleOptions(slang="ja"),
-        interactive=True,
-        auto_advance=False,
-    )
-    assert reader.graph.episode_watch.reslot_hook is not None  # follows file-loaded / playlists
-    assert reader.graph.episode_watch.advance_hook is None  # but never drives its own advance
-
-
 def test_watch_hook_samples_the_current_profile_context_on_file_load(
     tmp_path, monkeypatch, make_session
 ):
@@ -410,6 +384,31 @@ def test_watch_hook_samples_the_current_profile_context_on_file_load(
     reader.graph.episode_watch.file_loaded()
 
     assert seen == [({"profile": "fr-de"}, "Show 02.mkv", "fr", "de")]
+
+
+def test_auto_advance_off_does_not_load_the_next_sibling(tmp_path, make_session):
+    current = tmp_path / "Show 01.mkv"
+    sibling = tmp_path / "Show 02.mkv"
+    current.write_bytes(b"")
+    sibling.write_bytes(b"")
+    ipc = FakeIPC()
+    ipc.props.update({"path": str(current), "playlist-count": 1})
+    reader = make_session(ipc)
+    cli_run._install_watch_hooks(
+        reader.graph.reslot,
+        reader.graph.watch,
+        {},
+        current,
+        tmp_path,
+        0,
+        cli_run.RunSubtitleOptions(slang="ja"),
+        interactive=True,
+        auto_advance=False,
+    )
+
+    _observe_eof(reader, reached=True)
+
+    assert not any(command and command[0] == "loadfile" for command in ipc.commands)
 
 
 def test_watch_hooks_not_installed_for_a_non_interactive_run(tmp_path, make_session):

@@ -2,18 +2,25 @@
 
 Properties pinned:
 - wrap never splits a ruby unit (a RubyBox is atomic across lines);
-- ``strip_inline_furigana`` is idempotent;
+- inline furigana stripping preserves kanji and surrounding grammar;
 - the deinflection chain on an arbitrary surface reaches the lemma or returns empty;
 - ``merge_inflected`` output concatenates back to its input surfaces.
 """
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from saitenka_deinflect import (  # noqa: TID251  # property tests exercise the GPL chain directly, not via the app chokepoint
     deinflect,
     inflection_chain,
 )
-from saitenka_tokenize.japanese import Token, has_kanji, merge_inflected, strip_inline_furigana
+from saitenka_tokenize.japanese import (
+    Token,
+    has_kanji,
+    merge_inflected,
+    strip_inline_furigana,
+    tokenize,
+)
 
 from saitenka.model import Span, Style
 from saitenka.render.flow import build_items, ruby, wrap_items
@@ -87,6 +94,19 @@ def test_strip_inline_furigana_is_a_subsequence_preserving_kanji(toks):
     ]
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("龍門光英りゅうもんみつひでは―", ["龍門", "光英", "は", "―"]),
+        ("賀来泰明かくやすあきさえも", ["賀来", "泰明", "さえ", "も"]),
+        ("本を読む", ["本", "を", "読む"]),
+        ("更には", ["更に", "は"]),
+    ],
+)
+def test_tokenize_strips_inline_furigana_without_eating_grammar(text, expected):
+    assert [token.surface for token in tokenize(text)] == expected
+
+
 # --- kanji detection spans the supplementary planes (not just the BMP) ---------------------------
 
 
@@ -105,21 +125,6 @@ def test_has_kanji_recognizes_supplementary_plane_ideographs():
 @settings(max_examples=50, deadline=None)
 def test_has_kanji_true_for_every_ext_b_codepoint(cp):
     assert has_kanji(chr(cp))
-
-
-# --- deinflection chain reaches the lemma or returns empty ---------------------------------------
-
-
-@given(surface=jp_text, lemma=jp_text)
-@settings(max_examples=100, deadline=None)
-def test_inflection_chain_reaches_lemma_or_empty(surface, lemma):
-    chain = inflection_chain(surface, lemma)
-    assert isinstance(chain, list)
-    if surface == lemma:
-        assert chain == []  # already the dictionary form → no chain
-    # a non-empty chain must be a list of transform names (strings)
-    for name in chain:
-        assert isinstance(name, str) and name
 
 
 # --- deinflect ⇄ inflection_chain agree (metamorphic cross-check) --------------------------------

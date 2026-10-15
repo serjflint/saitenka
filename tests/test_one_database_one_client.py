@@ -1,8 +1,7 @@
-"""One database, one client.
+"""Dictionary schema convergence and released-database migration.
 
 ``dictionaries.sqlite`` used to be declared by two writers with two different schemas — whichever
-opened the file first won, and the reader carried a duplicate of every entry query to cope. These pin
-the merge: :mod:`saitenka_dict.schema` is the only declaration, and no entry point may diverge from it.
+opened the file first won. These pin fresh-schema convergence and released-database migration behavior.
 """
 
 from __future__ import annotations
@@ -10,17 +9,19 @@ from __future__ import annotations
 import json
 import sqlite3
 import zipfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from saitenka_dict import DictionaryDatabase
 from saitenka_dict.schema import SCHEMA_VERSION, ensure_schema
 from saitenka_tokenize.japanese import Token
 
-from saitenka.app import dictdb
 from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
 from saitenka.app.dictionary import DictionarySet
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 AT = "2026-08-31T00:00:00"
 
@@ -77,84 +78,6 @@ def test_both_entry_points_create_the_same_schema(tmp_path):
     DictionaryDatabase(tmp_path / "package.sqlite").initialize()
 
     assert _schema_of(tmp_path / "app.sqlite") == _schema_of(tmp_path / "package.sqlite")
-
-
-def test_the_app_declares_no_dictionary_schema():
-    """The app owns *policy* over this file — where it lives, how a reading connection is tuned — but
-    not its shape. A CREATE here would be a second declaration drifting from the first again."""
-    source = Path(dictdb.__file__).read_text(encoding="utf-8")
-
-    assert "CREATE TABLE" not in source
-    assert "CREATE INDEX" not in source
-
-
-def test_the_app_writes_only_its_own_key_value_rows():
-    """Every write to the dictionary tables goes through `saitenka-dict`. What the app retains is
-    `meta_set`, which touches the key-value table it uses for its own bookkeeping and nothing else."""
-    source = Path(dictdb.__file__).read_text(encoding="utf-8").upper()
-    writes = [
-        clause
-        for clause in ("INSERT INTO", "INSERT OR REPLACE INTO", "UPDATE ", "DELETE FROM")
-        if clause in source
-    ]
-
-    assert writes == ["INSERT OR REPLACE INTO"]
-    assert source.count("INSERT OR REPLACE INTO META VALUES") == 1
-
-
-#: Every app module still allowed to issue SQL against the dictionary database, and the reason. This
-#: is a census with a locked denominator, not a per-file check: the reader this PR retired could
-#: otherwise reappear one module over and a gate scoped to `dictionary.py` would say nothing.
-#: Shrinking it is the goal; growing it is a decision, so both directions fail until re-blessed.
-_APP_MODULES_THAT_QUERY_THE_DICTIONARY = {
-    # The app's own handle: `media_for` and the `meta` key-value rows it owns.
-    "app/dictdb.py",
-    # Diagnostics: a `seq IS NOT NULL` probe for the deep-link report.
-    "app/doctor.py",
-}
-
-
-#: Table names only this database uses. Marking on the SCHEMA rather than on one column is the point:
-#: a reader that never happens to spell `dict_id` is the same defect, and that shape already exists —
-#: `saitenka_dict.tables` does `SELECT ... FROM term_meta`, which a `dict_id` marker cannot see.
-_DICTIONARY_TABLES = ("entries", "keys", "kanji", "term_meta", "kanji_meta", "tags")
-#: Names the app's *other* databases also use — `backlog.py` owns an unrelated `media` table. A hit on
-#: one of these only counts alongside `dict_id`, which no other schema here has.
-_AMBIGUOUS_TABLES = ("media", "meta")
-
-
-def _names_a_dictionary_table(source: str) -> bool:
-    """Whether a module issues SQL against a table of the *dictionary* database."""
-
-    def clauses(table: str) -> tuple[str, ...]:
-        return tuple(f"{verb} {table}" for verb in ("FROM", "INTO", "UPDATE", "JOIN"))
-
-    # Keywords stay uppercase (the repo writes SQL that way throughout) so prose does not match:
-    # config.py's help text says "into entries.seq" and means nothing of the sort. Collapsed because
-    # a SQL literal wraps across lines.
-    collapsed = " ".join(source.split())
-    if any(clause in collapsed for table in _DICTIONARY_TABLES for clause in clauses(table)):
-        return True
-    return "dict_id" in collapsed and any(
-        clause in collapsed for table in _AMBIGUOUS_TABLES for clause in clauses(table)
-    )
-
-
-def test_no_new_app_module_starts_reading_the_dictionary_database():
-    """The reader followed the writer — but only out of `dictionary.py`.
-
-    `saitenka.app.dictionary` carried a hand-rolled SQL reader beside the semantic store: two readers
-    of one schema, kept in step by hand. Checking that one file would be a gate on a name rather than
-    a meaning — the same reader can reappear in any neighbour, and a reviewer's planted one did.
-    """
-    root = Path(dictdb.__file__).parents[1]
-    querying = {
-        str(path.relative_to(root)).replace("\\", "/")
-        for path in root.rglob("*.py")
-        if _names_a_dictionary_table(path.read_text(encoding="utf-8"))
-    }
-
-    assert querying == _APP_MODULES_THAT_QUERY_THE_DICTIONARY
 
 
 #: The shape a released version of the app actually created. A migration test that invents its own

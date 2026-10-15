@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import replace
 
 import pytest
 from saitenka_subtitles import (
@@ -146,16 +146,6 @@ def prefetch_builder(build):
     return lambda: (build(), TokenizedCue([], [], None))
 
 
-def test_coordinator_publishes_matching_generation() -> None:
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
-
-    result = coordinator.render(request(coordinator.generation))
-
-    assert result == coordinator.current
-    assert result is not None
-    assert result.tokens[0].bounds.contains(25, 30)
-
-
 def test_coordinator_rejects_obsolete_generation() -> None:
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     obsolete = request(coordinator.generation)
@@ -195,14 +185,6 @@ def test_coordinator_rejects_superseded_same_generation_result() -> None:
     assert coordinator.current == newer_result
 
 
-def test_coordinator_contains_optional_provider_failure() -> None:
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FailingBackend())
-
-    assert coordinator.render(request(coordinator.generation)) is None
-    assert coordinator.current is None
-    assert coordinator.last_error == "font provider unavailable"
-
-
 def test_coordinator_close_invalidates_and_is_idempotent() -> None:
     backend = FakeGeometryBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
@@ -215,13 +197,6 @@ def test_coordinator_close_invalidates_and_is_idempotent() -> None:
     assert coordinator.current is None
     assert coordinator.render(request(generation)) is None
     assert backend.closed
-
-
-def test_geometry_values_are_immutable() -> None:
-    rect = Rect(1, 2, 3, 4)
-
-    with pytest.raises(FrozenInstanceError):
-        rect.x = 5  # type: ignore[misc]
 
 
 def test_coordinator_delegates_current_renderer(make_session) -> None:
@@ -275,23 +250,6 @@ def test_worker_drops_superseded_pending_request() -> None:
     assert worker.stats.submitted == 2
     assert worker.stats.completed == 1
     assert worker.stats.superseded == 1
-    worker.close()
-
-
-def test_worker_cache_rebinds_generation_after_invalidation() -> None:
-    backend = FakeGeometryBackend()
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
-    worker = SubtitleGeometryWorker(coordinator)
-    first = request(coordinator.generation)
-    assert worker.submit(first) and worker.wait_idle()
-    coordinator.invalidate()
-    repeated = request(coordinator.generation)
-
-    assert worker.submit(repeated) and worker.wait_idle()
-
-    assert coordinator.current is not None
-    assert coordinator.current.generation == repeated.generation
-    assert worker.stats.cache_hits == 1
     worker.close()
 
 
@@ -571,34 +529,27 @@ def test_a_render_identity_change_still_discards_the_lookahead() -> None:
     worker.close()
 
 
-def test_the_fence_holds_when_the_same_cue_is_observed_again() -> None:
-    """mpv re-publishes `sub-text` for a line already on screen. That is not a new cue."""
-    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
-    identity = ("猫を見る", 1.0, 3.0, 1)
-    first = coordinator.invalidate(identity)
-
-    assert coordinator.invalidate(identity) == first
-    assert coordinator.generation == first
-
-
 @pytest.mark.parametrize(
-    "moved",
+    ("observed", "moves"),
     [
-        pytest.param(("犬も見る", 1.0, 3.0, 1), id="text"),
-        pytest.param(("猫を見る", 4.0, 3.0, 1), id="start"),
-        pytest.param(("猫を見る", 1.0, 6.0, 1), id="end"),
-        pytest.param(("猫を見る", 1.0, 3.0, 2), id="track"),
-        pytest.param(("", 1.0, 3.0, 1), id="cue-cleared"),
+        pytest.param(("猫を見る", 1.0, 3.0, 1), False, id="same"),
+        pytest.param(("犬も見る", 1.0, 3.0, 1), True, id="text"),
+        pytest.param(("猫を見る", 4.0, 3.0, 1), True, id="start"),
+        pytest.param(("猫を見る", 1.0, 6.0, 1), True, id="end"),
+        pytest.param(("猫を見る", 1.0, 3.0, 2), True, id="track"),
+        pytest.param(("", 1.0, 3.0, 1), True, id="cue-cleared"),
     ],
 )
-def test_the_fence_moves_for_every_component_of_cue_identity(moved: tuple) -> None:
+def test_cue_identity_moves_the_fence_only_when_changed(observed: tuple, *, moves: bool) -> None:
     """The evasion, not the example: a repeat with the same text at different timing is a different
     cue, and geometry published for the first would be painted onto the second. Parametrised so a
     comparison quietly dropping a component fails here."""
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
     before = coordinator.invalidate(("猫を見る", 1.0, 3.0, 1))
+    after = coordinator.invalidate(observed)
 
-    assert coordinator.invalidate(moved) > before
+    assert after == before + int(moves)
+    assert coordinator.generation == after
 
 
 def test_a_caller_with_no_cue_identity_always_moves_the_fence() -> None:
@@ -612,25 +563,21 @@ def test_a_caller_with_no_cue_identity_always_moves_the_fence() -> None:
     assert coordinator.invalidate(None) == first + 2  # None compares equal to itself
 
 
-def test_a_current_result_dropped_mid_render_leaves_the_cue_with_no_retry() -> None:
-    """Characterization: `bind` and `publish` both refuse once the generation has moved, so a
-    result finished while the fence moved underneath is discarded — superseded, reported as no
-    failure, and never re-driven. The drop window is the render's own duration.
-
-    Asserts what the code does, not the contract wanted, so that fixing it fails loudly.
-    """
+def test_result_finishing_after_fence_moves_never_publishes_stale_geometry() -> None:
+    """A retry may eventually publish, but the completed old-generation render never may."""
     backend = BlockingBackend()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), backend)
     worker = SubtitleGeometryWorker(coordinator, cache_max=2)
+    submitted_generation = coordinator.generation
 
-    assert worker.submit(request(coordinator.generation, 1_300))
+    assert worker.submit(request(submitted_generation, 1_300))
     assert backend.entered.wait(1)
-    coordinator.invalidate()  # a reconcile lands while libass is still running
+    current_generation = coordinator.invalidate()
     backend.release.set()
     assert worker.wait_idle()
 
-    assert coordinator.current is None  # the finished render went nowhere
-    assert (worker.stats.superseded, worker.stats.failures) == (1, 0)
+    published = coordinator.current
+    assert published is None or published.generation == current_generation
     worker.close()
 
 

@@ -278,8 +278,6 @@ def test_explicit_shadow_keeps_boxes_when_backend_refuses_paint(tmp_path, monkey
 
 
 def test_whole_event_osd_keeps_independent_underline():
-    from subtitle_test_support import FakeSurfaces
-
     from saitenka.app.subtitle_render import NativeVisibleRenderer
 
     source, prepared = prepared_source()
@@ -293,9 +291,9 @@ def test_whole_event_osd_keeps_independent_underline():
         whole_cue=cue,
         osd_shaper="complex",
     )
-    payload, resolution = NativeVisibleRenderer(coloring="whole-cue-osd")._draw_whole_cue(
-        request, FakeSurfaces()
-    )
+    prepared = NativeVisibleRenderer(coloring="whole-cue-osd").prepare_osd(request)
+    assert prepared is not None
+    payload, resolution = prepared
     assert r"\pos(640,600)" in payload
     assert r"\p1" in payload
     assert r"\1c&H00FF00&" in payload
@@ -416,31 +414,10 @@ def test_a_frame_the_copy_colors_is_the_tracks_to_paint():
     )
 
 
-def test_a_prepared_frame_names_the_track_only_when_the_copy_colors_all_of_it():
-    from saitenka_subtitles.colored_track import color_document
-
-    from saitenka.app.native_subtitles import _track_colors
-
-    source = ASS.decode() + "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,{\\k20}猫\n"
-    copy = color_document(source, "external:/x.ass", _per_character).text.encode()
-    rows = [line for line in copy.decode().splitlines() if line.startswith("Dialogue:")]
-    tokens = (TokenAnnotation(0, 0, 1), TokenAnnotation(1, 1, 2))
-
-    def prepared(document: bytes, active: str, text: str):
-        return prepare_ass_hit_map_frame(
-            document, SubtitleTrackId("t"), active_rows=active, text=text, tokens=tokens
-        )
-
-    assert _track_colors(copy, prepared(copy, rows[0], "猫を見る"))
-    authored = next(line for line in source.splitlines() if line.startswith("Dialogue:"))
-    assert not _track_colors(source.encode(), prepared(source.encode(), authored, "猫を見る"))
-    both = prepared(copy, "\n".join((rows[0], rows[2])), "猫を見る\n猫")
-    assert not _track_colors(copy, both)
-
-
 @pytest.mark.integration
 @pytest.mark.timeout(5)
-def test_a_cue_of_the_colored_copy_gets_no_overlay_paint(tmp_path):
+@pytest.mark.parametrize("case", ["colored", "mixed", "authored"])
+def test_track_owned_paint_requires_every_active_event_to_be_colored(tmp_path, *, case):
     from saitenka_subtitles.colored_track import color_document
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
@@ -460,26 +437,43 @@ def test_a_cue_of_the_colored_copy_gets_no_overlay_paint(tmp_path):
         "external:/x.ass",
         lambda _text: (spans, {0: 0x2080C0, 1: 0x2080C1, 2: 0x2080C2}),
     )
+    if case == "mixed":
+        copy = replace(
+            copy,
+            text=copy.text + "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,犬を見る\n",
+        )
+    elif case == "authored":
+        copy = replace(copy, text=NATIVE_ASS.decode())
     path = write_copy("episode", copy.text)
     ipc.props["track-list"] = [
         {"id": 2, "type": "sub", "external": True, "external-filename": str(path), "selected": True}
     ]
-    ipc.props["sub-text/ass-full"] = next(
-        line for line in copy.text.splitlines() if line.startswith("Dialogue:")
-    )
+    rows = [line for line in copy.text.splitlines() if line.startswith("Dialogue:")]
+    ipc.props["sub-text/ass-full"] = "\n".join(rows if case == "mixed" else rows[:1])
     try:
         native = result.graph.subtitle_presentation.native
         assert native is not None
         native.set_source(path)
-        result.graph.playback.observe("sub-text", "猫を見る")
+        result.graph.playback.observe(
+            "sub-text", "猫を見る\n犬を見る" if case == "mixed" else "猫を見る"
+        )
         result.graph.cue.settle()
         settle_jobs(result, ipc)
         request = result.graph.cue.draw_request()
         assert request.boxes
-        assert backend.requests[-1].whole_cue.osd_reason == "track"
-        assert whole_cue_device(request) == ("track", "track")
-        assert not presented_overpaints(ipc)
-        assert not any("\\1c" in str(command) for command in painted_overlays(ipc))
+        assert request.track_colored is (case == "colored")
+        device, reason = whole_cue_device(request)
+        if case != "colored":
+            assert reason != "track"
+            assert device != "track"
+            assert presented_overpaints(ipc) or any(
+                "\\1c" in str(command) for command in painted_overlays(ipc)
+            )
+        else:
+            assert backend.requests[-1].whole_cue.osd_reason == "track"
+            assert (device, reason) == ("track", "track")
+            assert not presented_overpaints(ipc)
+            assert not any("\\1c" in str(command) for command in painted_overlays(ipc))
     finally:
         result.close()
 

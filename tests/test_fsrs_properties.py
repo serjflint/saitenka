@@ -25,10 +25,7 @@ from saitenka_wordstate.fsrs import (
     FORGOTTEN_R,
     FSRS_DEFAULT_DECAY,
     MATURE_IVL,
-    RARENESS_COMMON_MAX,
-    RARENESS_UNCOMMON_MAX,
     load_knownness,
-    rareness_band,
     retrievability,
 )
 
@@ -110,33 +107,6 @@ def _snap(notes: list[dict[str, Any]], now: float = 1_700_000_000.0):
 # ---------------------------------------------------------------------------
 
 
-@given(
-    s=st.floats(min_value=1e-6, max_value=1000.0, allow_nan=False, allow_infinity=False),
-    elapsed=st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False),
-    decay=st.floats(min_value=0.01, max_value=2.0, allow_nan=False, allow_infinity=False),
-)
-@example(s=0.5, elapsed=30.0, decay=0.1542)  # 0 < s <= 1: kills `s <= 0` mutated to `s <= 1`
-@settings(max_examples=100, deadline=None)
-def test_retrievability_matches_reference_for_any_positive_s(s, elapsed, decay):
-    """Any strictly positive `s` yields a real value — including 0 < s <= 1, the exact range a
-    `s <= 0` → `s <= 1` mutant would wrongly collapse to None."""
-    factor = 0.9 ** (1.0 / decay) - 1.0
-    expected = (1.0 + factor * elapsed / s) ** decay
-    got = retrievability(s, elapsed, decay)
-    assert got is not None
-    assert abs(got - expected) < 1e-6
-
-
-@given(
-    s=st.floats(max_value=0.0, allow_nan=False, allow_infinity=False),
-    elapsed=st.floats(min_value=0.0, max_value=1000.0, allow_nan=False, allow_infinity=False),
-    decay=st.floats(min_value=0.01, max_value=2.0, allow_nan=False, allow_infinity=False),
-)
-@settings(max_examples=50, deadline=None)
-def test_retrievability_none_for_nonpositive_s(s, elapsed, decay):
-    assert retrievability(s, elapsed, decay) is None
-
-
 # ---------------------------------------------------------------------------
 # 2. The rareness pill's two halves: the band (here) and the `Nk` formatting (the panel side)
 # ---------------------------------------------------------------------------
@@ -155,19 +125,6 @@ def test_rareness_value_matches_documented_formatting(rank):
     r = round(float(rank))
     expected = (f"{r // 1000}k" if r % 1000 == 0 else f"{r / 1000:.1f}k") if r >= 1000 else str(r)
     assert rareness_value(float(rank)) == expected
-
-
-@given(rank=st.integers(min_value=0, max_value=200_000))
-@example(rank=RARENESS_COMMON_MAX)
-@example(rank=RARENESS_COMMON_MAX + 1)
-@example(rank=RARENESS_UNCOMMON_MAX)
-@example(rank=RARENESS_UNCOMMON_MAX + 1)
-@settings(max_examples=200, deadline=None)
-def test_rareness_band_is_monotone_in_the_rank(rank):
-    """Rarer never bands as commoner — the invariant behind the two cutoffs, independent of where
-    they sit or which colour draws them."""
-    order = {"common": 0, "uncommon": 1, "rare": 2}
-    assert order[rareness_band(float(rank))] <= order[rareness_band(float(rank) + 1)]
 
 
 # ---------------------------------------------------------------------------

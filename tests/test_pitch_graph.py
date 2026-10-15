@@ -94,7 +94,7 @@ def _pitch_zip(path):
     return str(path)
 
 
-def test_the_lookup_exposes_raw_positions(tmp_path):
+def test_entry_carries_pitch_accents(tmp_path):
     import dicthelp
     from saitenka_tokenize.japanese import Token
 
@@ -104,32 +104,11 @@ def test_the_lookup_exposes_raw_positions(tmp_path):
         [_term_zip(tmp_path / "d.zip", "D", "本命", "ほんめい")],
         pitch_zips=[_pitch_zip(tmp_path / "p.zip")],
     )
-    assert ds.entry_for(Token("本命", "本命", "ほんめい", "名詞", 0, 2)).pitches == [
-        ("ほんめい", (PitchAccent(0),))
-    ]
-    assert ds.entry_for(Token("犬", "犬", "いぬ", "名詞", 0, 1)).pitches == []
-
-
-def test_entry_carries_pitch_accents(tmp_path):
-    import zipfile as _zf
-
-    import dicthelp
-    from saitenka_tokenize.japanese import Token
-
-    from saitenka.model import PitchAccent
-
-    dz = tmp_path / "d.zip"
-    with _zf.ZipFile(dz, "w") as zf:
-        zf.writestr("index.json", json.dumps({"title": "D", "format": 3}))
-        zf.writestr(
-            "term_bank_1.json", json.dumps([["本命", "ほんめい", "", "", 0, ["favourite"], 1, ""]])
-        )
-    ds = dicthelp.load_set([str(dz)], pitch_zips=[_pitch_zip(tmp_path / "p.zip")])
     tok = Token("本命", "本命", "ほんめい", "名詞", 0, 2)
     e = ds.entry_for(tok)
     assert e.pitches == [("ほんめい", (PitchAccent(0),))]
-    # …and the purple pill fallback in the freq row is still there
     assert any(f.value == "ほんめい [0]" for f in e.freqs)
+    assert ds.entry_for(Token("犬", "犬", "いぬ", "名詞", 0, 1)).pitches == []
 
 
 def _alpha_sum(img) -> int:

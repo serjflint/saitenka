@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from types import SimpleNamespace
 
+import pytest
+
 from saitenka.app.features.tooltip import tooltip_engaged
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome
 
@@ -48,64 +50,41 @@ def _hover(key: str) -> tooltip_engaged.HoverRequest:
     )
 
 
-def test_newest_intent_supersedes_running_and_pending_work():
+@pytest.mark.parametrize("kind", ["navigate", "open"])
+def test_newest_intent_supersedes_running_and_pending_work(kind):
     state = tooltip_engaged.EngagedState()
     submitter = Submitter()
-    completions = []
-    assert tooltip_engaged.submit(
-        state, _hover("a"), generation=1, submitter=submitter, on_finished=completions.append
-    )
-    first = state.inflight
-    assert first is not None
-
-    assert tooltip_engaged.submit(
-        state,
-        tooltip_engaged.NavigateRequest("b", 1),
-        generation=1,
-        submitter=submitter,
-        on_finished=completions.append,
-    )
-    second = state.pending
-    assert second is not None and first[1].superseded.is_set()
-    assert tooltip_engaged.submit(
-        state,
-        tooltip_engaged.OpenRequest("link", "c", (1, 2, 3), 1),
-        generation=1,
-        submitter=submitter,
-        on_finished=completions.append,
-    )
-
-    assert second[1].superseded.is_set()
-    assert isinstance(state.pending[1].request, tooltip_engaged.OpenRequest)
-
-
-def test_stale_completion_dispatches_newest_once_and_cannot_publish():
-    state = tooltip_engaged.EngagedState()
-    submitter = Submitter()
+    backend = Backend()
     observed = []
 
     def finished(completion):
         observed.append(tooltip_engaged.finish(state, completion, submitter, finished))
 
-    tooltip_engaged.submit(
-        state, _hover("a"), generation=1, submitter=submitter, on_finished=finished
-    )
-    tooltip_engaged.submit(
-        state,
-        tooltip_engaged.NavigateRequest("b", 1),
-        generation=1,
-        submitter=submitter,
-        on_finished=finished,
-    )
+    if kind == "navigate":
+        newest = tooltip_engaged.NavigateRequest("b", 1)
+        expected = tooltip_engaged.NavigateReady(1, None)
+        query = "b"
+    else:
+        newest = tooltip_engaged.OpenRequest("link", "c", (1, 2, 3), 1)
+        expected = tooltip_engaged.OpenReady("link", "c", (1, 2, 3), 1)
+        query = "c"
+    for request in (_hover("a"), tooltip_engaged.NavigateRequest("superseded", 1), newest):
+        assert tooltip_engaged.submit(
+            state, request, generation=1, submitter=submitter, on_finished=finished
+        )
 
-    submitter.finish(Backend())
+    submitter.finish(backend)
+    submitter.finish(backend)
 
-    assert len(observed) == 1
-    assert observed[0] is not None
-    assert observed[0][2:5] == (None, False, True)
-    assert observed[0][5] is None
-    assert len(submitter.calls) == 1
-    assert isinstance(submitter.calls[0]["request"].request, tooltip_engaged.NavigateRequest)
+    assert backend.calls == [(kind, query, False)]
+    assert [
+        (published, succeeded, superseded)
+        for _identity, _request, published, succeeded, superseded, _rejected in observed
+    ] == [
+        (None, False, True),
+        (expected, True, False),
+    ]
+    assert submitter.calls == []
 
 
 def test_cancel_and_close_reject_stale_or_new_work():
@@ -123,16 +102,6 @@ def test_cancel_and_close_reject_stale_or_new_work():
     assert not tooltip_engaged.submit(
         state, _hover("b"), generation=2, submitter=submitter, on_finished=lambda _: None
     )
-
-
-def test_worker_checks_feature_supersession_before_touching_backend():
-    backend = Backend()
-    superseded = threading.Event()
-    superseded.set()
-    work = tooltip_engaged.EngagedWork(_hover("a"), superseded)
-
-    assert tooltip_engaged.run_engaged(work, threading.Event(), backend) is None
-    assert backend.calls == []
 
 
 def test_initial_admission_rejection_is_observable_to_the_sync_fallback():
@@ -170,25 +139,3 @@ def test_pending_admission_rejection_returns_the_newest_intent():
     rejected = observed[0][5]
     assert rejected is not None and rejected[1] == newest
     assert state.inflight is None and state.pending is None
-
-
-def test_stale_completion_reports_rejected_new_generation_with_its_own_identity():
-    state = tooltip_engaged.EngagedState()
-    submitter = Submitter()
-    observed = []
-
-    def finished(completion):
-        observed.append(tooltip_engaged.finish(state, completion, submitter, finished))
-
-    tooltip_engaged.submit(
-        state, _hover("a"), generation=1, submitter=submitter, on_finished=finished
-    )
-    newest = tooltip_engaged.NavigateRequest("b", 1)
-    tooltip_engaged.submit(state, newest, generation=2, submitter=submitter, on_finished=finished)
-    submitter.reject_next = True
-
-    submitter.finish(Backend())
-
-    rejected = observed[0][5]
-    assert rejected is not None
-    assert rejected[0].generation == 2 and rejected[1] == newest

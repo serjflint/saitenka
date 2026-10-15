@@ -5,6 +5,8 @@ import time
 from concurrent.futures import Future
 from typing import TYPE_CHECKING, cast
 
+import pytest
+
 from saitenka.app.session.mpv_gateway import MpvGateway
 from saitenka.mpvio.ipc import IPCRequest, MpvIPC
 from saitenka.runtime.effects import EffectError, EffectOutcome, Owner
@@ -305,39 +307,44 @@ def test_job_completion_is_delivered_on_the_reader_turn() -> None:
     assert completed[0].result == "done:input"
 
 
-def test_job_lane_rejects_saturation_with_a_terminal_outcome() -> None:
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize(("capacity", "workers"), [(1, 1), (4, 2)])
+def test_job_lane_rejects_saturation_with_a_terminal_outcome(capacity, workers) -> None:
     ipc = FakeIPC()
     gateway = MpvGateway(cast("MpvIPC", ipc), SessionMailbox(), clock=Clock())
-    started = threading.Event()
+    started = [threading.Event() for _ in range(capacity)]
     release = threading.Event()
     completed: list[EffectFinished] = []
 
     def blocked(request: object, _cancelled: threading.Event) -> object:
-        started.set()
+        started[cast("int", request)].set()
         release.wait()
         return request
 
-    gateway.register_job_lane("probe", JobLanePolicy(capacity=1), blocked)
-    assert gateway.submit_job(
-        owner=Owner.SESSION,
-        identity="probe:1",
-        lane="probe",
-        request="first",
-        on_finished=completed.append,
-    )
-    assert started.wait(1.0)
-    assert not gateway.submit_job(
-        owner=Owner.SESSION,
-        identity="probe:2",
-        lane="probe",
-        request="second",
-        on_finished=completed.append,
-    )
-    assert len(completed) == 1
-    assert completed[0].identity == "probe:2"
-    assert completed[0].outcome is EffectOutcome.REJECTED
-    assert completed[0].error is EffectError.OVERLOADED
-    release.set()
+    gateway.register_job_lane("probe", JobLanePolicy(capacity=capacity, workers=workers), blocked)
+    try:
+        accepted = []
+        for index in range(capacity + 1):
+            accepted.append(
+                gateway.submit_job(
+                    owner=Owner.SESSION,
+                    identity=f"probe:{index}",
+                    lane="probe",
+                    request=index,
+                    on_finished=completed.append,
+                )
+            )
+            if index < workers:
+                assert started[index].wait(1.0)
+        assert accepted == [True] * capacity + [False]
+        assert len(completed) == 1
+        assert completed[0].identity == f"probe:{capacity}"
+        assert completed[0].outcome is EffectOutcome.REJECTED
+        assert completed[0].error is EffectError.OVERLOADED
+    finally:
+        release.set()
+        gateway.close()
 
 
 def test_job_close_cancels_pending_work_and_quarantines_late_completion() -> None:

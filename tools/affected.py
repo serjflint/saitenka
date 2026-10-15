@@ -11,8 +11,9 @@ How it works:
     module through an intermediary.
   - A change touching a static-graph blind spot forces a FULL default-tier run: `conftest.py` (fixtures),
     image goldens, the `.lua` asset, a dynamic-import loader (`importlib`/`entry_points`), config/
-    lockfiles, `tools/**` (its tests file-LOAD their targets via `importlib`, an edge ruff can't see),
-    or the `deinflect` package overlay imports. A source module with no dependent test → FULL.
+    lockfiles, or the `deinflect` package overlay imports. A source module with no dependent test → FULL.
+    `tools/**`, `tool_tests/**`, and `vibe/**` are outside application-test selection; `loop-tools-test`
+    owns durable tool changes, while ignored `vibe/**` holds session-only scripts.
   - Residual, left to the pre-push full `poe all` (not chased here): a change to a module `conftest`
     *imports* can shift a fixture used by tests outside the closure. Escalating on that would collapse
     almost every selection to full (conftest pulls in the god-objects), so it is deliberately left out.
@@ -77,20 +78,22 @@ def classify(changed: list[str]) -> tuple[list[str], set[str], set[str]]:
         name = f.rsplit("/", 1)[-1]
         if f.startswith("deinflect/") or name in {"pyproject.toml", "uv.lock"}:
             full.append(f)  # code dep overlay imports, or a config/lock change
-        elif not f.startswith(("src/", "tests/", "tools/", "tool_tests/")):
-            continue  # docs / install / .github — irrelevant to the application suite
+        elif not f.startswith(("src/", "tests/")):
+            continue  # docs / tools / vibe / install / .github — outside the application suite
         elif (
             name == "conftest.py"
-            or f.startswith(("tests/golden/", "tools/"))
+            or f.startswith("tests/golden/")
             or f.endswith(".lua")  # tests file-LOAD tools via importlib — no static edge
         ):
             full.append(f)  # fixture injection / data goldens / runtime asset / file-loaded tool
         elif f.endswith(".py"):
-            if _is_dynamic(f):
+            if f.startswith("tests/") and not (ROOT / f).exists():
+                continue
+            if f.startswith("src/") and _is_dynamic(f):
                 full.append(f)
             else:
                 overlay_py.add(f)
-                if f.startswith(("tests/", "tool_tests/")):
+                if f.startswith("tests/"):
                     changed_tests.add(f)
     return full, overlay_py, changed_tests
 
@@ -122,9 +125,7 @@ def closure_tests(seeds: set[str], graph: dict[str, list[str]]) -> set[str]:
     return {
         f
         for f in seen
-        if f.startswith(("tests/", "tool_tests/"))
-        and f.endswith(".py")
-        and not f.endswith("conftest.py")
+        if f.startswith("tests/") and f.endswith(".py") and not f.endswith("conftest.py")
     }
 
 

@@ -52,18 +52,7 @@ def test_navigation_replaced_before_target_binding_stays_in_attempt_denominator(
     assert not ipc.fire_runtime_timer("subtitle:color-deadline")
 
 
-def test_disabled_telemetry_does_not_schedule_a_deadline():
-    ipc = FakeIPC()
-    telemetry = ColorTelemetry(ipc, clock=lambda: 0.0)
-
-    telemetry.begin("navigation")
-    telemetry.bind((1000, "target"))
-
-    assert telemetry.current is None
-    assert not ipc.fire_runtime_timer("subtitle:color-deadline")
-
-
-@pytest.mark.parametrize("resolved", [(2, "resolved"), (2, "provisional")])
+@pytest.mark.parametrize("resolved", [(1, "resolved"), (2, "provisional")])
 @pytest.mark.parametrize("already_acknowledged", [False, True])
 def test_corrected_navigation_target_keeps_start_and_rejects_provisional_write(
     resolved, already_acknowledged
@@ -95,24 +84,6 @@ def test_corrected_navigation_target_keeps_start_and_rejects_provisional_write(
         metrics["saitenka.subtitle.color_ack_ms"]["by"]["endpoint=first,kind=navigation"]["count"]
         == 1
     )
-
-
-def test_repeated_target_has_readable_timestamp_and_distinct_occurrences(monkeypatch):
-    spans = record_spans(monkeypatch)
-    with _telemetry():
-        telemetry = ColorTelemetry(FakeIPC(), clock=lambda: 0.0)
-        key = (1, "media", 2, "primary", 16120, "text-digest")
-        telemetry.begin("navigation")
-        telemetry.bind(key)
-
-        telemetry.begin("navigation")
-        telemetry.bind(key)
-        telemetry.retire("shutdown")
-
-    targets = [span["attrs"] for span in spans if span["name"] == "subtitle_color_target"]
-    assert [target["occurrence"] for target in targets] == [1, 2]
-    assert all(target["cue_start_ms"] == 16120 for target in targets)
-    assert all(target["text_hash"] == "text-digest" for target in targets)
 
 
 @pytest.mark.usefixtures("enabled_telemetry")

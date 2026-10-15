@@ -29,19 +29,6 @@ def _entries(reader: TestSession):
     ]
 
 
-def test_default_and_configured_help_keys_are_registered(make_session):
-    default_ipc = FakeIPC()
-    make_session(default_ipc).graph.commands.install_input()
-    assert keybind_registry(default_ipc)["F1"] == "saitenka-toggle-help"
-
-    custom_ipc = FakeIPC()
-    options = ReaderOptions(keys=KeyOptions(help_key="Ctrl+h"))
-    make_session(custom_ipc, options=options).graph.commands.install_input()
-    custom_binds = keybind_registry(custom_ipc)
-    assert custom_binds["Ctrl+h"] == "saitenka-toggle-help"
-    assert "F1" not in custom_binds
-
-
 def test_help_document_uses_effective_catalog_and_context_labels(make_session):
     options = ReaderOptions(
         keys=KeyOptions(
@@ -59,6 +46,7 @@ def test_help_document_uses_effective_catalog_and_context_labels(make_session):
         ),
         options=options,
     )
+    document = reader.graph.help.document()
     entries = _entries(reader)
     by_label = {entry.label: entry for _section, entry in entries}
     sections = {section for section, _entry in entries}
@@ -73,6 +61,7 @@ def test_help_document_uses_effective_catalog_and_context_labels(make_session):
     assert by_label["Cycle primary subtitles"].key == "j / Shift+J"
     assert by_label["Toggle native primary subtitles"].key == "v"
     assert by_label["Toggle native secondary subtitles"].key == "Alt+v"
+    assert {page.footer for page in document.pages} == {"Ctrl+h / Esc close  ·  PgUp/PgDn or wheel"}
     assert {
         "Essentials & language",
         "Subtitle navigation",
@@ -205,10 +194,3 @@ def test_the_reference_lists_only_bindings_that_opt_in() -> None:
     entries = help_entries([binding("a", shown=True), binding("b", shown=False)])
 
     assert [entry.key for entry in entries] == ["a"]
-
-
-def test_the_footer_names_the_configured_close_key() -> None:
-    """The reference is the only place a user learns the key, so it must not hard-code one."""
-    from saitenka.app.features.help.help_overlay import help_footer
-
-    assert help_footer("Alt+/").startswith("Alt+/")

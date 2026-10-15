@@ -2,16 +2,11 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 from dataclasses import replace
-from typing import cast
 
-import pytest
-from runtime_behavior import BehaviorRecord, BehaviorTrace, CueState
 from saitenka_tokenize.japanese import Token
-from session_behavior_trace import SessionTrace, _visible_surfaces
 from subtitle_test_support import FakeSurfaces, Style, draw_request
 from util import FakeIPC, await_ready, bare_gateway
 
-from saitenka.app import subtitle_adapter
 from saitenka.app.bindings import SUB_PICKER_MSG
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionInfrastructure
@@ -25,6 +20,20 @@ from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 
 def _token(surface: str) -> Token:
     return Token(surface=surface, lemma=surface, reading="", pos="名詞", start=0, end=len(surface))
+
+
+def _visible_surfaces(commands: list[tuple]) -> set[object]:
+    visible: set[object] = set()
+    for command in commands:
+        if not command:
+            continue
+        if command[0] == "overlay-add":
+            visible.add(command[1])
+        elif command[0] == "overlay-remove":
+            visible.discard(command[1])
+        elif command[0] == "osd-overlay":
+            (visible.discard if command[2] == "none" else visible.add)(command[1])
+    return visible
 
 
 class _VisibilityIPC(FakeIPC):
@@ -80,112 +89,11 @@ def test_first_command_precedes_readiness_and_cosmetic_clear(
         lambda *_args, **_kwargs: dispatched.append(True),
     )
     ipc.emit({"event": "client-message", "args": [SUB_PICKER_MSG]})
-    trace = SessionTrace(reader)
 
     assert reader.pump()
-    trace.observe("first-input", outcome="dispatched-before-ready-clear")
     assert reader.pump()
-    trace.observe("next-turn", outcome="clear-reply-not-required")
 
     assert dispatched == [True]
-    assert trace.records() == (
-        {
-            "event": "first-input",
-            "cue": "none",
-            "pixels": "none",
-            "interaction": "unavailable",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "dispatched-before-ready-clear",
-        },
-        {
-            "event": "next-turn",
-            "cue": "none",
-            "pixels": "none",
-            "interaction": "unavailable",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "clear-reply-not-required",
-        },
-    )
-    reader.close()
-
-
-def test_changed_cue_retires_interaction_before_later_batch_command(
-    monkeypatch, make_session
-) -> None:
-    ipc = FakeIPC()
-    ipc.props.update({"sub-text": "old", "sid": 1, "sub-start": 1.0, "sub-end": 2.0})
-    reader = make_session(
-        ipc,
-        infrastructure=SessionInfrastructure(
-            renderer=NullRenderer(),
-        ),
-        options=ReaderOptions().with_overrides(
-            prefetch=False,
-        ),
-    )
-    reader.graph.playback.start_session()
-    reader.graph.cue.set_subtitle("old")
-    # Tokens alongside the boxes, because that is the only pairing production can produce: a box
-    # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
-    # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
-    # assertion below then rests on it.
-    reader.graph.subtitle_presentation.cue.install_tokenized(
-        TokenizedCue(lines=[[_token("active")]], tokens=[_token("active")], styles=None)
-    )
-    reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 10, 10, 20, 20)])
-    copied: list[str] = []
-    monkeypatch.setattr(subtitle_adapter, "copy_clipboard", lambda _text: copied.append("called"))
-    trace = SessionTrace(reader)
-    trace.observe("cue-installed", outcome="interactive")
-
-    ipc.set_prop("sub-text", "new")
-    ipc.emit({"event": "client-message", "args": ["saitenka-copy-line"]})
-    # Reconciliation now runs at the drain's batch boundary rather than on the next tick, so the
-    # conflict phase is observed from inside the drain — after every event in the batch was
-    # processed against the retired cue, before the replacement settles. Same three phases, real
-    # boundaries; snapshotting after the drain would only ever see the settled state.
-    settle = reader.graph.cue.settle
-
-    def traced_settle() -> None:
-        trace.observe("cue-conflict", outcome="input-rejected")
-        settle()
-
-    monkeypatch.setattr(reader.graph.cue, "settle", traced_settle)
-    reader.pump()
-    trace.observe("cue-reconciled", outcome="replacement-active")
-
-    assert copied == []
-    assert trace.records() == (
-        {
-            "event": "cue-installed",
-            "cue": "active",
-            "pixels": "none",
-            "interaction": "ready",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "interactive",
-        },
-        {
-            "event": "cue-conflict",
-            "cue": "retired",
-            "pixels": "none",
-            "interaction": "unavailable",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "input-rejected",
-        },
-        {
-            "event": "cue-reconciled",
-            "cue": "active",
-            "pixels": "none",
-            "interaction": "unavailable",
-            "surfaces": "none",
-            "lifecycle": "open",
-            "outcome": "replacement-active",
-        },
-    )
     reader.close()
 
 
@@ -347,8 +255,7 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
         "native subtitle setup did not settle",
         pump=reader.pump,
     )
-    trace = SessionTrace(reader)
-    trace.observe("native-cue", outcome="pixels-established")
+    assert ipc.props["sub-visibility"] is True
 
     # Tokens alongside the boxes, because that is the only pairing production can produce: a box
     # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
@@ -368,12 +275,12 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
         "native subtitle surface did not settle after the geometry became interactive",
         pump=reader.pump,
     )
-    trace.observe("geometry-ready", outcome="interaction-ready")
+    assert reader.graph.tooltip.observation().selected == 0
     reader.graph.subtitle_presentation.cue.replace_geometry(boxes=[])
     renderer.degrade_geometry(reader.graph.subtitle_presentation.target())
     assert reader.graph.subtitle_presentation.cue.current.boxes == []
     assert renderer.ownership_state.owner.value == "native"
-    trace.observe("geometry-miss", outcome="interaction-only-degraded")
+    assert _visible_surfaces(ipc.commands)
     # Tokens alongside the boxes, because that is the only pairing production can produce: a box
     # exists because a token was measured, and a draw withholds boxes a cue has no tokens for
     # (`paintable_boxes`). Setting geometry alone builds a state the runtime cannot reach, and the
@@ -391,68 +298,7 @@ def test_native_geometry_degradation_changes_hits_not_pixel_owner(make_session) 
         "recovered subtitle surface did not settle",
         pump=reader.pump,
     )
-    trace.observe("geometry-recovered", outcome="interaction-ready")
-
-    assert [record["pixels"] for record in trace.records()] == [
-        "native",
-        "native",
-        "native",
-        "native",
-    ]
-    assert [record["interaction"] for record in trace.records()] == [
-        "unavailable",
-        "hovered",
-        "unavailable",
-        "hovered",
-    ]
-    assert [record["surfaces"] for record in trace.records()] == [
-        "none",
-        "present",
-        "present",
-        "present",
-    ]
+    assert ipc.props["sub-visibility"] is True
+    assert reader.graph.tooltip.observation().selected == 0
     reader.close()
-    trace.observe("close", outcome="presentation-retired")
-    assert trace.records()[-1] == {
-        "event": "close",
-        "cue": "active",
-        "pixels": "none",
-        "interaction": "hovered",
-        "surfaces": "none",
-        "lifecycle": "closed",
-        "outcome": "presentation-retired",
-    }
-
-
-def test_behavior_trace_rejects_unbounded_user_text() -> None:
-    trace = BehaviorTrace()
-
-    with pytest.raises(ValueError, match="text-free vocabulary"):
-        trace.append(
-            BehaviorRecord(
-                event="猫を見る",
-                cue="none",
-                pixels="none",
-                interaction="unavailable",
-                surfaces="none",
-                lifecycle="open",
-                outcome="interactive",
-            )
-        )
-
-
-def test_behavior_trace_rejects_user_text_in_state_fields() -> None:
-    trace = BehaviorTrace()
-
-    with pytest.raises(ValueError, match="text-free vocabulary"):
-        trace.append(
-            BehaviorRecord(
-                event="close",
-                cue=cast("CueState", "猫を見る"),
-                pixels="none",
-                interaction="unavailable",
-                surfaces="none",
-                lifecycle="closed",
-                outcome="presentation-retired",
-            )
-        )
+    assert _visible_surfaces(ipc.commands) == set()

@@ -44,7 +44,12 @@ def test_mining_built_when_anki_up(monkeypatch):
     )
     assert anki == "ANKI"
     assert mine_conf.deck == "Saitenka::Mining" and mine_conf.model == "Lapis"
-    assert mine_conf.normalize_audio is False  # off unless [mine].normalize_audio is set
+    assert (
+        mine_conf.normalize_audio,
+        mine_conf.animated.enabled,
+        mine_conf.animated.height,
+        mine_conf.animated.fmt,
+    ) == (False, False, 480, "webp")
 
 
 def test_mining_threads_normalize_audio_flag(monkeypatch):
@@ -69,17 +74,6 @@ def test_mining_threads_animated_screenshot_and_quality_knobs(monkeypatch):
     assert (
         mine_conf.animated.height == 720 and mine_conf.animated.fps == 15
     )  # storage↔quality levers
-
-
-def test_mining_animated_screenshot_off_by_default(monkeypatch):
-    import saitenka.app.anki as anki_mod
-
-    monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
-    _, _, mine_conf, _ = reader_deps.build_reader_deps(
-        {"mine": {"deck": "D", "model": "Lapis"}}, color=False
-    )
-    assert mine_conf.animated.enabled is False
-    assert mine_conf.animated.height == 480 and mine_conf.animated.fmt == "webp"
 
 
 def test_mining_reads_field_map_and_card_kind_from_config(monkeypatch):
@@ -139,20 +133,17 @@ def test_mining_validation_drops_field_absent_from_note_type(monkeypatch):
 
 
 def test_color_builds_scorer_even_without_known(monkeypatch):
-    import saitenka_wordstate as wordstate_mod
-    import saitenka_wordstate.known as wl
+    from saitenka_dict import JlptDict
+    from saitenka_tokenize.japanese import Token
 
     import saitenka.app.dict_meta as dm
 
-    monkeypatch.setattr(
-        wl.KnownWords, "from_set", staticmethod(lambda words: f"known:{len(words)}")
-    )
-    monkeypatch.setattr(dm, "load_jlpt", lambda _db: "JLPT")
-    monkeypatch.setattr(
-        wordstate_mod, "Scorer", lambda known, jlpt, **_kw: {"known": known, "jlpt": jlpt}
-    )
+    monkeypatch.setattr(dm, "load_jlpt", lambda _db: JlptDict({"本": "N5"}))
+
     scorer, _, _, _ = reader_deps.build_reader_deps({}, color=True)
-    assert scorer.scorer == {"known": "known:0", "jlpt": "JLPT"}
+
+    token = Token("本", "本", "ほん", "名詞", 0, 1)
+    assert scorer.score_line([token])[0].tag == "base/jlpt-N5"
 
 
 def test_dict_set_built_from_db_titles_and_warns_on_missing(tmp_path, capsys):
@@ -205,95 +196,49 @@ def test_anki_launch_is_fire_and_forget_off_the_critical_path(monkeypatch):
     monkeypatch.setattr(anki_mod, "anki_reachable", lambda *_a, **_k: False)  # Anki not up at build
     launched = []
     monkeypatch.setattr(anki_mod, "launch_anki", lambda: launched.append(True) or True)
-    waited = []
-    monkeypatch.setattr(
-        anki_mod, "wait_until_anki_up", lambda *_a, **_k: waited.append(True) or True
-    )
     monkeypatch.setattr(anki_mod, "Anki", lambda: "ANKI")
 
     _, anki, mine_conf, _ = reader_deps.build_reader_deps(
         {"mine": {"deck": "D", "model": "M"}}, color=False
     )
     assert launched == [True]  # Anki was kicked off...
-    assert waited == []  # ...but the build never blocked polling for it
     assert anki == "ANKI" and mine_conf is not None
 
 
-def test_known_falls_back_when_ankiconnect_raises(monkeypatch):
-    import saitenka_wordstate as wordstate_mod
+@pytest.mark.parametrize("error", [ConnectionError, anki_mod._AnkiRetryable])
+def test_known_falls_back_when_ankiconnect_raises(monkeypatch, error):
     import saitenka_wordstate.known as wl
+    from saitenka_tokenize.japanese import Token
 
     import saitenka.app.dict_meta as dm
 
     def boom(*_a, **_k):
-        raise ConnectionError("down")
-
-    # cache-first path: empty cache → miss → the blocking refresh_known_cache raises (Anki down)
-    monkeypatch.setattr(wl, "refresh_known_cache", boom)
-    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
-    monkeypatch.setattr(dm, "load_jlpt", lambda _db: "JLPT")
-    monkeypatch.setattr(wordstate_mod, "Scorer", lambda known, **_kw: {"known": known})
-    scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
-    assert scorer.scorer == {"known": "empty-known"}  # degraded, not crashed
-
-
-def test_known_falls_back_on_ankiretryable_not_just_oserror(monkeypatch):
-    # Regression: an expected-down Anki raises `_AnkiRetryable` (an AnkiError, NOT an OSError). The
-    # cache-miss catch used to omit AnkiError, so it escaped to the top-level dep loader and surfaced as
-    # a full startup traceback. It must degrade to the fallback set exactly like a connection error.
-    import saitenka_wordstate as wordstate_mod
-    import saitenka_wordstate.known as wl
-
-    import saitenka.app.dict_meta as dm
-    from saitenka.app.anki import _AnkiRetryable
-
-    def boom(*_a, **_k):
-        raise _AnkiRetryable("AnkiConnect unreachable at http://127.0.0.1:8765")
+        raise error("AnkiConnect down")
 
     monkeypatch.setattr(wl, "refresh_known_cache", boom)
-    monkeypatch.setattr(wl.KnownWords, "from_set", staticmethod(lambda _words: "empty-known"))
-    monkeypatch.setattr(dm, "load_jlpt", lambda _db: "JLPT")
-    monkeypatch.setattr(wordstate_mod, "Scorer", lambda known, **_kw: {"known": known})
+    monkeypatch.setattr(dm, "load_jlpt", lambda _db: None)
 
     scorer, _, _, _ = reader_deps.build_reader_deps({"known": {"Deck": ["Expression"]}}, color=True)
 
-    assert scorer.scorer == {"known": "empty-known"}  # caught, degraded — no traceback escapes
+    token = Token("unseen", "unseen", "", "名詞", 0, 6)
+    assert scorer.score_line([token])[0].tag == "base"
 
 
-def test_run_path_language_is_threaded_not_re_resolved(monkeypatch):
-    # Regression: the run path rebuilds a minimal effective_cfg WITHOUT the [profiles.*] table, so
-    # build_reader_deps must use the explicitly-passed language — re-resolving from that cfg would
-    # wrongly return the JP default and silently no-op second-language deinflection (French tooltips
-    # showed only the "non-lemma" redirect, never the base word).
-    seen = {}
+@pytest.mark.parametrize("source", ["run", "attach"])
+def test_dependency_dictionary_uses_the_selected_language(tmp_path, source):
+    import dicthelp
+    from saitenka_tokenize.japanese import Token
 
-    def _spy(_db, _d, _f, _p, language="jp"):
-        seen["language"] = language
-        return None, None
+    archive = dicthelp.term_zip(tmp_path / "d.zip", "X", [["present", "", ["definition"]]])
+    dicthelp.db().import_zip(archive, imported_at=dicthelp.AT)
+    cfg = {"dicts": ["X"]}
+    if source == "attach":
+        cfg.update(active_profile="fr", profiles={"fr": {"language": "fr", "tokenizer": "latin"}})
 
-    monkeypatch.setattr(reader_deps, "_build_dict_set", _spy)
-    eff = {
-        "dicts": ["X"],
-        "freq": [],
-        "pitch": [],
-    }  # no active_profile / profiles → would resolve JP
-    reader_deps.build_reader_deps(eff, color=False, mine=False, language="fr")
-    assert seen["language"] == "fr"
+    _, _, _, dictionaries = reader_deps.build_reader_deps(
+        cfg, color=False, mine=False, language="fr" if source == "run" else None
+    )
 
-
-def test_attach_path_resolves_language_from_the_profile_when_unset(monkeypatch):
-    # attach passes the full cfg and no explicit language, so it must resolve from the active profile.
-    seen = {}
-
-    def _spy(_db, _d, _f, _p, language="jp"):
-        seen["language"] = language
-        return None, None
-
-    monkeypatch.setattr(reader_deps, "_build_dict_set", _spy)
-    cfg = {
-        "dicts": ["X"],
-        "active_profile": "fr",
-        "profiles": {"fr": {"language": "fr", "tokenizer": "latin"}},
-    }
-    reader_deps.build_reader_deps(cfg, color=False, mine=False)
-    assert seen["language"] == "fr"
+    token = Token("missing", "missing", "", "WORD", 0, 7)
+    entry = dictionaries.entry_for(token)
+    assert (dictionaries.language, entry.defs[0].content[0]) == ("fr", "(not found in dictionary)")

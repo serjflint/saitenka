@@ -5,6 +5,7 @@ import json
 import zipfile
 
 import dicthelp
+import pytest
 from driver import Driver
 from saitenka_tokenize.japanese import Token
 from session_builder import build_session
@@ -195,29 +196,27 @@ def test_stroke_order_defaults_on_and_threads_to_the_reader(tmp_path, make_sessi
 # --- `k` key: open / cycle the hovered word's kanji ------------------------------------------------
 
 
-def _kanji_reader(tmp_path):
+def _kanji_reader(tmp_path, word="読本"):
     ds = _fixture_ds(tmp_path)
     r = build_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     r.graph.subtitle_presentation.cue.replace_tokenized(
-        tokens=[Token("読本", "読本", "とくほん", "名詞", 0, 2)]
+        tokens=[Token(word, word, "とくほん", "名詞", 0, len(word))]
     )
     r.graph.subtitle_presentation.cue.replace_geometry(boxes=[WordBox(0, 100, 300, 40, 40)])
     return r
 
 
-def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path):
-    r = _kanji_reader(tmp_path)
+@pytest.mark.parametrize("word", ["読本", "読本読"])
+def test_k_key_opens_first_kanji_and_cycles(monkeypatch, tmp_path, word):
+    r = _kanji_reader(tmp_path, word)
     monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
     r.graph.tooltip.select(0)
-    r.command("saitenka-kanji")
-    assert r.graph.tooltip.hover_view().nested.shown
-    assert r.graph.tooltip.hover_view().nested.word == "読"  # first kanji of the hovered word
-    r.command("saitenka-kanji")
-    assert r.graph.tooltip.hover_view().nested.word == "本"  # repeat cycles to the next kanji
-    r.command("saitenka-kanji")
-    assert r.graph.tooltip.hover_view().nested.word == "読"  # …and wraps around
+    for expected in word + word[:2]:
+        r.command("saitenka-kanji")
+        assert r.graph.tooltip.hover_view().nested.shown
+        assert r.graph.tooltip.hover_view().nested.word == expected
 
 
 def test_k_key_bound_globally(make_session):

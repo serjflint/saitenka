@@ -5,23 +5,28 @@ from __future__ import annotations
 import json
 
 import ankiconnect_client.transport as anki_transport
+import pytest
 
 from saitenka.app import anki
 
 
-def test_resolve_anki_defaults_to_stock():
-    assert anki.resolve_anki({}) == ("http://127.0.0.1:8765", None)
-
-
-def test_resolve_anki_from_url_and_key():
-    cfg = {"anki": {"url": "http://127.0.0.1:9999", "api_key": "SECRET"}}
-    assert anki.resolve_anki(cfg) == ("http://127.0.0.1:9999", "SECRET")
-
-
-def test_resolve_anki_from_host_and_port():
-    cfg = {"anki": {"host": "127.0.0.1", "port": 8766}}
-    url, key = anki.resolve_anki(cfg)
-    assert url == "http://127.0.0.1:8766" and key is None
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        ({}, ("http://127.0.0.1:8765", None)),
+        (
+            {"anki": {"url": "http://127.0.0.1:9999", "api_key": "SECRET"}},
+            ("http://127.0.0.1:9999", "SECRET"),
+        ),
+        (
+            {"anki": {"host": "127.0.0.1", "port": 8766}},
+            ("http://127.0.0.1:8766", None),
+        ),
+    ],
+    ids=["stock", "url-and-key", "host-and-port"],
+)
+def test_resolve_anki_connection(config, expected):
+    assert anki.resolve_anki(config) == expected
 
 
 def test_anki_client_reads_config_and_injects_key(monkeypatch, tmp_path):
@@ -32,7 +37,7 @@ def test_anki_client_reads_config_and_injects_key(monkeypatch, tmp_path):
 
     class _Resp:
         def read(self):
-            return json.dumps({"result": 6}).encode()
+            return json.dumps({"result": ["Expression"]}).encode()
 
         def __enter__(self):
             return self
@@ -48,6 +53,6 @@ def test_anki_client_reads_config_and_injects_key(monkeypatch, tmp_path):
     monkeypatch.setattr(anki_transport.urllib.request, "urlopen", _fake_urlopen)
     client = anki.Anki()
     assert client.host == "http://127.0.0.1:9001"
-    client._call("version")
+    assert client.model_field_names("Mining") == ["Expression"]
     assert sent["url"] == "http://127.0.0.1:9001"
     assert sent["body"]["key"] == "K"  # apiKey injected into the request body

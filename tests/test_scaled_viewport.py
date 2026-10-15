@@ -64,13 +64,14 @@ def test_native_render_ahead_warms_bands_and_matches_a_cold_composite():
     # pixels.
     cold, total = _panel()
     _warm_1x(cold, total)
-    cold_img = cold.viewport(0, _VH, scale=2.0)
+    ahead_scroll, ahead_h = _VH, 180
+    cold_img = cold.viewport(ahead_scroll, ahead_h, scale=2.0)
 
     warm, wtotal = _panel()
     _warm_1x(warm, wtotal)
-    warm.render_ahead(0, _VH, direction=1, scale=2.0)  # native warm-ahead
-    assert len(warm._scaled_blocks) > 0  # bands landed in the native cache
-    warm_img = warm.viewport(0, _VH, scale=2.0)
+    assert warm.render_ahead(0, _VH, direction=1, scale=2.0) > 0
+    assert warm.native_viewport_warm(ahead_scroll, ahead_h, 2.0)
+    warm_img = warm.viewport(ahead_scroll, ahead_h, scale=2.0)
     assert np.array_equal(to_bgra_array(cold_img), to_bgra_array(warm_img))
 
 

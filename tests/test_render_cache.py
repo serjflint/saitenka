@@ -147,52 +147,18 @@ def _entry(n_defs: int = 20) -> Entry:
     )
 
 
-def test_put_then_get_returns_byte_identical_view(tmp_path):
-    cache = _cache(tmp_path)
-    arr = _view()
-    cache.put(SIG, "kakeru", 260, 260, 4000, arr)
-    got = cache.get(SIG, "kakeru", 260, 260)
-    assert got is not None
-    assert got.view_h == 260 and got.overscan == 260 and got.full_h == 4000
-    assert np.array_equal(got.array, arr)
-
-
-def test_peek_returns_view_and_full_h_regardless_of_geometry(tmp_path):
-    # The direct-paint path peeks by key alone (it doesn't know view_h until it has full_h): the row
-    # comes back with the stored full_h for placement + scrollbar.
-    cache = _cache(tmp_path)
-    cache.put(SIG, "kakeru", 260, 260, 4000, _view())
-    got = cache.peek(SIG, "kakeru")
-    assert got is not None and got.full_h == 4000 and got.array.shape == (260, WIDTH, 4)
-    assert cache.peek(SIG, "absent") is None
-
-
-def test_get_misses_on_absent_key(tmp_path):
-    cache = _cache(tmp_path)
-    assert cache.get(SIG, "never-stored", 260, 260) is None
-
-
-def test_get_misses_on_geometry_mismatch(tmp_path):
-    # A different full-height → different view_h/overscan at show time: must miss (the stored pixels are
-    # for the wrong viewport), so the caller live-renders instead of installing wrong-sized pixels.
-    cache = _cache(tmp_path)
-    cache.put(SIG, "kakeru", 260, 260, 4000, _view())
-    assert cache.get(SIG, "kakeru", 300, 300) is None
-    assert cache.get(SIG, "kakeru", 260, 200) is None
-
-
 def test_get_misses_across_config_partitions(tmp_path):
     cache = _cache(tmp_path)
     cache.put(SIG, "kakeru", 260, 260, 4000, _view())
-    assert cache.get("v1|w640|c432|test-dicts", "kakeru", 260, 260) is None
+    assert cache.peek_compressed("v1|w640|c432|test-dicts", "kakeru") is None
 
 
 def test_put_is_idempotent_last_write_wins(tmp_path):
     cache = _cache(tmp_path)
     cache.put(SIG, "kakeru", 260, 260, 4000, _view(fill=1))
     cache.put(SIG, "kakeru", 260, 260, 4000, _view(fill=9))
-    got = cache.get(SIG, "kakeru", 260, 260)
-    assert got is not None and int(got.array[0, 0, 0]) == 9
+    got = cache.peek_compressed(SIG, "kakeru")
+    assert got is not None and int(got.inflate().array[0, 0, 0]) == 9
     assert cache.stats()[0] == 1  # replaced, not duplicated
 
 
@@ -215,13 +181,11 @@ def test_enforce_limits_evicts_oldest_inserted_offline(tmp_path):
     cache.put(SIG, "b", 260, 260, 4000, _view(fill=2))
     cache.max_bytes = cache.stats()[1] + 1  # room for ~the two present, but not a third
     cache.put(SIG, "c", 260, 260, 4000, _view(fill=3))
-    cache.get(SIG, "a", 260, 260)  # a read does NOT save 'a' anymore (recency untracked)
+    cache.peek_compressed(SIG, "a")  # a read does NOT save 'a' anymore (recency untracked)
     cache.enforce_limits()
-    assert (
-        cache.get(SIG, "a", 260, 260) is None
-    )  # oldest INSERTED — evicted despite the recent read
-    assert cache.get(SIG, "b", 260, 260) is not None
-    assert cache.get(SIG, "c", 260, 260) is not None
+    assert cache.peek_compressed(SIG, "a") is None  # oldest despite the recent read
+    assert cache.peek_compressed(SIG, "b") is not None
+    assert cache.peek_compressed(SIG, "c") is not None
 
 
 def test_protected_prewarm_rows_evict_last(tmp_path):
@@ -233,9 +197,9 @@ def test_protected_prewarm_rows_evict_last(tmp_path):
     cache.max_bytes = cache.stats()[1] + 1  # room for ~two, not three
     cache.put(SIG, "rare2", 260, 260, 4000, _view(fill=3))  # live: no trim here
     cache.enforce_limits()  # offline: must evict rare1 (unprotected, oldest), NOT popular
-    assert cache.get(SIG, "popular", 260, 260) is not None  # protected — survived
-    assert cache.get(SIG, "rare1", 260, 260) is None  # unprotected + oldest — evicted
-    assert cache.get(SIG, "rare2", 260, 260) is not None
+    assert cache.peek_compressed(SIG, "popular") is not None  # protected — survived
+    assert cache.peek_compressed(SIG, "rare1") is None  # unprotected + oldest — evicted
+    assert cache.peek_compressed(SIG, "rare2") is not None
 
 
 def test_config_signature_varies_with_width_and_dicts():
@@ -264,28 +228,6 @@ def test_dict_set_signature_tracks_titles_and_db_stamp(tmp_path):
     assert dict_set_signature(ds) != sig
 
 
-def test_panel_store_then_fresh_panel_loads_zero_raster(tmp_path):
-    # End-to-end: a prefetch-worker precompose stores a cost-gated head; a fresh Panel (cold, other
-    # session) loads it and the show's first viewport is a zero-raster copy of the same pixels.
-    cache = _cache(tmp_path)
-    rows = panel_rows(_entry(), WIDTH)
-    cap = 260
-    writer = Panel.from_rows(rows, WIDTH, "かける")
-    writer.render_head(cap)
-    writer.precompose_head(cap, cache=cache, config_sig=SIG, content_key="kakeru", min_height=0)
-    ref = writer.viewport(0, min(writer.full_height, cap), overscan=min(writer.full_height, cap))
-
-    reader = Panel.from_rows(panel_rows(_entry(), WIDTH), WIDTH, "かける")
-    reader.render_head(cap)
-    assert reader.load_precomposed_head(cap, cache, SIG, "kakeru") is True
-    vh = min(reader.full_height, cap)
-    warm = reader.viewport(0, vh, overscan=vh)
-    assert reader.last_frame_rasters == 0  # served from the disk-seeded first view
-    assert np.array_equal(
-        warm, ref
-    )  # Panel.viewport returns premul-BGRA; same pixels either session
-
-
 def test_cost_gate_skips_short_heads(tmp_path):
     # A head shorter than min_height (the common, cheap-cold case) is NOT persisted — the cache stays
     # bounded to the pathological tall tail.
@@ -298,13 +240,6 @@ def test_cost_gate_skips_short_heads(tmp_path):
         cap, cache=cache, config_sig=SIG, content_key="short", min_height=tall_gate
     )
     assert cache.stats()[0] == 0  # nothing stored
-
-
-def test_load_misses_when_never_stored(tmp_path):
-    cache = _cache(tmp_path)
-    panel = Panel.from_rows(panel_rows(_entry(), WIDTH), WIDTH, "かける")
-    panel.render_head(260)
-    assert panel.load_precomposed_head(260, cache, SIG, "absent") is False
 
 
 class _TallDS:
@@ -742,8 +677,7 @@ def test_content_key_is_stable_and_distinguishing():
 
 
 def test_reads_never_write_back(tmp_path):
-    # peek/get/peek_compressed are pure reads now (no LRU used_seq bump) — the main-thread hover path
-    # must not write. Prove used_seq is unchanged after a batch of reads.
+    # The worker's compressed disk read is pure (no LRU used_seq bump).
     import sqlite3
 
     cache = _cache(tmp_path)
@@ -757,13 +691,11 @@ def test_reads_never_write_back(tmp_path):
             conn.close()
 
     before = used_seq()
-    cache.peek(SIG, "k")
-    cache.get(SIG, "k", 260, 260)
     cache.peek_compressed(SIG, "k")
     assert used_seq() == before  # no read bumped recency
 
 
-def test_peek_compressed_round_trips_and_matches_get(tmp_path):
+def test_peek_compressed_round_trips_and_misses_when_absent(tmp_path):
     cache = _cache(tmp_path)
     arr = _view(fill=5)
     cache.put(SIG, "k", 260, 260, 4000, arr)
@@ -858,7 +790,6 @@ def test_preloop_demo_hover_is_ready_with_a_real_runtime_gateway(tmp_path, monke
     try:
         r.graph.tooltip.prepare_hover_blocking(i)
         assert r.graph.tooltip.surface_state().view.state is not None
-        assert r.graph.tooltip.surface_state().view.state is not None
     finally:
         r.close()
         gateway.close()
@@ -894,6 +825,8 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
         protected=True,
     )
     assert cache.stats()[0] == 1  # persisted to disk
+    view_h = min(st.full_height, cap)
+    expected = st.viewport(0, view_h, overscan=view_h)
 
     r.graph.tooltip.surface_state().panel_cache.clear()  # simulate the in-memory panel evicted
     fresh = r.graph.tooltip.panel_for(tok, inflected, min_h=cap, mined=mined)
@@ -907,6 +840,9 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
         cap=cap,
     )
     assert fresh.windowed.first_view is not None  # seeded from disk on the worker
+    actual = fresh.viewport(0, view_h, overscan=view_h)
+    assert fresh.last_frame_rasters == 0
+    assert np.array_equal(actual, expected)
     assert r.graph.tooltip_preparation.cache.memory_entries == 1
     assert (
         r.graph.tooltip_preparation.cache.peek(
@@ -915,6 +851,37 @@ def test_worker_seed_head_hydrates_tier2_from_disk_no_raster(tmp_path, monkeypat
         )
         is not None
     )  # main hits RAM
+
+
+@pytest.mark.parametrize("mismatch", ["view_h", "overscan"])
+def test_worker_seed_head_rejects_incompatible_disk_geometry(tmp_path, monkeypatch, mismatch):
+    r, cache = _tall_reader(tmp_path, monkeypatch)
+    _i, tok, inflected, mined = _first_content(r)
+    cap = r.graph.tooltip.scale().cap
+    panel = r.graph.tooltip.panel_for(tok, inflected, min_h=cap, mined=mined)
+    view_h = min(panel.full_height, cap)
+    stored_view_h = view_h + (mismatch == "view_h")
+    stored_overscan = view_h + (mismatch == "overscan")
+    key = r.graph.tooltip.panel_key(tok, inflected, mined=mined)
+    signature = r.graph.tooltip_preparation.cache.signature(r.graph.tooltip.preparation_inputs)
+    cache.put(
+        signature,
+        content_key(key),
+        stored_view_h,
+        stored_overscan,
+        panel.full_height,
+        np.zeros((view_h, r.graph.tooltip.scale().width, 4), dtype=np.uint8),
+    )
+
+    assert not r.graph.tooltip_preparation.cache.worker_seed_head(
+        r.graph.tooltip.preparation_inputs,
+        panel,
+        tok,
+        inflected,
+        mined=mined,
+        cap=cap,
+    )
+    assert panel.windowed.first_view is None
 
 
 def test_cold_miss_defers_showing_nothing_and_enqueues(tmp_path, monkeypatch):
@@ -1079,7 +1046,6 @@ def test_engaged_result_cannot_drive_a_new_hover_job(tmp_path, monkeypatch):
     )
 
     assert r.graph.tooltip.surface_state().view.state is None
-    assert r.graph.tooltip.surface_state().view.state is None
 
 
 # --- nested scan popup: the same tier-3 off-thread treatment (PR A) ------------------------------
@@ -1132,7 +1098,6 @@ def test_nested_no_worker_opens_synchronously(tmp_path, monkeypatch):
         defer=True,
     )
     assert r.graph.tooltip.surface_state().nest.state is not None  # shown synchronously
-    assert r.graph.tooltip.surface_state().nest.state is not None
 
 
 def test_engaged_nested_composes_warms_bands_without_disk(tmp_path, monkeypatch):
@@ -1455,7 +1420,6 @@ def test_the_panel_cache_evicts_the_least_recently_used_entry_at_the_cap():
     cache.setdefault("d", "panel-d")
 
     assert "b" not in cache  # the least recently used went, not the oldest inserted
-    assert {"a", "c", "d"} <= {"a", "c", "d"}
     assert all(k in cache for k in ("a", "c", "d")) and len(cache) == 3
 
 

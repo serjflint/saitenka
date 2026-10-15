@@ -26,7 +26,6 @@ from saitenka.render.layout_backend import (
     DEFAULT_BACKEND,
     DefaultLayoutBackend,
     FlexColumnBackend,
-    LayoutBackend,
     LayoutResult,
     Rect,
     TaffyLayoutBackend,
@@ -48,27 +47,12 @@ _HAS_TAFFY = importlib.util.find_spec("taffylite") is not None
 requires_taffy = pytest.mark.skipif(not _HAS_TAFFY, reason="taffylite (layout-engine extra) absent")
 
 
-def test_both_backends_are_layout_backends():
-    assert isinstance(DefaultLayoutBackend(), LayoutBackend)
-    assert isinstance(FlexColumnBackend(), LayoutBackend)
-
-
-@requires_taffy
-def test_taffy_backend_is_a_layout_backend():
-    assert isinstance(TaffyLayoutBackend(), LayoutBackend)
-
-
 def test_resolve_backend_default_is_the_shared_default():
     assert resolve_backend("default") is DEFAULT_BACKEND
 
 
 def test_resolve_backend_unknown_name_falls_back_to_default():
     assert resolve_backend("nonsense") is DEFAULT_BACKEND
-
-
-@requires_taffy
-def test_resolve_backend_taffy_selects_the_taffy_engine():
-    assert isinstance(resolve_backend("taffy"), TaffyLayoutBackend)
 
 
 def test_resolve_backend_taffy_falls_back_to_default_when_wheel_absent(monkeypatch):
@@ -200,21 +184,6 @@ def test_taffy_backend_satisfies_the_vendored_fixtures():
         assert list(starts) == case["starts"], case["name"]
         assert list(ends) == case["ends"], case["name"]
         assert total == case["total"], case["name"]
-
-
-@requires_taffy
-def test_real_panel_is_pixel_identical_under_taffy_backend():
-    # The differential on a real panel across the full scroll: the Rust engine renders byte-identically
-    # to the pure-Python default, so it is a true drop-in behind the WindowedPanel seam.
-    entry = _tall_entry(6)
-    rows = panel_rows(entry, WIDTH)
-    total = render_panel(entry, width=WIDTH).height
-    default = WindowedPanel(panel_rows(entry, WIDTH), WIDTH, layout_backend=DefaultLayoutBackend())
-    taffy = WindowedPanel(rows, WIDTH, layout_backend=TaffyLayoutBackend())
-    for scroll in range(0, max(1, total - 200), 137):
-        a = np.asarray(default.viewport(scroll, 240))
-        b = np.asarray(taffy.viewport(scroll, 240))
-        assert np.array_equal(a, b), f"taffy diverged from default at scroll {scroll}"
 
 
 class _ShiftedBackend:

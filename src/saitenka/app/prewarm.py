@@ -465,7 +465,7 @@ def _open_build_caches(template, *, atlas_only: bool):
         if cache is None:  # pragma: no cover — open() only fails on a broken cache dir
             raise RuntimeError("could not open the render cache")
     atlas = mask_atlas.MaskAtlas.open(cache_dir() / "mask-atlas.sqlite")
-    fonts.set_mask_atlas(None, atlas)
+    fonts.set_mask_atlas(atlas)
     return cache, atlas
 
 
@@ -608,7 +608,7 @@ def prewarm(
         with ThreadPoolExecutor(max_workers=n_workers) as ex:
             list(ex.map(job.render, terms))
     finally:
-        fonts.set_mask_atlas(None, None)  # clear the process-global write-back handle
+        fonts.set_mask_atlas(None)
 
     rows, nbytes = _finalize_caches(cache, atlas)
     return PrewarmResult(

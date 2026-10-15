@@ -19,7 +19,8 @@ or cosmic-ray property mutant in the usual sense).
     OLD baseline must EXCLUDE the grown test (`--deselect`) or extend-before-add collapses the delta (C3).
   4 concurrency — the grown test ships as a PAIR of PASSING tests: a regression (the guard prevents the
     bug under the forced schedule) + a self-certifying negative control that unguards a throwaway instance
-    and asserts the bug REPRODUCES (`blanket` scripts the interleaving; see tests/test_cache_race.py). The
+    and asserts the bug REPRODUCES (a test-owned cache hook scripts the interleaving; see
+    tests/test_cache_race.py). The
     teeth are the control's own falsifiable assertion — a passing control with a LIVE oracle proves the
     schedule reproduces the bug unguarded (C6). Both pass; arm-2 liveness on the control gives it teeth.
 

@@ -21,8 +21,17 @@ from saitenka_dict.archive import DictionaryArchive
 from saitenka_dict.store import TermSearch
 
 
-def write_dictionary(path, *, root="", title="Core", term="読む", extra_terms=(), malformed=False):
-    with zipfile.ZipFile(path, "w") as archive:
+def write_dictionary(
+    path,
+    *,
+    root="",
+    title="Core",
+    term="読む",
+    extra_terms=(),
+    malformed=False,
+    compression=zipfile.ZIP_STORED,
+):
+    with zipfile.ZipFile(path, "w", compression) as archive:
         archive.writestr(
             root + "index.json",
             json.dumps({"title": title, "format": 3, "revision": "r1"}),
@@ -179,8 +188,8 @@ def test_archive_file_limit_is_enforced(tmp_path):
         DictionaryDatabase(tmp_path / "dictionary.sqlite").import_dictionary(request)
 
 
-def test_import_tolerates_wrong_stored_crc(tmp_path):
-    archive = write_dictionary(tmp_path / "core.zip")
+def test_import_tolerates_wrong_deflated_crc(tmp_path):
+    archive = write_dictionary(tmp_path / "core.zip", compression=zipfile.ZIP_DEFLATED)
     raw = bytearray(archive.read_bytes())
     central = raw.find(b"PK\x01\x02")
     local = raw.find(b"PK\x03\x04")

@@ -130,16 +130,26 @@ def test_timing_repair_only_blocks_when_native_intervals_can_change(repair, over
     )
 
 
-def test_enabling_effective_timing_repair_removes_prepared_color():
+@pytest.mark.parametrize(
+    ("change", "replacement"),
+    [
+        (("options/sub-fix-timing", True), None),
+        (("sub-delay", -5.0), (11120, 16090)),
+    ],
+)
+def test_clock_context_change_removes_stale_interval_before_replacement(change, replacement):
     owner, ipc = consumer()
     ipc.props.update({"options/sub-fix-timing": False, "options/sub-ass-override": "scale"})
     owner.stage(16121, "cat", (1280, 720))
     ipc.commands.clear()
-    ipc.props["options/sub-fix-timing"] = True
+    ipc.props[change[0]] = change[1]
 
     owner.stage(16121, "cat", (1280, 720))
 
-    assert ipc.commands == [("osd-overlay", 2001, "none", "")]
+    expected = [("osd-overlay", 2001, "none", "")]
+    if replacement is not None:
+        expected.append(("osd-overlay-timed", 2001, *replacement, "cat", 1280, 720, 1))
+    assert ipc.commands == expected
 
 
 def test_invalidation_clears_pending_stage_before_slot_can_be_reused():
@@ -209,20 +219,6 @@ def test_closed_consumer_does_not_publish_after_late_capability_reply():
 
     assert not ipc.submitted
     assert not any(c[0] == "osd-overlay-timed" for c in ipc.commands)
-
-
-def test_delay_change_removes_old_interval_before_staging_replacement():
-    owner, ipc = consumer()
-    owner.stage(16121, "colored cue", (1280, 720))
-    ipc.commands.clear()
-    ipc.props["sub-delay"] = -5.0
-
-    owner.stage(16121, "colored cue", (1280, 720))
-
-    assert ipc.commands == [
-        ("osd-overlay", 2001, "none", ""),
-        ("osd-overlay-timed", 2001, 11120, 16090, "colored cue", 1280, 720, 1),
-    ]
 
 
 def test_overlap_later_in_event_declines_whole_interval():

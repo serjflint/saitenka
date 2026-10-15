@@ -77,12 +77,14 @@ def test_snapshot_reports_counter_value():
 
 
 @pytest.mark.usefixtures("registered")
-def test_snapshot_reports_histogram_percentiles():
+def test_snapshot_reports_histogram_summary():
     for ms in (1, 2, 5, 10, 50, 100, 500):
         otel_metrics.render_duration_ms.record(ms)
     snap = otel_metrics.snapshot()
     hist = snap["saitenka.render.duration_ms"]
     assert hist["count"] == 7
+    assert hist["sum"] == 668
+    assert hist["max"] == 500
     assert hist["p50"] is not None
     assert hist["p95"] is not None
     assert hist["p99"] is not None
@@ -129,17 +131,6 @@ def test_instrumented_emit_span_false_still_records_histogram():
 
 
 @pytest.mark.usefixtures("registered")
-def test_snapshot_histogram_reports_exact_max():
-    # p50/p95/p99 are bucket-bound estimates; max is the exact largest sample — the band-size tail
-    # the trace consumer needs, so it's summarized alongside the percentiles.
-    for px in (64, 128, 200, 256):
-        otel_metrics.block_rendered_px.record(px)
-    hist = otel_metrics.snapshot()["saitenka.block_cache.rendered_px"]
-    assert hist["max"] == 256
-    assert hist["count"] == 4
-
-
-@pytest.mark.usefixtures("registered")
 def test_snapshot_reports_gil_enabled_gauge():
     snap = otel_metrics.snapshot()
     assert snap["saitenka.runtime.gil_enabled"]["value"] in {0, 1}
@@ -172,10 +163,6 @@ def test_unregister_resets_instruments_to_none():
     assert otel_metrics.snapshot() == {}
 
 
-def test_percentiles_helper_on_empty_histogram():
-    assert otel_metrics._percentiles([], [], 0.0, 0) == {"p50": None, "p95": None, "p99": None}
-
-
 def test_timed_is_a_noop_when_histogram_is_none():
     """Every Stage 8 call site wraps with `otel_metrics.timed(otel_metrics.<hist>)` unconditionally
     — this must be safe when telemetry is disabled (the module attribute is None)."""
@@ -189,8 +176,9 @@ def test_timed_is_a_noop_when_histogram_is_none():
 def test_timed_records_duration_and_attributes():
     with otel_metrics.timed(otel_metrics.dict_sql_duration_ms, dict="Jitendex"):
         pass
-    snap = otel_metrics.snapshot()
-    assert snap["saitenka.dict_sql.duration_ms"]["count"] == 1
+    hist = otel_metrics.snapshot()["saitenka.dict_sql.duration_ms"]
+    assert hist["count"] == 1
+    assert set(hist["by"]) == {"dict=Jitendex"}
 
 
 @pytest.mark.usefixtures("registered")
@@ -206,10 +194,16 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     directly, which crashed on any install without the `observability` extra (found via live
     end-to-end testing — the dev/test env always has the extra via `[full]`, so no test caught it).
     traced() must run the wrapped block regardless of whether opentelemetry is importable."""
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
     real_import = __import__
+    attempts = 0
 
     def _fake_import(name, *a, **kw):
+        nonlocal attempts
         if name.startswith("opentelemetry"):
+            attempts += 1
             raise ImportError(name)
         return real_import(name, *a, **kw)
 
@@ -221,15 +215,24 @@ def test_traced_runs_the_wrapped_block_when_opentelemetry_is_unimportable(monkey
     ran = False
     with otel_metrics.traced("test-span"):
         ran = True
-    assert ran
+    with otel_metrics.traced("cached-noop"):
+        ran = ran and True
+    assert ran and attempts == 1
 
 
-@pytest.mark.usefixtures("registered")
-def test_traced_creates_a_real_span_when_telemetry_is_configured():
-    with otel_metrics.traced("my-span", foo="bar"):
+def test_traced_lazily_resolves_an_available_trace_module(monkeypatch):
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
+    fake = _FakeTraceModule()
+    monkeypatch.setattr(trace, "get_tracer", fake.get_tracer)
+    monkeypatch.setattr(otel_metrics, "_trace_available", None)
+    monkeypatch.setattr(otel_metrics, "_trace_module", None)
+
+    with otel_metrics.traced("resolved"):
         pass
-    # the fixture's provider has no exporter attached — this just proves start_as_current_span
-    # didn't raise and the block ran; span content is covered end-to-end in test_telemetry.py.
+
+    assert fake.tracer.spans
 
 
 class _FakeSpan:
@@ -268,10 +271,12 @@ class _FakeTraceModule:
         return self.tracer
 
 
-def test_traced_stamps_cpu_ms_so_wall_vs_cpu_reveals_a_stall(monkeypatch):
+def test_traced_stamps_cpu_ms_and_native_thread_id(monkeypatch):
     """wall (the span dur) ≫ cpu_ms ⇒ the thread was descheduled (GIL contention / lock / I/O),
     not working — the one signal that told genuinely-CPU-bound freq load apart from GIL-stalled
     startup. A fake trace module keeps this off OTel's set-once global provider."""
+    import threading
+
     fake = _FakeTraceModule()
     from telemetry_helpers import enable_span_gate
 
@@ -283,25 +288,7 @@ def test_traced_stamps_cpu_ms_so_wall_vs_cpu_reveals_a_stall(monkeypatch):
     attrs = fake.tracer.spans[0].attributes
     assert "cpu_ms" in attrs
     assert isinstance(attrs["cpu_ms"], float)
-
-
-def test_traced_stamps_the_real_native_thread_id(monkeypatch):
-    """otel_export._span_to_ctf_event reads this attribute back for the CTF "tid" field — without
-    it, independently-started spans (no parent-child relationship, so different random trace_ids)
-    scatter across a different synthetic "thread" track each in Perfetto instead of grouping by the
-    actual Python thread that ran them. A fake trace module here keeps this deterministic — no
-    dependency on OTel's global-provider-set-once ordering across the test session."""
-    import threading
-
-    fake = _FakeTraceModule()
-    from telemetry_helpers import enable_span_gate
-
-    enable_span_gate(monkeypatch)
-    monkeypatch.setattr(otel_metrics, "_trace_available", True)
-    monkeypatch.setattr(otel_metrics, "_trace_module", fake)
-    with otel_metrics.traced("x"):
-        pass
-    assert fake.tracer.spans[0].attributes["thread.id"] == threading.get_native_id()
+    assert attrs["thread.id"] == threading.get_native_id()
 
 
 def test_instrumented_is_a_noop_when_histogram_is_none():
@@ -314,19 +301,29 @@ def test_instrumented_is_a_noop_when_histogram_is_none():
 
 
 @pytest.mark.usefixtures("registered")
-def test_instrumented_records_both_the_histogram_and_a_span():
+def test_instrumented_records_both_the_histogram_and_a_span(monkeypatch):
+    from telemetry_helpers import enable_span_gate
+
+    fake = _FakeTraceModule()
+    enable_span_gate(monkeypatch)
+    monkeypatch.setattr(otel_metrics, "_trace_available", True)
+    monkeypatch.setattr(otel_metrics, "_trace_module", fake)
     with otel_metrics.instrumented(otel_metrics.render_duration_ms, "render", dict="X"):
         pass
-    snap = otel_metrics.snapshot()
-    assert snap["saitenka.render.duration_ms"]["count"] == 1
+    assert otel_metrics.snapshot()["saitenka.render.duration_ms"]["count"] == 1
+    assert len(fake.tracer.spans) == 1
 
 
 @pytest.mark.usefixtures("registered")
 def test_show_tooltip_histogram_records_with_a_kind_label():
     otel_metrics.show_tooltip_duration_ms.record(30.0, {"kind": "cold"})
     otel_metrics.show_tooltip_duration_ms.record(1.0, {"kind": "warm"})
-    snap = otel_metrics.snapshot()
-    assert snap["saitenka.show_tooltip.duration_ms"]["count"] == 2
+    hist = otel_metrics.snapshot()["saitenka.show_tooltip.duration_ms"]
+    assert hist["count"] == 2
+    assert hist["by"] == {
+        "kind=cold": {"count": 1, "max": 30.0},
+        "kind=warm": {"count": 1, "max": 1.0},
+    }
 
 
 @pytest.mark.usefixtures("registered")

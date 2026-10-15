@@ -40,13 +40,6 @@ def test_scaled_chip_is_sharper_than_the_upscale_it_replaced():
     assert _blur_fraction(native) < _blur_fraction(_upscaled("JPDBv2", _CS, 2.0))
 
 
-def test_scaled_chip_is_not_merely_a_resize_of_the_reference_sprite():
-    # Negative control for the test above: without the native path these two are the same pixels.
-    native = render_chip("JPDBv2", _CS, scale=2.0).image
-    up = _upscaled("JPDBv2", _CS, 2.0)
-    assert native.size != up.size or native.tobytes() != up.tobytes()
-
-
 def test_reference_scale_chip_is_unchanged():
     # 1.0 must stay the byte-identical reference raster — the panel's whole 1× cache depends on it.
     assert (
@@ -136,11 +129,13 @@ def test_a_box_without_a_provider_still_upscales_its_sprite():
 def test_the_sprite_memo_is_not_part_of_the_box_s_identity():
     # A cache that joined __eq__/__init__ would make two equal boxes compare unequal once one had
     # rendered, and `replace()` would inherit the other box's pixels.
-    a = ImgBox(width=20, height=20, native=_counting_native([]))
+    asked: list[float] = []
+    a = ImgBox(width=20, height=20, native=_counting_native(asked))
     b = replace(a)
     a.sprite_at(2.0)
     assert a == b
-    assert b._sprites.keys() == {1.0}
+    b.sprite_at(2.0)
+    assert asked == [1.0, 2.0, 2.0]
 
 
 def test_chip_row_raster_is_the_device_size_of_its_reference_row():

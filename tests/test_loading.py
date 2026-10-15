@@ -7,20 +7,17 @@ from concurrent.futures import Future
 import pytest
 from util import await_ready, bare_gateway
 
-from saitenka.app.loading import SPINNER, loading_image
+from saitenka.app.loading import loading_image
 from saitenka.mpvio.ipc import IPCRequest
 from saitenka.runtime.events import SubtitleLanguageChanged
 
 
-def test_loading_image_renders_a_visible_frame():
-    img = loading_image("loading dictionaries", 0)
-    assert img.width > 30 and img.getextrema()[3][1] > 0  # visible (non-transparent) pixels
-
-
-def test_frames_cycle_through_spinner_glyphs():
-    a = loading_image("x", 0).tobytes()
-    b = loading_image("x", 1).tobytes()
-    assert a != b or len(SPINNER) == 1  # different frame → different glyph → different bitmap
+@pytest.mark.parametrize("text", ["loading dictionaries", "x"])
+def test_frames_cycle_through_spinner_glyphs(text):
+    a = loading_image(text, 0)
+    b = loading_image(text, 1)
+    assert a.width > 30 and a.getextrema()[3][1] > 0
+    assert a.tobytes() != b.tobytes()
 
 
 # --- the controller lifecycle: the spinner actually shows while loading, and stops when deps land ---
@@ -58,18 +55,6 @@ def _install(ipc):
     return gateway, install_session_reactor(gateway)
 
 
-def _hint_state(reactor):
-    from saitenka.app.session.routes import STARTUP_HINT
-    from saitenka.runtime.startup_hint import StartupHintState
-    from saitenka.runtime.state import OwnerSlice
-
-    slot = reactor.snapshot.state.session
-    assert isinstance(slot, OwnerSlice)  # the owner slot is a slice, not one feature's state
-    state = slot.get(STARTUP_HINT)
-    assert isinstance(state, StartupHintState)
-    return state
-
-
 def _announce_ready(ipc, gateway) -> None:
     from saitenka.runtime import StartupReady
 
@@ -85,43 +70,25 @@ def _replace_connection(ipc, gateway, epoch: int) -> None:
     ipc.drain_events()
 
 
-def test_show_startup_hint_posts_mpv_osd_text():
+def test_ready_startup_hint_empties_the_osd_text():
     from util import FakeIPC
 
     from saitenka.runtime.startup_hint import STARTUP_HINT
 
     ipc = FakeIPC()
-    _install(ipc)
-    assert ("show-text", STARTUP_HINT, 30000) in ipc.commands
-
-
-def test_show_startup_hint_skipped_for_screenshot(request):
-    # A screenshot capture must not carry the breadcrumb, so it never touches mpv's OSD -- but the
-    # session still gets its reactor, which is not the hint's to withhold.
-    from util import FakeIPC
-
-    from saitenka.app.session.routes import install_session_reactor
-
-    ipc = FakeIPC()
-    gateway = bare_gateway(ipc)
-    request.addfinalizer(gateway.close)  # owns threads; a leak here exhausts the pool at -n auto
-    reactor = install_session_reactor(gateway, startup_hint=False)
-    assert ipc.commands == []
-    assert reactor is not None
-
-
-def test_ready_startup_hint_empties_the_osd_text():
-    from util import FakeIPC
-
-    ipc = FakeIPC()
     gateway, _reactor = _install(ipc)
+    assert ("show-text", STARTUP_HINT, 30000) in ipc.commands
     ipc.drain_events()
+
     _announce_ready(ipc, gateway)
+
     assert ("show-text", "", 1) in ipc.commands
 
 
 def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness(make_session):
     from util import FakeIPC
+
+    from saitenka.app.overlay_ids import OverlayId
 
     ipc = FakeIPC()
     _install(ipc)
@@ -129,8 +96,9 @@ def test_subtitle_draw_cannot_clear_the_hint_before_interactive_readiness(make_s
     ipc.drain_events()
     # plain path -> no dict/tokenize deps needed to raster a cue
     r.graph.track_commands.declare(SubtitleLanguageChanged("en"))
-    r.graph.cue.set_subtitle("hello")
-    assert r.graph.subtitle_presentation.renderer.logged_first
+    r.graph.playback.observe("sub-text", "hello")
+    r.graph.cue.settle()
+    assert any(command[:2] == ("overlay-add", OverlayId.SUB) for command in ipc.commands)
     assert ("show-text", "", 1) not in ipc.commands
 
     r.pump()
@@ -183,67 +151,45 @@ class _AsyncIPC:
 
 
 def test_late_show_acceptance_after_ready_clears_exactly_once():
-    from saitenka.runtime.startup_hint import HintOutcome
-
     ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
+    gateway, _reactor = _install(ipc)
     _announce_ready(ipc, gateway)
-    assert _hint_state(reactor).outcome is HintOutcome.PENDING
     assert ipc.commands == [("show-text", "saitenka starting...", 30000)]
 
     ipc.requests[0].future.set_result({"error": "success"})
     ipc.drain_events()
     _announce_ready(ipc, gateway)
 
-    assert _hint_state(reactor).outcome is HintOutcome.ACCEPTED
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
 
 def test_late_show_rejection_never_authorizes_clear():
-    from saitenka.runtime.startup_hint import HintOutcome
-
     ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
+    gateway, _reactor = _install(ipc)
     _announce_ready(ipc, gateway)
     ipc.requests[0].future.set_result({"error": "property unavailable"})
     ipc.drain_events()
-
-    assert _hint_state(reactor).outcome is HintOutcome.REJECTED
-    assert ("show-text", "", 1) not in ipc.commands
-
-
-def test_lost_show_reply_clears_only_after_a_live_reconnection():
-    from saitenka.runtime.startup_hint import HintOutcome
-
-    ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
-    _announce_ready(ipc, gateway)
-    ipc.requests[0].future.set_result({"error": "disconnected"})
-    ipc.drain_events()
-
-    assert _hint_state(reactor).outcome is HintOutcome.UNKNOWN
     assert ("show-text", "", 1) not in ipc.commands
 
     _replace_connection(ipc, gateway, 1)
-    _replace_connection(ipc, gateway, 2)
-    assert ipc.commands.count(("show-text", "", 1)) == 1
+
+    assert ("show-text", "", 1) not in ipc.commands
 
 
-def test_show_disconnect_delivered_after_reconnect_still_clears() -> None:
-    """The reply lands after the epoch already moved on, so the ambiguity is resolved on arrival."""
-    from saitenka.runtime.startup_hint import HintOutcome
-
+@pytest.mark.parametrize("reconnect_before_delivery", [False, True])
+def test_lost_show_reply_clears_only_after_a_live_reconnection(reconnect_before_delivery):
     ipc = _AsyncIPC()
-    gateway, reactor = _install(ipc)
+    gateway, _reactor = _install(ipc)
     _announce_ready(ipc, gateway)
     ipc.requests[0].future.set_result({"error": "disconnected"})
-    assert ipc.connection_sink is not None
-    ipc.connection_sink("replaced", 1)
-    assert gateway._commit_replacement(1, ())
+    if not reconnect_before_delivery:
+        ipc.drain_events()
+        assert ("show-text", "", 1) not in ipc.commands
 
-    ipc.drain_events()
+    _replace_connection(ipc, gateway, 1)
+    assert ipc.commands.count(("show-text", "", 1)) == 1
 
-    assert _hint_state(reactor).outcome is HintOutcome.UNKNOWN
+    _replace_connection(ipc, gateway, 2)
     assert ipc.commands.count(("show-text", "", 1)) == 1
 
 
@@ -263,19 +209,6 @@ def test_lost_clear_reply_is_retried_once_on_the_replacement_connection():
     ipc.drain_events()
     _replace_connection(ipc, gateway, 2)
     assert ipc.commands.count(("show-text", "", 1)) == 2
-
-
-def test_apply_deps_stops_the_spinner(make_session):
-    from util import FakeIPC
-
-    from saitenka.app.features.profiles.dependencies import DependencyBundle
-    from saitenka.app.overlay_ids import OverlayId
-
-    r = make_session(FakeIPC())
-    r.graph.profile.begin_loading()
-    r.graph.profile.accept(DependencyBundle(r.graph.profile.identity))
-    assert r.graph.profile.loading is False
-    assert ("overlay-remove", OverlayId.LOADING) in r.graph.ipc.commands
 
 
 def test_load_deps_async_uses_a_custom_build(make_session):

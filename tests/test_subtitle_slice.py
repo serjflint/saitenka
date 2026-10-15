@@ -80,13 +80,6 @@ def test_the_reducer_refuses_an_event_from_another_owner():
         SubtitleReducer()(SubtitleTrackState(), object())  # type: ignore[arg-type]  # the point
 
 
-def test_a_store_without_a_reactor_keeps_the_slice_itself():
-    store = SubtitleTrackStore(FakeIPC())
-
-    assert store.dispatch(SubtitleTracksDiscovered(1, 2)).jp_sid == 1
-    assert store.current.en_sid == 2
-
-
 def test_the_routed_store_and_the_local_one_end_on_the_same_selection(request):
     """The differential: whether the reactor or the store holds it must not change the answer."""
     local = SubtitleTrackStore(FakeIPC())
@@ -96,11 +89,16 @@ def test_the_routed_store_and_the_local_one_end_on_the_same_selection(request):
     install_session_reactor(gateway)
     routed = SubtitleTrackStore(ipc)
 
+    expected = SubtitleTrackState()
+    reducer = SubtitleReducer()
     for event in STREAM:
-        local.dispatch(event)
-        routed.dispatch(event)
-
-    assert routed.current == local.current == _fold(STREAM)
+        expected = reducer.reduce(expected, event)
+        assert local.dispatch(event) == expected
+        assert routed.dispatch(event) == expected
+        assert local.current == expected
+        assert routed.current == expected
+        if isinstance(event, SubtitleTracksDiscovered):
+            assert (expected.jp_sid, expected.en_sid) == (3, 4)
 
 
 def test_the_reactor_owned_slice_refuses_a_direct_write(request):

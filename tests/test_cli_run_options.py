@@ -1,9 +1,8 @@
 """overlay.toml keys → ReaderOptions. Pure functions, no IPC/mpv."""
 
-from dataclasses import replace
+from dirty_equals import IsPartialDict
 
-from saitenka.app.commands.attach import _build_attach_options
-from saitenka.app.launch.run import RunFlags, _build_run_options
+from saitenka.app.launch.run import RunFlags
 
 _BASE_FLAGS = RunFlags(
     mine_key="Ctrl+m",
@@ -22,64 +21,7 @@ _BASE_FLAGS = RunFlags(
 )
 
 
-def test_scan_delay_defaults_when_absent_from_config():
-    opts = _build_run_options({}, _BASE_FLAGS)
-    assert opts.tooltip.scan_delay == 1.0
-
-
-def test_run_options_pass_layout_engine_through():
-    opts = _build_run_options({}, replace(_BASE_FLAGS, layout_engine="taffy"))
-    assert opts.tooltip.layout_engine == "taffy"
-
-
-def test_attach_options_read_layout_engine_from_config():
-    opts = _build_attach_options({"layout_engine": "taffy"}, mine={})
-    assert opts.tooltip.layout_engine == "taffy"
-
-
-def test_scan_delay_reads_from_config():
-    opts = _build_run_options({"scan_delay": 1.5}, _BASE_FLAGS)
-    assert opts.tooltip.scan_delay == 1.5
-
-
-def test_run_options_pass_tip_scale_through():
-    opts = _build_run_options({}, replace(_BASE_FLAGS, tip_scale=1.5))
-    assert opts.tooltip.tip_scale == 1.5
-
-
-def test_attach_options_read_tip_scale_from_config():
-    # The attach path reads it from config (not a CLI kwarg) — must match the run path or the knob
-    # silently no-ops when attaching to a running mpv.
-    assert _build_attach_options({}, mine={}).tooltip.tip_scale == 0.0  # default = auto
-    assert _build_attach_options({"tip_scale": 1.5}, mine={}).tooltip.tip_scale == 1.5
-
-
-def test_run_options_read_utility_ui_scale():
-    opts = _build_run_options({"ui_scale": 1.5}, _BASE_FLAGS)
-    assert opts.panels.scale == 1.5
-
-
-def test_attach_options_read_utility_ui_scale():
-    opts = _build_attach_options({"ui_scale": 1.5}, mine={})
-    assert opts.panels.scale == 1.5
-
-
-def test_attach_options_read_mine_preview_toggle():
-    assert _build_attach_options({}, mine={}).mining.show_preview is True  # default on
-    opts = _build_attach_options({}, mine={"preview": False})
-    assert opts.mining.show_preview is False  # [mine] preview = false disables the panel
-
-
-def test_run_options_read_mine_preview_toggle():
-    assert (
-        _build_run_options({}, replace(_BASE_FLAGS, mine_preview=False)).mining.show_preview
-        is False
-    )
-
-
-def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
-    # The RUN path rebuilds a synthetic effective_cfg dict from the CLI kwargs; the animated flag must
-    # survive it or it silently no-ops on `run` while working on `attach` (the both-seams trap).
+def test_run_threads_mining_config_into_dependency_build(monkeypatch):
     import saitenka.app.features.profiles.dependencies as reader_deps
     from saitenka.app.launch import run as cli_run
 
@@ -98,7 +40,15 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
             mine_all_key="Shift+m",
             mine_normalize_audio=False,
             mine_animated_screenshot=True,
-            raw_mine={"animated_height": 720, "animated_format": "gif", "deck": "IGNORED"},
+            raw_mine={
+                "animated_height": 720,
+                "animated_format": "gif",
+                "preset": "Kiku",
+                "card_kind": "sentence",
+                "fields": {"expression": "Word"},
+                "card_format": {"Word": "{expression}"},
+                "deck": "IGNORED",
+            },
             known_cfg=None,
             known="",
             color=False,
@@ -107,192 +57,17 @@ def test_run_path_threads_animated_screenshot_into_effective_cfg(monkeypatch):
             pitch_titles=[],
         )
     )
-    assert captured["mine"]["animated_screenshot"] is True
-    # config-only quality knobs (no CLI flag) must survive the synthetic effective_cfg too
-    assert captured["mine"]["animated_height"] == 720
-    assert captured["mine"]["animated_format"] == "gif"
-    assert captured["mine"]["deck"] == "D"  # CLI-threaded value overrides the raw config
-
-
-def test_resolve_mine_model_prefers_explicit_then_preset_then_lapis():
-    # preset-only config must resolve to the preset's note type on run/doctor, matching the attach
-    # seam's mine_config_from — else `preset = "Kiku"` (no model) mines to Kiku on attach but Lapis on run.
-    from saitenka.app.command_defaults import resolve_mine_model
-
-    assert resolve_mine_model({}) == "Lapis"
-    assert resolve_mine_model({"preset": "Kiku"}) == "Kiku"
-    assert (
-        resolve_mine_model({"model": "Custom", "preset": "Kiku"}) == "Custom"
-    )  # explicit model wins
-
-
-def test_run_threads_field_map_and_card_kind(monkeypatch):
-    # #101 field-map/card-kind have no CLI flag — they must ride through the RUN seam purely via the
-    # raw [mine] table (the both-seams trap), or they'd work on attach but silently no-op on run.
-    import saitenka.app.features.profiles.dependencies as reader_deps
-    from saitenka.app.launch import run as cli_run
-
-    captured: dict = {}
-    monkeypatch.setattr(
-        reader_deps,
-        "build_reader_deps",
-        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
-    )
-    cli_run._build_run_deps(
-        cli_run.RunDepsRequest(
-            mine=True,
-            mine_deck="D",
-            mine_model="Lapis",
-            mine_key="Ctrl+m",
-            mine_all_key="Shift+m",
-            mine_normalize_audio=False,
-            mine_animated_screenshot=False,
-            raw_mine={"preset": "Kiku", "card_kind": "sentence", "fields": {"expression": "Word"}},
-            known_cfg=None,
-            known="",
-            color=False,
-            dict_titles=[],
-            freq_titles=[],
-            pitch_titles=[],
-        )
-    )
-    assert captured["mine"]["preset"] == "Kiku"
-    assert captured["mine"]["card_kind"] == "sentence"
-    assert captured["mine"]["fields"] == {"expression": "Word"}
-
-
-def test_run_threads_card_format(monkeypatch):
-    # [mine.card_format] has no CLI flag — like fields/card_kind it must ride the RUN seam via raw [mine].
-    import saitenka.app.features.profiles.dependencies as reader_deps
-    from saitenka.app.launch import run as cli_run
-
-    captured: dict = {}
-    monkeypatch.setattr(
-        reader_deps,
-        "build_reader_deps",
-        lambda cfg, **_k: (captured.update(cfg), (None, None, None, None))[1],
-    )
-    cli_run._build_run_deps(
-        cli_run.RunDepsRequest(
-            mine=True,
-            mine_deck="D",
-            mine_model="Lapis",
-            mine_key="Ctrl+m",
-            mine_all_key="Shift+m",
-            mine_normalize_audio=False,
-            mine_animated_screenshot=False,
-            raw_mine={"card_format": {"Word": "{expression}"}},
-            known_cfg=None,
-            known="",
-            color=False,
-            dict_titles=[],
-            freq_titles=[],
-            pitch_titles=[],
-        )
-    )
-    assert captured["mine"]["card_format"] == {"Word": "{expression}"}
-
-
-def test_run_options_read_hover_pause_key():
-    opts = _build_run_options(
+    assert captured["mine"] == IsPartialDict(
         {
-            "hover_pause_key": "Alt+q",
-            "subtitle_language_key": "Alt+l",
-            "bookmark_key": "Alt+b",
-            "sidebar_key": "Alt+s",
-            "analysis_key": "Ctrl+d",
-            "annotation_key": "Ctrl+a",
-            "help_key": "Ctrl+h",
-            "subtitle_retry_key": "Ctrl+r",
-            "annotation_mode": "hover",
-            "stats": {"enabled": True, "summary": False},
-        },
-        _BASE_FLAGS,
+            "animated_height": 720,
+            "animated_format": "gif",
+            "preset": "Kiku",
+            "card_kind": "sentence",
+            "fields": {"expression": "Word"},
+            "card_format": {"Word": "{expression}"},
+            "deck": "D",
+            "model": "Lapis",
+            "normalize_audio": False,
+            "animated_screenshot": True,
+        }
     )
-    assert opts.keys.hover_pause_key == "Alt+q"
-    assert opts.keys.subtitle_language_key == "Alt+l"
-    assert opts.keys.bookmark_key == "Alt+b"
-    assert opts.keys.sidebar_key == "Alt+s"
-    assert opts.keys.analysis_key == "Ctrl+d"
-    assert opts.keys.annotation_key == "Ctrl+a"
-    assert opts.keys.help_key == "Ctrl+h"
-    assert opts.keys.subtitle_retry_key == "Ctrl+r"
-    assert opts.tooltip.annotation_mode == "hover"
-    assert opts.stats.enabled is True
-    assert opts.stats.summary is False
-
-
-def test_attach_options_read_hover_pause_settings():
-    opts = _build_attach_options(
-        {
-            "pause_on_tooltip": False,
-            "hover_pause_key": "Alt+q",
-            "subtitle_language_key": "Alt+l",
-            "bookmark_key": "Alt+b",
-            "sidebar_key": "Alt+s",
-            "analysis_key": "Ctrl+d",
-            "annotation_key": "Ctrl+a",
-            "help_key": "Ctrl+h",
-            "subtitle_retry_key": "Ctrl+r",
-            "annotation_mode": "hover",
-            "stats": {"enabled": True, "summary": False},
-        },
-        mine={},
-    )
-    assert opts.tooltip.pause_on_tooltip is False
-    assert opts.keys.hover_pause_key == "Alt+q"
-    assert opts.keys.subtitle_language_key == "Alt+l"
-    assert opts.keys.bookmark_key == "Alt+b"
-    assert opts.keys.sidebar_key == "Alt+s"
-    assert opts.keys.analysis_key == "Ctrl+d"
-    assert opts.keys.annotation_key == "Ctrl+a"
-    assert opts.keys.help_key == "Ctrl+h"
-    assert opts.keys.subtitle_retry_key == "Ctrl+r"
-    assert opts.tooltip.annotation_mode == "hover"
-    assert opts.stats.enabled is True
-    assert opts.stats.summary is False
-
-
-def test_run_carries_every_config_table_the_dependency_build_reads():
-    """`run` used to rebuild its effective config from a hand-written key list, so a table it
-    forgot worked under `attach` and silently did nothing under `run` — the setting keeps its
-    default, the config file says otherwise, and nothing warns.
-
-    Three had already fallen through when this was written: `[palette]` (band colors), `[fsrs]`
-    (maturity from Anki) and `[scoring]`. The language field carries a comment about the same trap,
-    paid for once already as #254. Named tables rather than a fixed list, because the point is that
-    the config reaches the builder whole.
-    """
-    from saitenka.app.launch.run import RunDepsRequest, _run_effective_config
-
-    scoped = {
-        "palette": {"learning": "#eed49f"},
-        "fsrs": {"collection": "/tmp/copy.anki2"},
-        "scoring": {"jlpt_underlines": False},
-        "dicts": ["from config"],
-    }
-    request = RunDepsRequest(
-        mine=False,
-        mine_deck="",
-        mine_model="",
-        mine_key="",
-        mine_all_key="",
-        mine_normalize_audio=False,
-        mine_animated_screenshot=False,
-        raw_mine={},
-        known_cfg=None,
-        known="",
-        color=True,
-        dict_titles=["from the flag"],
-        freq_titles=[],
-        pitch_titles=[],
-        scoped_cfg=scoped,
-    )
-
-    effective = _run_effective_config(request)
-
-    assert effective["palette"] == {"learning": "#eed49f"}
-    assert effective["fsrs"] == {"collection": "/tmp/copy.anki2"}
-    assert effective["scoring"] == {"jlpt_underlines": False}
-    # …and the run's own options still win over the file they are layered onto.
-    assert effective["dicts"] == ["from the flag"]

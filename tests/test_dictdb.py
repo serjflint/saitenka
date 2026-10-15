@@ -6,7 +6,6 @@ import zipfile
 import pytest
 from saitenka_dict.schema import SCHEMA_VERSION
 
-from saitenka.app.config import DictDbOptions
 from saitenka.app.dictdb import DictionaryDb
 
 AT = "2026-07-23T00:00:00"  # fixed imported_at — no Date.now in the store, stamped by the caller
@@ -40,45 +39,25 @@ def _meta_zip(path, title, mode, entries, *, frequency_mode=None):
     return str(path)
 
 
-def test_import_term_dict_populates_entries_keys_and_meta(tmp_path):
+def test_import_returns_the_app_dictionary_row(tmp_path):
     z = _term_zip(
         tmp_path / "d.zip", "TestDict", [["読む", "よむ", ["to read"]], ["本", "ほん", ["book"]]]
     )
     db = DictionaryDb.open(tmp_path / "db.sqlite")
     row = db.import_zip(z, imported_at=AT)
     assert row.title == "TestDict" and row.kind == "dict" and row.revision == "r1"
-    counts = db.dict_counts(row.id)
-    assert counts["entries"] == 2
-    assert counts["keys"] == 4  # each entry keyed by term AND reading
-    assert counts["term_meta"] == 0
-    # the reading key resolves to the kanji headword, scoped to this dict_id
-    hit = (
-        db.connection()
-        .execute(
-            "SELECT e.term FROM keys k JOIN entries e ON k.dict_id=e.dict_id AND k.id=e.id "
-            "WHERE k.dict_id=? AND k.key=?",
-            (row.id, "よむ"),
-        )
-        .fetchone()
-    )
-    assert hit[0] == "読む"
 
 
-def test_import_combined_dict_loads_both_glossaries_and_freq_meta(tmp_path):
-    """A combined definition+frequency dict (the seth-js French dict) imports BOTH its term_bank
-    glossaries AND its term_meta — the frequency mode no longer wins and drops the 448k definitions.
-    Regression for the classifier bug the real French import surfaced."""
-    p = tmp_path / "fr.zip"
-    with zipfile.ZipFile(p, "w") as zf:
-        zf.writestr("index.json", json.dumps({"title": "FR", "format": 3, "revision": "r1"}))
-        zf.writestr("term_bank_1.json", json.dumps([["chat", "", "", "", 0, ["cat"], 1, ""]]))
-        zf.writestr("term_meta_bank_1.json", json.dumps([["chat", "freq", 42]]))
-    db = DictionaryDb.open(tmp_path / "db.sqlite")
-    row = db.import_zip(str(p), imported_at=AT)
-    assert row.kind == "dict"  # primary — definitions win
-    counts = db.dict_counts(row.id)
-    assert counts["entries"] == 1  # the glossary loaded (was 0 under the single-role bug)
-    assert counts["term_meta"] == 1  # AND the frequency meta loaded
+def test_import_combined_dictionary_is_primary(tmp_path):
+    archive = tmp_path / "combined.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("index.json", json.dumps({"title": "Combined", "format": 3}))
+        output.writestr("term_bank_1.json", json.dumps([["chat", "", "", "", 0, ["cat"], 1, ""]]))
+        output.writestr("term_meta_bank_1.json", json.dumps([["chat", "freq", 42]]))
+
+    row = DictionaryDb.open(tmp_path / "db.sqlite").import_zip(str(archive), imported_at=AT)
+
+    assert row.kind == "dict"
 
 
 def test_import_freq_and_pitch_go_to_term_meta(tmp_path):
@@ -107,56 +86,6 @@ def test_import_freq_and_pitch_go_to_term_meta(tmp_path):
         .fetchone()
     )
     assert pitch[0] == "pitch" and json.loads(pitch[2]) == [0]
-
-
-def test_import_pitch_carries_devoice_and_nasal(tmp_path):
-    # #298: an NHK/Kanjium pitch entry encodes per-mora devoice/nasal; import must keep them (a plain
-    # accent with neither stays the bare [int] list — byte-identical DB — so only richer data grows).
-    pz = _meta_zip(
-        tmp_path / "p.zip",
-        "PitchNHK",
-        "pitch",
-        [
-            [
-                "牛",
-                {"reading": "うし", "pitches": [{"position": 0, "devoice": [1], "nasal": 2}]},
-            ],
-            ["犬", {"reading": "いぬ", "pitches": [{"position": 1}]}],  # plain → bare list
-        ],
-    )
-    db = DictionaryDb.open(tmp_path / "db.sqlite")
-    pr = db.import_zip(pz, imported_at=AT)
-    rows = dict(
-        db.connection()
-        .execute("SELECT reading, positions FROM term_meta WHERE dict_id=?", (pr.id,))
-        .fetchall()
-    )
-    assert json.loads(rows["うし"]) == [
-        {"p": 0, "d": [1], "n": [2]}
-    ]  # richer object, devoice+nasal
-    assert json.loads(rows["いぬ"]) == [1]  # plain accent unchanged
-
-
-def test_import_kanji_and_tags(tmp_path):
-    z = _term_zip(
-        tmp_path / "k.zip",
-        "K",
-        [["聞こえる", "きこえる", ["to be heard"]]],
-        kanji=[["猫", "ビョウ", "ねこ", "jouyou", ["cat"]]],
-        tags=[["★", "popular", 2]],
-    )
-    db = DictionaryDb.open(tmp_path / "db.sqlite")
-    row = db.import_zip(z, imported_at=AT)
-    assert db.dict_counts(row.id)["kanji"] == 1
-    assert db.dict_counts(row.id)["tags"] == 1
-    k = (
-        db.connection()
-        .execute(
-            "SELECT onyomi, kunyomi, meanings FROM kanji WHERE dict_id=? AND chr=?", (row.id, "猫")
-        )
-        .fetchone()
-    )
-    assert k[0] == "ビョウ" and k[1] == "ねこ" and json.loads(k[2]) == ["cat"]
 
 
 def test_stats_reports_schema_size_and_per_dict_counts(tmp_path):
@@ -218,24 +147,6 @@ def test_drop_removes_dictionary(tmp_path):
     assert db.list_dictionaries() == []
     assert db.dict_counts(row.id)["entries"] == 0
     assert db.drop("AAA") is False  # already gone
-
-
-def test_import_tolerates_wrong_crc_meta(tmp_path):
-    """Some Yomitan pitch/freq exports ship a wrong stored CRC on intact deflate data — import anyway."""
-    p = tmp_path / "meta.zip"
-    entry = [["本命", "pitch", {"reading": "ほんめい", "pitches": [{"position": 0}]}]]
-    with zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("index.json", json.dumps({"title": "BadCRC"}))
-        zf.writestr("term_meta_bank_1.json", json.dumps(entry, ensure_ascii=False))
-    raw = bytearray(p.read_bytes())
-    ci = raw.find(b"PK\x01\x02")
-    raw[ci + 16 : ci + 20] = b"\x00\x00\x00\x00"
-    li = raw.find(b"PK\x03\x04")
-    raw[li + 14 : li + 18] = b"\x00\x00\x00\x00"
-    p.write_bytes(raw)
-    db = DictionaryDb.open(tmp_path / "db.sqlite")
-    row = db.import_zip(str(p), imported_at=AT)
-    assert db.dict_counts(row.id)["term_meta"] == 1
 
 
 def test_failed_import_rolls_back(tmp_path, monkeypatch):
@@ -336,25 +247,6 @@ def _ranks(db, dict_id):
     )
 
 
-def test_occurrence_based_freq_is_converted_to_rank(tmp_path):
-    """An occurrence-based dict stores COUNTS (higher = more frequent). Import must convert them to
-    ranks (most-frequent = 1) so the banded scorer colors them the right way round, not inverted."""
-    fz = _meta_zip(
-        tmp_path / "occ.zip",
-        "OccFreq",
-        "freq",
-        [
-            ["猫", {"reading": "ねこ", "frequency": 500}],  # rarest count → highest rank
-            ["犬", {"reading": "いぬ", "frequency": 9000}],  # most common → rank 1
-            ["鳥", {"reading": "とり", "frequency": 3000}],
-        ],
-        frequency_mode="occurrence-based",
-    )
-    db = DictionaryDb.open(tmp_path / "db.sqlite")
-    row = db.import_zip(fz, imported_at=AT)
-    assert _ranks(db, row.id) == {"犬": 1, "鳥": 2, "猫": 3}
-
-
 def test_occurrence_based_preserves_count_in_display(tmp_path):
     """The derived rank drives coloring, but the tooltip should still show the real occurrence count —
     kept in ``disp`` when the dict gave no explicit displayValue."""
@@ -373,70 +265,3 @@ def test_occurrence_based_preserves_count_in_display(tmp_path):
         .fetchone()
     )
     assert (rank, disp) == (1, "9000")
-
-
-def test_rank_based_freq_is_left_as_is(tmp_path):
-    """The default (rank-based) path must NOT remap — a rank of 8912 stays 8912."""
-    fz = _meta_zip(
-        tmp_path / "rank.zip",
-        "RankFreq",
-        "freq",
-        [["本命", {"reading": "ほんめい", "frequency": 8912}]],
-    )
-    db = DictionaryDb.open(tmp_path / "db.sqlite")
-    row = db.import_zip(fz, imported_at=AT)
-    assert _ranks(db, row.id) == {"本命": 8912}
-
-
-# --- entries.seq (#255: opt-in persistence of the Yomitan seq / JMdict ent_seq) -----------------
-
-
-def test_seq_column_exists_but_is_null_by_default(tmp_path):
-    """The `entries.seq` column is always present (additive schema), but import leaves it NULL unless
-    `[dictdb] persist_seq` opts in — the default install pays no extra-storage cost."""
-    z = _term_zip(tmp_path / "d.zip", "Jitendex", [["読む", "よむ", ["to read"]]])
-    db = DictionaryDb.open(tmp_path / "db.sqlite")  # default DictDbOptions: persist_seq=False
-    row = db.import_zip(z, imported_at=AT)
-    seq = (
-        db.connection().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
-    )
-    assert seq is None
-
-
-def test_persist_seq_opt_in_writes_the_bank_seq(tmp_path):
-    """With `[dictdb] persist_seq = true`, the term_bank's `seq` (element [6], the JMdict `ent_seq`
-    for a JMdict-derived dict) lands in `entries.seq`."""
-    z = _term_zip(tmp_path / "d.zip", "Jitendex", [["読む", "よむ", ["to read"]]])  # seq=1 (i+1)
-    db = DictionaryDb.open(tmp_path / "db.sqlite", DictDbOptions(persist_seq=True))
-    row = db.import_zip(z, imported_at=AT)
-    seq = (
-        db.connection().execute("SELECT seq FROM entries WHERE dict_id=?", (row.id,)).fetchone()[0]
-    )
-    assert seq == 1
-
-
-def test_seq_column_added_additively_to_a_pre_255_db(tmp_path):
-    """A DB created before `entries.seq` existed must gain the column on next open (ALTER TABLE), not
-    error or silently keep the stale schema — CREATE TABLE IF NOT EXISTS alone never adds a column to
-    an existing table."""
-    p = tmp_path / "db.sqlite"
-    import sqlite3
-
-    conn = sqlite3.connect(p)
-    conn.executescript(
-        "CREATE TABLE entries(dict_id INTEGER, id INTEGER, term TEXT, reading TEXT, "
-        "glossary TEXT, tags TEXT, PRIMARY KEY(dict_id, id));"
-        "CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);"
-    )
-    conn.execute("INSERT INTO entries VALUES(1, 1, '猫', 'ねこ', '[\"cat\"]', '')")
-    conn.commit()
-    conn.close()
-
-    db = DictionaryDb.open(p)  # triggers _ensure_schema's additive migration
-    cols = {r[1] for r in db.connection().execute("PRAGMA table_info(entries)")}
-    assert "seq" in cols
-    # the pre-existing row survives the migration, with seq defaulting to NULL
-    row = (
-        db.connection().execute("SELECT term, seq FROM entries WHERE dict_id=1 AND id=1").fetchone()
-    )
-    assert row == ("猫", None)

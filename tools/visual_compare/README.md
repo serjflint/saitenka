@@ -12,15 +12,6 @@ uv run python tools/visual_compare/generate.py     # → tools/visual_compare/ou
 
 Needs `~/.config/saitenka/overlay.toml` pointing at your dictionaries (see `overlay.example.toml`).
 
-## Parity test
-
-```bash
-uv run pytest tests/test_compare.py -v
-```
-
-Asserts our render carries the same frequency dictionaries and inflection chain SubMiner shows.
-Skipped automatically when the (large, out-of-repo) dictionaries aren't present.
-
 ## Add a case
 
 1. Screenshot SubMiner's popup for a word → save as `tools/visual_compare/refs/<name>_subminer.jpeg`.

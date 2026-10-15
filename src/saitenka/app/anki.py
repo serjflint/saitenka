@@ -15,7 +15,6 @@ import os
 import shutil
 import subprocess
 import sys
-import time
 from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -109,9 +108,7 @@ def anki_reachable(
 
 
 def launch_anki() -> bool:
-    """Fire-and-forget: start the Anki app (no polling). True if the launch was issued. Split out of
-    :func:`ensure_anki_running` so a caller can kick Anki off the startup critical path and poll for it
-    in the background (see reader_deps' Anki watcher)."""
+    """Fire-and-forget: start the Anki app without blocking dependency loading."""
     if sys.platform == "darwin":
         launch = ["open", "-a", "Anki"]
     elif sys.platform.startswith("win"):
@@ -147,35 +144,6 @@ def launch_anki() -> bool:
         log.warning("could not launch Anki automatically: %s", e)
         return False
     return True
-
-
-def wait_until_anki_up(host: str | None = None, wait: float = 20.0) -> bool:
-    """Poll AnkiConnect until it answers or ``wait`` seconds elapse. Does NOT launch Anki — assumes it
-    is already (being) started. True once reachable, False on timeout."""
-    deadline = time.monotonic() + wait
-    while time.monotonic() < deadline:
-        if anki_reachable(host):
-            return True
-        time.sleep(1.0)
-    return False
-
-
-def ensure_anki_running(host: str | None = None, wait: float = 20.0) -> bool:
-    """If AnkiConnect isn't answering, launch Anki and poll until it does (up to ``wait`` seconds).
-
-    Returns True once reachable, False if it couldn't be started — the caller WARNS and degrades
-    (mining/known-word coloring off) rather than failing. Non-blocking when Anki is already up. This
-    blocks for the poll; startup instead uses :func:`launch_anki` + a background :func:`wait_until_anki_up`
-    so the wait never gates dictionary/coloring readiness."""
-    if anki_reachable(host):
-        return True
-    if not launch_anki():
-        return False
-    if wait_until_anki_up(host, wait):
-        log.info("Anki is up (AnkiConnect responding)")
-        return True
-    log.warning("Anki launched but AnkiConnect didn't come up within %.0fs", wait)
-    return False
 
 
 class AnkiError(AnkiConnectError):

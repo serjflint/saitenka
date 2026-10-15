@@ -183,7 +183,7 @@ def _log_mpv_exit(code: int | None) -> None:
 DEMO_LINE_EN = "A shop-boy at the temple gate recites sutras he was never taught."
 
 
-def _resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:
+def resolve_names(flag_vals: list[str] | None, cfg: dict, key: str) -> list[str]:
     """Flag values win over the config file. Values are dictionary **titles** resolved against the
     consolidated DB (imported once) — not paths, so no ~/$VAR expansion is needed."""
     return list(flag_vals or []) or list(cfg.get(key) or [])
@@ -1106,9 +1106,9 @@ def run_impl(  # noqa: PLR0913  # mirrors cli.run's flat cyclopts signature (the
             known_cfg=json.loads(anki_decks) if anki_decks else selected_cfg.get("known"),
             known=known,
             color=color,
-            dict_titles=_resolve_names(dicts, selected_cfg, "dicts"),
-            freq_titles=_resolve_names(freq, selected_cfg, "freq"),
-            pitch_titles=_resolve_names(pitch, selected_cfg, "pitch"),
+            dict_titles=resolve_names(dicts, selected_cfg, "dicts"),
+            freq_titles=resolve_names(freq, selected_cfg, "freq"),
+            pitch_titles=resolve_names(pitch, selected_cfg, "pitch"),
             language=selected.langs.main,
             scoped_cfg=selected_cfg,
         )

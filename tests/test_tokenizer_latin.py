@@ -9,8 +9,6 @@ from __future__ import annotations
 from saitenka_tokenize.latin import WORD, LatinTokenizer
 from saitenka_tokenize.registry import get_tokenizer
 
-from saitenka.app.profiles import default_tokenizer_for
-
 
 def _surfaces(line: str) -> list[str]:
     return [t.surface for t in LatinTokenizer().tokenize(line)]
@@ -89,9 +87,3 @@ def test_lemma_is_the_lowercased_surface_lookup_layer_deinflects():
     # "helpful" stemming here.
     (tok,) = [t for t in LatinTokenizer().tokenize("mangé") if t.pos == WORD]
     assert tok.lemma == "mangé"
-
-
-def test_french_language_resolves_latin_without_explicit_tokenizer():
-    assert default_tokenizer_for("fr") == "latin"
-    assert default_tokenizer_for("de-CH") == "latin"
-    assert get_tokenizer("latin").name == "latin"

@@ -7,6 +7,7 @@ that make the procedural guarantee as good as the structural one it replaced.
 
 from __future__ import annotations
 
+from saitenka_subtitles import Cue
 from util import FakeIPC, bare_gateway
 
 from saitenka.app import bindings as app_bindings
@@ -27,26 +28,6 @@ from saitenka.runtime.presentation import TranslationState
 from saitenka.runtime.presentation_slice import TranslationStore
 from saitenka.runtime.subtitle import SubtitleTrackState
 from saitenka.runtime.subtitle_slice import SubtitleTrackStore
-
-
-def test_the_track_selection_does_not_survive_into_the_next_episode() -> None:
-    """The slot's episode-safety used to rest on `configure` always running after a re-slot — true,
-    and true only while that rule holds. This is the rule said out loud."""
-    store = SubtitleTrackStore(FakeIPC())
-    store.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
-
-    assert store.dispatch(EpisodeRetired()) == SubtitleTrackState()
-
-
-def test_no_dwell_armed_against_the_old_episode_can_fire_into_the_new_one() -> None:
-    store = HoverStore(FakeIPC())
-    store.dispatch(HoverConfigured(HoverDelays(scan=0.1, hide=0.2, switch=0.3)))
-    store.dispatch(HoverObserved(HoverObservation(hover=0, word=1)))
-    assert store.current.hysteresis.word_target == 1  # negative control
-
-    store.dispatch(EpisodeRetired())
-
-    assert store.current.hysteresis.word_target is None
 
 
 def test_the_dwell_lengths_survive_because_they_are_the_sessions_not_the_episodes() -> None:
@@ -84,6 +65,9 @@ def test_one_event_reaches_every_slice_when_a_reactor_owns_them(request) -> None
     hover.dispatch(HoverConfigured(HoverDelays(scan=0.1, hide=0.2, switch=0.3)))
     hover.dispatch(HoverObserved(HoverObservation(hover=0, word=1)))
     translation.dispatch(TranslationDrawn("a line"))
+    assert subtitle.current != SubtitleTrackState()
+    assert hover.current.hysteresis.word_target == 1
+    assert translation.current.drawn == "a line"
 
     subtitle.dispatch(EpisodeRetired())  # ONE store, not four
 
@@ -102,11 +86,13 @@ def test_an_owner_with_no_per_episode_facts_is_not_counted_as_an_unrouted_gap(re
     gateway = bare_gateway(ipc)
     request.addfinalizer(gateway.close)
     install_session_reactor(gateway)
-    router = gateway.session_reactor._reducer  # the OwnerRouter the reactor was built with
-
     SubtitleTrackStore(ipc).dispatch(EpisodeRetired())
 
-    assert not [key for key in router.unrouted if key.endswith("EpisodeRetired")]
+    assert not [
+        key
+        for key in gateway.runtime_census()
+        if key.startswith("unrouted:") and key.endswith("EpisodeRetired")
+    ]
 
 
 def test_rebinding_the_episode_retires_the_slots_with_the_container(
@@ -126,10 +112,34 @@ def test_rebinding_the_episode_retires_the_slots_with_the_container(
     monkeypatch.setattr(reader.graph.lifecycle_surfaces, "remove", removed.append)
     reader.command(app_bindings.TRANS_MSG)
     reader.graph.subtitle_tracks.dispatch(SubtitleStartupConfigured(1, 2, "jp", "ja,jpn,jp"))
+    hover = HoverStore(ipc)
+    hover.dispatch(HoverConfigured(HoverDelays(scan=0.1, hide=0.2, switch=0.3)))
+    hover.dispatch(HoverObserved(HoverObservation(hover=0, word=1)))
+    reader.graph.mining.record_mined_expression("読む")
+    backlog = object()
+    reader.graph.history.replace_backlog(backlog)  # type: ignore[arg-type]
+    history_before = reader.graph.history
+    navigation = reader.graph.track_commands.navigation.current
+    navigation.nav_idx = 9
+    navigation.sub_settle = navigation.sub_settle.begin()
+    navigation.geometry_cue_hint = Cue(1.0, 2.0, "犬")
+    assert reader.graph.subtitle_tracks.current != SubtitleTrackState()
+    assert hover.current.hysteresis.word_target == 1
+    assert reader.graph.translation.state.drawn == "old line"
+    assert navigation.sub_settle.open
     removed.clear()
 
     reader.graph.reslot.rebind_episode()
 
     assert reader.graph.subtitle_tracks.current == SubtitleTrackState()
+    assert hover.current.hysteresis.word_target is None
     assert reader.graph.translation.state.held  # the hold is session-lived
+    assert reader.graph.translation.state.drawn is None
+    assert reader.graph.history is history_before
+    assert reader.graph.history.backlog is backlog
+    assert "読む" in reader.graph.mining.index_snapshot()
+    current = reader.graph.track_commands.navigation.current
+    assert current.nav_idx == -1
+    assert not current.sub_settle.open
+    assert current.geometry_cue_hint is None
     assert removed == [OverlayId.PREVIEW, OverlayId.TRANS]

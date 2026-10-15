@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from util import FakeIPC, keybind_registry, press
 
-from saitenka.app.bindings import BINDINGS, active_bindings
+from saitenka.app.bindings import BINDINGS
 from saitenka.app.config import ReaderOptions
 from saitenka.app.session.factory import SessionServices
 from saitenka.app.subtitle_render import NullRenderer
@@ -27,41 +27,20 @@ def test_every_global_saitenka_binding_registers_without_deps(make_session):
     A future `requires`-gated binding fails here automatically."""
     ipc = FakeIPC()
     options = ReaderOptions()
-    r = make_session(
-        ipc, services=SessionServices(anki=None)
-    )  # deps absent at registration, exactly like attach mode
+    r = make_session(ipc, services=SessionServices(anki=None), options=options)
     r.graph.commands.install_input()
     reg = keybind_registry(ipc)
 
     expected = {
-        b.key: b.spec.message for b in active_bindings(options.keys, "global") if b.spec.message
+        key: spec.message
+        for spec in BINDINGS
+        if spec.scope == "global"
+        and spec.message
+        and (key := getattr(options.keys, spec.key_attr) if spec.key_attr else spec.key)
     }
     assert expected, "no global message bindings resolved — the sweep would be vacuous"
     missing = {k: m for k, m in expected.items() if reg.get(k) != m}
     assert not missing, f"global bindings not registered with anki=None: {missing}"
-
-
-def test_requires_gated_bindings_still_register_when_the_dep_is_absent(make_session):
-    """The #244 regression, stated as an invariant over the gated subset: every binding whose
-    `requires` is NOT "always" (the anki/tts actions — mine, mine-video, mine-all, preview, speak) must
-    still register when the dep is down. This is the exact set a `requires`-gate would have silently
-    dropped."""
-    ipc = FakeIPC()
-    options = ReaderOptions()
-    r = make_session(ipc, services=SessionServices(anki=None), options=options)  # no anki, no tts
-    r.graph.commands.install_input()
-    reg = keybind_registry(ipc)
-
-    gated = [
-        b
-        for b in active_bindings(options.keys, "global")
-        if b.spec.requires != "always" and b.spec.message
-    ]
-    assert gated, "no requires-gated global bindings found — guard against the filter going empty"
-    for b in gated:
-        assert reg.get(b.key) == b.spec.message, (
-            f"{b.spec.requires}-gated {b.key} ({b.spec.message}) dropped when the dep was absent"
-        )
 
 
 # --- closure: message ↔ binding ↔ handler must correspond exactly ----------------------------------

@@ -37,17 +37,24 @@ def test_capability_probe_deduplicates_and_publishes_snapshot():
 
 def test_capability_close_rejects_late_result():
     release = threading.Event()
-    probe = CapabilityProbe(
-        lambda: release.wait(1) or True,
-        name="test",
-        ttl=10,
-        retry=1,
+
+    def blocked() -> bool:
+        release.wait(1)
+        return True
+
+    probe = CapabilityProbe(blocked, name="test", ttl=10, retry=1)
+    existing_threads = set(threading.enumerate())
+    assert probe.request()
+    worker = next(
+        thread
+        for thread in set(threading.enumerate()) - existing_threads
+        if thread.name == "saitenka-test-probe"
     )
-    probe.request()
     probe.close()
     release.set()
-    time.sleep(0.01)
+    worker.join(1)
 
+    assert not worker.is_alive()
     assert probe.value is None
 
 
@@ -71,11 +78,17 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
         return True
 
     probe = CapabilityProbe(run, name="test", ttl=30, retry=1, timeout=5, clock=lambda: clock[0])
+    existing_threads = set(threading.enumerate())
     assert probe.request()
     # Ordering the two threads: the clock is fake, so without this the replacement is spawned
     # microseconds later and can reach `run` first, taking the wedge branch meant for its
     # predecessor. `calls` is then read from one thread at a time, too.
     assert wedged.wait(5), "the first probe never reached the callable it is supposed to wedge in"
+    first_worker = next(
+        thread
+        for thread in set(threading.enumerate()) - existing_threads
+        if thread.name == "saitenka-test-probe"
+    )
     clock[0] = 6.0
     assert probe.request()
     assert not probe.request(force=True)
@@ -84,8 +97,8 @@ def test_wedged_probe_is_replaced_once_and_late_result_is_rejected():
     assert probe.value is True and calls == 2
 
     first.set()
-    # Not a wait: let the unwedged first probe finish and prove its stale result is still rejected.
-    time.sleep(0.01)
+    first_worker.join(1)
+    assert not first_worker.is_alive()
     assert probe.value is True
 
 
@@ -171,9 +184,8 @@ def test_runtime_capability_completion_changes_reader_only_after_event_delivery(
         gateway.close()
 
 
-#: How long the first probe stays wedged before letting go on its own. Short on purpose — the
-#: replacement's result is only accepted once the call it replaced has finished.
-_WEDGE_TIMEOUT = 1.0
+#: Bounds waiting for each deliberately wedged call to start.
+_WEDGE_TIMEOUT = 5.0
 #: Bounds a hang, never a race: far past what the work needs, because a test that passes only on an
 #: idle machine is the defect this replaced.
 _REPLACEMENT_TIMEOUT = 10.0
@@ -194,11 +206,7 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
             calls[name] += 1
             if calls[name] == 1:
                 started[name].set()
-                # Self-releases, and must: the wedge has to end for the *replacement's* terminal to
-                # be accepted, so holding it for the whole assertion deadlocks the very thing being
-                # measured. Retry timing runs off the injected clock, so this cannot re-fire the
-                # probe on wall time — it only bounds how long the first call blocks.
-                releases[name].wait(_WEDGE_TIMEOUT)
+                releases[name].wait(30)
                 return False
             return True
 
@@ -226,9 +234,8 @@ def test_runtime_lane_can_replace_both_wedged_capability_probes() -> None:
             assert running.wait(_WEDGE_TIMEOUT), f"{name} probe never started"
         clock[0] = 6.0
         assert all(probe.request() for probe in probes)
-        # A deadline, not a fixed number of 1 ms sleeps: the replacement runs on a lane thread, and
-        # under `-n auto` the old 200 ms budget expired before it was ever scheduled. The wait is a
-        # timeout guarding a hang, so it may be generous — what it must not be is a race.
+        # Both original workers remain blocked here. Their replacements need spare lane capacity;
+        # a two-worker lane cannot satisfy this assertion before cleanup releases the wedges.
         deadline = time.monotonic() + _REPLACEMENT_TIMEOUT
         while time.monotonic() < deadline:
             ipc.drain_events()

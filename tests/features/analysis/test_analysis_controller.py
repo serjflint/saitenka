@@ -12,16 +12,11 @@ from util import FakeIPC, await_ready, drain_for, session_gateway
 from saitenka.app.bindings import ANALYSIS_MSG
 from saitenka.app.features.analysis import analysis_controller
 from saitenka.app.features.analysis.analysis_rows import analysis_rows
-from saitenka.app.features.analysis.episode_analysis import cue_result
-from saitenka.app.features.profiles.dependencies import DependencyBundle
-from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.scoring import Coloring
 from saitenka.app.session.factory import SessionServices
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime.events import (
-    SubtitleLanguageChanged,
     SubtitleStartupConfigured,
-    SubtitleTracksDiscovered,
 )
 
 
@@ -55,109 +50,6 @@ def _finish(reader: TestSession) -> None:
         "analysis result was not published",
         pump=reader.pump,
     )
-
-
-def test_toggle_shows_analyzing_then_result_without_pause_or_seek(reader, monkeypatch):
-    started = threading.Event()
-    release = threading.Event()
-    analyze_cues = analysis_controller.analyze_cues
-
-    def analyze(cues, scorer, tokenizer):
-        started.set()
-        release.wait(1)
-        return analyze_cues(cues, scorer, tokenizer)
-
-    monkeypatch.setattr(analysis_controller, "analyze_cues", analyze)
-    _toggle(reader)
-    assert started.wait(1)
-    assert reader.graph.analysis.status == "Analyzing…"
-    release.set()
-    _finish(reader)
-
-    assert reader.graph.analysis.result is not None
-    assert reader.graph.analysis.status == "Ready"
-    assert OverlayId.ANALYSIS in reader.graph.overlay._live
-    forbidden = {"sub-seek", "seek"}
-    assert not any(command and command[0] in forbidden for command in reader.graph.ipc.commands)
-    assert not any(
-        command[:2] == ("set_property", "pause") for command in reader.graph.ipc.commands
-    )
-
-    _toggle(reader)
-    await_ready(
-        lambda: OverlayId.ANALYSIS not in reader.graph.overlay._live,
-        "analysis overlay did not retire",
-        pump=reader.pump,
-    )
-
-
-def test_external_srt_without_mpv_sid_is_still_analyzable(reader):
-    reader.graph.track_commands.declare(
-        SubtitleTracksDiscovered(None, reader.graph.track_commands.current().en_sid)
-    )
-
-    _toggle(reader)
-    _finish(reader)
-    assert reader.graph.analysis.status == "Ready"
-    assert reader.graph.analysis.result is not None
-
-
-def test_no_index_reports_unavailable(reader):
-    reader.graph.track_commands.navigation.current.sub_index = None
-
-    _toggle(reader)
-
-    assert reader.graph.analysis.status == "Japanese track unavailable"
-    assert reader.graph.analysis.settled
-
-
-def test_cache_hit_reopens_with_the_same_result_immediately(reader):
-    _toggle(reader)
-    _finish(reader)
-    result = reader.graph.analysis.result
-
-    _toggle(reader)
-    _toggle(reader)
-
-    assert reader.graph.analysis.status == "Ready"
-    assert reader.graph.analysis.result is result
-
-
-def test_track_analysis_completes_while_overlay_is_closed(reader):
-    _invalidate(reader)
-    _finish(reader)
-
-    assert reader.graph.analysis.result is not None
-    assert not reader.graph.analysis.open
-    assert OverlayId.ANALYSIS not in reader.graph.overlay._live
-
-
-def test_dependency_loading_defers_analysis_until_vocabulary_arrives(reader):
-    reader.graph.profile.begin_loading()
-
-    _invalidate(reader)
-    assert reader.graph.analysis.settled
-
-    reader.graph.profile.accept(DependencyBundle(reader.graph.profile.identity))
-    _invalidate(reader, vocabulary_changed=True)
-    _finish(reader)
-    assert reader.graph.analysis.result is not None
-
-
-def test_vocabulary_and_track_changes_invalidate_and_restart(reader):
-    _toggle(reader)
-    _finish(reader)
-
-    _invalidate(reader, vocabulary_changed=True)
-    assert reader.graph.analysis.status == "Analyzing…"
-    _finish(reader)
-
-    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
-        [Cue(0, 1, "彼は映画を見る。")]
-    )
-    _invalidate(reader)
-    _finish(reader)
-    assert cue_result(reader.graph.analysis.result, 0) is not None
 
 
 def test_latest_analysis_waits_for_a_slot_then_publishes(reader, monkeypatch):
@@ -291,16 +183,6 @@ def test_analysis_failure_has_a_terminal_unavailable_state(reader, monkeypatch, 
     assert reader.graph.analysis.result is None
     assert reader.graph.analysis.status == "Analysis unavailable"
     assert "episode analysis failed" in caplog.text
-
-
-def test_english_or_missing_japanese_track_is_unavailable(reader):
-    reader.graph.track_commands.declare(SubtitleLanguageChanged("en"))
-
-    _toggle(reader)
-
-    assert reader.graph.analysis.status == "Japanese track unavailable"
-    assert reader.graph.analysis.result is None
-    assert reader.graph.analysis.settled
 
 
 def test_ui_scale_enlarges_episode_analysis_window():

@@ -33,6 +33,8 @@ OPTIONAL_MODULES = [
     "opentelemetry",  # [telemetry] the OTel SDK
     "libasslite",  # [subtitle-geometry] system-libass wrapper
     "libasslite_bundle",  # [subtitle-geometry-bundle] native runtime payload
+    "resvg_py",  # [images] SVG rasterizer
+    "keyring",  # conditional Linux credential backend
 ]
 
 # The base install's eager import graph: the CLI surface plus what `run`/`attach` load to play a video.
@@ -60,13 +62,15 @@ def _extras_pulled_by_importing(entry: str, tmp_path) -> list[str]:
         capture_output=True,
         text=True,
         env=env,
-        timeout=60,
+        timeout=5,
         check=False,
     )
     assert out.returncode == 0, out.stderr  # the base import must SUCCEED, never ImportError
     return json.loads(out.stdout)
 
 
+@pytest.mark.integration
+@pytest.mark.timeout(5)
 @pytest.mark.parametrize("entry", ENTRY_POINTS)
 def test_entry_point_pulls_no_optional_extra(entry, tmp_path):
     leaked = _extras_pulled_by_importing(entry, tmp_path)

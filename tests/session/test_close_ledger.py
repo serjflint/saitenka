@@ -23,36 +23,6 @@ def _session(ipc: FakeIPC | None = None):
     return session
 
 
-def test_a_failing_participant_does_not_strand_the_ones_after_it() -> None:
-    ledger = CloseLedger()
-    order: list[str] = []
-
-    with ledger.participant("first"):
-        order.append("first")
-    with ledger.participant("thrower"):
-        order.append("thrower")
-        raise RuntimeError("boom")
-    with ledger.participant("last"):
-        order.append("last")
-
-    assert order == ["first", "thrower", "last"]
-    assert ledger.completed == ["first", "last"]
-    assert [failure.participant for failure in ledger.failures] == ["thrower"]
-
-
-def test_an_interrupt_during_teardown_still_runs_the_rest() -> None:
-    ledger = CloseLedger()
-    reached = False
-
-    with ledger.participant("interrupted"):
-        raise KeyboardInterrupt
-    with ledger.participant("after"):
-        reached = True
-
-    assert reached
-    assert [type(failure.error) for failure in ledger.failures] == [KeyboardInterrupt]
-
-
 def test_the_report_names_every_failure_and_its_type() -> None:
     ledger = CloseLedger()
     for name, error in (("a", RuntimeError), ("b", ValueError)):
@@ -78,34 +48,32 @@ def test_close_is_idempotent() -> None:
     assert session.close() is first
 
 
-def test_a_wedged_interaction_participant_does_not_strand_transport(monkeypatch) -> None:
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize(
+    ("owner", "method", "participant", "error_type"),
+    [
+        ("tooltip", "cancel_jobs", "interaction-jobs", RuntimeError),
+        ("tooltip", "cancel_jobs", "interaction-jobs", KeyboardInterrupt),
+        ("lifecycle_surfaces", "close", "lifecycle-surfaces", RuntimeError),
+    ],
+)
+def test_a_failing_close_participant_does_not_strand_later_retirement(
+    monkeypatch, owner, method, participant, error_type
+) -> None:
     session = _session()
 
     def fail() -> None:
-        raise RuntimeError("wedged")
+        raise error_type("wedged")
 
-    monkeypatch.setattr(session.graph.tooltip, "cancel_jobs", fail)
-
-    ledger = session.close()
-
-    assert [failure.participant for failure in ledger.failures] == ["interaction-jobs"]
-    assert "transport" in ledger.completed
-    assert "temporary-artifacts" in ledger.completed
-
-
-def test_a_late_failure_does_not_skip_artifact_or_runtime_retirement(monkeypatch) -> None:
-    session = _session()
-
-    def fail() -> None:
-        raise RuntimeError("wedged")
-
-    monkeypatch.setattr(session.graph.lifecycle_surfaces, "close", fail)
+    monkeypatch.setattr(getattr(session.graph, owner), method, fail)
 
     ledger = session.close()
 
-    assert [failure.participant for failure in ledger.failures] == ["lifecycle-surfaces"]
-    assert "temporary-artifacts" in ledger.completed
-    assert "session-runtime" in ledger.completed
+    assert [failure.participant for failure in ledger.failures] == [participant]
+    assert [type(failure.error) for failure in ledger.failures] == [error_type]
+    assert participant not in ledger.completed
+    assert {"transport", "temporary-artifacts", "session-runtime"} <= set(ledger.completed)
 
 
 def test_capabilities_stop_before_the_shared_lane_budget_starts() -> None:

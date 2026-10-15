@@ -134,25 +134,8 @@ def test_to_bgra_channel_order_and_premultiply():
     assert tuple(data2) == (25, 50, 100, 128)
 
 
-def test_premul_lut_exists_and_matches_formula():
-    """to_bgra_array premultiplies via a precomputed 256×256 LUT; the LUT must encode exactly
-    value*alpha//255."""
-    import numpy as np
-
-    from saitenka import bgra
-
-    lut = (
-        bgra._PREMUL_LUT
-    )  # moved from mpvio.osd to the overlay.bgra leaf (#138), re-exported by osd
-    assert lut.shape == (256, 256) and lut.dtype == np.uint8
-    a = np.arange(256, dtype=np.uint16)
-    for alpha in (0, 1, 127, 128, 254, 255):
-        assert (lut[alpha] == (a * alpha // 255).astype(np.uint8)).all()
-
-
 def test_to_bgra_array_byte_identical_to_reference():
-    """Property test: to_bgra_array must be byte-identical to the original uint16-multiply
-    implementation over random RGBA images (all alphas, all channels)."""
+    """Every value/alpha pair matches the independent uint16-multiply reference."""
     import numpy as np
 
     from saitenka.mpvio.osd import to_bgra_array
@@ -164,16 +147,14 @@ def test_to_bgra_array_byte_identical_to_reference():
         arr = np.dstack([rgb, arr[:, :, 3]])
         return np.ascontiguousarray(arr[:, :, [2, 1, 0, 3]])
 
-    rng = np.random.default_rng(42)
-    for _ in range(5):
-        raw = rng.integers(0, 256, size=(37, 53, 4), dtype=np.uint8)
-        img = Image.fromarray(raw, "RGBA")
-        got = to_bgra_array(img)
-        want = reference(img)
-        assert got.dtype == want.dtype and got.shape == want.shape
-        assert (got == want).all()
-    # no-premultiply path unchanged too
-    img = Image.fromarray(rng.integers(0, 256, size=(8, 8, 4), dtype=np.uint8), "RGBA")
-    got = to_bgra_array(img, premultiply=False)
-    arr = np.asarray(img)
-    assert (got == arr[:, :, [2, 1, 0, 3]]).all()
+    raw = np.empty((256, 256, 4), dtype=np.uint8)
+    raw[:, :, :3] = np.arange(256, dtype=np.uint8)[None, :, None]
+    raw[:, :, 3] = np.arange(256, dtype=np.uint8)[:, None]
+    img = Image.fromarray(raw, "RGBA")
+
+    got = to_bgra_array(img)
+    want = reference(img)
+
+    assert got.dtype == want.dtype and got.shape == want.shape
+    assert (got == want).all()
+    assert (to_bgra_array(img, premultiply=False) == raw[:, :, [2, 1, 0, 3]]).all()

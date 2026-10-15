@@ -43,9 +43,7 @@ def detect_extras() -> list[str]:
     )
 
 
-def reinstall_command(
-    extras: list[str], *, source: str = "pypi", ref: str | None = None
-) -> list[str]:
+def _reinstall_command(extras: list[str], *, source: str, ref: str | None = None) -> list[str]:
     """A ``uv tool install --reinstall`` command that keeps the given extras. ``source``:
     ``"pypi"`` → ``saitenka[extras]`` (once published); ``"github"`` → the same package pulled
     from GitHub (latest on the default branch, or a ``ref`` tag/branch), which always works and carries
@@ -82,11 +80,11 @@ def reinstall_attempts(
     the GitHub attempt targets (a resolved release tag, an explicit pin, or ``None`` = default branch) —
     it selects WHICH ref, not the source. Pure — unit-tested."""
     if source == "pypi":
-        return [reinstall_command(extras, source="pypi")]
-    github = reinstall_command(extras, source="github", ref=github_ref)
+        return [_reinstall_command(extras, source="pypi")]
+    github = _reinstall_command(extras, source="github", ref=github_ref)
     if source == "github":
         return [github]
-    return [reinstall_command(extras, source="pypi"), github]
+    return [_reinstall_command(extras, source="pypi"), github]
 
 
 def update_command() -> list[str]:

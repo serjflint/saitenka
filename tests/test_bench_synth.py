@@ -117,7 +117,19 @@ def test_clicks_bench_emits_the_three_click_spans(monkeypatch, capsys):
 
     monkeypatch.setattr(otel_metrics, "traced", _rec)
     mod = _bench_module()
+
+    def once(fn, _reps):
+        fn()
+        return {"p50": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0}
+
+    monkeypatch.setattr(mod, "measure", once)
     rc = mod.run_clicks(reps=2, rt=mod.runtime_info(), require_ft=False)
     capsys.readouterr()  # swallow the bench's report
     assert rc == 0
-    assert {"sidebar_click", "backlog_write", "mined_store_write"} <= set(names)
+    assert {
+        name: names.count(name) for name in ("sidebar_click", "backlog_write", "mined_store_write")
+    } == {
+        "sidebar_click": 1,
+        "backlog_write": 1,
+        "mined_store_write": 1,
+    }
