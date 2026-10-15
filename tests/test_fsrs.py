@@ -15,8 +15,6 @@ import sqlite3
 import time
 from typing import TYPE_CHECKING
 
-import pytest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -109,46 +107,6 @@ def _build_minimal_anki2(path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-class TestRetrievability:
-    """The FSRS formula must match tools/anki_rank_dicts.py verbatim."""
-
-    def test_exact_formula_matches_reference(self):
-        """retrievability(s, elapsed, decay) == (1 + (0.9^(1/decay)-1) * elapsed/s)^decay."""
-        fsrs = _import_fsrs()
-
-        # Reference formula (from anki_rank_dicts.py retrievability())
-        def ref(s, elapsed, decay):
-            factor = 0.9 ** (1.0 / decay) - 1.0
-            return (1.0 + factor * elapsed / s) ** decay
-
-        cases = [
-            (200.0, 30.0, 0.1542),  # mature known card
-            (10.0, 30.0, 0.1542),  # forgotten card
-            (50.0, 7.0, 0.1542),  # young card
-            (100.0, 0.0, 0.1542),  # elapsed=0 → R=1.0
-        ]
-        for s, elapsed, decay in cases:
-            expected = ref(s, elapsed, decay)
-            got = fsrs.retrievability(s, elapsed, decay)
-            assert abs(got - expected) < 1e-9, (
-                f"retrievability({s},{elapsed},{decay}): got {got}, expected {expected}"
-            )
-
-    def test_invalid_inputs_return_none(self):
-        """s≤0, negative elapsed, or s=None → None (not a crash)."""
-        fsrs = _import_fsrs()
-        assert fsrs.retrievability(0, 10, 0.1542) is None
-        assert fsrs.retrievability(-5, 10, 0.1542) is None
-        assert fsrs.retrievability(None, 10, 0.1542) is None  # type: ignore[arg-type]
-        assert fsrs.retrievability(10, -1, 0.1542) is None
-
-    def test_r_at_zero_elapsed_is_one(self):
-        fsrs = _import_fsrs()
-        r = fsrs.retrievability(100.0, 0.0, 0.1542)
-        assert r is not None
-        assert abs(r - 1.0) < 1e-9
-
-
 # ---------------------------------------------------------------------------
 # 2. Collection loading — word → state classification
 # ---------------------------------------------------------------------------
@@ -230,53 +188,3 @@ class TestKnownSnap:
 # ---------------------------------------------------------------------------
 # 5. Difficulty pill — harmonic-mean frequency rank
 # ---------------------------------------------------------------------------
-
-
-class TestDifficultyPill:
-    """harmonic_rank() computes the blended difficulty estimate."""
-
-    def test_harmonic_rank_single_dict(self):
-        """With one freq dict, harmonic rank == that dict's rank."""
-        fsrs = _import_fsrs()
-        result = fsrs.harmonic_rank("猫", [{"猫": 500}])
-        assert result == pytest.approx(500.0)
-
-    def test_harmonic_rank_two_dicts(self):
-        """With two dicts, result is the harmonic mean (len/sum(1/r))."""
-        fsrs = _import_fsrs()
-        # harmonic mean of 1000 and 2000 = 2 / (1/1000 + 1/2000) = 2/(0.001+0.0005) ≈ 1333.3
-        result = fsrs.harmonic_rank("言葉", [{"言葉": 1000}, {"言葉": 2000}])
-        assert result == pytest.approx(1333.33, rel=1e-3)
-
-    def test_harmonic_rank_word_absent_from_some_dicts(self):
-        """Only dicts that contain the word contribute to the blend."""
-        fsrs = _import_fsrs()
-        result = fsrs.harmonic_rank("猫", [{"猫": 500}, {"犬": 100}])
-        # Only the first dict has 猫
-        assert result == pytest.approx(500.0)
-
-    def test_harmonic_rank_absent_everywhere_returns_none(self):
-        """If no dict has the word, returns None."""
-        fsrs = _import_fsrs()
-        result = fsrs.harmonic_rank("存在しない語", [{"猫": 500}])
-        assert result is None
-
-    def test_harmonic_rank_empty_dicts_returns_none(self):
-        fsrs = _import_fsrs()
-        result = fsrs.harmonic_rank("猫", [])
-        assert result is None
-
-    def test_harmonic_of_blends_a_rank_list(self):
-        """harmonic_of is the blend core: len/sum(1/r); empty → None."""
-        fsrs = _import_fsrs()
-        assert fsrs.harmonic_of([1000.0, 2000.0]) == pytest.approx(1333.33, rel=1e-3)
-        assert fsrs.harmonic_of([]) is None
-
-    def test_rareness_bands_at_the_cutoffs(self):
-        """common ≤10k, uncommon ≤30k, rare beyond — cutoffs inclusive."""
-        fsrs = _import_fsrs()
-        assert fsrs.rareness_band(500) == "common"
-        assert fsrs.rareness_band(fsrs.RARENESS_COMMON_MAX) == "common"
-        assert fsrs.rareness_band(fsrs.RARENESS_COMMON_MAX + 1) == "uncommon"
-        assert fsrs.rareness_band(fsrs.RARENESS_UNCOMMON_MAX) == "uncommon"
-        assert fsrs.rareness_band(fsrs.RARENESS_UNCOMMON_MAX + 1) == "rare"

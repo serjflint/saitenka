@@ -10,15 +10,11 @@ from __future__ import annotations
 
 from dataclasses import fields
 
-import pytest
 from saitenka_tokenize import Token
 from saitenka_wordstate import (
     KnownWords,
     Scorer,
     TokenVerdict,
-    freq_band,
-    harmonic_of,
-    rareness_band,
 )
 
 
@@ -123,18 +119,3 @@ def test_the_collection_is_reached_through_an_injected_client():
 
     known = KnownWords.from_ankiconnect({"D": ["Expression"]}, _Notes())
     assert known.is_known("猫")
-
-
-@pytest.mark.parametrize(
-    ("rank", "band"), [(1, 1), (2000, 1), (2001, 2), (10_000, 5), (10_001, None)]
-)
-def test_freq_band_splits_the_cap_into_equal_slices(rank, band):
-    assert freq_band(rank, top_x=10_000, bands=5) == band
-
-
-def test_the_blend_and_its_bands_are_pure_numbers():
-    assert harmonic_of([1000.0, 2000.0]) == pytest.approx(1333.33, rel=1e-3)
-    assert harmonic_of([]) is None
-    assert rareness_band(500) == "common"
-    assert rareness_band(20_000) == "uncommon"
-    assert rareness_band(40_000) == "rare"

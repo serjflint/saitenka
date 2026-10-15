@@ -6,7 +6,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 if __package__:
-    from . import cli_adapter, config_adapter, saitenka_session_adapter, subtitle_adapter
+    from . import (
+        cli_adapter,
+        config_adapter,
+        saitenka_session_adapter,
+        subtitle_adapter,
+        wordstate_adapter,
+    )
     from . import protocol as session_protocol
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -15,6 +21,7 @@ else:
     import protocol as session_protocol
     import saitenka_session_adapter
     import subtitle_adapter
+    import wordstate_adapter
 
 Adapter = tuple[str, Callable[[dict], object]]
 ADAPTERS: dict[str, Adapter] = {
@@ -25,6 +32,7 @@ ADAPTERS: dict[str, Adapter] = {
     config_adapter.PROTOCOL: (config_adapter.CAPABILITY, config_adapter.evaluate),
     cli_adapter.PROTOCOL: (cli_adapter.CAPABILITY, cli_adapter.evaluate),
     subtitle_adapter.PROTOCOL: (subtitle_adapter.CAPABILITY, subtitle_adapter.evaluate),
+    wordstate_adapter.PROTOCOL: (wordstate_adapter.CAPABILITY, wordstate_adapter.evaluate),
 }
 
 

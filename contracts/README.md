@@ -71,3 +71,9 @@ settings and frame geometry, then observe either portable geometry fields or the
 hit geometry unsafe. Renderer-state scenarios expose the libass scaling values that must match mpv. Corpus
 rows conform to `schema/subtitle-v0.json`; Python classes, cache keys, and ownership state stay behind the
 adapter.
+
+## Word-state v0 protocol
+
+`saitenka.wordstate/v0` uses capability `wordstate-v0`. It evaluates JSON numeric cases for FSRS
+retrievability and frequency/rareness laws. The reference-vector expectations stay with the runner, so an
+adapter in another language receives inputs but no answers. Rows conform to `schema/wordstate-v0.json`.

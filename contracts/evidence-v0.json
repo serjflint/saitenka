@@ -325,6 +325,15 @@
       "replace": "        if False:",
       "command": "uv run pytest -q tests/session/test_session_controller.py::test_a_late_due_from_a_superseded_navigation_leaves_the_new_window_open",
       "mismatch": "a superseded due event closed the current navigation window"
+    },
+    {
+      "id": "wordstate-fsrs-reference-vectors",
+      "scenario_id": "fsrs-retrievability-reference-vectors",
+      "path": "saitenka-wordstate/src/saitenka_wordstate/fsrs.py",
+      "find": "    factor = 0.9 ** (1.0 / decay) - 1.0",
+      "replace": "    factor = 0.8 ** (1.0 / decay) - 1.0",
+      "command": "uv run pytest -q 'tests/contracts/test_wordstate_corpus.py::test_wordstate_contract[fsrs-retrievability-reference-vectors]'",
+      "mismatch": "the vendored py-fsrs vector at elapsed equal to stability changed from 0.9 to 0.8"
     }
   ]
 }
