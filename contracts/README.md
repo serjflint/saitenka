@@ -96,5 +96,6 @@ observations. Archive, media, telemetry, and connection lifetimes stay native bo
 `saitenka.tooltip/v0` uses capability `tooltip-v0`. Geometry scenarios supply viewport, word-box, panel,
 and user-scale inputs and return only visible sizes and coordinates. The contract covers scale preference,
 raster buckets, caps, nested-popup height, clamping, and side selection without exposing controller or cache
-objects. Font rasterization, hit-map agreement, hover concurrency, and interaction state stay native tests.
-Rows conform to `schema/tooltip-v0.json`.
+objects. Hit-testing scenarios map frame coordinates to interactive token indices while respecting cue
+origins and noninteractive tokens. Font rasterization, cross-engine hit-map agreement, hover concurrency,
+and interaction state stay native tests. Rows conform to `schema/tooltip-v0.json`.

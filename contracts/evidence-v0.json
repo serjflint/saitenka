@@ -433,6 +433,15 @@
       "replace": "    display = osd_h / REF_H",
       "command": "uv run pytest -q tests/contracts/test_tooltip_corpus.py",
       "mismatch": "a fixed 1.5 user scale reverted to the viewport-derived 1.0 at 1080p"
+    },
+    {
+      "id": "tooltip-frame-origin",
+      "scenario_id": "tooltip-token-hit-testing",
+      "path": "src/saitenka/app/subtitles.py",
+      "find": "        if box.contains(point[0] - origin_x, point[1] - origin_y):",
+      "replace": "        if box.contains(point[0], point[1]):",
+      "command": "uv run pytest -q 'tests/contracts/test_tooltip_corpus.py::test_tooltip_contract[tooltip-token-hit-testing]'",
+      "mismatch": "an offset subtitle cue resolved no token at the frame-space pointer"
     }
   ]
 }

@@ -1,0 +1,27 @@
+[
+  {
+    "scenario_id": "tooltip-token-hit-testing",
+    "mode": "hit-testing",
+    "cases": [
+      {
+        "boxes": [[0, 10, 20, 30, 10], [1, 40, 20, 30, 10]],
+        "point": [55, 25],
+        "origin": [0, 0],
+        "skippable": []
+      },
+      {
+        "boxes": [[0, 10, 20, 30, 10], [1, 40, 20, 30, 10]],
+        "point": [95, 625],
+        "origin": [40, 600],
+        "skippable": []
+      },
+      {
+        "boxes": [[0, 10, 20, 30, 10], [1, 40, 20, 30, 10]],
+        "point": [25, 25],
+        "origin": [0, 0],
+        "skippable": [0]
+      }
+    ],
+    "expect": [1, 1, -1]
+  }
+]

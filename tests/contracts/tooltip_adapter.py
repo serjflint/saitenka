@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from itertools import starmap
+
 PROTOCOL = "saitenka.tooltip/v0"
 CAPABILITY = "tooltip-v0"
 ANSWER_KEYS = frozenset({"expect"})
+MODES = frozenset({"geometry", "hit-testing"})
 
 
 def scenario_request(scenario: dict) -> dict:
     if (
         set(scenario) != {"scenario_id", "mode", "cases", "expect"}
-        or scenario.get("mode") != "geometry"
+        or scenario.get("mode") not in MODES
     ):
         raise ValueError("invalid tooltip-v0 scenario")
     return {
@@ -23,7 +26,7 @@ def validate_request(request: dict) -> None:
         ANSWER_KEYS & request.keys()
         or request.get("type") != "run"
         or request.get("protocol") != PROTOCOL
-        or request.get("mode") != "geometry"
+        or request.get("mode") not in MODES
         or set(request) != {"type", "protocol", "scenario_id", "mode", "cases"}
     ):
         raise ValueError("invalid tooltip-v0 request envelope")
@@ -31,7 +34,22 @@ def validate_request(request: dict) -> None:
 
 def evaluate(request: dict) -> list[object]:
     validate_request(request)
+    if request["mode"] == "hit-testing":
+        return [_hit_test(case) for case in request["cases"]]
     return [_evaluate_case(case) for case in request["cases"]]
+
+
+def _hit_test(case: dict) -> int:
+    from saitenka.app.subtitles import WordBox, token_at
+
+    boxes = list(starmap(WordBox, case["boxes"]))
+    skippable = frozenset(case["skippable"])
+    return token_at(
+        boxes,
+        tuple(case["point"]),
+        tuple(case["origin"]),
+        is_skippable=skippable.__contains__,
+    )
 
 
 def _evaluate_case(case: dict) -> object:
