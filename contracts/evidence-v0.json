@@ -271,6 +271,15 @@
       "replace": "        selective_font_scale=scale.scale_signs and scale.font_scale != 1.0,",
       "command": "uv run pytest -q 'tests/contracts/test_subtitle_corpus.py::test_subtitle_contract[renderer-state-follows-mpv-scale-semantics]'",
       "mismatch": "the selective font scale bit followed sub-scale-signs instead of inverting it"
+    },
+    {
+      "id": "session-cue-retirement-before-command",
+      "scenario_id": "cue-change-rejects-same-batch-command",
+      "path": "src/saitenka/runtime/playback.py",
+      "find": "        state, retired = self._retire_conflict(state, name, data)",
+      "replace": "        retired = ()",
+      "command": "uv run pytest -q 'tests/contracts/test_session_corpus.py::test_session_contract[cue-change-rejects-same-batch-command]'",
+      "mismatch": "same-batch commands copied the retired cue and became externally visible"
     }
   ]
 }
