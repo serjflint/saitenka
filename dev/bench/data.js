@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1792410048747,
+  "lastUpdate": 1792410078061,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19845,6 +19845,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 54.626678,
             "range": "3 replicas; min 37.0944; max 59.3454; MAD 4.71875",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2030a90ff1b75a58e1fc22e9e4b125964b6a3e27",
+          "message": "Merge pull request #556 from serjflint/audit/core-test-trim-20261011\n\nrefactor(core): replace obsolete seams with portable behavior contracts",
+          "timestamp": "2026-10-15T08:04:07Z",
+          "url": "https://github.com/serjflint/saitenka/commit/2030a90ff1b75a58e1fc22e9e4b125964b6a3e27"
+        },
+        "date": 1792410076581,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 1; MAD 0; worst 1",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 232.584665,
+            "range": "3 replicas; min 231.107; max 244.632; MAD 1.478",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 73.730295,
+            "range": "3 replicas; min 61.979; max 83.7032; MAD 9.97294",
             "unit": "ms"
           }
         ]
