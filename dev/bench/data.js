@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793018448552,
+  "lastUpdate": 1793629205850,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -21203,6 +21203,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 8.728576,
             "range": "3 replicas; min 8.63437; max 9.0071; MAD 0.094208",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "2030a90ff1b75a58e1fc22e9e4b125964b6a3e27",
+          "message": "Merge pull request #556 from serjflint/audit/core-test-trim-20261011\n\nrefactor(core): replace obsolete seams with portable behavior contracts",
+          "timestamp": "2026-10-15T08:04:07Z",
+          "url": "https://github.com/serjflint/saitenka/commit/2030a90ff1b75a58e1fc22e9e4b125964b6a3e27"
+        },
+        "date": 1793629204907,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 20.950397,
+            "range": "3 replicas; min 16.338; max 26.3443; MAD 4.61236; worst 26.3443",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 22.765102,
+            "range": "3 replicas; min 22.4076; max 101.883; MAD 0.357463; worst 101.883",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 9.089024,
+            "range": "3 replicas; min 8.76954; max 9.16275; MAD 0.073728",
             "unit": "MB"
           }
         ]
