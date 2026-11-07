@@ -7,7 +7,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from saitenka_subtitles import Cue, CueIndex, parse_ass, parse_cues, parse_srt
 
@@ -478,3 +478,19 @@ def test_mislabeled_ass_preserves_the_authored_view():
 def test_literal_animation_command_outside_an_override_is_ordinary_dialogue():
     content = CORPUS[6]["ass"].replace(",Karaoke,歌詞", ",,歌詞\\t(")
     assert len(parse_ass(content)) == 3
+
+
+@example(order=(0, 1, 2, 3, 2))
+@given(st.permutations((0, 1, 2, 3, 2)))
+def test_burst_overlap_and_duplicate_keep_every_authored_frame(order):
+    rows = CORPUS[1]["ass"].splitlines()
+    events = [*rows[2:], rows[4].replace("0:00:03.55", "0:00:01.10").replace("m 3 3", "m 4 4")]
+    content = "\n".join(rows[:2] + [events[position] for position in order])
+    index = CueIndex.from_content(content, "episode.ass")
+    assert len(index.authored) == 5
+    assert len(index) == 2
+    assert tuple(index.boundaries_after(-1)) == (1.0, 1.05, 1.09, 1.1, 3.55)
+    assert (
+        index.frame_events("過ぎ去ってしまう瞬間を\n過ぎ去ってしまう瞬間を\n過ぎ去ってしまう瞬間を")
+        == ("過ぎ去ってしまう瞬間を",) * 3
+    )

@@ -91,11 +91,11 @@ def _ass_projection(content: str) -> CueProjection:
     groups: dict[int, list[int]] = {}
     exact: dict[tuple, int] = {}
     runs: dict[tuple, list[int]] = {}
+    merges: list[list[int]] = []
 
     def finish(run: list[int]) -> None:
         if _animated_run([rows[position][0] for position in run]):
-            for position in run[1:]:
-                groups[run[0]].extend(groups.pop(position))
+            merges.append(run)
 
     for position, (event, cue) in enumerate(rows):
         signature = (*_metadata(event), event.start, event.end, event.text)
@@ -115,6 +115,9 @@ def _ass_projection(content: str) -> CueProjection:
         runs[key] = run
     for run in runs.values():
         finish(run)
+    for run in merges:
+        for position in run[1:]:
+            groups[run[0]].extend(groups.pop(position))
     cues: list[Cue] = []
     owners = [0] * len(rows)
     for first, members in groups.items():
