@@ -71,6 +71,10 @@ opt-in native-visible experiment instead leaves authored external ASS rendering 
 derives hit boxes on a bounded background worker; Pillow remains authoritative by default. On hover,
 the reader looks the word up and draws its tooltip in mpv's OSD surface.
 
+Tooltip placement, uploaded pixels and pointer hit tests share `TipScale.raster`, the bucketed
+reference-to-screen scale. The soft first frame uses the same geometry as its later native render;
+`TipScale.display` is the requested scale before bucketing.
+
 Native color masks come from an unmodified render of the subtitle track. A separate color-tagged
 render supplies ownership hints: inserting color boundaries can change libass's pixels. The worker
 attributes connected ink only when its owner is unambiguous, with pixel, run and aggregate mask-byte

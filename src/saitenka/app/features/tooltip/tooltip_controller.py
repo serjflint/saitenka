@@ -704,7 +704,7 @@ class TooltipController:
     def submit_render_ahead(self, view: PopupView, direction: int) -> bool:
         view.quality.prepare(
             view.key if view.key is not None else view.state,
-            (view.desired_scroll, view.view_h, self.scale().display),
+            (view.desired_scroll, view.view_h, self.scale().raster),
         )
         with otel_metrics.traced(
             "render_ahead_request",

@@ -9,6 +9,8 @@ logs.
 
 ### Fixed
 
+- Tooltip links, character scanning and header buttons stay aligned with the displayed panel
+  between scale buckets, including the first frame before native rendering warms.
 - Mined sentence audio keeps the selected embedded track when background work is delayed or
   the player switches tracks. Unavailable or external audio warns instead of capturing another track.
 

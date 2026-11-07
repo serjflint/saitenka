@@ -171,15 +171,7 @@ def test_the_native_scrollbar_thumb_is_sized_in_display_px(scale, monkeypatch):
 
 
 def test_a_sub_1080p_tooltip_uploads_display_sized_pixels(monkeypatch):
-    """A cold sub-1080p show still composites at the 1920x1080 reference and resizes down at upload —
-    and the pixels that reach mpv, not just ``rect``, have to be that size.
-
-    This is the soft FALLBACK, the one frame before the native bands warm; the band makes the steady
-    state native, so the resize is no longer paid per notch. It is still the only place one is paid
-    at all, and nothing watched it: dropping it outright left the whole suite green while every
-    sub-1080p tooltip uploaded a frame half again too big for its OSD, with `rect` still claiming
-    the smaller one the hit-test inverts.
-    """
+    """Cold fallback and warm native frames upload at the same bucketed scale."""
     r = hidpi_reader(2 / 3).graph
     monkeypatch.setattr(r.subtitle_presentation, "renderer", NullRenderer())
     uploaded: list[tuple[int, ...]] = []
@@ -198,7 +190,7 @@ def test_a_sub_1080p_tooltip_uploads_display_sized_pixels(monkeypatch):
         r.tooltip.surface_state().view.crisp_miss == "warming"
     )  # but cold, so this IS the soft one
     height, width = uploaded[-1][:2]
-    assert width == round(scale.width * scale.display)  # the reference panel, resized down
+    assert width == round(scale.width * scale.raster)  # the reference panel, resized down
     assert (width, height) == r.tooltip.surface_state().view.rect[2:4]  # what the hit-test inverts
 
 
@@ -223,3 +215,110 @@ def test_navigated_view_is_keyless_and_still_round_trips(monkeypatch):
         assert (
             tooltip_panel.scan_hit(r.tooltip.surface_state(), r.tooltip.scale().raster, mx, my) == b
         )
+
+
+@pytest.mark.parametrize("osd_h", [1000, 1053, 1080, 1106, 1621])
+@pytest.mark.parametrize("warm", [False, True])
+@pytest.mark.parametrize("nested", [False, True])
+def test_uploaded_geometry_matches_interaction_after_resize_and_scroll(
+    osd_h, warm, nested, monkeypatch
+):
+    """The upload boundary owns scale; hit_target cannot supply its own round-trip oracle."""
+    from saitenka.app.features.tooltip import nested_popup
+
+    r = _reader(2.0, monkeypatch)
+    tip = r.tooltip.surface_state()
+    uploaded = []
+    monkeypatch.setattr(r.overlay, "show_bgra", lambda bgra, *_a, **_k: uploaded.append(bgra.shape))
+    r.screen.osd = (round(osd_h * 16 / 9), osd_h)
+    if nested:
+        tok = r.subtitle_presentation.cue.current.tokens[0]
+        nested_popup.open_nested(
+            r.tooltip.tip_ports,
+            r.tooltip.panel_ports,
+            tok,
+            tok.surface,
+            nested_popup.Anchor(200.0, 200.0, 40.0),
+        )
+    view = tip.nest if nested else tip.view
+    panel = view.state
+    panel.windowed.viewport(0, 1_000_000)
+    tooltip_panel.scroll_view(r.tooltip.tip_ports, view, 40)
+    if warm:
+        panel.viewport(view.scroll, view.view_h, scale=r.tooltip.scale().raster)
+    tooltip_panel.render_view(r.tooltip.tip_ports, view)
+
+    height, width = uploaded[-1][:2]
+    assert (width, height) == view.rect[2:]
+    drawn_scale = width / panel.width
+    sx, sy = view.xy
+    scans = [
+        b
+        for b in panel.windowed.scan_boxes()
+        if view.scroll <= b.y + b.h / 2 < view.scroll + view.view_h
+    ]
+    links = [
+        b
+        for b in panel.windowed.link_boxes()
+        if view.scroll <= b.y + b.h / 2 < view.scroll + view.view_h
+    ]
+    assert scans and links
+    for box in links:
+        mx = sx + (box.x + box.w / 2) * drawn_scale
+        my = sy + (box.y + box.h / 2 - view.scroll) * drawn_scale
+        assert (
+            tooltip_panel.link_hit_at(tip, r.tooltip.scale().raster, mx, my, nested=nested) == box
+        )
+    if not nested:
+        for box in scans:
+            mx = sx + (box.x + box.w / 2) * drawn_scale
+            my = sy + (box.y + box.h / 2 - view.scroll) * drawn_scale
+            assert tooltip_panel.scan_hit(tip, r.tooltip.scale().raster, mx, my) == box
+
+    assert width == round(panel.width * r.tooltip.scale().raster)
+
+
+@pytest.mark.parametrize("osd_h", [1000, 1053, 1106, 1621])
+def test_header_controls_use_the_uploaded_transform(osd_h, monkeypatch):
+    from dataclasses import replace
+
+    from saitenka.panel import header_add_rect, header_speaker_rect
+
+    r = _reader(osd_h / 1080, monkeypatch)
+    view = r.tooltip.surface_state().view
+    style = replace(r.tooltip.panel_ports.style, add_button=True, speak_button=True)
+    chrome = tooltip.chrome_for(view, scale=r.tooltip.scale(), style=style)
+    s = r.tooltip.scale().raster
+    for rect, hit in [
+        (header_add_rect(style.width, speak_button=True), tooltip.hit_header_add),
+        (header_speaker_rect(style.width), tooltip.hit_header_speaker),
+    ]:
+        x, y, w, h = rect
+        assert hit(chrome, view.xy[0] + (x + w - 0.5) * s, view.xy[1] + (y + h / 2) * s)
+        assert not hit(chrome, view.xy[0] + (x + w + 0.5) * s, view.xy[1] + (y + h / 2) * s)
+
+
+def test_render_ahead_preserves_acknowledged_quality_between_scale_buckets(monkeypatch):
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+    from telemetry_helpers import enable_span_gate
+
+    enable_span_gate(monkeypatch)
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(trace, "get_tracer", provider.get_tracer)
+    try:
+        r = _reader(1053 / 1080, monkeypatch)
+        view = r.tooltip.surface_state().view
+        view.state.viewport(view.scroll, view.view_h)
+        tooltip_panel.render_view(r.tooltip.tip_ports, view)
+        r.tooltip.tip_ports.request_render_ahead(view, 1)
+        view.quality.close()
+        end = next(s for s in exporter.get_finished_spans() if s.name == "tooltip_quality_end")
+        assert end.attributes["acknowledged_quality"] == "crisp"
+        assert not end.attributes["upgrade_abandoned"]
+    finally:
+        provider.shutdown()

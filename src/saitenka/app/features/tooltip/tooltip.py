@@ -521,7 +521,7 @@ def chrome_for(view: PopupView, *, scale: TipScale, style: PanelStyle) -> Header
     to mine is `anki_ok(anki, capability)`, and computing it in two places is how the header and the
     panel it sits on end up disagreeing about the same word.
     """
-    return HeaderChrome(view, style.width, scale.display, style.speak_button, style.add_button)
+    return HeaderChrome(view, style.width, scale.raster, style.speak_button, style.add_button)
 
 
 def hit_header_speaker(chrome: HeaderChrome, x: float, y: float) -> bool:
@@ -873,7 +873,7 @@ def show_tooltip_impl(
             st.full_height,
             cap,
             anchor,
-            scale=ports.scale.display,
+            scale=ports.scale.raster,
             osd=ports.osd,
         )
         render_view(ports, ports.tip.view)
@@ -913,7 +913,7 @@ def _paint_from_cache(ports: TipPorts, key, cap: int, anchor) -> bool:
         full_h,
         cap,
         anchor,
-        scale=ports.scale.display,
+        scale=ports.scale.raster,
         osd=ports.osd,
     )
     with otel_metrics.traced(
