@@ -21,7 +21,7 @@ from saitenka.runtime import events
 from saitenka.runtime.sidebar import MANUAL_SCROLL_HOLD, SidebarState
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from saitenka_subtitles import Cue, CueIndex
 
@@ -181,6 +181,14 @@ def _authored_parts(text, tokens, styles) -> tuple[tuple[str, tuple], ...]:
     return tuple(parts)
 
 
+def _capture_cues(index: CueIndex | None) -> Iterator[tuple[int, Cue]]:
+    """Authored capture spans plus the existing logical-span matches."""
+    if index is not None:
+        yield from enumerate(index.cues)
+        if index.authored is not index:
+            yield from zip(index.authored_study_positions, index.authored.cues, strict=True)
+
+
 def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int, str]:
     """Mined status per cue index, for the Mine column.
 
@@ -191,7 +199,7 @@ def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int,
     entries = store.entries_for_path(video)
     cue_by_span = {
         (round(cue.start, 1), round(cue.end, 1)): cue_index
-        for cue_index, cue in enumerate(index.cues)
+        for cue_index, cue in _capture_cues(index)
     }
     statuses: dict[int, str] = {}
     for entry in entries:
@@ -302,14 +310,11 @@ def _entry_text(entry: BacklogEntry, language: str) -> str:
     return entry.jp_text or entry.en_text
 
 
-def _entry_row(entry: BacklogEntry, active_cue, *, language: str) -> SidebarRow:
-    """One backlog row. ``active_cue`` is the cue playing now, or None — the row highlights when the
-    bookmark's span matches it to within 50 ms, which is looser than equality because the entry's
-    times were rounded when it was saved."""
-    is_active = bool(
-        active_cue
-        and abs(active_cue.start - entry.cue_start) < 0.05
-        and abs(active_cue.end - entry.cue_end) < 0.05
+def _entry_row(entry: BacklogEntry, active_cues: tuple[Cue, ...], *, language: str) -> SidebarRow:
+    """Highlight an active capture within 50 ms to allow persisted timestamp rounding."""
+    is_active = any(
+        abs(cue.start - entry.cue_start) < 0.05 and abs(cue.end - entry.cue_end) < 0.05
+        for cue in active_cues
     )
     text = _entry_text(entry, language)
     return SidebarRow(
@@ -328,9 +333,9 @@ def _matched_entry_rows(
 ) -> list[SidebarRow]:
     if not video:
         return []
-    active_cue = index.cues[active] if index is not None and active >= 0 else None
+    active_cues = tuple(cue for owner, cue in _capture_cues(index) if owner == active)
     return [
-        _entry_row(entry, active_cue, language=language) for entry in store.entries_for_path(video)
+        _entry_row(entry, active_cues, language=language) for entry in store.entries_for_path(video)
     ]
 
 
@@ -347,12 +352,11 @@ def _summary_rows(view: SidebarView) -> list[SidebarRow]:
     )
 
 
-def _mined_row(card: MinedCard, active_cue: Cue | None) -> SidebarRow:
+def _mined_row(card: MinedCard, active_cues: tuple[Cue, ...]) -> SidebarRow:
     text = f"{card.expression}（{card.reading}）" if card.reading else card.expression
-    is_active = bool(
-        active_cue
-        and abs(active_cue.start - card.cue_start) < 0.05
-        and abs(active_cue.end - card.cue_end) < 0.05
+    is_active = any(
+        abs(cue.start - card.cue_start) < 0.05 and abs(cue.end - card.cue_end) < 0.05
+        for cue in active_cues
     )
     return SidebarRow(
         value=card.note_id,
@@ -371,7 +375,8 @@ def _mine_rows(view: SidebarView) -> list[SidebarRow]:
     if not view.video or not view.mined_exists:
         return []
     store = view.mined()
-    return [_mined_row(card, view.active_cue) for card in store.for_path(view.video)]
+    active_cues = tuple(cue for owner, cue in _capture_cues(view.index) if owner == view.active)
+    return [_mined_row(card, active_cues) for card in store.for_path(view.video)]
 
 
 def draw(view: SidebarView) -> None:
@@ -561,11 +566,16 @@ def mine_active(view: SidebarView) -> None:
     cue = view.active_cue
     if not view.video or cue is None or not view.backlog_exists:
         return
+    active_cues = tuple(cue for owner, cue in _capture_cues(view.index) if owner == view.active)
     try:
         store = view.backlog()
         with otel_metrics.traced("backlog_write", op="set_status"):  # main-thread SQLite on a mine
             for entry in store.entries_for_path(view.video):
-                if abs(entry.cue_start - cue.start) < 0.05 and abs(entry.cue_end - cue.end) < 0.05:
+                if any(
+                    abs(entry.cue_start - source.start) < 0.05
+                    and abs(entry.cue_end - source.end) < 0.05
+                    for source in active_cues
+                ):
                     store.set_status(entry.id, "mined")
     except (OSError, sqlite3.Error, ValueError, KeyError):
         return

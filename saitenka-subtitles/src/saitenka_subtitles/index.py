@@ -49,6 +49,7 @@ class CueIndex:
         # `frame_text` joins in this order and the renderer reads the document in that same order,
         # so a different tie-break here would make the two disagree about a line no one moved.
         self.cues = sorted(cues, key=lambda cue: cue.start)
+        self._authored_study_positions = tuple(range(len(self.cues)))
         self._frames = self._compute_frames()
         by_text: defaultdict[str, list[int]] = defaultdict(list)
         for position, cue in enumerate(self.cues):
@@ -69,6 +70,7 @@ class CueIndex:
         """Build study/navigation rows while retaining every authored frame and boundary."""
         parsed = parse_projection(content, filename)
         index = cls(parsed.cues)
+        index._authored_study_positions = parsed.owners
         if parsed.cues == parsed.authored:
             return index
         authored = cls(parsed.authored)
@@ -89,6 +91,11 @@ class CueIndex:
     def authored(self) -> CueIndex:
         """Complete event timings for rendering and scheduling, without study collapse."""
         return self._authored if self._authored is not None else self
+
+    @property
+    def authored_study_positions(self) -> tuple[int, ...]:
+        """Study-row owner of each cue in ``authored.cues``, in the same order."""
+        return self._authored_study_positions
 
     def _compute_frames(self) -> tuple[tuple[int, ...], ...]:
         """For each cue, every cue on screen at the instant it appears — itself included.

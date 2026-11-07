@@ -628,3 +628,86 @@ def test_bookmark_rejects_unsupported_or_invalid_timing(
     reader.command(BOOKMARK_MSG)
     assert reader.graph.history.ensure_backlog().entries_for_path("/video.mkv") == []
     assert messages and messages[-1].startswith("bookmark failed:")
+
+
+def _ass_burst_reader(make_session, tmp_path, start, end, delay=0.0):
+    from test_sub_index import CORPUS
+
+    text = "過ぎ去ってしまう瞬間を"
+    source = CORPUS[1]["ass"] + f"\nDialogue: 0,0:00:04.00,0:00:06.00,OP_JP,,0,0,0,,{text}"
+    path = tmp_path / "episode.ass"
+    path.write_text(source, encoding="utf-8")
+    video = str(tmp_path / "episode.mkv")
+    ipc = FakeIPC({"path": video, "sub-start": start, "sub-end": end, "sub-delay": delay})
+    reader = make_session(ipc)
+    reader.graph.subtitle_navigation.load_index(path)
+    reader.graph.playback.observe("sub-text", text)
+    return reader, video
+
+
+@pytest.mark.parametrize("delay", [-0.5, 0.0, 0.5])
+@pytest.mark.parametrize(("start", "end", "owner"), [(1.09, 3.55, 0), (4.0, 6.0, 1)])
+def test_bookmark_marks_its_study_row_without_retiming_the_authored_capture(
+    make_session, tmp_path, delay, start, end, owner
+):
+    from saitenka.app.bindings import BOOKMARK_MSG
+
+    reader, video = _ass_burst_reader(make_session, tmp_path, start, end, delay)
+
+    reader.command(BOOKMARK_MSG)
+
+    entry = reader.graph.history.ensure_backlog().entries_for_path(video)[0]
+    view = reader.graph.sidebar.view()
+    rows, total = sidebar._track_rows(view, 0, 10)
+    assert (entry.cue_start, entry.cue_end) == (start, end)
+    assert (entry.media_start, entry.media_end) == (start + delay, end + delay)
+    assert total == 2
+    assert [row.status for row in rows] == (["open", None] if owner == 0 else [None, "open"])
+    assert [
+        row.active for row in sidebar._summary_rows(view) if row.click_kind == "backlog-seek"
+    ] == [True]
+
+
+@pytest.mark.parametrize(("start", "end", "owner"), [(1.09, 3.55, 0), (4.0, 6.0, 1)])
+def test_mining_a_study_row_marks_its_authored_bookmark(make_session, tmp_path, start, end, owner):
+    from saitenka.app.bindings import BOOKMARK_MSG
+
+    reader, video = _ass_burst_reader(make_session, tmp_path, start, end)
+    reader.command(BOOKMARK_MSG)
+    store = reader.graph.history.ensure_backlog()
+    entry = store.entries_for_path(video)[0]
+
+    sidebar.mine_active(reader.graph.sidebar.view())
+
+    assert store.entry(entry.id).status == "mined"
+    rows, _total = sidebar._track_rows(reader.graph.sidebar.view(), 0, 10)
+    assert [row.status for row in rows] == (["mined", None] if owner == 0 else [None, "mined"])
+    assert (store.entry(entry.id).cue_start, store.entry(entry.id).cue_end) == (start, end)
+
+
+@pytest.mark.parametrize(("start", "end", "owner"), [(1.09, 3.55, 0), (4.0, 6.0, 1)])
+def test_mined_authored_frame_highlights_its_study_row(
+    make_session, tmp_path, monkeypatch, start, end, owner
+):
+    from saitenka.app.features.mining import mined_store
+
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
+    reader, video = _ass_burst_reader(make_session, tmp_path, start, end, 0.5)
+    store = reader.graph.mining.store
+    for note_id, (cue_start, cue_end) in enumerate([(1.09, 3.55), (4.0, 6.0)], 1):
+        store.record(
+            note_id=note_id,
+            video_path=video,
+            cue_start=cue_start,
+            cue_end=cue_end,
+            subtitle_delay=0.5,
+            expression="同じ",
+        )
+
+    rows = sidebar._mine_rows(reader.graph.sidebar.view())
+
+    assert [row.active for row in rows] == [owner == 0, owner == 1]
+    assert [(card.cue_start, card.cue_end) for card in store.for_path(video)] == [
+        (1.09, 3.55),
+        (4.0, 6.0),
+    ]
