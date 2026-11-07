@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794086629411,
+  "lastUpdate": 1794086718871,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19079,6 +19079,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.170023,
             "range": "3 replicas; min 1.04458; max 1.83543; MAD 0.125447; worst 1.83543",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "007ca012facb8050d631ee21b3e9fa9b0b145f37",
+          "message": "Merge pull request #565 from serjflint/issue-347\n\nfix(subtitles): collapse proven duplicate ASS study cues",
+          "timestamp": "2026-11-08T00:24:07+03:00",
+          "tree_id": "b0f6c94246efe3980332c84d9abae4ad2690c954",
+          "url": "https://github.com/serjflint/saitenka/commit/007ca012facb8050d631ee21b3e9fa9b0b145f37"
+        },
+        "date": 1794086717856,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.732369,
+            "range": "3 replicas; min 3.89963; max 6.7512; MAD 0.01883",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.310061,
+            "range": "3 replicas; min 5.87213; max 9.5665; MAD 0.25644; worst 9.5665",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.976579,
+            "range": "3 replicas; min 10.5738; max 22.2787; MAD 0.302099",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.1309,
+            "range": "3 replicas; min 10.9453; max 22.496; MAD 0.365085; worst 22.496",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.863068,
+            "range": "3 replicas; min 13.0653; max 15.0459; MAD 0.797802",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.121568,
+            "range": "3 replicas; min 0.050807; max 0.123812; MAD 0.002244; worst 0.123812",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.960557,
+            "range": "3 replicas; min 22.4482; max 44.0843; MAD 0.123712; worst 44.0843",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.021713,
+            "range": "3 replicas; min 2.53253; max 3.15288; MAD 0.131165; worst 3.15288",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.20804,
+            "range": "3 replicas; min 1.11489; max 1.23825; MAD 0.030211; worst 1.23825",
             "unit": "ms"
           }
         ]
