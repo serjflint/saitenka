@@ -259,7 +259,7 @@ class ReadAnki:
         return [{"fields": {"Expression": {"value": "猫"}}}]
 
 
-def sidebar_session(tmp_path, monkeypatch):
+def sidebar_session(tmp_path, monkeypatch, *, delay=0.0):
     from saitenka_card import MineConfig
     from saitenka_subtitles import Cue, CueIndex
     from session_builder import build_session
@@ -285,6 +285,7 @@ def sidebar_session(tmp_path, monkeypatch):
             "sub-start": 1.0,
             "sub-end": 3.0,
             "sub-text": "前",
+            "sub-delay": delay,
         }
     )
     session.graph.track_commands.navigation.current.sub_index = CueIndex(
@@ -300,6 +301,7 @@ def sidebar_session(tmp_path, monkeypatch):
         video_path=video,
         cue_start=10.0,
         cue_end=12.0,
+        subtitle_delay=delay,
         expression="猫",
         reading="ねこ",
     )
@@ -328,11 +330,12 @@ def observe_cue(session, ipc, *, text="猫", start=10.0, end=12.0):
         session.pump()
 
 
+@pytest.mark.parametrize("delay", [-2.0, 0.0, 2.0])
 @pytest.mark.parametrize("complete_before_seek", [False, True])
 def test_sidebar_preview_survives_its_separately_observed_seek(
-    tmp_path, monkeypatch, *, complete_before_seek
+    tmp_path, monkeypatch, *, complete_before_seek, delay
 ):
-    session, ipc = sidebar_session(tmp_path, monkeypatch)
+    session, ipc = sidebar_session(tmp_path, monkeypatch, delay=delay)
     open_sidebar_preview(session)
     prepared = ipc.prepare_next()
     if complete_before_seek:
@@ -343,8 +346,8 @@ def test_sidebar_preview_survives_its_separately_observed_seek(
         ipc.deliver(prepared)
 
     assert session.graph.preview.state.content.expression == "猫"
-    assert session.graph.preview.state.content.footer.endswith("00:10")
-    assert ("set_property", "time-pos", 10.0) in ipc.commands
+    assert session.graph.preview.state.content.footer.endswith(f"00:{int(10 + delay):02d}")
+    assert ("set_property", "time-pos", 10.0 + delay) in ipc.commands
 
 
 def test_sidebar_preview_does_not_require_a_subtitle_destination(tmp_path, monkeypatch):

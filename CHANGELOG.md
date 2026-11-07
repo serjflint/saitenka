@@ -9,6 +9,9 @@ logs.
 
 ### Fixed
 
+- Mining, bookmarks and sidebar seeks respect subtitle delay; saved encounters retain their capture
+  timing when the delay changes later. Unsupported subtitle speed/FPS/reverse timing is reported.
+
 - Deferred background work keeps its original diagnostic tracer, preventing older requests from
   appearing in later reports.
 - `libasslite` now refuses to reuse a renderer when track features change, raising

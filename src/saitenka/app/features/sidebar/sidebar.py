@@ -12,6 +12,7 @@ from saitenka_tokenize.languages import SECOND_LANG
 from saitenka import otel_metrics
 from saitenka.app.features.analysis.episode_analysis import cue_result
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.subnav_policy import seek_position
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
 from saitenka.model import in_rect
 from saitenka.runtime import events
@@ -98,6 +99,7 @@ class SidebarView:
     tokenizer: object
     analysis: object
     can_mine: bool
+    subtitle_delay: float | None = 0.0
 
     @property
     def state(self) -> SidebarState:
@@ -471,14 +473,23 @@ class SidebarActions:
     bookmark: Callable[[], None]
     mine: Callable[[], None]
     open_mined: Callable[[int], None]
+    announce: Callable[[str], None] = lambda _message: None
 
 
 def _seek_hit(view: SidebarView, actions: SidebarActions, hit) -> bool:
     if hit.kind == "seek" and view.index is not None:
-        actions.seek("sidebar-seek-cue", view.index.cues[hit.value].start)
+        at = (
+            seek_position(view.index.cues[hit.value], view.subtitle_delay)
+            if view.subtitle_delay is not None
+            else None
+        )
+        if at is None:
+            actions.announce("cannot seek cue: unsupported subtitle timing or bounds")
+        else:
+            actions.seek("sidebar-seek-cue", at)
         return True
     if hit.kind == "backlog-seek":
-        actions.seek("sidebar-seek-backlog", view.backlog().entry(hit.value).cue_start)
+        actions.seek("sidebar-seek-backlog", view.backlog().entry(hit.value).media_start)
         return True
     return False
 

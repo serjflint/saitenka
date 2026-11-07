@@ -10,6 +10,7 @@ from saitenka import otel_metrics
 from saitenka.app import backlog
 from saitenka.app.features.mining import mine_intents
 from saitenka.app.intents import Announce
+from saitenka.app.subnav_policy import indexed_delay
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,6 +56,7 @@ class BookmarkCommandEndpoint:
         backlog.capture_current(
             backlog.CapturePorts(
                 video=self.property_value("path"),
+                subtitle_delay=indexed_delay(self.property_value),
                 start=self.number_property("sub-start"),
                 end=self.number_property("sub-end"),
                 text=cue_facts.text,

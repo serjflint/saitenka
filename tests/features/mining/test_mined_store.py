@@ -119,3 +119,24 @@ def test_card_lookup_raises_on_a_missing_row(tmp_path):
 
     with pytest.raises(KeyError):
         store.card(123)
+
+
+def test_legacy_card_migration_preserves_original_replay_times(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy.sqlite"
+    with MinedCardStore(path) as store:
+        store.record(
+            note_id=42, video_path="/video.mkv", cue_start=10.0, cue_end=12.0, expression="猫"
+        )
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE mined_card DROP COLUMN subtitle_delay")
+
+    with MinedCardStore(path) as reopened:
+        card = reopened.by_note_id(42)
+    assert (card.cue_start, card.cue_end, card.media_start, card.media_end) == (
+        10.0,
+        12.0,
+        10.0,
+        12.0,
+    )

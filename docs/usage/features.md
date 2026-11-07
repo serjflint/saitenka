@@ -102,6 +102,14 @@ you ask for it.
 
 ## One-key & bulk mining
 
+Mining and bookmarks freeze the current subtitle delay for media extraction and later replay.
+Authored cue times remain the identity used for sidebar matching. Sidebar cue clicks apply the
+current delay, as keyboard navigation does. Tracks retimed in the subtitle file need no extra shift
+when mpv’s delay is zero. Non-default subtitle speed/FPS or reverse playback is not supported for
+capture: Saitenka reports the failure instead of extracting the wrong scene. Invalid or wholly
+pre-zero spans are rejected; partially pre-zero spans start at media time zero. Existing saved
+records retain their original timestamps because their historical delay cannot be recovered.
+
 Hover a word and mine it straight into Anki — sentence, audio, and a clean screenshot — all
 without leaving the video. Mining needs **Anki open** with the **AnkiConnect** add-on.
 

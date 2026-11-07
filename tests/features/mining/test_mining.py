@@ -1235,3 +1235,97 @@ def test_a_stacked_entry_mine_link_is_read_without_breaking_navigation(query, ex
     from saitenka.app.features.tooltip.tooltip import mine_index
 
     assert mine_index(query) == expected
+
+
+@pytest.mark.parametrize("delay", [-11.0, -2.0, 0.0, 2.0])
+def test_media_capture_freezes_delay_before_later_playback_changes(
+    monkeypatch, make_session, delay
+):
+    from util import FakeIPC
+
+    ipc = FakeIPC()
+    ipc.props.update({"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, "sub-delay": delay})
+    reader = make_session(ipc, services=SessionServices(anki=_FakeAnki(), mining=MineConfig()))
+    operation = _ports(reader)
+    captured = []
+
+    def audio(_video, span, _path, **_kwargs):
+        captured.append((span.start, span.end))
+
+    monkeypatch.setattr(miner, "clip_audio", audio)
+    monkeypatch.setattr(miner, "screenshot", lambda *_args: None)
+    ipc.props["sub-delay"] = 99.0
+
+    miner.capture_media(operation, "frozen", "/video.mkv")
+
+    assert captured == [(max(0.0, 10.0 + delay), 12.0 + delay)]
+
+
+@pytest.mark.parametrize("delay", [-2.0, 0.0, 2.0])
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_mining_persists_authored_identity_and_frozen_media_bounds(
+    monkeypatch, make_session, delay
+):
+    from util import FakeIPC, await_ready
+
+    ipc, anki = FakeIPC(), _HeldAddAnki()
+    ipc.props.update(
+        {"path": "/Show - 01.mkv", "sub-start": 10.0, "sub-end": 12.0, "sub-delay": delay}
+    )
+    reader = make_session(
+        ipc,
+        services=SessionServices(
+            anki=anki, mining=MineConfig(card_format={"Word": "{expression}"})
+        ),
+    )
+    reader.graph.playback.observe("sub-text", "本を読む")
+    reader.pump()
+    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
+    token = next(
+        t for t in reader.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む"
+    )
+    try:
+        reader.graph.mining.mine_token(token)
+        await_ready(anki.entered.is_set, "Anki add not started", pump=reader.pump)
+        ipc.props["sub-delay"] = 99.0
+        anki.release.set()
+        _await_mining(reader)
+        card = reader.graph.mining.store.by_note_id(1)
+        assert (card.cue_start, card.cue_end) == (10.0, 12.0)
+        assert (card.media_start, card.media_end) == (10.0 + delay, 12.0 + delay)
+    finally:
+        anki.release.set()
+
+
+@pytest.mark.parametrize(
+    ("property_name", "value"),
+    [
+        ("options/sub-speed", 1.1),
+        ("options/sub-fps", 25),
+        ("options/play-direction", "backward"),
+        ("sub-delay", float("nan")),
+        ("sub-end", 9.0),
+        ("sub-delay", -12.0),
+    ],
+)
+def test_mining_rejects_unsupported_or_invalid_cue_timing(
+    monkeypatch, make_session, property_name, value
+):
+    from util import FakeIPC
+
+    ipc, anki = FakeIPC(), _FakeAnki()
+    ipc.props.update(
+        {"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, property_name: value}
+    )
+    reader = make_session(ipc, services=SessionServices(anki=anki, mining=MineConfig()))
+    reader.graph.playback.observe("sub-text", "本を読む")
+    reader.pump()
+    messages = []
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, *_args: messages.append(text)
+    )
+    reader.graph.mining.mine_index(0)
+    assert anki.added == []
+    assert not reader.graph.mining.operation_pending
+    assert messages and messages[-1].startswith("mine failed:")

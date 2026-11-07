@@ -45,6 +45,19 @@ class MinedCard:
     reading: str
     deck: str
     created_at: float
+    subtitle_delay: float | None = None
+
+    @property
+    def media_start(self) -> float:
+        return (
+            self.cue_start
+            if self.subtitle_delay is None
+            else max(0.0, self.cue_start + self.subtitle_delay)
+        )
+
+    @property
+    def media_end(self) -> float:
+        return self.cue_end + (self.subtitle_delay or 0.0)
 
 
 class MinedCardStore:
@@ -81,6 +94,9 @@ class MinedCardStore:
             PRAGMA user_version = 1;
             """
         )
+        columns = {row[1] for row in self._con.execute("PRAGMA table_info(mined_card)")}
+        if "subtitle_delay" not in columns:
+            self._con.execute("ALTER TABLE mined_card ADD COLUMN subtitle_delay REAL")
         self._con.commit()
 
     def close(self) -> None:
@@ -107,6 +123,7 @@ class MinedCardStore:
             reading=row["reading"],
             deck=row["deck"],
             created_at=row["created_at"],
+            subtitle_delay=row["subtitle_delay"],
         )
 
     def record(
@@ -119,6 +136,7 @@ class MinedCardStore:
         expression: str,
         reading: str = "",
         deck: str = "",
+        subtitle_delay: float | None = None,
     ) -> MinedCard:
         """Stamp one mined note. The episode match-key is derived from ``video_path`` so it agrees with
         the backlog/continuity code. Re-mining the same note id updates the existing row (the note is the
@@ -129,13 +147,13 @@ class MinedCardStore:
             """
             INSERT INTO mined_card (
                 note_id, title, title_match, episode, video_path, cue_start, cue_end,
-                expression, reading, deck, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                expression, reading, deck, created_at, subtitle_delay
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(note_id) DO UPDATE SET
                 title=excluded.title, title_match=excluded.title_match, episode=excluded.episode,
                 video_path=excluded.video_path, cue_start=excluded.cue_start,
                 cue_end=excluded.cue_end, expression=excluded.expression, reading=excluded.reading,
-                deck=excluded.deck
+                deck=excluded.deck, subtitle_delay=excluded.subtitle_delay
             """,
             (
                 note_id,
@@ -149,6 +167,7 @@ class MinedCardStore:
                 reading,
                 deck,
                 now,
+                subtitle_delay,
             ),
         )
         self._con.commit()

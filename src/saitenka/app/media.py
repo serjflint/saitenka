@@ -7,6 +7,7 @@ OSD saitenka. Audio is cut from the source file over the current subtitle's time
 
 from __future__ import annotations
 
+import math
 import re
 import shutil
 import subprocess
@@ -31,6 +32,16 @@ class Timespan:
     @property
     def duration(self) -> float:
         return max(0.05, self.end - self.start)
+
+
+def media_span(start: float, end: float, delay: float) -> Timespan:
+    """Map authored cue bounds to the playable file intersection."""
+    if not all(math.isfinite(value) for value in (start, end, delay)) or end <= start:
+        raise ValueError("invalid subtitle bounds")
+    start, end = start + delay, end + delay
+    if not math.isfinite(start) or not math.isfinite(end) or end <= 0:
+        raise ValueError("subtitle lies outside the media timeline")
+    return Timespan(max(0.0, start), end)
 
 
 def screenshot(ipc, path: str | Path, *, retain=None, expected_connection_epoch=None) -> Path:

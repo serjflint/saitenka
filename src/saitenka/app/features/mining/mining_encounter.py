@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.miner import MineCue
-from saitenka.app.media import Timespan
+from saitenka.app.media import Timespan, media_span
+from saitenka.app.subnav_policy import indexed_delay
 
 if TYPE_CHECKING:
     from saitenka.app.features.profiles.profile_controller import ProfileController
@@ -46,6 +47,16 @@ class MiningEncounterSource:
             if isinstance(start, int | float) and isinstance(end, int | float)
             else None
         )
+        authored_span = span
+        delay = indexed_delay(value)
+        timing_error = None
+        if delay is None:
+            span, timing_error = None, "unsupported subtitle speed, FPS or play direction"
+        elif span is not None:
+            try:
+                span = media_span(span.start, span.end, delay)
+            except ValueError as exc:
+                span, timing_error = None, str(exc)
         path, playhead = value("path"), value("time-pos")
         return miner.MiningEncounter(
             cue=MineCue(
@@ -60,6 +71,9 @@ class MiningEncounterSource:
             media_path=path if isinstance(path, str) else None,
             playhead=float(playhead) if isinstance(playhead, int | float) else 0.0,
             span=span,
+            authored_span=authored_span,
+            subtitle_delay=delay or 0.0,
+            timing_error=timing_error,
             sentence_html=miner.sentence_html(cue.lines),
             hovered_terms=tooltip.metadata.terms,
             connection_epoch=state.connection.epoch if self.playback.observing else None,
