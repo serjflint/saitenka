@@ -4084,3 +4084,61 @@ def test_a_new_font_environment_asks_again(
 
     assert _asked(caplog) == [("Arial",), ("Arial",)]
     result.close()
+
+
+def test_navigation_to_deduplicated_overlap_keeps_every_authored_event(tmp_path: Path) -> None:
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    row = "Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,猫を見る\n"
+    source.write_text(
+        ASS.decode().replace(
+            row, row + row + "Dialogue: 1,0:00:01.50,0:00:02.50,Default,sign,0,0,0,,犬\n"
+        ),
+        encoding="utf-8",
+    )
+    result.graph.subtitle_navigation.load_index(source)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_source(source)
+
+    assert result.graph.subtitle_navigation.seek(SeekCue(1, result.graph.cue.revision))
+    settle_jobs(result, ipc)
+
+    assert result.graph.playback.cue.text == "猫を見る\n猫を見る\n犬"
+    assert result.graph.subtitle_presentation.native.status.geometry_ready
+    request = next(request for request in backend.requests if request.timestamp_ms == 1501)
+    assert {event.source_order for event in request.frame_id.active_event_ids} == {0, 1, 2}
+    assert {entry.event_id.source_order for entry in request.palette} == {0, 1, 2}
+    assert len(result.graph.subtitle_presentation.cue.current.boxes) == len(request.palette)
+    result.close()
+
+
+def test_later_collapsed_animation_frame_keeps_native_refusal(tmp_path: Path) -> None:
+    from test_sub_index import CORPUS
+
+    result, ipc, backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    header = ASS.decode().split("[Events]")[0]
+    source.write_text(header + CORPUS[1]["ass"].replace("OP_JP", "Default"), encoding="utf-8")
+    result.graph.subtitle_navigation.load_index(source)
+    assert result.graph.subtitle_presentation.native is not None
+    result.graph.subtitle_presentation.native.set_source(source)
+    ipc.props.update(
+        {
+            "sub-text/ass-full": CORPUS[1]["ass"].splitlines()[3].replace("OP_JP", "Default"),
+            "sub-start": 1.05,
+            "sub-end": 1.09,
+            "time-pos": 1.06,
+        }
+    )
+    result.graph.playback.install_seed(ipc.props)
+
+    result.graph.playback.observe("sub-text", "過ぎ去ってしまう瞬間を")
+    result.pump()
+    settle_jobs(result, ipc)
+
+    assert backend.requests == []
+    assert (
+        result.graph.subtitle_presentation.native.status.fallback_reason
+        == "subtitle-frame-unsupported"
+    )
+    result.close()

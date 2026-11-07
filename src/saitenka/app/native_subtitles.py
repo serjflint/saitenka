@@ -1898,14 +1898,14 @@ class NativeSubtitleGeometry:
             self._degrade_geometry("subtitle-timing-unavailable")
             return None
         if seen.index is not None:
-            position = seen.index.locate(
+            position = seen.index.authored.locate(
                 text=seen.text,
                 sub_start=start,
                 time_pos=subtitle_time,
-                preferred=seen.nav_index,
+                preferred=seen.nav_index if seen.index.authored is seen.index else -1,
             )
             if position >= 0:
-                indexed = seen.index.cues[position]
+                indexed = seen.index.authored.cues[position]
                 if indexed.text == seen.text:
                     start, end = indexed.start, indexed.end
                     # The cue's own start, not the playhead inside it. `timestamp_ms` reaches the
@@ -1930,11 +1930,13 @@ class NativeSubtitleGeometry:
         cue's own, and the index has them. Guarded the same way too — an index that disagrees with
         the text on screen is not allowed to decide which instant to measure.
         """
-        index = seen.index
+        index = seen.index.authored if seen.index is not None else None
         if index is None or not seen.text.strip():
             self._degrade_geometry("subtitle-observation-pending")
             return None
-        position = index.locate(text=seen.text, preferred=seen.nav_index)
+        position = index.locate(
+            text=seen.text, preferred=seen.nav_index if index is seen.index else -1
+        )
         if position < 0 or index.cues[position].text != seen.text:
             self._degrade_geometry("subtitle-observation-pending")
             return None

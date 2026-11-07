@@ -554,6 +554,24 @@ def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> 
     assert reader.graph.history.backlog is None
 
 
+def test_ass_burst_sidebar_and_analysis_have_one_row_per_study_cue(tmp_path):
+    from test_sub_index import CORPUS
+
+    reader, _ipc = _reader()
+    path = tmp_path / "episode.ass"
+    path.write_text(CORPUS[8]["ass"], encoding="utf-8")
+    reader.graph.subtitle_navigation.load_index(path)
+    index = reader.graph.track_commands.navigation.current.sub_index
+    assert index is not None
+    analysis = analyze_cues(index.cues, None, reader.graph.profile.profile.tokenizer)
+
+    rows, total = sidebar._track_rows(_view(reader, active=0, analysis=analysis), 0, 10)
+
+    assert total == len(rows) == len(analysis.cues) == 2
+    assert ["".join(text for text, _color in row.parts) for row in rows] == ["歌詞", "別のセリフ"]
+    reader.close()
+
+
 @pytest.mark.parametrize("delay", [-2.0, 0.0, 2.0])
 def test_bookmark_replay_freezes_media_clock_and_keeps_authored_cue_match(make_session, delay):
     from saitenka.app.bindings import BOOKMARK_MSG

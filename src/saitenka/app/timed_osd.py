@@ -68,6 +68,7 @@ def subtitle_delay_ms(seen: GeometryObservation) -> int | None:
 def timed_cue(index: CueIndex | None, timestamp_ms: int, delay_ms: int) -> TimedCue | None:
     if index is None:
         return None
+    index = index.authored
     active = index.active_at(timestamp_ms / 1000)
     if not active.located:
         return None

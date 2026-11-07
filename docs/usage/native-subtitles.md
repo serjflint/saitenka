@@ -1,5 +1,19 @@
 # Native mpv subtitles with Saitenka interaction
 
+## Study cue collapse
+
+ASS indexing collapses exact duplicate events only when timing, raw text, style, actor, layer,
+margins, effect and event type agree. Animation collapse requires at least three contiguous events
+with identical decoded text and authoring metadata, with every event except the last lasting at
+most 100 ms. Positive evidence is a karaoke/transform/move override, the exact effect `Karaoke`,
+or changing clip overrides; all other raw text and overrides must agree.
+
+Ordinary repeated dialogue, static signs, different speakers/styles/layers and separated bursts
+keep their rows. Fragmented karaoke is not reconstructed. Sidebar, indexed navigation, episode
+analysis and warming use the study rows; native rendering retains every authored event, its original
+timing and frame text. The source ASS is unchanged. Live session statistics still follow observed
+subtitle notifications and may differ from indexed analysis (tracked separately in #376).
+
 ## Optional whole-cue coloring
 
 Set `coloring` under `[subtitle_geometry]` alongside `native_visible = true`:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from saitenka_subtitles import CueIndex, parse_cues
+from saitenka_subtitles import CueIndex
 
 from saitenka.app import log_privacy
 
@@ -24,9 +24,9 @@ def load_index(path: str | Path, *, content: str | None = None) -> CueIndex | No
         except OSError:
             log.debug("sub index: cannot read %s", subtitle_path, exc_info=True)
             return None
-    cues = parse_cues(content, subtitle_path.name)
-    if not cues:
+    index = CueIndex.from_content(content, subtitle_path.name)
+    if not index:
         log.debug("sub index: no cues parsed from %s", subtitle_path)
         return None
-    log.info("sub index: %d cues from %s", len(cues), subtitle_path.name)
-    return CueIndex(cues)
+    log.info("sub index: %d cues from %s", len(index), subtitle_path.name)
+    return index

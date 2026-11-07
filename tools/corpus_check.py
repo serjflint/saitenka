@@ -97,6 +97,13 @@ def _character_keys() -> list[str]:
     ]
 
 
+def _ass_collapse_keys() -> list[str]:
+    return [
+        json.dumps(case, sort_keys=True, ensure_ascii=False)
+        for case in _json_cases("tests/fixtures/ass_collapse/cases.json")
+    ]
+
+
 # --- registry --------------------------------------------------------------------------------------
 
 
@@ -115,6 +122,12 @@ def _census(keys: list[str]) -> tuple[int, str]:
 
 
 CORPORA: list[CorpusSpec] = [
+    CorpusSpec(
+        "ass-collapse",
+        _ass_collapse_keys,
+        count=15,
+        sha256="fd18053741ffd40e84532556e6574e598b3b08135b97f3fdcc434eb894fb7ada",
+    ),
     CorpusSpec(
         "synthetic-characters",
         _character_keys,
