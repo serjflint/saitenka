@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794086496374,
+  "lastUpdate": 1794086525183,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18923,6 +18923,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 0.988286,
             "range": "3 replicas; min 0.945709; max 1.26109; MAD 0.042577; worst 1.26109",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6e699f8bb6e91e91bb141229489622f58c9576e1",
+          "message": "Merge pull request #563 from serjflint/issue-523\n\nfix: align tooltip drawing and pointer coordinates",
+          "timestamp": "2026-11-08T00:16:17+03:00",
+          "tree_id": "5403c8058856667bcea3858f84670c8516b48f12",
+          "url": "https://github.com/serjflint/saitenka/commit/6e699f8bb6e91e91bb141229489622f58c9576e1"
+        },
+        "date": 1794086524102,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.750059,
+            "range": "3 replicas; min 3.733; max 6.75064; MAD 0.000582",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 9.238853,
+            "range": "3 replicas; min 5.73977; max 9.52595; MAD 0.287102; worst 9.52595",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 22.021175,
+            "range": "3 replicas; min 10.3206; max 22.2907; MAD 0.269496",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.268466,
+            "range": "3 replicas; min 10.7924; max 22.6232; MAD 0.354747; worst 22.6232",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 13.59197,
+            "range": "3 replicas; min 12.0431; max 15.223; MAD 1.54885",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.122148,
+            "range": "3 replicas; min 0.049374; max 0.122429; MAD 0.000281; worst 0.122429",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.452078,
+            "range": "3 replicas; min 34.2354; max 43.5618; MAD 0.109741; worst 43.5618",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.817614,
+            "range": "3 replicas; min 2.28729; max 3.29655; MAD 0.47894; worst 3.29655",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.15966,
+            "range": "3 replicas; min 0.99399; max 1.30856; MAD 0.148899; worst 1.30856",
             "unit": "ms"
           }
         ]
