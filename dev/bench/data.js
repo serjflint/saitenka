@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794081440637,
+  "lastUpdate": 1794083955493,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18689,6 +18689,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.239647,
             "range": "3 replicas; min 1.05188; max 1.3249; MAD 0.085257; worst 1.3249",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f41017b6e15fd5fcbd1ac4d4a3cb585cdce0ad63",
+          "message": "Merge pull request #568 from serjflint/fix/macos-latest-native-geometry\n\nfix(ci): restore native qualification on macos-latest",
+          "timestamp": "2026-11-07T23:36:55+03:00",
+          "tree_id": "ba64047ffe3a2afaec107d5bbf0f385e1d6690bf",
+          "url": "https://github.com/serjflint/saitenka/commit/f41017b6e15fd5fcbd1ac4d4a3cb585cdce0ad63"
+        },
+        "date": 1794083954207,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 3.59471,
+            "range": "3 replicas; min 3.50337; max 6.16663; MAD 0.091338",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 6.729863,
+            "range": "3 replicas; min 5.57826; max 9.59665; MAD 1.1516; worst 9.59665",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 10.182319,
+            "range": "3 replicas; min 9.89345; max 18.5598; MAD 0.288869",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 11.871901,
+            "range": "3 replicas; min 9.94758; max 19.1375; MAD 1.92432; worst 19.1375",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 15.96178,
+            "range": "3 replicas; min 11.578; max 20.1212; MAD 4.15945",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.061572,
+            "range": "3 replicas; min 0.04604; max 0.101469; MAD 0.015532; worst 0.101469",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 21.230315,
+            "range": "3 replicas; min 20.35; max 45.0953; MAD 0.880281; worst 45.0953",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 5.558794,
+            "range": "3 replicas; min 2.33821; max 10.6484; MAD 3.22058; worst 10.6484",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.274129,
+            "range": "3 replicas; min 1.10354; max 1.58235; MAD 0.170586; worst 1.58235",
             "unit": "ms"
           }
         ]
