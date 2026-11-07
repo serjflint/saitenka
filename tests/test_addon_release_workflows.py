@@ -171,7 +171,7 @@ def test_libasslite_releases_allow_only_supported_macos_arm64() -> None:
     )
 
     assert wrapper["jobs"]["native"]["strategy"]["matrix"]["os"] == [
-        "macos-15",
+        "macos-latest",
         "windows-latest",
     ]
     assert [
@@ -179,9 +179,9 @@ def test_libasslite_releases_allow_only_supported_macos_arm64() -> None:
         for row in wrapper["jobs"]["smoke"]["strategy"]["matrix"]["include"]
         if row["os"].startswith("macos-")
     ] == [
-        {"os": "macos-15", "py": "3.13", "artifact": "wheels-macos-15-3.13"},
-        {"os": "macos-15", "py": "3.14t", "artifact": "wheels-macos-15-3.14t"},
-        {"os": "macos-15", "py": "3.15t", "artifact": "wheels-macos-15-3.15t"},
+        {"os": "macos-latest", "py": "3.13", "artifact": "wheels-macos-latest-3.13"},
+        {"os": "macos-latest", "py": "3.14t", "artifact": "wheels-macos-latest-3.14t"},
+        {"os": "macos-latest", "py": "3.15t", "artifact": "wheels-macos-latest-3.15t"},
     ]
     assert [
         row
@@ -190,7 +190,7 @@ def test_libasslite_releases_allow_only_supported_macos_arm64() -> None:
     ] == [
         {
             "name": "macos-arm64",
-            "runner": "macos-15",
+            "runner": "macos-latest",
             "triplet": "arm64-osx-saitenka",
             "tag": "macosx_11_0_arm64",
             "repair": "delocate",

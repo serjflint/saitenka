@@ -309,6 +309,12 @@ def budget_evidence(report: dict, budgets: dict) -> str:
             f"(bound {budgets['cold_geometry_p95_us']}us, median {percentile(cold, 50)}us, "
             f"n={len(cold)})"
         )
+    cadence = report["animated_cadence"]
+    lines.append(
+        f"  animated cold activation: {cadence['cold_activation_us']}us "
+        f"(bound {budgets['cold_geometry_p95_us']}us); warmed cadence: "
+        f"{cadence['skipped_budget_count']}/{cadence['frame_count']} over-budget frames"
+    )
     return "\n".join(lines)
 
 
@@ -327,6 +333,8 @@ def evaluate_budgets(report: dict, budgets: dict) -> tuple[str, ...]:
     if cold_latencies and percentile(cold_latencies, 95) > budgets["cold_geometry_p95_us"]:
         failures.append("cold geometry p95")
     cadence = report["animated_cadence"]
+    if cadence["cold_activation_us"] > budgets["cold_geometry_p95_us"]:
+        failures.append("animated cold activation")
     expected_frames = budgets["cadence_fps"] * budgets["cadence_duration_ms"] // 1000
     if cadence["frame_count"] != expected_frames:
         failures.append("animated frame count")
@@ -453,6 +461,8 @@ def _cadence_report(
     fps: int,
     duration_ms: int,
     library_path: str | None,
+    *,
+    clock: Callable[[], int] = time.perf_counter_ns,
 ) -> dict:
     document = _ass_document([str(animated["line"])])
     renderer = renderer_type(document, library_path=library_path)
@@ -464,11 +474,15 @@ def _cadence_report(
     try:
         frame_count = duration_ms * fps // 1000
         start_ms = int(animated["timestamp_ms"])
+        _result, cold_activation_us = _timed(
+            clock, lambda: renderer.render(start_ms, FRAME_SIZE, FRAME_SIZE)
+        )
+        renderer.render(0, FRAME_SIZE, FRAME_SIZE)
         for frame in range(frame_count):
             timestamp_ms = start_ms + frame * 1000 // fps
-            started = time.perf_counter_ns()
+            started = clock()
             result = renderer.render(timestamp_ms, FRAME_SIZE, FRAME_SIZE)
-            samples.append((time.perf_counter_ns() - started) // 1000)
+            samples.append((clock() - started) // 1000)
             signatures.append(character_mask_signature(result))
             active_frames += bool(character_support(result))
             changed_frames += bool(result.detect_change)
@@ -477,6 +491,9 @@ def _cadence_report(
     return {
         "fps": fps,
         "frame_budget_us": frame_budget_us,
+        "cache_state": "warmed",
+        "cold_activation_us": cold_activation_us,
+        "cold_activation_exceeds_frame_budget": cold_activation_us > frame_budget_us,
         "frame_count": len(samples),
         "samples_us": samples,
         "skipped_budget_count": sum(sample > frame_budget_us for sample in samples),

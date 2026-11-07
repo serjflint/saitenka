@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from libass_prototype_benchmark import (
     _bgr_to_rgb,
+    _cadence_report,
     _cold_samples,
     _render_activated,
     _run_and_persist,
@@ -131,6 +132,7 @@ def _passing_report(budgets: dict) -> dict:
             for _ in range(budgets["cold_process_starts"])
         ],
         "animated_cadence": {
+            "cold_activation_us": budgets["cold_geometry_p95_us"],
             "frame_count": 48,
             "active_frame_count": 48,
             "unique_geometry_frames": budgets["cadence_min_unique_frames"],
@@ -213,3 +215,61 @@ def test_failed_run_preserves_completed_samples(tmp_path: Path) -> None:
     assert report["status"] == "failed"
     assert report["warm_samples"] == [{"render_us": 7}]
     assert report["error"] == "RuntimeError: cold worker failed"
+
+
+@pytest.mark.parametrize("frame_us", [5_000, 50_000])
+def test_cadence_separates_activation_and_measures_every_warm_frame(frame_us):
+    now = [0]
+
+    class FakeRenderer:
+        def __init__(self, *_args, **_kwargs):
+            self.first = True
+            self.previous = None
+
+        def render(self, timestamp_ms, *_args):
+            if timestamp_ms >= 1000:
+                elapsed = 50_000 if self.first else frame_us
+                if timestamp_ms == self.previous:
+                    elapsed = 0
+                now[0] += elapsed * 1000
+                self.first = False
+            self.previous = timestamp_ms
+            layer = SimpleNamespace(
+                image_type=0,
+                dst_x=timestamp_ms,
+                dst_y=0,
+                width=1,
+                height=1,
+                bitmap=b"\xff",
+                color=0x11111100,
+            )
+            return SimpleNamespace(layers=(layer,), detect_change=2)
+
+        def close(self):
+            pass
+
+    manifest = load_manifest(MANIFEST)
+
+    cadence = _cadence_report(
+        FakeRenderer, manifest["animated"], 24, 2000, None, clock=lambda: now[0]
+    )
+
+    assert cadence["cold_activation_us"] == 50_000
+    assert cadence["cold_activation_exceeds_frame_budget"] is True
+    assert cadence["samples_us"] == [frame_us] * 48
+    assert cadence["active_frame_count"] == cadence["unique_geometry_frames"] == 48
+    report = _passing_report(manifest["budgets"])
+    report["animated_cadence"] = cadence
+    expected = () if frame_us == 5_000 else ("animated cadence skips",)
+    assert evaluate_budgets(report, manifest["budgets"]) == expected
+
+
+@pytest.mark.parametrize("delta", [0, 1])
+def test_animated_activation_still_enforces_the_cold_budget(delta):
+    budgets = load_manifest(MANIFEST)["budgets"]
+    report = _passing_report(budgets)
+    report["animated_cadence"]["cold_activation_us"] = budgets["cold_geometry_p95_us"] + delta
+
+    failures = evaluate_budgets(report, budgets)
+
+    assert failures == (() if delta == 0 else ("animated cold activation",))

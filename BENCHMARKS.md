@@ -434,6 +434,11 @@ noise moves.
 | `tools/libass_prototype_benchmark.py` | p99 over 1000 warm samples | 11th worst | conforms |
 | `tools/libass_prototype_benchmark.py` (cold) | p95 over 30 process starts | 2nd worst | below the floor and left there — reaching it would cost ~200 real process starts per CI run — so the bound is set from measured noise instead (300 ms; see below) |
 
+The shadow prototype separates first activation from **warmed animation cadence**. Activation uses
+the cold-operation budget and reports whether it exceeded a frame interval; every subsequent cadence
+sample, including the first reactivation, uses warm font caches. A passing warmed cadence does not
+promise uninterrupted playback from a cold renderer.
+
 ### The cold bound was inside its own noise (2026-09-01)
 
 The row above used to justify the below-floor estimator by calling 100 ms "a smoke bound an order of
