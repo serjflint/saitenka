@@ -180,6 +180,7 @@ class WordLookup:
     cue_identity: object
     deferred: bool
     submit: Callable[..., bool]
+    boundaries: tuple[int, ...] = ()
 
 
 class MinedSnapshot(Protocol):

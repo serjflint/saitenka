@@ -158,6 +158,7 @@ class DrawRequest:
     whole_cue_identity: tuple[str, float | None, int] | None = None
     #: mpv is drawing this frame from the colored copy, every event colored — nothing to paint.
     track_colored: bool = False
+    preserve_raw: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -571,6 +572,7 @@ class SubtitleRenderer(NoPixelOwnership):
                 request.sub_size,
                 # configurable box alpha (0 = fully transparent)
                 (0, 0, 0, request.bg_opacity),
+                preserve_raw=request.preserve_raw,
             ),
             subtitle_raster.AnnotationOverlay(
                 request.annotation_visible,

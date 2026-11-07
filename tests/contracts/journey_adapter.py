@@ -45,8 +45,9 @@ def evaluate(request: dict) -> list[dict]:
     from saitenka.app import bindings
     from saitenka.app.config import ReaderOptions
     from saitenka.app.features.mining import miner
+    from saitenka.app.profiles import resolve_profile
     from saitenka.app.scoring import Coloring
-    from saitenka.app.session.factory import SessionInfrastructure, SessionServices
+    from saitenka.app.session.factory import SessionIdentity, SessionInfrastructure, SessionServices
     from saitenka.app.subtitle_raster import PillowRasterProvider
     from saitenka.app.subtitle_render import SubtitleRenderer
     from saitenka.panel import Definition, Entry
@@ -75,6 +76,7 @@ def evaluate(request: dict) -> list[dict]:
             scorer=scorer,
         ),
         infrastructure=SessionInfrastructure(renderer=SubtitleRenderer(raster)),
+        identity=SessionIdentity(profile=resolve_profile(given.get("profile_config", {}))),
         options=ReaderOptions().with_overrides(prefetch=False, scan_delay=0.0),
     )
     reader.graph.screen.osd = tuple(given["viewport"])
@@ -116,6 +118,19 @@ def evaluate(request: dict) -> list[dict]:
                         ],
                     }
                 )
+                if given.get("observe_authored"):
+                    observations[-1]["authored"] = drawn.text
+            elif action["action"] == "copy-cue":
+                from saitenka.app import subtitle_adapter
+
+                copied = []
+                original_copy = subtitle_adapter.copy_clipboard
+                subtitle_adapter.copy_clipboard = copied.append
+                try:
+                    reader.command(bindings.COPY_LINE_MSG)
+                finally:
+                    subtitle_adapter.copy_clipboard = original_copy
+                observations.append({"boundary": "clipboard", "text": copied})
             elif action["action"] == "hover-token":
                 driver.move_to_word(action["index"])
                 view = reader.graph.tooltip.surface_state().view

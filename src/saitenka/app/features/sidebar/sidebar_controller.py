@@ -88,6 +88,7 @@ class SidebarController:
             tokenizer=owners.profile.profile.tokenizer,
             analysis=owners.analysis.result,
             can_mine=owners.mining.configured,
+            study_rules=owners.profile.profile.profile.study_rules,
             subtitle_delay=delay,
         )
 

@@ -16,6 +16,7 @@ from saitenka.app.features.analysis.episode_analysis import (
     analyze_cues,
 )
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.study_text import DISABLED, StudyRules
 from saitenka.render.analysis import render_analysis
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, configure_lane
@@ -49,6 +50,7 @@ class AnalysisInputs:
     loading: bool
     scorer: Coloring | None
     tokenizer: Tokenizer
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +68,7 @@ class AnalysisObservation:
             loading=self.profile.loading,
             scorer=self.profile.scorer,
             tokenizer=self.profile.profile.tokenizer,
+            study_rules=self.profile.profile.profile.study_rules,
         )
 
 
@@ -74,6 +77,7 @@ class AnalysisRequest:
     cues: tuple[Cue, ...]
     scorer: Coloring | None
     tokenizer: Tokenizer
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(slots=True)
@@ -110,7 +114,11 @@ def run_analysis(request: object, cancelled: threading.Event) -> object:
     if cancelled.is_set():
         return None
     try:
-        return analyze_cues(list(request.cues), request.scorer, request.tokenizer)
+        if not request.study_rules.enabled:
+            return analyze_cues(list(request.cues), request.scorer, request.tokenizer)
+        return analyze_cues(
+            list(request.cues), request.scorer, request.tokenizer, request.study_rules
+        )
     except Exception:
         log.warning("episode analysis failed", exc_info=True)
         raise
@@ -222,7 +230,7 @@ class AnalysisController:
             state.current = None
             state.status = "Analyzing…"
             return
-        key = analysis_key(inputs.index, inputs.scorer)
+        key = analysis_key(inputs.index, inputs.scorer, inputs.study_rules)
         cached = state.cache.get(key)
         if cached is not None:
             state.current = cached
@@ -239,7 +247,9 @@ class AnalysisController:
         state.pending = (
             state.generation,
             key,
-            AnalysisRequest(tuple(inputs.index.cues), inputs.scorer, inputs.tokenizer),
+            AnalysisRequest(
+                tuple(inputs.index.cues), inputs.scorer, inputs.tokenizer, inputs.study_rules
+            ),
         )
 
     def _submit_pending(self) -> bool:

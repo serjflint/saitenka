@@ -287,6 +287,42 @@ profile can override just the deck and inherit the rest. A non-Japanese language
 `tokenizer` explicitly — there is no silent fallback. The commented `[profiles.french]` block in the
 example file is a complete template.
 
+### Subtitle study text
+
+Preprocessing is off by default. Enable individual rules in `[profile]` or a named
+`[profiles.<name>]` table:
+
+```toml
+[profile]
+preprocess_speaker_labels = true
+preprocess_annotations = true
+preprocess_music = true
+preprocess_join_lines = true
+# Optional restricted regex, applied after the presets:
+preprocess_regex = '^\[[^\]]+\]\s'
+```
+
+These rules affect dictionary lookup, N+1 scoring, episode analysis, copied cues and mined sentences.
+The displayed subtitle, its source text and timing remain authored. Profile switching invalidates
+derived tokens and analysis. Removed text has no hover target, and words on opposite sides of a removed
+annotation are tokenized separately.
+
+The speaker preset recognizes a leading short `Name:`/`Name：` or `(Name)`/`（Name）` followed by a colon,
+whitespace or an opening Japanese quote. It retains a whole parenthesized thought and parentheses
+inside dialogue. The annotation preset removes square, full-width square, corner and curly bracket
+spans; enable it only for sources that use those brackets as accessibility metadata. The music preset
+removes edge `♪♫♬` markers and music-only lines from study text while keeping lyrics. Joining lines
+uses spaces in copied/mined sentences; authored line breaks and event boundaries stay intact.
+
+Custom regex support is deliberately restricted: literals, character classes, character categories and
+anchors; at most one repetition (`*`, `+`, `?`, or `{m,n}`) over a single character atom. A repeated
+pattern must begin with `^` or `\A`. Groups, lookarounds, backreferences, flags and branching expressions
+are unsupported (alternatives optimized into a character class are safe). Patterns are limited to
+256 characters and finite repetition bounds to 4096. Lines over 4096 characters use raw text when a
+custom pattern is configured and emit a warning. These limits bound work without a background regex
+process. Invalid or unsupported configuration disables preprocessing for that profile, shows a warning
+and leaves the raw cue usable. No Unicode normalization or guessed readings are added.
+
 ## The full reference
 
 !!! note "Everything is in the example file"

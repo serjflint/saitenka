@@ -22,6 +22,8 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from saitenka.app.study_text import DISABLED, StudyRules
+
 if TYPE_CHECKING:
     from saitenka_subtitles import CueIndex
     from saitenka_tokenize.japanese import Token
@@ -66,6 +68,7 @@ class TokenizedCue:
     lines: list[list[Token]]
     tokens: list[Token]
     styles: list[TokenStyle] | None
+    study_lines: tuple[str, ...] | None = None
 
 
 class TokenCache:
@@ -73,7 +76,9 @@ class TokenCache:
     the prefetch workers, so every mutation holds the lock (``OrderedDict`` get/move_to_end/setitem/popitem aren't atomic no-GIL)."""
 
     def __init__(self, maxsize: int = 512) -> None:
-        self._data: OrderedDict[tuple[str, tuple[int, ...]], TokenizedCue] = OrderedDict()
+        self._data: OrderedDict[tuple[str, tuple[int, ...], StudyRules], TokenizedCue] = (
+            OrderedDict()
+        )
         self._max = max(1, maxsize)
         self._lock = threading.Lock()
         # Bumped on every clear() so a background worker that captured the generation before a profile
@@ -88,11 +93,13 @@ class TokenCache:
         with self._lock:
             return self._gen
 
-    def get(self, text: str, events: tuple[int, ...]) -> TokenizedCue | None:
+    def get(
+        self, text: str, events: tuple[int, ...], rules: StudyRules = DISABLED
+    ) -> TokenizedCue | None:
         with self._lock:
-            cue = self._data.get((text, events))
+            cue = self._data.get((text, events, rules))
             if cue is not None:
-                self._data.move_to_end((text, events))
+                self._data.move_to_end((text, events, rules))
             return cue
 
     def put(
@@ -103,16 +110,17 @@ class TokenCache:
         *,
         complete: bool = True,
         generation: int | None = None,
+        rules: StudyRules = DISABLED,
     ) -> None:
         # Never store an empty or incomplete tokenization — a later identical line must get
         # another shot at annotations (empty = a miss re-tries; incomplete = re-tries once deps load).
-        if not cue.tokens or not complete:
+        if (not cue.tokens and cue.study_lines is None) or not complete:
             return
         with self._lock:
             if generation is not None and generation != self._gen:
                 return  # a profile swap cleared+bumped the cache after this cue was tokenized → drop it
-            self._data[text, events] = cue
-            self._data.move_to_end((text, events))
+            self._data[text, events, rules] = cue
+            self._data.move_to_end((text, events, rules))
             while len(self._data) > self._max:
                 self._data.popitem(last=False)
 

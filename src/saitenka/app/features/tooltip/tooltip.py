@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
+from saitenka.app import study_text
 from saitenka.app.features.tooltip import nested_popup, tooltip_engaged
 from saitenka.app.features.tooltip.hover_metadata import HoverMetadataKey
 from saitenka.app.features.tooltip.popups import (
@@ -262,7 +263,9 @@ def resolve_hover(ports: TipPorts, lookup: WordLookup, inputs: HoverInputs, inde
         lookup.dict_set, "has_term", None
     )  # phrase merge is an optional dict capability
     if has_term is not None:
-        got = lookup.tokenizer.phrase_terms(tokens=inputs.tokens, index=index, has_term=has_term)
+        got = study_text.phrase_terms(
+            lookup.tokenizer, inputs.tokens, index, has_term, lookup.boundaries
+        )
         if got is not None:
             term_list, start, end = got
             terms, span = tuple(term_list), (start, end)
@@ -309,6 +312,7 @@ def _request_hover_metadata(
             tuple(inputs.tokens),
             lookup.dict_set,
             lookup.mined.snapshot(),
+            lookup.boundaries,
         )
     )
 

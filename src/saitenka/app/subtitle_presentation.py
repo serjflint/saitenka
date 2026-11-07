@@ -74,6 +74,12 @@ class CueRenderState:
     boxes: list[WordBox] = field(default_factory=list)
     origin: tuple[int, int] = (0, 0)
     paint_allowed: bool = True
+    study_lines: tuple[str, ...] | None = None
+
+    def sentence_lines(self) -> list[str]:
+        if self.study_lines is not None:
+            return list(self.study_lines)
+        return ["".join(token.surface for token in line) for line in self.lines]
 
 
 def boxes_for(tokens: list[Token], boxes: list[WordBox]) -> list[WordBox]:
@@ -119,6 +125,7 @@ class CueRenderStore:
         state = self._current
         self._current = CueRenderState(
             lines=cue.lines,
+            study_lines=cue.study_lines,
             tokens=cue.tokens,
             styles=cue.styles,
             boxes=boxes_for(cue.tokens, state.boxes),
@@ -137,6 +144,7 @@ class CueRenderStore:
         state = self._current
         replaced = state.tokens if tokens is _UNCHANGED else cast("list[Token]", tokens)
         self._current = CueRenderState(
+            study_lines=state.study_lines,
             lines=state.lines if lines is _UNCHANGED else cast("list[list[Token]]", lines),
             tokens=replaced,
             styles=(
@@ -150,7 +158,11 @@ class CueRenderStore:
     def clear_geometry(self) -> None:
         state = self._current
         self._current = CueRenderState(
-            state.lines, state.tokens, state.styles, paint_allowed=state.paint_allowed
+            state.lines,
+            state.tokens,
+            state.styles,
+            paint_allowed=state.paint_allowed,
+            study_lines=state.study_lines,
         )
 
     def publish_geometry(
@@ -164,6 +176,7 @@ class CueRenderStore:
             boxes_for(state.tokens, boxes),
             origin,
             paint_allowed,
+            state.study_lines,
         )
 
     def replace_geometry(
@@ -185,6 +198,7 @@ class CueRenderStore:
             ),
             state.origin if origin is _UNCHANGED else cast("tuple[int, int]", origin),
             state.paint_allowed if paint_allowed is None else paint_allowed,
+            state.study_lines,
         )
 
 

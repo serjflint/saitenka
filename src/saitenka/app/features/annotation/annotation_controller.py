@@ -11,7 +11,9 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from saitenka import otel_metrics
+from saitenka.app import study_text
 from saitenka.app.features.annotation import jobs as cue_annotation
+from saitenka.app.study_text import DISABLED, StudyRules
 from saitenka.app.token_cache import TokenCache, TokenizedCue, cue_key, event_lines
 
 if TYPE_CHECKING:
@@ -56,6 +58,7 @@ class AnnotationInputs:
     annotate: bool
     #: The selected track's index, the only source of event boundaries inside a frame.
     sub_index: CueIndex | None = None
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,7 +178,9 @@ class CueAnnotationController:
                 publish=True,
                 schedule_geometry=True,
             )
-        cached = self._token_cache.get(norm, event_lines(norm, inputs.sub_index))
+        cached = self._token_cache.get(
+            norm, event_lines(norm, inputs.sub_index), inputs.study_rules
+        )
         if cached is not None:
             return AnnotationTransition(
                 AnnotationOutcome.CACHED,
@@ -230,7 +235,11 @@ class CueAnnotationController:
             drive=drive,
         )
         self._token_cache.put(
-            norm, event_lines(norm, inputs.sub_index), cue, generation=cache_generation
+            norm,
+            event_lines(norm, inputs.sub_index),
+            cue,
+            generation=cache_generation,
+            rules=inputs.study_rules,
         )
 
     def lookahead_captured(
@@ -295,7 +304,7 @@ class CueAnnotationController:
         a result computed under dependencies that have since changed is never stored.
         """
         norm = cue_key(text)
-        cached = self._token_cache.get(norm, ())
+        cached = self._token_cache.get(norm, (), inputs.study_rules)
         if cached is not None:
             return cached
         return self._tokenize(norm, replace(inputs, sub_index=None), generation=generation)
@@ -456,6 +465,7 @@ class CueAnnotationController:
             cache_generation,
             dependency_generation,
             event_lines(norm, inputs.sub_index),
+            inputs.study_rules,
         )
 
     @staticmethod
@@ -467,6 +477,7 @@ class CueAnnotationController:
             inputs.scorer,
             inputs.selected_dictionaries,
             event_lines(norm, inputs.sub_index),
+            inputs.study_rules,
         )
 
     def _submit_current(
@@ -527,6 +538,7 @@ class CueAnnotationController:
                     result.cue,
                     complete=result.complete,
                     generation=result.key.token_cache_generation,
+                    rules=result.key.study_rules,
                 )
                 self._pending_text = None
                 self._degraded = False
@@ -560,6 +572,7 @@ class CueAnnotationController:
             cue,
             complete=inputs.terms_exist is not None,
             generation=generation,
+            rules=inputs.study_rules,
         )
         return cue
 
@@ -571,6 +584,7 @@ class CueAnnotationController:
                 norm,
                 event_lines(norm, inputs.sub_index),
                 inputs.terms_exist,
+                inputs.study_rules,
             )
         lines = [line for group in groups for line in group]
         tokens = [token for line in lines for token in line]
@@ -578,7 +592,9 @@ class CueAnnotationController:
             styles: list[TokenStyle] | None = (
                 cue_annotation.score_events(inputs.scorer, groups) if inputs.scorer else None
             )
-        return TokenizedCue(lines, tokens, styles)
+        return TokenizedCue(
+            lines, tokens, styles, study_text.sentence_lines(norm, inputs.study_rules)
+        )
 
     def _feed_episode(self) -> None:
         coordinator = self._coordinator
@@ -625,6 +641,7 @@ class CueAnnotationController:
                     tokenized,
                     complete=inputs.terms_exist is not None,
                     generation=generation,
+                    rules=inputs.study_rules,
                 )
                 warmed += 1
             except Exception:

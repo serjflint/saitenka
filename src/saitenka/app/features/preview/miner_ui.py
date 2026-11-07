@@ -76,6 +76,7 @@ class CardSource:
     provenance: Callable[[object], str]
     video_path: Callable[[], object]
     current: Callable[[], bool] = lambda: True
+    study_lines: tuple[str, ...] | None = None
 
 
 def duplicate_token(panel: PreviewPanel) -> Token | None:
@@ -124,7 +125,7 @@ def prepare_mined(source: CardSource, card, tok, video, status: str, jpg, audio)
         status,
         card.expression,
         card.reading,
-        sentence_lines(source.lines),
+        sentence_lines(source.lines) if source.study_lines is None else list(source.study_lines),
         tok.surface,
         list(card.glosses),
         img,

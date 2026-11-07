@@ -11,6 +11,8 @@ from enum import IntEnum, StrEnum
 from typing import TYPE_CHECKING, Any
 
 from saitenka import otel_metrics
+from saitenka.app import study_text
+from saitenka.app.study_text import DISABLED, StudyRules
 from saitenka.app.token_cache import TokenizedCue
 from saitenka.runtime import EffectFinished, EffectId, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
@@ -51,6 +53,7 @@ class AnnotationWorkKey:
     token_cache_generation: int
     dependency_generation: int
     events: tuple[int, ...] = ()
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +64,7 @@ class AnnotationInputs:
     scorer: Any | None
     selected_dictionaries: int = 0
     events: tuple[int, ...] = ()
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,13 +269,16 @@ def tokenize_events(
     norm: str,
     events: tuple[int, ...],
     terms_exist: Callable[[Sequence[str]], set[str]] | None,
+    study_rules: StudyRules = DISABLED,
 ) -> list[list[list[Token]]]:
     """Token lines of ``norm``, grouped per event, compounds merged when a dictionary is ready."""
     groups = []
     for lines in event_groups(norm, events):
-        group = [tokenizer.tokenize(line) for line in lines if line.strip()]
-        if terms_exist is not None:
-            group = [tokenizer.merge_dict_compounds(tokens, terms_exist) for tokens in group]
+        group = [
+            study_text.tokenize_line(line, tokenizer, study_rules, terms_exist)
+            for line in lines
+            if line.strip()
+        ]
         groups.append(group)
     return groups
 
@@ -297,12 +304,18 @@ def _traced_attestation(inputs: AnnotationInputs) -> Callable[[Sequence[str]], s
 
 def annotate(inputs: AnnotationInputs) -> TokenizedCue:
     groups = tokenize_events(
-        inputs.tokenizer, inputs.normalized_text, inputs.events, _traced_attestation(inputs)
+        inputs.tokenizer,
+        inputs.normalized_text,
+        inputs.events,
+        _traced_attestation(inputs),
+        inputs.study_rules,
     )
     lines = [line for group in groups for line in group]
     tokens = [token for line in lines for token in line]
     styles = score_events(inputs.scorer, groups) if inputs.scorer is not None else None
-    return TokenizedCue(lines, tokens, styles)
+    return TokenizedCue(
+        lines, tokens, styles, study_text.sentence_lines(inputs.normalized_text, inputs.study_rules)
+    )
 
 
 class CueAnnotationCoordinator:
@@ -516,7 +529,12 @@ class CueAnnotationCoordinator:
                 return
             cue, annotation_result = _published_result(key, current, completion)
             complete = current.inputs.terms_exist is not None
-            if cue is not None and cue.tokens and complete and not current.cancelled:
+            if (
+                cue is not None
+                and (cue.tokens or cue.study_lines is not None)
+                and complete
+                and not current.cancelled
+            ):
                 self._cache_put(key, cue)
             if current.cancelled:
                 annotation_result = None

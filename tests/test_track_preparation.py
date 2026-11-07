@@ -207,7 +207,9 @@ def test_cancelling_preparation_interrupts_extraction_and_removes_staging(tmp_pa
     script = (
         "import os,signal,time\nfrom pathlib import Path\n"
         "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-        f"Path({str(ready)!r}).write_text(str(os.getpid()))\ntime.sleep(30)\n"
+        f"ready = Path({str(ready)!r})\n"
+        "staged = ready.with_suffix('.tmp')\n"
+        "staged.write_text(str(os.getpid()))\nstaged.replace(ready)\ntime.sleep(30)\n"
     )
     run = procutil.run_cancellable
 

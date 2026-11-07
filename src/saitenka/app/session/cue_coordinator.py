@@ -361,6 +361,7 @@ class CueCoordinator:
             dependencies_ready=dictionaries is not None,
             annotate=o.tracks.current.language != SECOND_LANG,
             sub_index=navigation.sub_index,
+            study_rules=o.profile.profile.profile.study_rules,
         )
 
     def apply_annotation_transition(self, transition: AnnotationTransition, *, draw: bool) -> None:
@@ -436,6 +437,7 @@ class CueCoordinator:
         view = o.annotation.view
         tooltip = o.tooltip.observation()
         return DrawRequest(
+            preserve_raw=o.presentation.cue.current.study_lines is not None,
             text=o.playback.cue.text,
             lines=o.presentation.cue.current.lines,
             osd=o.screen.osd,

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from saitenka_tokenize.languages import MAIN_LANG
 
 from saitenka import otel_metrics
-from saitenka.app import subtitles
+from saitenka.app import study_text, subtitles
 from saitenka.app.bindings import active_bindings
 from saitenka.app.feature_bindings import (
     HOVER_PAUSE_STATEFUL_BINDING,
@@ -53,6 +53,7 @@ from saitenka.app.interaction.surfaces import (
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.study_text import DISABLED, StudyRules
 from saitenka.runtime import Owner, events
 
 if TYPE_CHECKING:
@@ -210,6 +211,7 @@ class TooltipSessionView:
     navigation: TooltipNavigationView
     playback_cue_text: str
     cue_revision: int = 0
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +445,9 @@ class TooltipController:
             cue_identity=annotation.identity,
             deferred=self.metadata_deferred,
             submit=self.request_interaction_metadata,
+            boundaries=study_text.lookup_boundaries(view.cue.lines)
+            if view.study_rules.enabled
+            else (),
         )
 
     def apply_context(self) -> TooltipApply:
@@ -611,8 +616,14 @@ class TooltipController:
             tokens=tokens,
             styles=cue.styles,
             tokenizer=view.tokenizer,
-            inflected=lambda index: view.tokenizer.inflected_in(tokens, index),
+            inflected=lambda index: study_text.inflected(
+                view.tokenizer,
+                tokens,
+                index,
+                study_text.lookup_boundaries(cue.lines) if view.study_rules.enabled else (),
+            ),
             is_mined=lambda token: tooltip_panel.is_mined(token, mined),
+            study_rules=view.study_rules,
         )
 
     @property
@@ -656,7 +667,12 @@ class TooltipController:
 
     def inflected_surface(self, index: int) -> str:
         view = self._session().observe()
-        return view.tokenizer.inflected_in(view.cue.tokens, index)
+        return study_text.inflected(
+            view.tokenizer,
+            view.cue.tokens,
+            index,
+            study_text.lookup_boundaries(view.cue.lines) if view.study_rules.enabled else (),
+        )
 
     @property
     def navigation_endpoint(self) -> TooltipNavigationEndpoint:

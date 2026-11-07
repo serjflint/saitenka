@@ -79,6 +79,7 @@ class PreviewCommandEndpoint:
             fetch_image=access.fetch_image,
             fetch_media=access.fetch_media,
             lines=[list(line) for line in self.cue.current.lines],
+            study_lines=self.cue.current.study_lines,
             provenance=lambda video: miner.provenance(
                 float(playhead) if isinstance(playhead, int | float) else 0.0,
                 video,
@@ -93,7 +94,7 @@ class PreviewCommandEndpoint:
         )
 
     def sentence_lines(self) -> list[str]:
-        return miner_ui.sentence_lines(self.cue.current.lines)
+        return self.cue.current.sentence_lines()
 
     def render(self) -> None:
         miner_ui.render_preview(

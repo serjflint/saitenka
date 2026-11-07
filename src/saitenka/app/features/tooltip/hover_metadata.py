@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from saitenka_tokenize.registry import get_tokenizer
 
+from saitenka.app import study_text
 from saitenka.app.lookup import card_for
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy, JobSubmitter, configure_lane
@@ -59,6 +60,7 @@ class HoverMetadataRequest:
     tokens: tuple[Token, ...]
     dictionary: object | None
     mined: frozenset[str]
+    boundaries: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,7 +211,9 @@ def _resolve_hover(request: HoverMetadataRequest) -> HoverMetadata:
     span: tuple[int, int] | None = None
     has_term = getattr(request.dictionary, "has_term", None)
     if has_term is not None:
-        phrase = tokenizer.phrase_terms(tokens=tokens, index=request.key.index, has_term=has_term)
+        phrase = study_text.phrase_terms(
+            tokenizer, tokens, request.key.index, has_term, request.boundaries
+        )
         if phrase is not None:
             found, start, end = phrase
             terms, span = tuple(found), (start, end)

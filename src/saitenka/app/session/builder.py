@@ -718,6 +718,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             navigation=TooltipNavigationView(navigation.sub_index, navigation.nav_idx),
             playback_cue_text=playback_observation.cue.text,
             cue_revision=playback_observation.state.cue.cue.value,
+            study_rules=profile_session.profile.profile.study_rules,
         )
 
     def set_annotation_hover(*, revealed: bool) -> None:

@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING
 from saitenka_dict import FreqDict
 from saitenka_wordstate import SentenceProfile, is_content, sentence_profiles
 
+from saitenka.app import study_text
+from saitenka.app.study_text import DISABLED, StudyRules
+
 if TYPE_CHECKING:
     from saitenka_subtitles import Cue, CueIndex
     from saitenka_tokenize.japanese import Token
@@ -59,13 +62,13 @@ class AnalysisKey:
     vocabulary: str
 
 
-def _tokens(text: str, tokenizer: Tokenizer) -> list[Token]:
+def _tokens(text: str, tokenizer: Tokenizer, rules: StudyRules = DISABLED) -> list[Token]:
     normalized = text.replace("\\N", "\n").replace("\r", "")
     return [
         token
         for line in normalized.split("\n")
         if line.strip()
-        for token in tokenizer.tokenize(line)
+        for token in study_text.tokenize_line(line, tokenizer, rules)
     ]
 
 
@@ -120,9 +123,9 @@ def _n_plus_counts(profiles: tuple[SentenceProfile, ...], min_words: int) -> tup
 
 
 def _cue_analysis(
-    index: int, cue: Cue, scorer: Coloring | None, tokenizer: Tokenizer
+    index: int, cue: Cue, scorer: Coloring | None, tokenizer: Tokenizer, rules: StudyRules
 ) -> CueAnalysis:
-    tokens = _tokens(cue.text, tokenizer)
+    tokens = _tokens(cue.text, tokenizer, rules)
     known = [scorer.is_known(token) if scorer else False for token in tokens]
     profiles = sentence_profiles(tokens, known)
     content_indices = [i for i, token in enumerate(tokens) if is_content(token)]
@@ -140,7 +143,7 @@ def _cue_analysis(
         sentence_count=len(profiles),
         content_token_count=len(content_indices),
         unique_lemmas=lemmas,
-        unique_kanji=_kanji(cue.text),
+        unique_kanji=_kanji("\n".join(study_text.sentence_lines(cue.text, rules) or (cue.text,))),
         unknown_lemmas=unknown_lemmas,
         known_token_count=sum(known[i] for i in content_indices),
         known_lemmas=known_lemmas,
@@ -159,8 +162,10 @@ def _sum_distributions(cues: tuple[CueAnalysis, ...], attr: str) -> Distribution
     return tuple((label, sum(dict(dist)[label] for dist in available)) for label in labels)
 
 
-def analyze_cues(cues: list[Cue], scorer: Coloring | None, tokenizer: Tokenizer) -> EpisodeAnalysis:
-    per_cue = tuple(_cue_analysis(i, cue, scorer, tokenizer) for i, cue in enumerate(cues))
+def analyze_cues(
+    cues: list[Cue], scorer: Coloring | None, tokenizer: Tokenizer, rules: StudyRules = DISABLED
+) -> EpisodeAnalysis:
+    per_cue = tuple(_cue_analysis(i, cue, scorer, tokenizer, rules) for i, cue in enumerate(cues))
     lemmas = frozenset().union(*(cue.unique_lemmas for cue in per_cue))
     known_lemmas = frozenset().union(*(cue.known_lemmas for cue in per_cue))
     unknown_lemmas = frozenset().union(*(cue.unknown_lemmas for cue in per_cue))
@@ -194,8 +199,12 @@ def _digest(parts) -> str:
     return h.hexdigest()
 
 
-def analysis_key(index: CueIndex, scorer: Coloring | None) -> AnalysisKey:
+def analysis_key(
+    index: CueIndex, scorer: Coloring | None, rules: StudyRules = DISABLED
+) -> AnalysisKey:
     subtitle = _digest((cue.start, cue.end, cue.text) for cue in index.cues)
+    if rules != DISABLED:
+        subtitle = _digest((subtitle, rules))
     if scorer is None:
         return AnalysisKey(subtitle, "no-scorer")
     known = tuple(

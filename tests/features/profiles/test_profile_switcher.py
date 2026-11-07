@@ -116,6 +116,61 @@ def _headless(request, profile=None, profiles=None) -> TestSession:
     return reader
 
 
+@pytest.mark.parametrize("filtered", [True, False])
+def test_profile_switch_replaces_warm_study_tokens_sentence_and_analysis_identity(
+    request, filtered
+):
+    from saitenka.app.features.analysis.episode_analysis import analysis_key
+    from saitenka.app.features.mining.mining_encounter import MiningEncounterSource
+    from saitenka.app.profiles import resolve_profile
+
+    def profile(name, enabled):
+        return resolve_profile(
+            {
+                "profiles": {
+                    name: {"preprocess_speaker_labels": enabled, "preprocess_annotations": enabled}
+                },
+                "active_profile": name,
+            }
+        )
+
+    first, target = profile("initial", not filtered), profile("target", filtered)
+    reader = _headless(request, profile=first, profiles=[first, target])
+    graph = reader.graph
+    graph.profile.profile.replace_dictionary_set(_ExistsDS())
+    raw = "太郎：［雷鳴］本を読む。"
+    index = CueIndex(parse_srt("1\n00:00:00,000 --> 00:00:02,000\n" + raw))
+    graph.track_commands.navigation.current.sub_index = index
+    graph.playback.observe("sub-start", 0.0)
+    graph.playback.observe("sub-end", 2.0)
+    graph.playback.observe("sub-text", raw)
+    graph.cue.settle()
+    before = graph.annotation.token_generation
+    old_key = analysis_key(index, None, first.study_rules)
+
+    reader.command(app_bindings.PROFILE_CYCLE_MSG)
+
+    cue = graph.subtitle_presentation.cue.current
+    expected = "本を読む。" if filtered else raw
+    assert cue.sentence_lines() == [expected]
+    assert ("太郎" in {token.surface for token in cue.tokens}) is not filtered
+    assert graph.playback.cue.text == raw
+    assert graph.annotation.token_generation > before
+    assert analysis_key(index, None, target.study_rules) != old_key
+    encounter = MiningEncounterSource(
+        graph.ipc,
+        graph.subtitle_presentation.cue,
+        graph.tooltip,
+        graph.profile.profile,
+        graph.playback,
+        10,
+    ).capture()
+    assert encounter.sentence_html == expected
+    warmed = graph.annotation.lookahead_captured(raw, graph.cue.annotation_inputs)
+    assert warmed.tokens == cue.tokens
+    assert warmed.study_lines == cue.study_lines
+
+
 def test_dictionary_replacement_retires_tooltip_work_and_cached_panels(request):
     reader = _headless(request)
     reader.graph.profile.profile.replace_dictionary_set(_ExistsDS())
