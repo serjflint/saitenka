@@ -494,3 +494,30 @@ def test_burst_overlap_and_duplicate_keep_every_authored_frame(order):
         index.frame_events("過ぎ去ってしまう瞬間を\n過ぎ去ってしまう瞬間を\n過ぎ去ってしまう瞬間を")
         == ("過ぎ去ってしまう瞬間を",) * 3
     )
+
+
+@example(duration=5, authored=("注意", "scrolling-credit"))
+@given(
+    duration=st.integers(min_value=1, max_value=10),
+    authored=st.sampled_from(
+        [
+            (r"{\clip(0,0,100,100)}注意", ""),
+            (r"{\pos(100,100)\fad(20,20)}注意", ""),
+            ("注意", "scrolling-credit"),
+        ]
+    ),
+)
+def test_rapid_static_signs_and_custom_effects_are_not_animation(duration, authored):
+    raw, effect = authored
+
+    def timestamp(cs):
+        return f"0:00:{cs // 100:02}.{cs % 100:02}"
+
+    content = "\n".join(
+        CORPUS[0]["ass"].splitlines()[:2]
+        + [
+            f"Dialogue: 0,{timestamp(100 + i * duration)},{timestamp(100 + (i + 1) * duration)},Default,,0,0,0,{effect},{raw}"
+            for i in range(3)
+        ]
+    )
+    assert parse_ass(content) == parse_ass(content, collapse=False)
