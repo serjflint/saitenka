@@ -26,6 +26,8 @@ from saitenka.app.anki import AnkiError, dedupe
 from saitenka.app.lookup import card_for
 from saitenka.app.media import (
     AudioOutputMissingError,
+    AudioSelectionError,
+    AudioSource,
     Timespan,
     animated_screenshot,
     clip_audio,
@@ -76,6 +78,8 @@ class MiningEncounter:
     authored_span: Timespan | None = None
     subtitle_delay: float = 0.0
     timing_error: str | None = None
+    audio_source: AudioSource | None = None
+    audio_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,9 +339,7 @@ def capture_media(
     failure."""
     prepared = prepared or prepare_capture(p, base, animated=animated)
     pic, pic_err = _capture_image(p, video, prepared)
-    audio, audio_err = _capture_audio(
-        p, prepared.base, video, prepared.span, enabled=prepared.needs.audio
-    )
+    audio, audio_err = _capture_audio(p, prepared.base, prepared.span, enabled=prepared.needs.audio)
     _warn_capture_failure(p, pic_err, audio_err)
     return pic, audio
 
@@ -382,17 +384,27 @@ def _encode_animated(p: MiningTransaction, base: str, video, span) -> str | None
 
 
 def _capture_audio(
-    p: MiningTransaction, base: str, video, span, *, enabled: bool = True
+    p: MiningTransaction, base: str, span, *, enabled: bool = True
 ) -> tuple[str, Exception | None]:
     """The cue audio clip (→ ``preview.last_audio``). Returns (media_name, error-or-None)."""
+    if not enabled or span is None:
+        return "", None
+    source = p.encounter.audio_source
+    if source is None:
+        return "", AudioSelectionError(p.encounter.audio_error or "audio selection unavailable")
     try:
-        if enabled and video and span:
-            aud = p.scratch / f"{base}.m4a"
-            clip_audio(video, span, aud, normalize=p.mine_cfg.normalize_audio)
-            if p.cancelled():
-                return "", None
-            p.apply.captured_audio(aud)
-            return p.anki.store_media(f"{base}.m4a", aud), None
+        aud = p.scratch / f"{base}.m4a"
+        clip_audio(
+            source.path,
+            span,
+            aud,
+            normalize=p.mine_cfg.normalize_audio,
+            stream_index=source.stream_index,
+        )
+        if p.cancelled():
+            return "", None
+        p.apply.captured_audio(aud)
+        return p.anki.store_media(f"{base}.m4a", aud), None
     except (
         OSError,
         subprocess.SubprocessError,
@@ -402,7 +414,6 @@ def _capture_audio(
     ) as e:
         log.debug("audio capture failed", exc_info=True)
         return "", e
-    return "", None
 
 
 def _warn_capture_failure(p: MiningTransaction, pic_err, audio_err) -> None:
@@ -435,6 +446,8 @@ def _capture_failure_message(pic_err, audio_err) -> tuple[str, str] | None:
 
 
 def _audio_failure_reason(error: Exception | None) -> str:
+    if isinstance(error, AudioSelectionError):
+        return str(error)
     if isinstance(error, subprocess.TimeoutExpired):
         return "audio extraction timed out"
     if isinstance(error, subprocess.CalledProcessError):

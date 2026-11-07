@@ -264,6 +264,8 @@ def test_mine_command_uses_one_observed_encounter_without_property_queries(monke
         {
             "path": "/video.mkv",
             "time-pos": 5.0,
+            "aid": 1,
+            "track-list": [{"id": 1, "type": "audio", "ff-index": 1}],
             "sub-start": 4.0,
             "sub-end": 6.0,
             "sub-text": "本命",

@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 OBSERVED_PROPERTIES = (
     "path",
     "track-list",
+    "aid",
     "subtitle-layout-revision",
     "options/subtitle-layout",
     "playlist",
