@@ -201,7 +201,10 @@ def _evaluate_case(case: dict) -> object:
         jlpt=JlptDict(case["jlpt"]) if case.get("jlpt") is not None else None,
         freq=FreqDict(case["freq"], "contract") if case.get("freq") is not None else None,
     )
-    result = analyze_cues(list(starmap(Cue, case["cues"])), scorer, UnidicTokenizer())
+    from saitenka.app.profiles import resolve_profile
+
+    rules = resolve_profile(case.get("profile_config", {})).study_rules
+    result = analyze_cues(list(starmap(Cue, case["cues"])), scorer, UnidicTokenizer(), rules)
     observed: dict[str, object] = {}
     for field in case.get("observe", []):
         value = getattr(result, field)

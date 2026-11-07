@@ -28,6 +28,7 @@ from saitenka_tokenize.languages import (
 )
 
 from saitenka.app.config import ProfileOptions
+from saitenka.app.study_text import DISABLED, StudyRules, rules_from_profile
 
 # BCP-47-ish shape: a primary subtag of letters, optional hyphen-separated alphanumeric subtags. Open by
 # design — this validates SHAPE, never a whitelist, so any real language ("fr", "de-CH", "zh-Hant") is
@@ -51,6 +52,7 @@ class Profile:
     # top-level default stands (byte-identical JP path). A non-JP profile derives it from its language so
     # it picks that track, not the JP default; an explicit ``slang`` in the profile table wins.
     slang: str | None = None
+    study_rules: StudyRules = DISABLED
 
 
 def validate_language_code(code: str) -> str:
@@ -211,6 +213,7 @@ def resolve_profile(cfg: dict, override: str | None = None) -> Profile:
         langs=ReaderLanguages(main=language, second=second),
         tokenizer=tokenizer,
         slang=_profile_slang(raw, language),
+        study_rules=rules_from_profile(raw),
     )
 
 

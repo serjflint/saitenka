@@ -7,6 +7,12 @@ logs.
 
 ## [Unreleased]
 
+### Added
+
+- Reading profiles can preprocess study text for lookup, scoring, analysis, copying and mining while
+  retaining the authored subtitle on screen. Speaker, accessibility and music presets are opt-in;
+  custom patterns use a validated, bounded regex dialect.
+
 ### Fixed
 
 - Tooltip links, character scanning and header buttons stay aligned with the displayed panel

@@ -114,6 +114,8 @@ class ProfileController:
         self._dict_set = dict_set
         self._apply_font_mode(self._profile)
         self._evidence = ProfileEvidence(self._profile)
+        if self._profile.study_rules.error:
+            self._aftermath.notify(self._profile.study_rules.error, "warn")
 
     @property
     def profile(self) -> Profile:
@@ -223,7 +225,10 @@ class ProfileController:
         if track is not _TrackSwitch.SWITCHED:
             self._subtitles.retokenize_current_cue()
         self._aftermath.warm_episode()
-        self._aftermath.notify(f"profile: {target.name} ({target.langs.main})", "ok")
+        if target.study_rules.error:
+            self._aftermath.notify(target.study_rules.error, "warn")
+        else:
+            self._aftermath.notify(f"profile: {target.name} ({target.langs.main})", "ok")
         status = (
             ProfileSwitchStatus.DEGRADED
             if track is _TrackSwitch.MISSING

@@ -10,7 +10,9 @@ from itertools import islice
 from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
+from saitenka.app import study_text
 from saitenka.app.perf import gil_disabled
+from saitenka.app.study_text import DISABLED, StudyRules
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
 from saitenka.runtime.jobs import JobLanePolicy
 
@@ -374,6 +376,7 @@ class PrefetchPorts:
     tokenizer: Tokenizer
     inflected: Callable[[int], str]
     is_mined: Callable[[Token], bool]
+    study_rules: StudyRules = DISABLED
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,7 +446,12 @@ def candidate_jobs(
     if ports.cues.lookahead > 0:
         jobs.extend(
             _lookahead_items(
-                ports.cues, ports.tokenizer, gen, {t.lemma for _, _, t in cands}, should_cancel
+                ports.cues,
+                ports.tokenizer,
+                gen,
+                {t.lemma for _, _, t in cands},
+                should_cancel,
+                ports.study_rules,
             )
         )
     if head.lookahead > 0:
@@ -465,7 +473,12 @@ class LookaheadCues:
 
 
 def _lookahead_items(
-    cues: LookaheadCues, tokenizer, gen: int, seen: set[str], should_cancel=lambda: False
+    cues: LookaheadCues,
+    tokenizer,
+    gen: int,
+    seen: set[str],
+    should_cancel=lambda: False,
+    rules: StudyRules = DISABLED,
 ) -> list[tuple[int, PrefetchItem]]:
     """WARM (dict-only, never full, ``mined=False``) the content words of the next
     ``prefetch_lookahead`` cues — a future line is never *engaged* and never builds a header, so no
@@ -478,7 +491,7 @@ def _lookahead_items(
             return []
         if len(text) > _MAX_CANDIDATE_CHARS:
             continue
-        toks = tokenizer.tokenize(text)
+        toks = study_text.tokenize_text(text, tokenizer, rules)
         for i, t in enumerate(toks):
             if not tokenizer.is_content(t) or t.lemma in seen:
                 continue
@@ -486,7 +499,13 @@ def _lookahead_items(
             items.append(
                 (
                     3,
-                    PrefetchItem(gen, t, tokenizer.inflected_in(toks, i), mined=False, full=False),
+                    PrefetchItem(
+                        gen,
+                        t,
+                        study_text.line_inflected(tokenizer, toks, i, rules),
+                        mined=False,
+                        full=False,
+                    ),
                 )
             )
             if len(items) >= _MAX_WARM_PENDING:
@@ -520,7 +539,7 @@ def _head_prefetch_candidate(
         return None
     if ports.is_mined(t):
         return None
-    inflected = ports.tokenizer.inflected_in(toks, i)
+    inflected = study_text.line_inflected(ports.tokenizer, toks, i, ports.study_rules)
     key = head.panel_key(t, inflected, mined=False)
     if head.panel_present(key):
         return None  # already warm (hovered earlier, or a prior speculative render)
@@ -582,7 +601,7 @@ def _head_prefetch_items(
         found, probes = _head_candidates_for_text(
             text,
             seen,
-            ports.tokenizer.tokenize,
+            lambda text: study_text.tokenize_text(text, ports.tokenizer, ports.study_rules),
             ports.tokenizer.is_content,
             head.scorer.score_line,
             lambda toks, i, token, styles: _head_prefetch_candidate(

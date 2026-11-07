@@ -7,7 +7,7 @@ satisfy the same contract, so the choice of provider cannot change what gets dec
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol
 
@@ -38,6 +38,7 @@ class SubtitleRasterRequest:
     hover: int | None = None
     hover_end: int | None = None
     styles: list | None = None
+    preserve_raw: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +78,7 @@ class RasterContent:
     width: int
     size: int
     background: tuple[int, int, int, int]
+    preserve_raw: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +112,7 @@ def build_request(
         hover=span[0] if span else hovered,
         hover_end=span[1] if span else None,
         styles=overlay.styles if overlay.annotated else None,
+        preserve_raw=content.preserve_raw,
     )
 
 
@@ -126,6 +129,8 @@ class PillowRasterProvider:
             rendered = render_plain_subtitle(
                 request.text, request.width, size=request.size, background=request.background
             )
+        elif request.preserve_raw:
+            return _render_projected(request)
         else:
             rendered = render_subtitle(
                 [list(line) for line in request.lines],
@@ -137,3 +142,67 @@ class PillowRasterProvider:
                 background=request.background,
             )
         return SubtitleRasterResult(rendered.image, tuple(rendered.boxes))
+
+
+def raw_display_lines(text: str, lines) -> tuple[list[list[Token]], list[int | None]]:
+    """Fill authored gaps for painting only; fillers never receive semantic indices."""
+    from saitenka_tokenize.japanese import Token
+
+    source = iter(
+        line for line in text.replace("\\N", "\n").replace("\r", "").split("\n") if line.strip()
+    )
+    display: list[list[Token]] = []
+    indices: list[int | None] = []
+    semantic_index = 0
+    for line_tokens in lines:
+        raw = next(source)
+        row: list[Token] = []
+        end = 0
+        for token in line_tokens:
+            if raw[token.start : token.end] != token.surface or token.start < end:
+                raise ValueError("study token does not match authored text")
+            if token.start > end:
+                row.append(Token(raw[end : token.start], "", "", "記号", end, token.start))
+                indices.append(None)
+            row.append(token)
+            indices.append(semantic_index)
+            semantic_index += 1
+            end = token.end
+        if end < len(raw):
+            row.append(Token(raw[end:], "", "", "記号", end, len(raw)))
+            indices.append(None)
+        display.append(row)
+    return display, indices
+
+
+def _render_projected(request: SubtitleRasterRequest) -> SubtitleRasterResult:
+    from saitenka.app.subtitles import render_subtitle
+
+    lines, indices = raw_display_lines(request.text, request.lines)
+    selected = [
+        index
+        for index, semantic in enumerate(indices)
+        if semantic is not None
+        and request.hover is not None
+        and request.hover <= semantic < (request.hover_end or request.hover + 1)
+    ]
+    styles = (
+        [request.styles[index] if index is not None else None for index in indices]
+        if request.styles
+        else None
+    )
+    rendered = render_subtitle(
+        lines,
+        request.width,
+        size=request.size,
+        background=request.background,
+        hover=selected[0] if selected else None,
+        hover_end=selected[-1] + 1 if selected else None,
+        styles=styles,
+    )
+    boxes = []
+    for box in rendered.boxes:
+        index = indices[box.index]
+        if index is not None:
+            boxes.append(replace(box, index=index))
+    return SubtitleRasterResult(rendered.image, tuple(boxes))

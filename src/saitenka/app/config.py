@@ -646,6 +646,23 @@ class ProfileOptions:
     second: str = field(
         default="en", metadata={"help": "Second (known/translation) language code."}
     )
+    preprocess_speaker_labels: bool = field(
+        default=False, metadata={"help": "Remove leading speaker labels from study text."}
+    )
+    preprocess_annotations: bool = field(
+        default=False,
+        metadata={"help": "Remove bracketed accessibility annotations from study text."},
+    )
+    preprocess_music: bool = field(
+        default=False, metadata={"help": "Remove music markers from study text."}
+    )
+    preprocess_join_lines: bool = field(
+        default=False, metadata={"help": "Join study sentence lines with spaces."}
+    )
+    preprocess_regex: str = field(
+        default="",
+        metadata={"help": "Restricted study-text regex; see configuration documentation."},
+    )
 
 
 @dataclass(frozen=True)

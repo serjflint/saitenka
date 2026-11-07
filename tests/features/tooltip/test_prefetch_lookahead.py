@@ -113,6 +113,52 @@ def test_lookahead_warms_the_next_cues_words(monkeypatch):
     assert "書く" in surfaces and "水" in surfaces and "飲む" in surfaces
 
 
+def test_study_rules_reach_both_speculative_dictionary_and_head_scoring():
+    from saitenka_dict import FreqDict
+    from saitenka_subtitles import Cue
+    from saitenka_tokenize.registry import UnidicTokenizer
+    from saitenka_wordstate import Scorer
+
+    from saitenka.app.scoring import Coloring
+    from saitenka.app.study_text import StudyRules
+
+    index = CueIndex([Cue(0, 1, "今"), Cue(2, 3, "太郎：本を読む。\n花子：水を飲む。\n［雷鳴］♪")])
+    scorer = Coloring(
+        Scorer(
+            known=KnownWords.from_set([]),
+            freq=FreqDict(
+                {"太郎": 1, "花子": 1, "雷鳴": 1, "本": 1, "読む": 1, "水": 1, "飲む": 1}, "test"
+            ),
+        )
+    )
+    ports = prefetch.PrefetchPorts(
+        enabled=True,
+        engaged=False,
+        cues=prefetch.LookaheadCues(index, "今", 0, 1),
+        tokens=[],
+        styles=[],
+        tokenizer=UnidicTokenizer(),
+        inflected=lambda _index: "",
+        is_mined=lambda _token: False,
+        study_rules=StudyRules(speaker_labels=True, annotations=True, music=True),
+    )
+    head = prefetch.HeadProbe(
+        scorer, lambda token, *_args, **_kwargs: token.surface, lambda _key: False, 1, 16
+    )
+
+    jobs = prefetch.candidate_jobs(ports, head, 1)
+
+    for kind in (prefetch.PrefetchItem, prefetch.HeadPrefetchItem):
+        assert {item.token.surface for _, item in jobs if isinstance(item, kind)} == {
+            "本",
+            "読む",
+            "水",
+            "飲む",
+        }
+    raw = prefetch.candidate_jobs(replace(ports, study_rules=StudyRules()), head, 2)
+    assert "雷鳴" in {item.token.surface for _, item in raw}
+
+
 def test_dependency_replacement_readmits_the_unchanged_cue(monkeypatch):
     r = _reader(monkeypatch, lookahead=0)
     r.graph.cue.set_subtitle("本を読む")

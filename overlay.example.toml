@@ -219,6 +219,13 @@ preview_key = "p"
 #   • [profiles.<name>.mine] MERGES key-wise over the top-level [mine] (override just the deck; inherit
 #     model/fields/animated_*). Omit it to reuse [mine] as-is.
 # active_profile = "french"     # uncomment to make the profile below the active one
+# [profile]
+# preprocess_speaker_labels = false # study text only; authored display/provenance stay unchanged
+# preprocess_annotations = false    # square/corner/curly accessibility spans
+# preprocess_music = false          # edge music markers; music-only study lines become empty
+# preprocess_join_lines = false     # spaces between copied/mined sentence lines
+# preprocess_regex = ''             # restricted, bounded dialect; see docs/usage/configuration.md
+#
 # [profiles.french]
 # language = "fr"               # open code (BCP-47-ish); tokenizer is a SEPARATE field, not derived from it
 # tokenizer = "latin"           # a non-JP language MUST name its tokenizer (no silent unidic fallback)

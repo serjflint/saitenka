@@ -99,12 +99,16 @@ class MiningEncounterSource:
             media_path=path if isinstance(path, str) else None,
             playhead=float(playhead) if isinstance(playhead, int | float) else 0.0,
             span=span,
+            sentence_html=(
+                miner.sentence_html(cue.lines)
+                if cue.study_lines is None
+                else "<br>".join(cue.study_lines)
+            ),
             authored_span=authored_span,
             subtitle_delay=delay or 0.0,
             timing_error=timing_error,
             audio_source=audio,
             audio_error=audio_error,
-            sentence_html=miner.sentence_html(cue.lines),
             hovered_terms=tooltip.metadata.terms,
             connection_epoch=state.connection.epoch if self.playback.observing else None,
         )

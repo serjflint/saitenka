@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING
 from saitenka_tokenize.languages import SECOND_LANG
 
 from saitenka import otel_metrics
+from saitenka.app import study_text
 from saitenka.app.features.analysis.episode_analysis import cue_result
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.app.study_text import DISABLED, StudyRules
 from saitenka.app.subnav_policy import seek_position
 from saitenka.app.subtitles import SidebarAction, SidebarRow, render_sidebar
 from saitenka.model import in_rect
@@ -99,6 +101,7 @@ class SidebarView:
     tokenizer: object
     analysis: object
     can_mine: bool
+    study_rules: StudyRules = DISABLED
     subtitle_delay: float | None = 0.0
 
     @property
@@ -134,7 +137,14 @@ def _active_index(index: CueIndex | None, text: str, *, sub_start, time_pos, pre
 
 
 def _cue_parts(
-    cache: dict, cue_index: int, cue: Cue, *, language: str, scorer, tokenizer
+    cache: dict,
+    cue_index: int,
+    cue: Cue,
+    *,
+    language: str,
+    scorer,
+    tokenizer,
+    rules: StudyRules = DISABLED,
 ) -> tuple[tuple[str, tuple], ...]:
     """Coloured spans for one cue, memoised in ``cache``.
 
@@ -144,15 +154,31 @@ def _cue_parts(
     """
     if language == SECOND_LANG or scorer is None:
         return ((cue.text.replace("\n", " "), PLAIN),)
-    key = (language, cue_index, cue.text, id(scorer))
+    key = (language, cue_index, cue.text, id(scorer), rules)
     cached = cache.get(key)
     if cached is not None:
         return cached
-    tokens = tokenizer.tokenize(cue.text.replace("\\N", "\n").replace("\r", ""))
+    text = cue.text.replace("\\N", "\n").replace("\r", "")
+    tokens = study_text.tokenize_text(text, tokenizer, rules)
     styles = scorer.score_line(tokens)
     parts = tuple((token.surface, style.color) for token, style in zip(tokens, styles, strict=True))
+    if rules.enabled:
+        parts = _authored_parts(text, tokens, styles)
     cache[key] = parts
     return parts
+
+
+def _authored_parts(text, tokens, styles) -> tuple[tuple[str, tuple], ...]:
+    parts = []
+    end = 0
+    for token, style in zip(tokens, styles, strict=True):
+        if token.start > end:
+            parts.append((text[end : token.start].replace("\n", " "), PLAIN))
+        parts.append((token.surface.replace("\n", " "), style.color))
+        end = token.end
+    if end < len(text):
+        parts.append((text[end:].replace("\n", " "), PLAIN))
+    return tuple(parts)
 
 
 def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int, str]:
@@ -218,6 +244,7 @@ def _track_rows(view: SidebarView, first: int, capacity: int) -> tuple[list[Side
                     language=view.language,
                     scorer=view.scorer,
                     tokenizer=view.tokenizer,
+                    rules=view.study_rules,
                 ),
                 status=status or None,
                 active=cue_index == active,
