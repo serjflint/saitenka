@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, field
+from heapq import merge
 from typing import TYPE_CHECKING
 
 from saitenka_tokenize.languages import SECOND_LANG
@@ -181,6 +183,42 @@ def _authored_parts(text, tokens, styles) -> tuple[tuple[str, tuple], ...]:
     return tuple(parts)
 
 
+@dataclass(frozen=True, slots=True)
+class _CaptureResolver:
+    """Prefer exact authored spans; tolerate persisted rounding only for one study owner."""
+
+    authored: dict[tuple[float, float], set[int]]
+    logical: dict[tuple[float, float], set[int]]
+    spans: tuple[tuple[float, float], ...]
+    starts: tuple[float, ...]
+
+    @classmethod
+    def from_index(cls, index: CueIndex | None) -> _CaptureResolver:
+        authored: defaultdict[tuple[float, float], set[int]] = defaultdict(set)
+        logical: defaultdict[tuple[float, float], set[int]] = defaultdict(set)
+        if index is not None:
+            for owner, cue in zip(index.authored_study_positions, index.authored.cues, strict=True):
+                authored[cue.start, cue.end].add(owner)
+            for owner, cue in enumerate(index.cues):
+                logical[cue.start, cue.end].add(owner)
+        # Span keys inherit each index's start order.
+        spans = tuple(dict.fromkeys(merge(authored, logical, key=lambda span: span[0])))
+        return cls(authored, logical, spans, tuple(span[0] for span in spans))
+
+    def resolve(self, start: float, end: float) -> int | None:
+        for owners in (self.authored.get((start, end)), self.logical.get((start, end))):
+            if owners:
+                return next(iter(owners)) if len(owners) == 1 else None
+        owners = set()
+        for span in self.spans[
+            bisect_left(self.starts, start - 0.05) : bisect_right(self.starts, start + 0.05)
+        ]:
+            if abs(span[0] - start) < 0.05 and abs(span[1] - end) < 0.05:
+                owners.update(self.authored.get(span, ()))
+                owners.update(self.logical.get(span, ()))
+        return next(iter(owners)) if len(owners) == 1 else None
+
+
 def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int, str]:
     """Mined status per cue index, for the Mine column.
 
@@ -189,13 +227,10 @@ def _cue_statuses(index: CueIndex, video: str, store: BacklogStore) -> dict[int,
     asks for a store instead of reaching for one.
     """
     entries = store.entries_for_path(video)
-    cue_by_span = {
-        (round(cue.start, 1), round(cue.end, 1)): cue_index
-        for cue_index, cue in enumerate(index.cues)
-    }
+    resolve = _CaptureResolver.from_index(index).resolve
     statuses: dict[int, str] = {}
     for entry in entries:
-        cue_index = cue_by_span.get((round(entry.cue_start, 1), round(entry.cue_end, 1)))
+        cue_index = resolve(entry.cue_start, entry.cue_end)
         if cue_index is not None:
             statuses[cue_index] = entry.status
     return statuses
@@ -302,15 +337,7 @@ def _entry_text(entry: BacklogEntry, language: str) -> str:
     return entry.jp_text or entry.en_text
 
 
-def _entry_row(entry: BacklogEntry, active_cue, *, language: str) -> SidebarRow:
-    """One backlog row. ``active_cue`` is the cue playing now, or None — the row highlights when the
-    bookmark's span matches it to within 50 ms, which is looser than equality because the entry's
-    times were rounded when it was saved."""
-    is_active = bool(
-        active_cue
-        and abs(active_cue.start - entry.cue_start) < 0.05
-        and abs(active_cue.end - entry.cue_end) < 0.05
-    )
+def _entry_row(entry: BacklogEntry, *, active: bool, language: str) -> SidebarRow:
     text = _entry_text(entry, language)
     return SidebarRow(
         value=entry.id,
@@ -318,7 +345,7 @@ def _entry_row(entry: BacklogEntry, active_cue, *, language: str) -> SidebarRow:
         text=text,
         parts=((text.replace("\n", " "), PLAIN),),
         status=entry.status,
-        active=is_active,
+        active=active,
         click_kind="backlog-seek",
     )
 
@@ -328,9 +355,12 @@ def _matched_entry_rows(
 ) -> list[SidebarRow]:
     if not video:
         return []
-    active_cue = index.cues[active] if index is not None and active >= 0 else None
+    resolve = _CaptureResolver.from_index(index).resolve
     return [
-        _entry_row(entry, active_cue, language=language) for entry in store.entries_for_path(video)
+        _entry_row(
+            entry, active=resolve(entry.cue_start, entry.cue_end) == active, language=language
+        )
+        for entry in store.entries_for_path(video)
     ]
 
 
@@ -347,20 +377,15 @@ def _summary_rows(view: SidebarView) -> list[SidebarRow]:
     )
 
 
-def _mined_row(card: MinedCard, active_cue: Cue | None) -> SidebarRow:
+def _mined_row(card: MinedCard, *, active: bool) -> SidebarRow:
     text = f"{card.expression}（{card.reading}）" if card.reading else card.expression
-    is_active = bool(
-        active_cue
-        and abs(active_cue.start - card.cue_start) < 0.05
-        and abs(active_cue.end - card.cue_end) < 0.05
-    )
     return SidebarRow(
         value=card.note_id,
         timestamp=_format_time(card.cue_start),
         text=text,
         parts=((text.replace("\n", " "), PLAIN),),
         status="mined",
-        active=is_active,
+        active=active,
         click_kind="mine-open",
     )
 
@@ -371,7 +396,11 @@ def _mine_rows(view: SidebarView) -> list[SidebarRow]:
     if not view.video or not view.mined_exists:
         return []
     store = view.mined()
-    return [_mined_row(card, view.active_cue) for card in store.for_path(view.video)]
+    resolve = _CaptureResolver.from_index(view.index).resolve
+    return [
+        _mined_row(card, active=resolve(card.cue_start, card.cue_end) == view.active)
+        for card in store.for_path(view.video)
+    ]
 
 
 def draw(view: SidebarView) -> None:
@@ -561,11 +590,12 @@ def mine_active(view: SidebarView) -> None:
     cue = view.active_cue
     if not view.video or cue is None or not view.backlog_exists:
         return
+    resolve = _CaptureResolver.from_index(view.index).resolve
     try:
         store = view.backlog()
         with otel_metrics.traced("backlog_write", op="set_status"):  # main-thread SQLite on a mine
             for entry in store.entries_for_path(view.video):
-                if abs(entry.cue_start - cue.start) < 0.05 and abs(entry.cue_end - cue.end) < 0.05:
+                if resolve(entry.cue_start, entry.cue_end) == view.active:
                     store.set_status(entry.id, "mined")
     except (OSError, sqlite3.Error, ValueError, KeyError):
         return

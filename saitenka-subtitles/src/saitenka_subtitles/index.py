@@ -10,6 +10,8 @@ from heapq import heappop, heappush
 from itertools import islice
 from typing import TYPE_CHECKING
 
+from saitenka_subtitles.parsers import parse_projection
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -41,10 +43,13 @@ class CueIndex:
     """A sorted cue list with lookup and navigation operations."""
 
     def __init__(self, cues: list[Cue]):
+        self._authored: CueIndex | None = None
+        self._authored_positions: tuple[int, ...] = ()
         # Stable, and on `start` alone, so co-timed cues keep the order the document gave them —
         # `frame_text` joins in this order and the renderer reads the document in that same order,
         # so a different tie-break here would make the two disagree about a line no one moved.
         self.cues = sorted(cues, key=lambda cue: cue.start)
+        self._authored_study_positions = tuple(range(len(self.cues)))
         self._frames = self._compute_frames()
         by_text: defaultdict[str, list[int]] = defaultdict(list)
         for position, cue in enumerate(self.cues):
@@ -59,6 +64,38 @@ class CueIndex:
         self._boundaries = tuple(
             sorted({point for cue in self.cues for point in (cue.start, cue.end)})
         )
+
+    @classmethod
+    def from_content(cls, content: str, filename: str) -> CueIndex:
+        """Build study/navigation rows while retaining every authored frame and boundary."""
+        parsed = parse_projection(content, filename)
+        index = cls(parsed.cues)
+        index._authored_study_positions = parsed.owners
+        if parsed.cues == parsed.authored:
+            return index
+        authored = cls(parsed.authored)
+        first = [-1] * len(index)
+        for position, owner in enumerate(parsed.owners):
+            if first[owner] < 0:
+                first[owner] = position
+        index._authored = authored
+        index._authored_positions = tuple(first)
+        index._by_text = {
+            text: sorted({parsed.owners[position] for position in positions})
+            for text, positions in authored._by_text.items()
+        }
+        index._boundaries = authored._boundaries
+        return index
+
+    @property
+    def authored(self) -> CueIndex:
+        """Complete event timings for rendering and scheduling, without study collapse."""
+        return self._authored if self._authored is not None else self
+
+    @property
+    def authored_study_positions(self) -> tuple[int, ...]:
+        """Study-row owner of each cue in ``authored.cues``, in the same order."""
+        return self._authored_study_positions
 
     def _compute_frames(self) -> tuple[tuple[int, ...], ...]:
         """For each cue, every cue on screen at the instant it appears — itself included.
@@ -84,7 +121,7 @@ class CueIndex:
         return tuple(frames)
 
     def frame_at_position(self, position: int) -> tuple[int, ...]:
-        """The cues drawn together with ``position``, in document order."""
+        """Logical rows active at ``position``; ``authored`` exposes the complete event frame."""
         if not 0 <= position < len(self._frames):
             return ()
         return self._frames[position]
@@ -97,6 +134,12 @@ class CueIndex:
         that timestamp, which it refuses (`subtitle-hint-text-mismatch`) — so color waits for mpv
         instead of painting from the index.
         """
+        if self._authored is not None:
+            return (
+                self._authored.frame_text(self._authored_positions[position])
+                if 0 <= position < len(self)
+                else ""
+            )
         return "\n".join(self.cues[index].text for index in self.frame_at_position(position))
 
     def frame_events(self, text: str) -> tuple[str, ...] | None:
@@ -106,6 +149,8 @@ class CueIndex:
         event boundaries exist only in the document. Known only for frames as they stand when one
         of their cues starts; a text drawn with two different splits is ambiguous.
         """
+        if self._authored is not None:
+            return self._authored.frame_events(text)
         key = _normalize(text)
         splits = set()
         for position in self._by_text.get(key, ()):

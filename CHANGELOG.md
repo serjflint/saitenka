@@ -15,6 +15,10 @@ logs.
 
 ### Fixed
 
+- ASS study indexes collapse exact authored duplicates and positively identified animation bursts,
+  reducing repeated sidebar, navigation, analysis and warm-cache rows while preserving native frames.
+
+
 - Tooltip links, character scanning and header buttons stay aligned with the displayed panel
   between scale buckets, including the first frame before native rendering warms.
 - Mined sentence audio keeps the selected embedded track when background work is delayed or

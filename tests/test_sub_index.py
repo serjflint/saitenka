@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
+from pathlib import Path
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 from saitenka_subtitles import Cue, CueIndex, parse_ass, parse_cues, parse_srt
 
 SRT = textwrap.dedent(
@@ -306,3 +310,214 @@ def test_a_drawn_frame_locates_back_to_the_cue_it_was_drawn_for():
     drawn = "（看板）雨天決行\n（児童）雨　すごいね。\n（児童）ねえ。"
 
     assert idx.locate(text=drawn, preferred=second) == second
+
+
+CORPUS = json.loads((Path(__file__).parent / "fixtures/ass_collapse/cases.json").read_text())[
+    "cases"
+]
+
+
+@pytest.mark.parametrize("case", CORPUS, ids=lambda case: case["name"])
+def test_locked_ass_study_cue_count(case):
+    assert len(parse_cues(case["ass"], "episode.ass")) == case["expected_count"]
+
+
+def test_duplicate_overlap_keeps_authored_frame_text_and_event_splits():
+    content = CORPUS[0]["ass"] + "\nDialogue: 1,0:00:02.00,0:00:03.00,Default,sign,0,0,0,,看板"
+    index = CueIndex.from_content(content, "episode.ass")
+
+    assert len(index) == 2
+    assert index.frame_text(1) == "重なった行\n重なった行\n看板"
+    assert index.frame_events("重なった行\n重なった行\n看板") == (
+        "重なった行",
+        "重なった行",
+        "看板",
+    )
+    assert index.locate(text="重なった行\n重なった行\n看板", preferred=1) == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [(3, "Other"), (4, "Bob"), (0, "1"), (5, "12"), (8, "effect")]
+)
+def test_exact_equality_retains_distinct_authored_metadata(field, value):
+    content = CORPUS[0]["ass"]
+    lines = content.splitlines()
+    row = lines[-1].removeprefix("Dialogue: ").split(",", 9)
+    row[field] = value
+    lines[-1] = "Dialogue: " + ",".join(row)
+    assert len(parse_ass("\n".join(lines))) == 2
+
+
+@given(st.lists(st.integers(min_value=1, max_value=20), min_size=1, max_size=12))
+def test_ordinary_repeated_dialogue_retains_every_interval(durations):
+    rows = []
+    start = 0
+    for duration in durations:
+        end = start + duration
+        rows.append(
+            f"Dialogue: 0,0:00:{start // 100:02}.{start % 100:02},0:00:{end // 100:02}.{end % 100:02},Default,,0,0,0,,えっ"
+        )
+        start = end
+    content = "\n".join(CORPUS[0]["ass"].splitlines()[:2] + rows)
+    assert parse_ass(content) == parse_ass(content, collapse=False)
+
+
+@pytest.mark.parametrize("case", CORPUS, ids=lambda case: case["name"])
+def test_every_authored_frame_remains_available_after_study_collapse(case):
+    index = CueIndex.from_content(case["ass"], "episode.ass")
+    authored = CueIndex(sorted(parse_ass(case["ass"], collapse=False), key=lambda cue: cue.start))
+    for position, cue in enumerate(authored.cues):
+        frame = authored.frame_text(position)
+        assert index.frame_events(frame) == authored.frame_events(frame)
+        logical = index.locate(text=frame, sub_start=cue.start)
+        assert index.cues[logical].start <= cue.start < index.cues[logical].end
+    assert tuple(index.boundaries_after(-1)) == tuple(authored.boundaries_after(-1))
+
+
+def test_retiming_retains_a_boundary_inside_a_collapsed_burst(tmp_path):
+    from saitenka.app.resync import _alass_ready_source, _parse_cues, _retimed_document
+
+    source = tmp_path / "episode.srt"
+    source.write_text(CORPUS[1]["ass"], encoding="utf-8")
+    authored = _parse_cues(source)
+    ready = _alass_ready_source(source, tmp_path)
+    assert len(_parse_cues(ready)) == 3
+    shifted = _retimed_document(source, authored, delta=1.0, boundary=1.05, workdir=tmp_path)
+    assert [(cue.start, cue.end) for cue in _parse_cues(shifted)] == [
+        (1.0, 1.05),
+        (2.05, 2.09),
+        (2.09, 4.55),
+    ]
+
+
+def test_timed_osd_uses_later_authored_frame_span():
+    from saitenka.app.timed_osd import timed_cue
+
+    index = CueIndex.from_content(CORPUS[1]["ass"], "episode.ass")
+    cue = timed_cue(index, 1060, 0)
+    assert cue is not None
+    assert (cue.start_ms, cue.end_ms) == (1050, 1090)
+
+
+def test_study_preprocessing_preserves_raw_offsets_in_duplicate_overlap():
+    from saitenka_tokenize.registry import UnidicTokenizer
+
+    from saitenka.app.features.annotation.jobs import AnnotationInputs, annotate
+    from saitenka.app.native_subtitles import token_annotations
+    from saitenka.app.study_text import StudyRules
+    from saitenka.app.token_cache import event_lines
+
+    content = (
+        CORPUS[0]["ass"].replace("重なった行", "太郎：本を読む。")
+        + "\nDialogue: 1,0:00:02.00,0:00:03.00,Default,sign,0,0,0,,［看板］猫"
+    )
+    index = CueIndex.from_content(content, "episode.ass")
+    raw = index.frame_text(1)
+    tokenizer = UnidicTokenizer()
+    cue = annotate(
+        AnnotationInputs(
+            raw,
+            tokenizer,
+            None,
+            None,
+            study_rules=StudyRules(speaker_labels=True, annotations=True),
+        )
+    )
+    selection = token_annotations(raw, cue.lines, cue.tokens, tokenizer.is_skippable)
+    assert event_lines(raw, index) == (1, 1, 1)
+    assert [raw[item.text_start : item.text_end] for item in selection.annotations] == [
+        token.surface for token in cue.tokens if not tokenizer.is_skippable(token)
+    ]
+    assert all("太郎" not in token.surface and "看板" not in token.surface for token in cue.tokens)
+
+
+@pytest.mark.parametrize("duration", [100, 110])
+def test_animation_collapse_requires_short_preceding_frames(duration):
+    from saitenka_subtitles import Cue
+
+    def timestamp(ms):
+        return f"0:00:{ms // 1000:02}.{ms % 1000 // 10:02}"
+
+    content = "\n".join(
+        CORPUS[0]["ass"].splitlines()[:2]
+        + [
+            f"Dialogue: 0,{timestamp(1000 + i * duration)},{timestamp(1000 + (i + 1) * duration)},Default,,0,0,0,,{{\\clip(m {i} {i})}}歌詞"
+            for i in range(3)
+        ]
+    )
+    expected = (
+        [Cue(1, (1000 + 3 * duration) / 1000, "歌詞")]
+        if duration == 100
+        else parse_ass(content, collapse=False)
+    )
+    assert parse_ass(content) == expected
+
+
+def test_two_animation_frames_do_not_prove_a_burst():
+    content = "\n".join(CORPUS[1]["ass"].splitlines()[:4])
+    assert len(parse_ass(content)) == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [(3, "Other"), (4, "Bob"), (0, "1"), (5, "12"), (8, "effect")]
+)
+def test_animation_collapse_retains_distinct_authored_metadata(field, value):
+    lines = CORPUS[1]["ass"].splitlines()
+    row = lines[-1].removeprefix("Dialogue: ").split(",", 9)
+    row[field] = value
+    lines[-1] = "Dialogue: " + ",".join(row)
+    assert len(parse_ass("\n".join(lines))) == 3
+
+
+def test_mislabeled_ass_preserves_the_authored_view():
+    index = CueIndex.from_content(CORPUS[1]["ass"], "episode.srt")
+    assert len(index) == 1
+    assert len(index.authored) == 3
+
+
+def test_literal_animation_command_outside_an_override_is_ordinary_dialogue():
+    content = CORPUS[6]["ass"].replace(",Karaoke,歌詞", ",,歌詞\\t(")
+    assert len(parse_ass(content)) == 3
+
+
+@example(order=(0, 1, 2, 3, 2))
+@given(st.permutations((0, 1, 2, 3, 2)))
+def test_burst_overlap_and_duplicate_keep_every_authored_frame(order):
+    rows = CORPUS[1]["ass"].splitlines()
+    events = [*rows[2:], rows[4].replace("0:00:03.55", "0:00:01.10").replace("m 3 3", "m 4 4")]
+    content = "\n".join(rows[:2] + [events[position] for position in order])
+    index = CueIndex.from_content(content, "episode.ass")
+    assert len(index.authored) == 5
+    assert len(index) == 2
+    assert tuple(index.boundaries_after(-1)) == (1.0, 1.05, 1.09, 1.1, 3.55)
+    assert (
+        index.frame_events("過ぎ去ってしまう瞬間を\n過ぎ去ってしまう瞬間を\n過ぎ去ってしまう瞬間を")
+        == ("過ぎ去ってしまう瞬間を",) * 3
+    )
+
+
+@example(duration=5, authored=("注意", "scrolling-credit"))
+@given(
+    duration=st.integers(min_value=1, max_value=10),
+    authored=st.sampled_from(
+        [
+            (r"{\clip(0,0,100,100)}注意", ""),
+            (r"{\pos(100,100)\fad(20,20)}注意", ""),
+            ("注意", "scrolling-credit"),
+        ]
+    ),
+)
+def test_rapid_static_signs_and_custom_effects_are_not_animation(duration, authored):
+    raw, effect = authored
+
+    def timestamp(cs):
+        return f"0:00:{cs // 100:02}.{cs % 100:02}"
+
+    content = "\n".join(
+        CORPUS[0]["ass"].splitlines()[:2]
+        + [
+            f"Dialogue: 0,{timestamp(100 + i * duration)},{timestamp(100 + (i + 1) * duration)},Default,,0,0,0,{effect},{raw}"
+            for i in range(3)
+        ]
+    )
+    assert parse_ass(content) == parse_ass(content, collapse=False)

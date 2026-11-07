@@ -255,7 +255,7 @@ def _alass_ready_source(src: Path, workdir: Path) -> Path:
         return src
     from saitenka_subtitles import parse_ass
 
-    cues = parse_ass(text.lstrip(_BOM))
+    cues = parse_ass(text.lstrip(_BOM), collapse=False)
     if not cues:  # unparseable → let alass try the original and surface its own error
         return src
     ready = workdir / "source.srt"
@@ -482,7 +482,11 @@ def _parse_cues(path: Path):
     from saitenka_subtitles import parse_ass, parse_srt
 
     text = path.read_text(encoding="utf-8", errors="replace")
-    return parse_ass(text) if path.suffix.lower() == ".ass" or _looks_ass(text) else parse_srt(text)
+    return (
+        parse_ass(text, collapse=False)
+        if path.suffix.lower() == ".ass" or _looks_ass(text)
+        else parse_srt(text)
+    )
 
 
 def _persist_windowed(sub: Path, tmp: Path) -> Path:

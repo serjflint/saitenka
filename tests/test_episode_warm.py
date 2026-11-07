@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 from session_builder import build_session
+from test_sub_index import CORPUS
 from util import FakeIPC
 
 from saitenka.app.session.factory import SessionInfrastructure, SessionServices
@@ -96,3 +97,13 @@ def test_launcher_is_a_noop_without_a_dictionary(monkeypatch, tmp_path):
     _load(reader, tmp_path / "episode.srt")
 
     assert calls == []
+
+
+@pytest.mark.parametrize("case", CORPUS, ids=lambda case: case["name"])
+def test_ass_corpus_warm_traverses_only_study_rows(monkeypatch, tmp_path, caplog, case):
+    reader, _calls = _reader(monkeypatch, dict_set=_ExistsDS())
+    with caplog.at_level("INFO", logger="saitenka.app.features.annotation.annotation_controller"):
+        _load(reader, tmp_path / "episode.ass", case["ass"])
+    count = case["expected_count"]
+    assert f"episode token warm: {count}/{count} cues" in caplog.text
+    reader.close()

@@ -9,11 +9,18 @@ rendered through libass, so a token's on-screen rectangle comes from the same la
 viewer actually saw, rather than from a second, guessing implementation of the same rules.
 
 ```python
-from saitenka_subtitles import CueIndex, parse_cues
+from pathlib import Path
+from saitenka_subtitles import CueIndex
 
-cues = parse_cues(Path("episode.ass").read_text(encoding="utf-8"))
-CueIndex(cues).at(93.5)
+index = CueIndex.from_content(Path("episode.ass").read_text(encoding="utf-8"), "episode.ass")
+index.active_at(93.5)
 ```
+
+`parse_cues` and `parse_ass` return logical study rows; use `CueIndex.from_content` to retain
+complete authored frames alongside those rows. `index.authored` retains original event timings
+for rendering and scheduling. `parse_ass(..., collapse=False)` retains authored source order
+for retiming. The conservative collapse contract is documented in
+[Saitenka’s native subtitle guide](https://saitenka.readthedocs.io/en/latest/usage/native-subtitles/#study-cue-collapse).
 
 ## What it does not do
 

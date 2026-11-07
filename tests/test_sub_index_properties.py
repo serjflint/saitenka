@@ -101,7 +101,7 @@ def test_ass_roundtrip(cues):
     body = "".join(
         f"Dialogue: 0,{_fmt_ass(s)},{_fmt_ass(e)},D,,0,0,0,,{txt}\n" for s, e, txt in cues
     )
-    parsed = parse_ass(_ASS_HEADER + body)
+    parsed = parse_ass(_ASS_HEADER + body, collapse=False)
     assert len(parsed) == len(cues)
     for got, (s, e, txt) in zip(parsed, cues, strict=True):
         assert abs(got.start - s) < 1e-6
