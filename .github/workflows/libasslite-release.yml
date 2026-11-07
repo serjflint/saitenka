@@ -58,7 +58,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-15, windows-latest]
         py: ["3.13", "3.14t", "3.15t"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -105,9 +105,9 @@ jobs:
           - {os: ubuntu-24.04-arm, py: "3.13", artifact: wheels-linux-aarch64-3.13}
           - {os: ubuntu-24.04-arm, py: "3.14t", artifact: wheels-linux-aarch64-3.14t}
           - {os: ubuntu-24.04-arm, py: "3.15t", artifact: wheels-linux-aarch64-3.15t}
-          - {os: macos-latest, py: "3.13", artifact: wheels-macos-latest-3.13}
-          - {os: macos-latest, py: "3.14t", artifact: wheels-macos-latest-3.14t}
-          - {os: macos-latest, py: "3.15t", artifact: wheels-macos-latest-3.15t}
+          - {os: macos-15, py: "3.13", artifact: wheels-macos-15-3.13}
+          - {os: macos-15, py: "3.14t", artifact: wheels-macos-15-3.14t}
+          - {os: macos-15, py: "3.15t", artifact: wheels-macos-15-3.15t}
           - {os: windows-latest, py: "3.13", artifact: wheels-windows-latest-3.13}
           - {os: windows-latest, py: "3.14t", artifact: wheels-windows-latest-3.14t}
           - {os: windows-latest, py: "3.15t", artifact: wheels-windows-latest-3.15t}

@@ -45,7 +45,7 @@ jobs:
 
   macos:
     name: wheel (macos ${{ matrix.py }}) # arm64 only; Intel dropped (retired runner pool, ▢ fallback)
-    runs-on: macos-latest
+    runs-on: macos-15
     continue-on-error: ${{ matrix.py == '3.15t' }}
     strategy:
       fail-fast: false
