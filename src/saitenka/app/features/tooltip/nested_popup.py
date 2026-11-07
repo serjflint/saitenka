@@ -245,7 +245,7 @@ def place_nested(ports: TipPorts, st, key, token, word: str, anchor: Anchor, tai
         anchor.wy,
         anchor.wh,
         ports.tip.nest.view_h,
-        scale=ports.scale.display,
+        scale=ports.scale.raster,
         osd=ports.osd,
     )
     # Kick a render-ahead so a first wheel notch on the nested popup composites crisp off warm

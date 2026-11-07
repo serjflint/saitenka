@@ -654,10 +654,10 @@ class TipScale:
     """
 
     #: REFERENCE→display factor: ``osd_h / REF_H`` (1.0 at 1080p, 2.0 at 4K), or a fixed ``tip_scale``
-    #: preference. Applied to the composited BGRA at upload and inverted in the hit-test.
+    #: preference. The requested scale; ``raster`` is the displayed scale.
     display: float
-    #: ``display`` snapped to ``SCALE_BUCKET`` — the scale the crisp path rasters, composites AND
-    #: inverts the hit-test at. All three must agree, so there is one bucketed value, not three.
+    #: ``display`` snapped to ``SCALE_BUCKET`` — the scale every popup uploads, places AND
+    #: inverts the hit-test at; the crisp path also rasters at this scale.
     raster: float
     #: Max BASE viewport height, in reference pixels.
     cap: int

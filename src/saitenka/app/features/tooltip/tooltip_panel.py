@@ -441,7 +441,7 @@ def place_panel(
 ) -> tuple[int, int]:
     """Choose a top-left (tx, ty) for a panel of REFERENCE size ``full_w`` × ``view_h`` anchored to an
     on-screen word box (wx, wy, wh): above it if there's room, else below, clamped to the safe area. The
-    panel is composited at reference size then upscaled by ``TipScale.display`` at upload, so placement
+    panel is composited at reference size then scaled by ``TipScale.raster`` at upload, so placement
     uses the DISPLAYED size. Shared by the base tooltip and nested popups."""
     s = scale
     disp_w, disp_h = full_w * s, view_h * s
@@ -523,7 +523,7 @@ def decorate_and_upload(
     cached_key: object = None,
 ):
     """Draw the scrollbar thumb and the copy-flash border onto a REFERENCE-sized viewport BGRA array,
-    then upscale by ``TipScale.display`` to the live display and upload. Decorations are drawn in
+    then scale by ``TipScale.raster`` to the live display and upload. Decorations are drawn in
     reference px (crisp thumb) before the scale; the returned rect is in DISPLAY px (what the hit-test
     compares the OSD cursor against). ``prescaled`` (the idle crisp re-render) means ``view`` is ALREADY
     at display resolution, so the upscale is skipped — but ``full_h``/``y0`` are still display px so the
@@ -538,7 +538,7 @@ def decorate_and_upload(
         b = 4  # "copied" highlight border (a brief visual pulse)
         view[:b, :] = view[-b:, :] = FLASH_BGRA
         view[:, :b] = view[:, -b:] = FLASH_BGRA
-    s = ports.scale.display
+    s = ports.scale.raster
     if not prescaled and abs(s - 1.0) > 1e-3:  # only hi-dpi pays the resize; 1080p is a 1:1 no-op
         from saitenka.bgra import scale_bgra
 
@@ -551,7 +551,7 @@ def decorate_and_upload(
 
 def _quality_submission(ports: TipPorts, oid: int, *, prescaled: bool, cached_key: object):
     popup = ports.tip.nest if oid == OverlayId.NESTED else ports.tip.view
-    s = ports.scale.display
+    s = ports.scale.raster
     kind = popup.job_kind
     job_id = popup.job_id
     partial = cached_key is None and popup.state is not None and popup.state.missed_last_assemble
@@ -633,7 +633,7 @@ def render_view(ports: TipPorts, view: PopupView) -> None:
     if st is None:
         return
     view.quality.prepare(
-        view.key if view.key is not None else st, (view.scroll, view.view_h, ports.scale.display)
+        view.key if view.key is not None else st, (view.scroll, view.view_h, ports.scale.raster)
     )
     with otel_metrics.traced(
         "tooltip_view",
