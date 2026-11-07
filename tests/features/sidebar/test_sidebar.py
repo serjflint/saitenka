@@ -711,3 +711,76 @@ def test_mined_authored_frame_highlights_its_study_row(
         (1.09, 3.55),
         (4.0, 6.0),
     ]
+
+
+@pytest.mark.parametrize("delay", [-0.5, 0.0, 0.5])
+@pytest.mark.parametrize("ordinary_start", [1.08, 1.09])
+def test_mining_a_burst_does_not_claim_a_nearby_or_ambiguous_capture(
+    make_session, tmp_path, monkeypatch, ordinary_start, delay
+):
+    from test_sub_index import CORPUS
+
+    from saitenka.app.bindings import BOOKMARK_MSG
+    from saitenka.app.features.mining import mined_store
+
+    monkeypatch.setattr(mined_store, "_DB_PATH_OVERRIDE", tmp_path / "mined.sqlite")
+    source = (
+        CORPUS[1]["ass"] + f"\nDialogue: 0,0:00:{ordinary_start:05.2f},0:00:03.55,Dial,,0,0,0,,普通"
+    )
+    path = tmp_path / "episode.ass"
+    path.write_text(source, encoding="utf-8")
+    video = str(tmp_path / "episode.mkv")
+    ipc = FakeIPC({"path": video, "sub-start": ordinary_start, "sub-end": 3.55, "sub-delay": delay})
+    reader = make_session(ipc)
+    reader.graph.subtitle_navigation.load_index(path)
+    index = reader.graph.track_commands.navigation.current.sub_index
+    assert index is not None
+    authored = index.authored
+    reader.graph.playback.observe("sub-text", authored.frame_text(authored.locate(text="普通")))
+    reader.command(BOOKMARK_MSG)
+    store = reader.graph.history.ensure_backlog()
+    entry = store.entries_for_path(video)[0]
+    reader.graph.mining.store.record(
+        note_id=1,
+        video_path=video,
+        cue_start=ordinary_start,
+        cue_end=3.55,
+        subtitle_delay=delay,
+        expression="普通",
+    )
+    ipc.props["sub-start"] = 1.09
+    reader.graph.playback.observe("sub-start", 1.09)
+    reader.graph.playback.observe(
+        "sub-text",
+        authored.frame_text(authored.locate(text="過ぎ去ってしまう瞬間を", sub_start=1.09)),
+    )
+    view = reader.graph.sidebar.view()
+    assert view.active == 0
+
+    sidebar.mine_active(view)
+
+    assert store.entry(entry.id).status == "open"
+    rows, _total = sidebar._track_rows(view, 0, 10)
+    assert [row.status for row in rows] == (
+        [None, "open"] if ordinary_start == 1.08 else [None, None]
+    )
+    assert [
+        row.active for row in sidebar._summary_rows(view) if row.click_kind == "backlog-seek"
+    ] == [False]
+    assert [row.active for row in sidebar._mine_rows(view)] == [False]
+    assert (entry.cue_start, entry.cue_end) == (ordinary_start, 3.55)
+    assert (entry.media_start, entry.media_end) == (ordinary_start + delay, 3.55 + delay)
+
+
+@pytest.mark.parametrize(
+    ("start", "expected"),
+    [(1.08, 1), (1.09, 0), (1.0, 0), (1.085, None), (1.01, 0)],
+)
+def test_capture_owner_prioritizes_exact_spans_and_refuses_ambiguous_rounding(start, expected):
+    from test_sub_index import CORPUS
+
+    content = CORPUS[1]["ass"] + "\nDialogue: 0,0:00:01.08,0:00:03.55,Dial,,0,0,0,,普通"
+    index = CueIndex.from_content(content, "episode.ass")
+    resolve = sidebar._CaptureResolver.from_index(index).resolve
+
+    assert resolve(start, 3.55) == expected
