@@ -39,6 +39,7 @@ def mine_config_from(config: dict) -> MineConfig:
         card_kind=str(config.get("card_kind", base.card_kind)),
         fields=fields,
         card_format=card_format,
+        merge_adapter=str(config.get("merge_adapter", "")),
         word_audio_pack=word_audio_pack,
         word_audio_field=str(config.get("word_audio_field", word_audio_defaults.word_audio_field)),
     )

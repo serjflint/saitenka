@@ -21,6 +21,7 @@ LANE = "mining-operation"
 class OperationKind(StrEnum):
     WORD = "word"
     BULK = "bulk"
+    MERGE = "merge"
 
 
 class OperationStage(StrEnum):
@@ -95,6 +96,8 @@ def _recording_apply(journal: MiningActionJournal) -> miner.MiningApply:
         record_mined=callback("record_mined"),
         record_link=callback("record_link"),
         commit_mined=callback("commit_mined"),
+        offer_merge=callback("offer_merge"),
+        merge_finished=callback("merge_finished"),
     )
 
 
@@ -126,15 +129,16 @@ def _run_operation(request: MiningOperationRequest, cancelled: threading.Event) 
         apply=_recording_apply(journal),
         cancelled=is_cancelled,
     )
+    if request.kind is OperationKind.MERGE:
+        from saitenka.app.features.mining.merge_encounter import MergeOffer, commit_merge
+
+        assert isinstance(request.card, MergeOffer)
+        if request.stage is OperationStage.PREFLIGHT:
+            return outcome(request.card)
+        commit_merge(transaction, request.card, request.base)
+        return outcome()
     if request.stage is OperationStage.PREFLIGHT:
-        plan: miner.BulkMinePlan | miner.TokenMinePlan | None
-        if request.kind is OperationKind.BULK:
-            plan = miner.preflight_bulk(transaction)
-        else:
-            assert request.token is not None
-            plan = miner.preflight_token(
-                transaction, request.token, force=request.force, card=request.card
-            )
+        plan = _preflight(transaction, request)
         return outcome(plan)
     assert request.plan is not None
     prepared = request.prepared or miner.prepare_capture(
@@ -149,6 +153,13 @@ def _run_operation(request: MiningOperationRequest, cancelled: threading.Event) 
         assert isinstance(request.plan, miner.TokenMinePlan)
         miner.commit_token(transaction, request.plan, prepared)
     return outcome()
+
+
+def _preflight(transaction: miner.MiningTransaction, request: MiningOperationRequest):
+    if request.kind is OperationKind.BULK:
+        return miner.preflight_bulk(transaction)
+    assert request.token is not None
+    return miner.preflight_token(transaction, request.token, force=request.force, card=request.card)
 
 
 def apply_outcome(outcome: MiningOutcome, apply: miner.MiningApply) -> None:

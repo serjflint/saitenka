@@ -247,6 +247,10 @@ class Anki:
     def add_note(self, note: dict) -> int:
         return self._call("addNote", note=note)
 
+    def update_note_fields(self, note_id: int, fields: dict[str, str]) -> None:
+        """Update retained fields once; a lost response must not replay stale content."""
+        self._call("updateNoteFields", note={"id": note_id, "fields": fields}, attempts=1)
+
     def delete_notes(self, ids: list[int]) -> None:
         self._call("deleteNotes", notes=ids)
 

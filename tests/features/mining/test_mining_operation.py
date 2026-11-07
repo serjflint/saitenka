@@ -26,6 +26,8 @@ def test_journal_preserves_callback_names_payloads_and_order(monkeypatch, revers
         mining_operation.MiningAction("record_mined", (2,)),
         mining_operation.MiningAction("record_link", (object(),)),
         mining_operation.MiningAction("commit_mined", (object(),)),
+        mining_operation.MiningAction("offer_merge", (object(),)),
+        mining_operation.MiningAction("merge_finished", ()),
     )
     journal = mining_operation.MiningActionJournal()
     callbacks = mining_operation._recording_apply(journal)

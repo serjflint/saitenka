@@ -56,6 +56,8 @@ class PreviewCommandEndpoint:
             keys=self.keys,
             add_duplicate=self.add_duplicate,
             play_audio=self.play_audio,
+            merge_duplicate=self.merge_duplicate,
+            cancel_merge=self.mining.cancel_merge,
         )
 
     def add_duplicate(self) -> None:
@@ -63,7 +65,31 @@ class PreviewCommandEndpoint:
 
         self.mining.force_duplicate(ForceDuplicate(miner_ui.duplicate_token(self.preview.panel)))
 
-    def card_source(self, *, at: float | None = None) -> miner_ui.CardSource:
+    def merge_duplicate(self) -> None:
+        from saitenka.app.features.preview.card_preview import PreviewData
+
+        content = self.preview.state.content
+        if not isinstance(content, PreviewData) or content.merge_offer is None:
+            return
+        if self.mining.merge_pending:
+            self.mining.cancel_merge_preparation()
+            content.merge_pending = False
+        else:
+            self.mining.merge_duplicate(content.merge_offer)
+            content.merge_pending = self.mining.merge_pending
+        self.render()
+
+    def merge_finished(self) -> None:
+        from saitenka.app.features.preview.card_preview import PreviewData
+
+        content = self.preview.state.content
+        if isinstance(content, PreviewData) and content.merge_pending:
+            content.merge_pending = False
+            self.render()
+
+    def card_source(
+        self, *, at: float | None = None, merge_offer: object | None = None
+    ) -> miner_ui.CardSource:
         from saitenka.app.features.mining import miner
 
         access = self.mining.preview_access()
@@ -85,6 +111,7 @@ class PreviewCommandEndpoint:
                 video,
             ),
             video_path=lambda: video,
+            merge_offer=merge_offer,
             current=lambda: (
                 self.playback.state.media == state.media
                 and self.playback.state.value("path") == video

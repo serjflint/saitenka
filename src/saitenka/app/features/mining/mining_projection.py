@@ -42,7 +42,11 @@ class MiningProjection:
             record_mined=self.record_mined,
             record_link=lambda *_args: None,
             commit_mined=lambda *_args: None,
+            merge_finished=self._merge_finished,
         )
+
+    def _merge_finished(self) -> None:
+        self.preview_endpoint().merge_finished()
 
     def _mark_mined(self, expression: str) -> None:
         self.tooltip.mark_mined(expression, self.tooltip_apply())
@@ -51,7 +55,7 @@ class MiningProjection:
         endpoint = self.preview_endpoint()
         self.preview.present_existing(
             endpoint.ports,
-            endpoint.card_source,
+            lambda: endpoint.card_source(merge_offer=endpoint.mining.merge_offer),
             self.notifications.show,
             note_id,
             card,

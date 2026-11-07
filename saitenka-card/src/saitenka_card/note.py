@@ -110,6 +110,7 @@ class MineConfig:
     # these fields are written), letting one field combine markers / one entity fan out. See
     # card_markers.render_card_format / MARKERS.
     card_format: dict = field(default_factory=dict)
+    merge_adapter: str = ""
     # non-empty flag fields that pick a card template; derived from card_kind unless set explicitly
     flags: dict = field(default_factory=dict)
     # Opt-in word-pronunciation audio from a local yomichan/yomitan audio pack (#93, offline/grounded) —

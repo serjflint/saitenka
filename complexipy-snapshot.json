@@ -1,15 +1,5 @@
 [
   {
-    "path": "src/saitenka/app/features/preview/card_preview.py",
-    "file_name": "card_preview.py",
-    "functions": [
-      {
-        "name": "render_card_preview",
-        "complexity": 16
-      }
-    ]
-  },
-  {
     "path": "src/saitenka/app/yomitan_db_import.py",
     "file_name": "yomitan_db_import.py",
     "functions": [

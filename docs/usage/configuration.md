@@ -198,6 +198,31 @@ touches cards mined before it existed; backfill an existing deck with
 the `[mine] deck`, resolves each empty `ID` with the same source config uses, and never overwrites a
 filled field). `tools/anki_normalize_fields.py` is an alternative that fills from a JMdict Yomitan zip.
 
+### Attach another scene to a Kiku note
+
+Set `model = "Kiku"` and `merge_adapter = "kiku"` in `[mine]`. With previews enabled,
+mining an existing word offers **merge scene into
+this note** alongside **add anyway**. Click merge to attach the admitted sentence, frame, selected
+audio and provenance to that note. Its note ID, cards and scheduling stay intact. Repeating the same
+note/media-path/authored-cue-span merge adds nothing; moving or renaming the media gives it a new identity.
+
+The adapter implements [Kiku field grouping](https://github.com/youyoumu/kiku/blob/main/apps/docs/mds/field-grouping.md).
+It requires the standard `Sentence`, `SentenceAudio`, `Picture` and `MiscInfo` mappings.
+For `[mine.card_format]`, those fields must contain exactly `{sentence}`, `{sentence-audio}`,
+`{screenshot}` and `{misc}` respectively. It preserves optional `SentenceFurigana` and
+`SentenceTranslation` groups; new scenes use unannotated sentence text and no translation.
+No new readings are generated. Existing groups must use the same order across scene fields, with one
+picture per scene; ambiguous markup
+keeps the ordinary preview/add-anyway behavior. Other adapters and undeclared formats have no merge action.
+
+Before updating, Saitenka rereads the retained note and refuses observed field changes or a missing
+note. AnkiConnect has no atomic compare-and-swap: an external edit between that read and the update
+can still race. Avoid editing that note elsewhere during a merge. The merge button becomes **Cancel
+preparation** while working; cancelling keeps the existing preview open. Closing/replacing the preview
+also cancels preparation. Once the field update starts, cancellation cannot undo it. A lost update response reports
+an unknown outcome: inspect Anki before retrying. Failed preparation leaves the retained note intact;
+already uploaded media is kept. Merges do not count as new cards or replace the original local replay link.
+
 ## Tooltip
 
 `[tooltip]` geometry and feel actually live as **top-level** keys (above the first `[table]` header).

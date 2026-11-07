@@ -73,6 +73,37 @@ def screenshot(ipc, path: str | Path, *, retain=None, expected_connection_epoch=
     return Path(path)
 
 
+def source_screenshot(video: str | Path, at: float, path: str | Path) -> Path:
+    """Extract an admitted frame without depending on later mpv playback."""
+    if not math.isfinite(at) or at < 0:
+        raise ValueError("invalid screenshot time")
+    from saitenka.mpvio.discover import find_tool
+
+    out = Path(path)
+    subprocess.run(
+        [
+            find_tool("ffmpeg") or "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-y",
+            "-ss",
+            str(at),
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            str(out),
+        ],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    if not out.is_file() or not out.stat().st_size:
+        raise OSError("ffmpeg produced no screenshot")
+    return out
+
+
 # EBU R128 target for opt-in loudness normalization: broadcast −23 LUFS, −1.5 dBTP ceiling, 11 LU
 # range. Single-pass (measure+correct in one ffmpeg run) — two-pass would double mining latency for a
 # few-second clip and buys little on speech.

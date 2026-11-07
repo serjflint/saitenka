@@ -185,3 +185,13 @@ def test_animated_screenshot_unknown_format_is_none(monkeypatch):
     )
     assert out is None
     assert calls == []
+
+
+@pytest.mark.parametrize("at", [-1.0, float("nan"), float("inf")])
+def test_admitted_frame_rejects_invalid_time_before_extraction(monkeypatch, tmp_path, at):
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("invalid frame time reached ffmpeg")
+
+    monkeypatch.setattr(media.subprocess, "run", unexpected)
+    with pytest.raises(ValueError, match="invalid screenshot time"):
+        media.source_screenshot("/video.mkv", at, tmp_path / "frame.jpg")

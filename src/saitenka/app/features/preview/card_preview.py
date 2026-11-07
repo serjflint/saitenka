@@ -53,6 +53,8 @@ class PreviewData:
     image: Image.Image | None = None
     audio_seconds: float | None = None
     footer: str = ""
+    merge_offer: object | None = None
+    merge_pending: bool = False
 
 
 @dataclass
@@ -63,6 +65,7 @@ class PreviewRender:
     close_rect: Rect | None = None  # ✕ dismiss
     audio_rect: Rect | None = None  # ▶ play the mined clip
     image_rect: Rect | None = None  # the screenshot thumbnail (click to enlarge / shrink)
+    merge_rect: Rect | None = None
     dup_rect: Rect | None = None  # ＋ add a second card for a different scene ('exists' only)
 
 
@@ -89,6 +92,7 @@ class PreviewPanel:
     audio_rect: Rect | None = None
     image_rect: Rect | None = None
     dup_rect: Rect | None = None
+    merge_rect: Rect | None = None
     #: Whether the preview's keys are currently bound in mpv, so a dismiss on a cue with no preview
     #: up does not send a `keybind` command per cue.
     keys_grabbed: bool = False
@@ -96,7 +100,7 @@ class PreviewPanel:
     def clear(self) -> None:
         """Dismiss: forget every clickable region in one move."""
         self.rect = self.close_rect = None
-        self.audio_rect = self.image_rect = self.dup_rect = None
+        self.audio_rect = self.image_rect = self.dup_rect = self.merge_rect = None
 
 
 def _bold_sentence(lines: list[str], surface: str, size: int, color: RGBA) -> list:
@@ -127,17 +131,22 @@ def _audio_chip(pv: PreviewData, size: int = 20) -> Image.Image:
     return render_chip(txt, ChipStyle(size=size, bg=bg)).image
 
 
-def _dup_button(
-    pv: PreviewData, theme: Theme, cw: int
-) -> tuple[Image.Image | None, tuple[int, int]]:
-    """The ＋ "add anyway" row — shown only for an in-deck ('exists') card, to mine a second card for a
-    different scene (line/episode/anime). Returns (row image | None, (width, height))."""
+def _preview_actions(pv: PreviewData, theme: Theme, cw: int, media_height: int):
     if pv.status != "exists":
-        return None, (0, 0)
-    chip = render_chip(DUP_LABEL, ChipStyle(size=theme.px(18), bg=DUP_CHIP)).image
-    row = Image.new("RGBA", (cw, chip.height), (0, 0, 0, 0))
-    row.alpha_composite(chip, (0, 0))
-    return row, (chip.width, chip.height)
+        return [], None, None
+    labels = [DUP_LABEL]
+    if pv.merge_offer is not None:
+        labels.append("Cancel preparation" if pv.merge_pending else "＋ merge scene into this note")
+    rows, rects = [], []
+    y = media_height + theme.px(8)
+    for label in labels:
+        chip = render_chip(label, ChipStyle(size=theme.px(18), bg=DUP_CHIP)).image
+        row = Image.new("RGBA", (cw, chip.height), (0, 0, 0, 0))
+        row.alpha_composite(chip)
+        rows.append(row)
+        rects.append((0, y, *chip.size))
+        y += chip.height + theme.px(8)
+    return rows, rects[0], rects[1] if len(rects) > 1 else None
 
 
 def _media_row(
@@ -228,10 +237,8 @@ def render_card_preview(
     media_idx = len(rows)
     rows.append(media)
 
-    # The ＋ "add anyway" row sits directly under the media row when the card is already in the deck.
-    dup_row, dup_size = _dup_button(pv, theme, cw)
-    if dup_row is not None:
-        rows.append(dup_row)
+    action_rows, dup_local, merge_local = _preview_actions(pv, theme, cw, media.height)
+    rows.extend(action_rows)
 
     if pv.footer:
         rows.append(flow_row([Span(pv.footer, Style(size=theme.px(15), color=theme.muted))]))
@@ -251,7 +258,11 @@ def render_card_preview(
     def _abs(local: Rect | None) -> Rect | None:
         return (m + local[0], media_y + local[1], local[2], local[3]) if local else None
 
-    dup_abs = (m, media_y + media.height + gap, *dup_size) if dup_row is not None else None
     return PreviewRender(
-        canvas, close_rect, _abs(audio_rect_local), _abs(image_rect_local), dup_abs
+        canvas,
+        close_rect,
+        _abs(audio_rect_local),
+        _abs(image_rect_local),
+        _abs(merge_local),
+        _abs(dup_local),
     )
