@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794083955493,
+  "lastUpdate": 1794086395786,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -18767,6 +18767,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.274129,
             "range": "3 replicas; min 1.10354; max 1.58235; MAD 0.170586; worst 1.58235",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6e569a56c1632fadbef4a3414a272611e070767f",
+          "message": "Merge pull request #561 from serjflint/issue-558\n\nfix(subtitles): freeze capture and replay media timing",
+          "timestamp": "2026-11-08T00:08:58+03:00",
+          "tree_id": "2d6f94674213b9c7e520fea61357197c9ce0a65f",
+          "url": "https://github.com/serjflint/saitenka/commit/6e569a56c1632fadbef4a3414a272611e070767f"
+        },
+        "date": 1794086394252,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.061324,
+            "range": "3 replicas; min 5.15118; max 6.73819; MAD 0.676863",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.262326,
+            "range": "3 replicas; min 7.43081; max 9.87364; MAD 0.831512; worst 9.87364",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.498822,
+            "range": "3 replicas; min 14.8529; max 22.0894; MAD 3.59058",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 18.617364,
+            "range": "3 replicas; min 15.0026; max 23.0381; MAD 3.61474; worst 23.0381",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.833858,
+            "range": "3 replicas; min 11.9933; max 17.6525; MAD 2.81869",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.08907,
+            "range": "3 replicas; min 0.067631; max 0.124622; MAD 0.021439; worst 0.124622",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.84586,
+            "range": "3 replicas; min 31.0589; max 44.6572; MAD 0.811297; worst 44.6572",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.147092,
+            "range": "3 replicas; min 2.68817; max 5.22024; MAD 0.45892; worst 5.22024",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.407407,
+            "range": "3 replicas; min 1.05096; max 1.75344; MAD 0.346036; worst 1.75344",
             "unit": "ms"
           }
         ]
