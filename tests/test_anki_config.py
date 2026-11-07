@@ -56,3 +56,36 @@ def test_anki_client_reads_config_and_injects_key(monkeypatch, tmp_path):
     assert client.model_field_names("Mining") == ["Expression"]
     assert sent["url"] == "http://127.0.0.1:9001"
     assert sent["body"]["key"] == "K"  # apiKey injected into the request body
+
+
+def test_explicit_kiku_merge_configuration_reaches_mining_contract():
+    from saitenka_card.merge import supports_kiku
+
+    from saitenka.app.mining_config import mine_config_from
+
+    assert supports_kiku(mine_config_from({"preset": "Kiku", "merge_adapter": "kiku"}))
+
+
+def test_app_field_update_does_not_retry_after_response_loss(monkeypatch):
+    from saitenka.app.anki import Anki, AnkiError
+
+    class LostResponse:
+        def __init__(self):
+            self.payloads = []
+
+        def send(self, payload, *, timeout):
+            assert timeout > 0
+            self.payloads.append(payload)
+            raise OSError("response lost")
+
+    anki, transport = Anki(), LostResponse()
+    monkeypatch.setattr(anki._client, "transport", transport)
+    with pytest.raises(AnkiError, match="response lost"):
+        anki.update_note_fields(42, {"Sentence": "new scene"})
+    assert transport.payloads == [
+        {
+            "action": "updateNoteFields",
+            "version": 6,
+            "params": {"note": {"id": 42, "fields": {"Sentence": "new scene"}}},
+        }
+    ]

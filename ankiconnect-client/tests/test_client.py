@@ -89,3 +89,18 @@ def test_urllib_transport_observes_http_and_json_parse_separately(monkeypatch):
 
     assert result == 6
     assert phases == [("attempt", "version"), ("http_call", "version"), ("json_parse", "version")]
+
+
+@pytest.mark.parametrize("response", [OSError("response lost"), {"error": None}])
+def test_update_retained_fields_is_one_non_retrying_request(response):
+    transport = FakeTransport(response, {"result": None, "error": None})
+    client = AnkiConnectClient(transport=transport)
+    with pytest.raises((AnkiConnectUnavailable, AnkiConnectProtocolError)):
+        client.update_note_fields(42, {"Sentence": "new scene"})
+    assert transport.payloads == [
+        {
+            "action": "updateNoteFields",
+            "version": 6,
+            "params": {"note": {"id": 42, "fields": {"Sentence": "new scene"}}},
+        }
+    ]

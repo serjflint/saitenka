@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Kiku duplicate previews can attach another admitted scene to the existing note with an explicit
+  merge adapter, preserving its cards and scheduling and refusing observed field conflicts.
+
 - Reading profiles can preprocess study text for lookup, scoring, analysis, copying and mining while
   retaining the authored subtitle on screen. Speaker, accessibility and music presets are opt-in;
   custom patterns use a validated, bounded regex dialect.

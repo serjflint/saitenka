@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from saitenka.app.anki import AnkiError
 from saitenka.app.capabilities import CapabilityProbe
 from saitenka.app.features.mining import mined_seed, miner, mining_operation, preview_access
+from saitenka.app.features.mining.merge_offer import MergeOffer
 from saitenka.app.features.mining.mined_set import MinedSet
 from saitenka.app.features.mining.scratch import ScratchArtifacts
 from saitenka.runtime import EffectFinished, EffectOutcome, Owner
@@ -218,6 +219,9 @@ class MiningController:
         self._operation_journal: mining_operation.MiningActionJournal | None = None
         self._operation_apply: miner.MiningApply | None = None
         self._closed = False
+        self._merge_offer: MergeOffer | None = None
+        self._merge_target: MiningTarget | None = None
+        self._merge_cancelled: threading.Event | None = None
         self._mined_index = MiningIndexState(spec.target_key, 0, SeedStatus.EMPTY, MinedSet())
 
     @classmethod
@@ -502,6 +506,33 @@ class MiningController:
                 context, mining_operation.OperationKind.WORD, token=request.token, force=True
             )
 
+    @property
+    def merge_offer(self) -> MergeOffer | None:
+        return self._merge_offer if self.active_target is self._merge_target else None
+
+    def cancel_merge(self, offer: object | None = None) -> None:
+        if offer is not None and offer is not self._merge_offer:
+            return
+        self._merge_offer = None
+        self._merge_target = None
+        if self._merge_cancelled is not None:
+            self._merge_cancelled.set()
+
+    @property
+    def merge_pending(self) -> bool:
+        return self.operation_pending and self._merge_cancelled is not None
+
+    def cancel_merge_preparation(self) -> None:
+        if self._merge_cancelled is not None:
+            self._merge_cancelled.set()
+
+    def merge_duplicate(self, offer: object) -> None:
+        if not isinstance(offer, MergeOffer) or offer is not self.merge_offer:
+            return
+        context = self._operation(offer.encounter)
+        if context is not None:
+            self._dispatch_operation(context, mining_operation.OperationKind.MERGE, card=offer)
+
     def bulk_mine(self, encounter: miner.MiningEncounter | None = None) -> None:
         context = self._operation(encounter)
         if context is not None:
@@ -525,8 +556,11 @@ class MiningController:
         if self.operation_pending:
             external.toast("mining already in progress", "warn")
             return
-        base = f"saitenka_{int(time.time() * 1000)}"
+        if kind is not mining_operation.OperationKind.MERGE:
+            self.cancel_merge()
+        base = f"saitenka_{time.time_ns()}"
         cancelled = threading.Event()
+        self._merge_cancelled = cancelled if kind is mining_operation.OperationKind.MERGE else None
         request = mining_operation.MiningOperationRequest(
             context,
             kind,
@@ -555,7 +589,11 @@ class MiningController:
         mining_operation.apply_outcome(outcome, external)
         if outcome.plan is None:
             return
-        prepared = miner.prepare_capture(request.transaction, base, animated=animated)
+        prepared = (
+            None
+            if request.kind is mining_operation.OperationKind.MERGE
+            else miner.prepare_capture(request.transaction, base, animated=animated)
+        )
         commit = mining_operation.MiningOperationRequest(
             request.transaction,
             request.kind,
@@ -563,10 +601,15 @@ class MiningController:
             request.cancelled,
             plan=outcome.plan,
             prepared=prepared,
+            card=request.card,
+            base=base,
         )
         committed = mining_operation.run_operation(commit, threading.Event())
         assert isinstance(committed, mining_operation.MiningOutcome)
         mining_operation.apply_outcome(committed, external)
+        if request.kind is mining_operation.OperationKind.MERGE:
+            self._merge_cancelled = None
+            external.merge_finished()
 
     def _start_operation_async(
         self,
@@ -661,6 +704,7 @@ class MiningController:
             mining_operation.OperationStage.COMMIT,
             request.cancelled,
             plan=outcome.plan,
+            card=request.card,
             journal=request.journal,
             base=base,
             animated=animated,
@@ -686,6 +730,9 @@ class MiningController:
 
     def _finish_operation(self, identity: int) -> None:
         if self._operation_inflight == identity:
+            if self._merge_cancelled is not None and self._operation_apply is not None:
+                self._operation_apply.merge_finished()
+            self._merge_cancelled = None
             self._operation_inflight = None
             self._operation_cancelled = None
             self._operation_journal = None
@@ -777,10 +824,16 @@ class MiningController:
                 record_mined=external.record_mined,
                 mark=mark,
             ),
+            current_call(lambda offer: self._remember_merge_offer(target, offer)),
+            current_call(external.merge_finished),
         )
         return miner.MiningTransaction(
             target.anki, target.config, self._scratch_dir, encounter, apply
         )
+
+    def _remember_merge_offer(self, target: MiningTarget, offer: MergeOffer | None) -> None:
+        self._merge_offer = offer
+        self._merge_target = target if offer is not None else None
 
     def preview_access(self) -> MiningPreviewAccess:
         target = self.active_target
@@ -822,6 +875,7 @@ class MiningController:
         self.cancel_operation()
 
     def cancel_operation(self) -> None:
+        self.cancel_merge()
         self._operation_generation += 1
         if self._operation_cancelled is not None:
             self._operation_cancelled.set()

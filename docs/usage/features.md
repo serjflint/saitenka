@@ -124,7 +124,8 @@ without leaving the video. Mining needs **Anki open** with the **AnkiConnect** a
 - **Post-mine preview:** a fixed-layout panel shows the card (status, headword + reading, the
   sentence, meaning, the *actual captured frame*, and `▶ Ns` audio that auto-plays) so you
   can verify it without alt-tabbing. Mining an existing word previews the card already in
-  Anki. ++p++ replays the last preview.
+  Anki. ++p++ replays the last preview. Explicitly configured Kiku notes also offer
+  [merge scene](configuration.md#attach-another-scene-to-a-kiku-note), preserving their cards and scheduling.
 
 Sentence audio uses the embedded audio track selected when mining starts, including when you
 switch tracks while extraction is pending. Card previews play that captured clip. Disabled or

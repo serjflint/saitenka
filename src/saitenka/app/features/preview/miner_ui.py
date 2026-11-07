@@ -56,6 +56,8 @@ class PreviewPorts:
     keys: KeyOptions
     add_duplicate: Callable[[], None]
     play_audio: bool
+    merge_duplicate: Callable[[], None] = lambda: None
+    cancel_merge: Callable[..., None] = lambda *_args: None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +78,7 @@ class CardSource:
     provenance: Callable[[object], str]
     video_path: Callable[[], object]
     current: Callable[[], bool] = lambda: True
+    merge_offer: object | None = None
     study_lines: tuple[str, ...] | None = None
 
 
@@ -159,6 +162,9 @@ def prepare_existing(source: CardSource, note_id: int, card, status: str) -> Pre
         img,
         secs,
         footer(source.deck, source.model, source.provenance(source.video_path())),
+        merge_offer=source.merge_offer
+        if getattr(source.merge_offer, "note_id", None) == note_id
+        else None,
     )
     return PreparedPreview(pv, mp3)
 
@@ -203,6 +209,9 @@ def _stop_preview_audio(preview: PreviewPanel) -> None:
 
 
 def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
+    previous = getattr(ports.preview.state.content, "merge_offer", None)
+    if previous is not None and previous is not pv.merge_offer:
+        ports.cancel_merge(previous)
     # A fresh preview starts un-zoomed; audio no longer autoplays — click the ▶ button to hear it.
     # replay (P) / a new mine silences any clip still playing
     _stop_preview_audio(ports.preview.panel)
@@ -237,10 +246,12 @@ def render_preview(
     panel.audio_rect = _screen(pr.audio_rect)
     panel.image_rect = _screen(pr.image_rect)
     panel.dup_rect = _screen(pr.dup_rect)
+    panel.merge_rect = _screen(pr.merge_rect)
 
 
 def hide_preview(ports: PreviewPorts) -> None:
     # every dismiss path (✕ / Esc / new-cue) funnels here
+    ports.cancel_merge()
     ports.preview.cancel()
     _stop_preview_audio(ports.preview.panel)
     ports.surfaces.remove(OverlayId.PREVIEW)
@@ -268,6 +279,8 @@ def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:
         return False
     if panel.close_rect and in_rect(panel.close_rect, x, y):
         hide_preview(ports)
+    elif panel.merge_rect and in_rect(panel.merge_rect, x, y):
+        ports.merge_duplicate()
     elif panel.dup_rect and in_rect(panel.dup_rect, x, y):
         ports.add_duplicate()  # ＋ add anyway → mine a second card for this scene
     elif panel.image_rect and in_rect(panel.image_rect, x, y):

@@ -1473,3 +1473,338 @@ def test_unavailable_audio_never_substitutes_another_track(
 
     assert (picture, audio, commands) == ("", "", [])
     assert toasts == [(f"{reason} — image only", "warn")] if required else toasts == []
+
+
+class _RetainedAnki(_FakeAnki):
+    def __init__(self):
+        super().__init__(existing=[42])
+        self.fields = {
+            "Expression": "読む",
+            "ExpressionReading": "よむ",
+            "Sentence": "以前の文",
+            "SentenceFurigana": "以前[いぜん]の文[ぶん]",
+            "SentenceTranslation": "old translation",
+            "SentenceAudio": "[sound:old.mp3]",
+            "Picture": '<img src="old.jpg">',
+            "MiscInfo": "old source",
+            "Glossary": "old definition",
+            "ID": "retained-dictionary-id",
+        }
+        self.cards = [
+            {
+                "cardId": 77,
+                "queue": 2,
+                "due": 100,
+                "ivl": 90,
+                "reps": 12,
+                "lapses": 1,
+                "data": '{"s":92,"d":4}',
+            }
+        ]
+        self.updates = []
+        self.messages = []
+        self.missing = False
+        self.before_read = lambda: None
+        self.after_update = lambda: None
+
+    def notes_info(self, ids):
+        self.before_read()
+        return (
+            []
+            if self.missing or 42 not in ids
+            else [
+                {
+                    "noteId": 42,
+                    "modelName": "Kiku",
+                    "fields": {name: {"value": value} for name, value in self.fields.items()},
+                    "cards": [77],
+                }
+            ]
+        )
+
+    def retrieve_media(self, _name):
+        return None
+
+    def update_note_fields(self, note_id, fields):
+        self.updates.append((note_id, fields.copy()))
+        self.fields.update(fields)
+        self.after_update()
+
+
+def _merge_session(make_session, monkeypatch, *, adapter="kiku"):
+    from pathlib import Path
+
+    from saitenka_card import CardData
+    from util import FakeIPC, await_ready
+
+    ipc, anki = FakeIPC(), _RetainedAnki()
+    ipc.props.update(
+        {
+            "path": "/Show - 01.mkv",
+            "time-pos": 11.0,
+            "sub-start": 10.0,
+            "sub-end": 12.0,
+            "sub-delay": 2.0,
+            "aid": 42,
+            "track-list": [{"id": 42, "type": "audio", "ff-index": 3}],
+        }
+    )
+    reader = make_session(
+        ipc,
+        services=SessionServices(anki=anki, mining=MineConfig(model="Kiku", merge_adapter=adapter)),
+    )
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, *_args: anki.messages.append(text)
+    )
+    reader.graph.playback.install_seed(dict(ipc.props))
+    reader.graph.playback.observe("sub-text", "本を読む")
+    reader.pump()
+    commands = []
+
+    def run(cmd, **_kwargs):
+        commands.append(cmd)
+        Path(cmd[-1]).write_bytes(b"scene media")
+
+    monkeypatch.setattr("saitenka.app.media.subprocess.run", run)
+    token = next(
+        t for t in reader.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む"
+    )
+    reader.graph.mining.mine_token(token, card=CardData("読む", "よむ", "definition"))
+    _await_mining(reader)
+    await_ready(
+        lambda: reader.graph.preview.state.open, "duplicate preview missing", pump=reader.pump
+    )
+    return reader, ipc, anki, commands
+
+
+def _click_merge(reader):
+    rect = reader.graph.preview.panel.merge_rect
+    assert rect is not None
+    assert reader.graph.preview_commands.click(rect[0] + rect[2] / 2, rect[1] + rect[3] / 2)
+    _await_mining(reader)
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_manual_merge_uses_admitted_scene_and_preserves_retained_cards(monkeypatch, make_session):
+    import copy
+
+    from saitenka_card.merge import scene_ids
+
+    reader, ipc, anki, commands = _merge_session(make_session, monkeypatch)
+    before_cards = copy.deepcopy(anki.cards)
+    original_link = reader.graph.mining.store.record(
+        note_id=42,
+        video_path="/Original - 01.mkv",
+        cue_start=1.0,
+        cue_end=2.0,
+        expression="読む",
+        reading="よむ",
+        deck="Saitenka::Mining",
+    )
+    before_preview = reader.graph.preview.state.content
+    assert commands == []
+    assert reader.graph.preview.panel.dup_rect is not None
+    ipc.set_prop("time-pos", 80.0)
+    ipc.set_prop("sub-delay", -5.0)
+    ipc.set_prop("aid", 99)
+    ipc.set_prop("track-list", [{"id": 99, "type": "audio", "ff-index": 9}])
+    reader.pump()
+    _click_merge(reader)
+    assert anki.added == []
+    assert [note_id for note_id, _fields in anki.updates] == [42]
+    assert anki.cards == before_cards
+    assert anki.fields["ID"] == "retained-dictionary-id"
+    assert anki.fields["Glossary"] == "old definition"
+    assert len(scene_ids(anki.fields)) == 2
+    assert "本を<b>読む</b>" in anki.fields["Sentence"]
+    assert "以前[いぜん]の文[ぶん]" in anki.fields["SentenceFurigana"]
+    assert "本を<b>読む</b>" in anki.fields["SentenceFurigana"]
+    assert anki.fields["SentenceTranslation"].endswith("></span>")
+    assert commands[0][commands[0].index("-ss") + 1] == "11.0"
+    assert commands[1][commands[1].index("-map") + 1] == "0:3"
+    assert commands[1][commands[1].index("-ss") + 1] == "11.500"
+    assert reader.graph.preview.state.content is before_preview
+    assert reader.graph.mining.store.for_path("/Show - 01.mkv") == []
+    assert reader.graph.mining.store.by_note_id(42) == original_link
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_repeating_same_merge_does_not_append_or_store_media_twice(monkeypatch, make_session):
+    reader, _ipc, anki, commands = _merge_session(make_session, monkeypatch)
+    _click_merge(reader)
+    once = anki.fields.copy()
+    _click_merge(reader)
+    assert anki.fields == once
+    assert len(anki.updates) == 1
+    assert len(commands) == 2
+    assert len(anki.stored) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize(
+    "failure", ["missing", "deleted-during-media", "conflict", "media", "collision"]
+)
+def test_merge_refuses_precommit_failure_without_overwriting_retained_note(
+    monkeypatch, make_session, failure
+):
+    from saitenka.app.features.mining import merge_encounter
+
+    reader, _ipc, anki, _commands = _merge_session(make_session, monkeypatch)
+    if failure == "missing":
+        anki.missing = True
+    elif failure == "deleted-during-media":
+
+        def deleted_at_write(*_args, **_kwargs):
+            anki.missing = True
+            return "audio.m4a", None
+
+        monkeypatch.setattr(merge_encounter.miner, "_capture_audio", deleted_at_write)
+    elif failure == "conflict":
+
+        def changed_at_write():
+            anki.fields["Sentence"] = "externally edited"
+
+        monkeypatch.setattr(
+            merge_encounter.miner,
+            "_capture_audio",
+            lambda *_a, **_k: (changed_at_write() or "audio.m4a", None),
+        )
+    elif failure == "media":
+        monkeypatch.setattr(
+            merge_encounter.miner, "_capture_audio", lambda *_a, **_k: ("", OSError("no audio"))
+        )
+    else:
+        from saitenka_card.merge import merge_scene
+
+        offer = reader.graph.mining.merge_offer
+        anki.fields.update(
+            merge_scene(
+                anki.fields,
+                {
+                    "Sentence": "other",
+                    "SentenceAudio": "[sound:x]",
+                    "Picture": '<img src="x">',
+                    "MiscInfo": "other",
+                },
+                42,
+                offer.group_id,
+            )
+        )
+    before = anki.fields.copy()
+    preview = reader.graph.preview.state.content
+    _click_merge(reader)
+    assert anki.updates == []
+    assert anki.fields == (
+        {**before, "Sentence": "externally edited"} if failure == "conflict" else before
+    )
+    assert reader.graph.preview.state.content is preview
+    assert "merge failed" in anki.messages[-1]
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_unsupported_adapter_keeps_preview_and_add_anyway_without_merge(monkeypatch, make_session):
+    reader, _ipc, anki, commands = _merge_session(make_session, monkeypatch, adapter="")
+    assert reader.graph.preview.panel.merge_rect is None
+    assert reader.graph.preview.panel.dup_rect is not None
+    assert anki.updates == []
+    assert commands == []
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize("at_commit", [False, True])
+def test_merge_cancellation_respects_field_update_commit_point(
+    monkeypatch, make_session, at_commit
+):
+    from saitenka.app.features.mining import merge_encounter
+
+    reader, _ipc, anki, _commands = _merge_session(make_session, monkeypatch)
+    before = anki.fields.copy()
+    preview = reader.graph.preview.state.content
+    from util import await_ready
+
+    entered, release = threading.Event(), threading.Event()
+
+    def hold():
+        entered.set()
+        assert release.wait(5), "release merge worker"
+
+    if at_commit:
+        anki.after_update = hold
+    else:
+        original = merge_encounter.miner._capture_audio
+
+        def hold_after_audio(*args, **kwargs):
+            result = original(*args, **kwargs)
+            hold()
+            return result
+
+        monkeypatch.setattr(merge_encounter.miner, "_capture_audio", hold_after_audio)
+    try:
+        reader.graph.preview_commands.merge_duplicate()
+        await_ready(entered.is_set, "merge did not reach cancellation point", pump=reader.pump)
+        assert reader.graph.preview.state.content.merge_pending
+        rect = reader.graph.preview.panel.merge_rect
+        assert reader.graph.preview_commands.click(rect[0] + rect[2] / 2, rect[1] + rect[3] / 2)
+        assert not reader.graph.preview.state.content.merge_pending
+        release.set()
+        _await_mining(reader)
+    finally:
+        release.set()
+    assert bool(anki.updates) is at_commit
+    assert (anki.fields == before) is not at_commit
+    assert reader.graph.preview.state.content is preview
+    assert ("scene attached" in anki.messages[-1]) is at_commit
+    assert not reader.graph.preview.state.content.merge_pending
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_dismissed_preview_cannot_reuse_its_merge_offer(monkeypatch, make_session):
+    reader, _ipc, anki, commands = _merge_session(make_session, monkeypatch)
+    offer = reader.graph.mining.merge_offer
+    reader.graph.preview_commands.hide()
+    reader.graph.mining.merge_duplicate(offer)
+    _await_mining(reader)
+    assert anki.updates == []
+    assert commands == []
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_unknown_merge_commit_is_visible_and_never_rolled_back(monkeypatch, make_session):
+    reader, _ipc, anki, _commands = _merge_session(make_session, monkeypatch)
+
+    def lost_response():
+        raise OSError("response lost after update")
+
+    anki.after_update = lost_response
+    _click_merge(reader)
+    assert len(anki.updates) == 1
+    assert "本を<b>読む</b>" in anki.fields["Sentence"]
+    assert "merge outcome unknown" in anki.messages[-1]
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+def test_replacing_duplicate_preview_does_not_reuse_its_merge_offer(monkeypatch, make_session):
+    from saitenka_card import CardData
+
+    reader, _ipc, anki, commands = _merge_session(make_session, monkeypatch)
+    offer = reader.graph.mining.merge_offer
+    prepared = miner_ui.prepare_existing(
+        reader.graph.preview_commands.card_source(),
+        42,
+        CardData("読む", "よむ", "definition"),
+        "exists",
+    )
+    miner_ui.show_preview(reader.graph.preview_commands.ports(), prepared.data, prepared.audio)
+    reader.graph.mining.merge_duplicate(offer)
+    _await_mining(reader)
+    assert reader.graph.preview.panel.merge_rect is None
+    assert anki.updates == []
+    assert commands == []

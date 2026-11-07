@@ -98,6 +98,8 @@ class MiningApply:
     record_mined: Callable[[int], None]
     record_link: Callable[..., None]
     commit_mined: Callable[..., None]
+    offer_merge: Callable[..., None] = lambda *_args: None
+    merge_finished: Callable[[], None] = lambda: None
 
 
 @dataclass(frozen=True, slots=True)
@@ -536,6 +538,10 @@ def preflight_token(
         if existing and not force:
             p.apply.mark_mined(card.expression)
             p.apply.mined_here()
+            from saitenka.app.features.mining.merge_offer import offer_merge
+
+            offer = offer_merge(p, existing[0], tok)
+            p.apply.offer_merge(offer)
             p.apply.remember_duplicate(tok)
             p.apply.preview_existing(existing[0], card, "exists")
             return None
