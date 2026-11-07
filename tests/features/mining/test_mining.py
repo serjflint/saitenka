@@ -424,7 +424,15 @@ def _capture_reader(*, animated_enabled: bool):
     from util import FakeIPC
 
     ipc = FakeIPC()
-    ipc.props.update({"sub-start": 10.0, "sub-end": 12.0})
+    ipc.props.update(
+        {
+            "path": "/v.mkv",
+            "sub-start": 10.0,
+            "sub-end": 12.0,
+            "aid": 1,
+            "track-list": [{"id": 1, "type": "audio", "ff-index": 1}],
+        }
+    )
     return build_session(
         ipc,
         services=SessionServices(
@@ -1244,7 +1252,16 @@ def test_media_capture_freezes_delay_before_later_playback_changes(
     from util import FakeIPC
 
     ipc = FakeIPC()
-    ipc.props.update({"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, "sub-delay": delay})
+    ipc.props.update(
+        {
+            "path": "/video.mkv",
+            "sub-start": 10.0,
+            "sub-end": 12.0,
+            "sub-delay": delay,
+            "aid": 1,
+            "track-list": [{"id": 1, "type": "audio", "ff-index": 1}],
+        }
+    )
     reader = make_session(ipc, services=SessionServices(anki=_FakeAnki(), mining=MineConfig()))
     operation = _ports(reader)
     captured = []
@@ -1329,3 +1346,130 @@ def test_mining_rejects_unsupported_or_invalid_cue_timing(
     assert anki.added == []
     assert not reader.graph.mining.operation_pending
     assert messages and messages[-1].startswith("mine failed:")
+
+
+@pytest.mark.integration
+@pytest.mark.timeout(5)
+@pytest.mark.parametrize(("aid", "stream"), [(1, 1), (42, 5)])
+def test_deferred_mining_keeps_selected_audio_stream(monkeypatch, make_session, aid, stream):
+    from pathlib import Path
+
+    from util import FakeIPC, await_ready
+
+    class HeldDedupe(_FakeAnki):
+        def __init__(self):
+            super().__init__()
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def find_notes(self, query):
+            if '"Word:' in query:
+                self.entered.set()
+                assert self.release.wait(5), "release deferred mining"
+            return super().find_notes(query)
+
+    ipc, anki = FakeIPC(), HeldDedupe()
+    tracks = [{"id": aid, "type": "audio", "ff-index": stream, "selected": True}]
+    if aid == 42:
+        tracks.insert(0, {"id": 7, "type": "audio", "ff-index": 1, "selected": False})
+    ipc.props.update(
+        {"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, "aid": aid, "track-list": tracks}
+    )
+    reader = make_session(
+        ipc,
+        services=SessionServices(
+            anki=anki,
+            mining=MineConfig(card_format={"Word": "{expression}", "Audio": "{sentence-audio}"}),
+        ),
+    )
+    reader.graph.playback.install_seed(dict(ipc.props))
+    reader.graph.playback.observe("sub-text", "本を読む")
+    reader.pump()
+    commands = []
+
+    def run(cmd, **_kwargs):
+        commands.append(cmd)
+        Path(cmd[-1]).write_bytes(b"selected audio")
+
+    monkeypatch.setattr("saitenka.app.media.subprocess.run", run)
+    monkeypatch.setattr(PreviewController, "present_mined", _discard_preview)
+    token = next(
+        t for t in reader.graph.subtitle_presentation.cue.current.tokens if t.surface == "読む"
+    )
+    try:
+        reader.graph.mining.mine_token(token)
+        await_ready(anki.entered.is_set, "preflight did not start", pump=reader.pump)
+        assert commands == []
+        ipc.set_prop("aid", 99)
+        ipc.set_prop("track-list", [{"id": 99, "type": "audio", "ff-index": 8}])
+        tracks[-1]["ff-index"] = 9
+        reader.pump()
+        anki.release.set()
+        _await_mining(reader)
+        assert [(cmd[cmd.index("-i") + 1], cmd[cmd.index("-map") + 1]) for cmd in commands] == [
+            ("/video.mkv", f"0:{stream}")
+        ]
+        assert anki.added[0]["fields"]["Audio"].startswith("[sound:")
+    finally:
+        anki.release.set()
+
+
+@pytest.mark.parametrize("required", [True, False])
+@pytest.mark.parametrize(
+    ("aid", "tracks", "reason"),
+    [
+        (False, [], "audio is disabled"),
+        ("no", [], "audio is disabled"),
+        (None, [], "audio selection unavailable"),
+        (2, [{"id": 1, "type": "audio", "ff-index": 1}], "selected audio track is missing"),
+        (2, [{"id": 2, "type": "audio"}], "selected audio stream is unidentified"),
+        (2, [{"id": 2, "type": "audio", "ff-index": -1}], "selected audio stream is unidentified"),
+        (
+            2,
+            [{"id": 2, "type": "audio", "ff-index": True}],
+            "selected audio stream is unidentified",
+        ),
+        (
+            2,
+            [
+                {
+                    "id": 2,
+                    "type": "audio",
+                    "external": True,
+                    "external-filename": "/ja.mka",
+                    "ff-index": 0,
+                }
+            ],
+            "external audio capture is unsupported",
+        ),
+    ],
+)
+def test_unavailable_audio_never_substitutes_another_track(
+    monkeypatch, make_session, aid, tracks, reason, required
+):
+    from util import FakeIPC
+
+    ipc = FakeIPC()
+    ipc.props.update(
+        {"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, "aid": aid, "track-list": tracks}
+    )
+    fields = {"Word": "{expression}"}
+    if required:
+        fields["Audio"] = "{sentence-audio}"
+    reader = make_session(
+        ipc, services=SessionServices(anki=_FakeAnki(), mining=MineConfig(card_format=fields))
+    )
+    toasts, commands = [], []
+    monkeypatch.setattr(
+        reader.graph.notifications,
+        "show",
+        lambda text, kind="ok", _seconds=2.8: toasts.append((text, kind)),
+    )
+    monkeypatch.setattr(
+        "saitenka.app.media.subprocess.run", lambda *args, **_kwargs: commands.append(args)
+    )
+
+    picture, audio = miner.capture_media(_ports(reader), "unavailable", "/video.mkv")
+
+    assert (picture, audio, commands) == ("", "", [])
+    assert toasts == [(f"{reason} — image only", "warn")] if required else toasts == []

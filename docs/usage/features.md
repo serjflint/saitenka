@@ -125,6 +125,13 @@ without leaving the video. Mining needs **Anki open** with the **AnkiConnect** a
   sentence, meaning, the *actual captured frame*, and `▶ Ns` audio that auto-plays) so you
   can verify it without alt-tabbing. Mining an existing word previews the card already in
   Anki. ++p++ replays the last preview.
+
+Sentence audio uses the embedded audio track selected when mining starts, including when you
+switch tracks while extraction is pending. Card previews play that captured clip. Disabled or
+missing audio, unidentified streams and external audio tracks produce a warning and leave sentence
+audio empty; Saitenka never substitutes the first track. Text/image-only formats need no audio.
+Bookmarks retain cue timing for replay and do not extract audio.
+
 - **Word-pronunciation audio (optional).** With a local yomichan/yomitan audio pack configured
   (`[mine] word_audio_enabled`, `word_audio_pack_dir`), mined cards also get a `WordAudio` clip
   resolved offline from the expression + reading — grounded from the pack, never synthesized.

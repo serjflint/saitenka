@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from saitenka.app.features.mining import miner
 from saitenka.app.features.mining.miner import MineCue
-from saitenka.app.media import Timespan, media_span
+from saitenka.app.media import AudioSource, Timespan, media_span
 from saitenka.app.subnav_policy import indexed_delay
 
 if TYPE_CHECKING:
@@ -16,6 +16,33 @@ if TYPE_CHECKING:
     from saitenka.app.session.playback_observation import PlaybackObservationController
     from saitenka.app.subtitle_presentation import CueRenderStore
     from saitenka.mpvio.ipc import MpvIPC
+
+
+def selected_audio(
+    aid: object, tracks: object, path: object
+) -> tuple[AudioSource | None, str | None]:
+    if aid is False or aid == "no":
+        return None, "audio is disabled"
+    if not isinstance(aid, int) or isinstance(aid, bool) or not isinstance(tracks, list):
+        return None, "audio selection unavailable"
+    track = next(
+        (
+            t
+            for t in tracks
+            if isinstance(t, dict) and t.get("type") == "audio" and t.get("id") == aid
+        ),
+        None,
+    )
+    if track is None:
+        return None, "selected audio track is missing"
+    if track.get("external"):
+        return None, "external audio capture is unsupported"
+    index = track.get("ff-index")
+    if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+        return None, "selected audio stream is unidentified"
+    if not isinstance(path, str) or not path:
+        return None, "audio source path is missing"
+    return AudioSource(path, index), None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +85,7 @@ class MiningEncounterSource:
             except ValueError as exc:
                 span, timing_error = None, str(exc)
         path, playhead = value("path"), value("time-pos")
+        audio, audio_error = selected_audio(value("aid"), value("track-list"), path)
         return miner.MiningEncounter(
             cue=MineCue(
                 cue.tokens,
@@ -74,6 +102,8 @@ class MiningEncounterSource:
             authored_span=authored_span,
             subtitle_delay=delay or 0.0,
             timing_error=timing_error,
+            audio_source=audio,
+            audio_error=audio_error,
             sentence_html=miner.sentence_html(cue.lines),
             hovered_terms=tooltip.metadata.terms,
             connection_epoch=state.connection.epoch if self.playback.observing else None,

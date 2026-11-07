@@ -9,6 +9,9 @@ logs.
 
 ### Fixed
 
+- Mined sentence audio keeps the selected embedded track when background work is delayed or
+  the player switches tracks. Unavailable or external audio warns instead of capturing another track.
+
 - Mining, bookmarks and sidebar seeks respect subtitle delay; saved encounters retain their capture
   timing when the delay changes later. Unsupported subtitle speed/FPS/reverse timing is reported.
 

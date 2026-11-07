@@ -82,6 +82,16 @@ _LOCAL_MATROSKA_SUFFIXES = frozenset({".mkv", ".mka", ".mks", ".webm"})
 _URL = re.compile(r"^[A-Za-z][A-Za-z\d+.-]*://")
 
 
+@dataclass(frozen=True, slots=True)
+class AudioSource:
+    path: str
+    stream_index: int
+
+
+class AudioSelectionError(RuntimeError):
+    """The admitted audio cannot be mapped safely to FFmpeg."""
+
+
 class AudioOutputMissingError(RuntimeError):
     """FFmpeg reported success without creating the requested audio file."""
 
@@ -106,9 +116,11 @@ def clip_audio(
     track: int = 0,
     *,
     normalize: bool = False,
+    stream_index: int | None = None,
 ) -> Path:
     """Extract [start-pad, end+pad] of audio track `track` as mono AAC (.m4a) with fades.
 
+    ``stream_index`` selects an absolute FFmpeg index instead of the audio ordinal ``track``.
     AAC is ffmpeg's built-in encoder (no libmp3lame dependency) and plays on every current Anki
     client. Pass an ``.m4a`` output path so the container matches the codec. ``normalize`` prepends an
     EBU R128 ``loudnorm`` pass (:data:`_LOUDNORM`) so card-to-card playback loudness is even — before
@@ -131,7 +143,7 @@ def clip_audio(
         "-i",
         str(video),
         "-map",
-        f"0:a:{track}",
+        f"0:{stream_index}" if stream_index is not None else f"0:a:{track}",
         "-af",
         af,
         "-ac",
