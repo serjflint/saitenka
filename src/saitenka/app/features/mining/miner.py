@@ -73,6 +73,9 @@ class MiningEncounter:
     sentence_html: str
     hovered_terms: tuple
     connection_epoch: int | None = None
+    authored_span: Timespan | None = None
+    subtitle_delay: float = 0.0
+    timing_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

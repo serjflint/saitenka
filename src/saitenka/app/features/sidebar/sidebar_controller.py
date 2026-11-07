@@ -10,6 +10,7 @@ from saitenka.app.feature_bindings import SIDEBAR_STATEFUL_BINDING
 from saitenka.app.features.sidebar import sidebar
 from saitenka.app.interaction.surfaces import ClickTarget, HoverSuppression, SurfaceSpec, WheelStep
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
+from saitenka.app.subnav_policy import indexed_delay, subtitle_time
 from saitenka.model import claims_pointer
 from saitenka.runtime import events
 
@@ -58,6 +59,7 @@ class SidebarController:
             raise RuntimeError("sidebar view owners are not bound")
         navigation = owners.tracks.navigation.current
         playback = owners.playback
+        delay = indexed_delay(playback.value)
         return sidebar.SidebarView(
             store=self.store,
             panel=self.panel,
@@ -67,7 +69,9 @@ class SidebarController:
                 # Observed facts, not round trips: this runs every turn ahead of the cue settle,
                 # and a read blocks for as long as mpv is busy — 250 ms across a seek.
                 sub_start=playback.value("sub-start"),
-                time_pos=playback.value("time-pos"),
+                time_pos=subtitle_time(playback.number("time-pos"), delay)
+                if delay is not None
+                else None,
                 preferred=navigation.nav_idx,
             ),
             index=navigation.sub_index,
@@ -84,6 +88,7 @@ class SidebarController:
             tokenizer=owners.profile.profile.tokenizer,
             analysis=owners.analysis.result,
             can_mine=owners.mining.configured,
+            subtitle_delay=delay,
         )
 
     @staticmethod

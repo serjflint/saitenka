@@ -700,6 +700,9 @@ class MiningController:
         if target is None:
             return None
         encounter = encounter or self._encounter()
+        if encounter.timing_error:
+            self._apply().toast(f"mine failed: {encounter.timing_error}", "warn")
+            return None
         cue = miner.MineCue(
             encounter.cue.tokens,
             encounter.cue.styles,
@@ -750,6 +753,7 @@ class MiningController:
                         expression=expression,
                         reading=reading,
                         deck=deck,
+                        subtitle_delay=encounter.subtitle_delay,
                     )
             except (OSError, sqlite3.Error, ValueError):
                 return
@@ -767,7 +771,7 @@ class MiningController:
             external.record_mined,
             record_link,
             _commit_mined_action(
-                span=encounter.span,
+                span=encounter.authored_span or encounter.span,
                 deck=target.config.deck,
                 record_link=record_link,
                 record_mined=external.record_mined,

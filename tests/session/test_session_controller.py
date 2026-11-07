@@ -268,6 +268,10 @@ def test_mine_command_uses_one_observed_encounter_without_property_queries(monke
             "sub-end": 6.0,
             "sub-text": "本命",
             "pause": False,
+            "sub-delay": 0.0,
+            "options/sub-speed": 1.0,
+            "options/sub-fps": 0.0,
+            "options/play-direction": "forward",
         }
     )
     reader = _reader_with_word(ipc)

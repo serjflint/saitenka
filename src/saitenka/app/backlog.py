@@ -15,6 +15,7 @@ from saitenka_tokenize.languages import MAIN_LANG
 from saitenka import otel_metrics
 from saitenka.app import colored_subs, paths
 from saitenka.app.jimaku import parse_filename
+from saitenka.app.media import media_span
 from saitenka.sqlite_pool import close_when_collected, open_owner_connection
 
 if TYPE_CHECKING:
@@ -74,6 +75,7 @@ class Capture:
     subtitle_track: dict[str, object] | None = None
     hovered_surface: str | None = None
     hovered_lemma: str | None = None
+    subtitle_delay: float | None = None
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,19 @@ class BacklogEntry:
     status: Status
     created_at: float
     updated_at: float
+    subtitle_delay: float | None = None
+
+    @property
+    def media_start(self) -> float:
+        return (
+            self.cue_start
+            if self.subtitle_delay is None
+            else max(0.0, self.cue_start + self.subtitle_delay)
+        )
+
+    @property
+    def media_end(self) -> float:
+        return self.cue_end + (self.subtitle_delay or 0.0)
 
 
 @dataclass(frozen=True)
@@ -188,6 +203,9 @@ class BacklogStore:
             PRAGMA user_version = 1;
             """
         )
+        columns = {row[1] for row in self._con.execute("PRAGMA table_info(entry)")}
+        if "subtitle_delay" not in columns:
+            self._con.execute("ALTER TABLE entry ADD COLUMN subtitle_delay REAL")
         self._con.commit()
 
     def close(self) -> None:
@@ -227,6 +245,7 @@ class BacklogStore:
             hovered_surface=row["hovered_surface"],
             hovered_lemma=row["hovered_lemma"],
             status=row["status"],
+            subtitle_delay=row["subtitle_delay"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -376,8 +395,8 @@ class BacklogStore:
             """
             INSERT INTO entry (
                 media_id, cue_start, cue_end, jp_text, en_text, subtitle_track_json,
-                hovered_surface, hovered_lemma, status, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+                hovered_surface, hovered_lemma, status, created_at, updated_at, subtitle_delay
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)
             """,
             (
                 media.id,
@@ -390,6 +409,7 @@ class BacklogStore:
                 capture.hovered_lemma,
                 now,
                 now,
+                capture.subtitle_delay,
             ),
         )
         entry_id = cur.lastrowid
@@ -489,12 +509,22 @@ class CapturePorts:
     store: Callable[[], BacklogStore]
     toast: Callable[..., None]
     record_capture: Callable[[], None]
+    subtitle_delay: float | None = 0.0
 
 
 def capture_current(ports: CapturePorts) -> BacklogEntry | None:
     """Sample current cue metadata, then perform one local transaction."""
     if not ports.video or ports.start is None or ports.end is None or not ports.text.strip():
         return None  # `mine_intents` owns the eligibility decision and its announcement
+
+    if ports.subtitle_delay is None:
+        ports.toast("bookmark failed: unsupported subtitle speed, FPS or play direction", "warn")
+        return None
+    try:
+        media_span(ports.start, ports.end, ports.subtitle_delay)
+    except ValueError as exc:
+        ports.toast(f"bookmark failed: {exc}", "warn")
+        return None
 
     jp_text, en_text = _cue_languages(ports.text, ports.secondary_text, ports.language)
     hovered = ports.tokens[ports.hover] if 0 <= ports.hover < len(ports.tokens) else None
@@ -503,6 +533,7 @@ def capture_current(ports: CapturePorts) -> BacklogEntry | None:
         video_path=str(ports.video),
         cue_start=float(ports.start),
         cue_end=float(ports.end),
+        subtitle_delay=ports.subtitle_delay,
         jp_text=jp_text,
         en_text=en_text,
         subtitle_track={

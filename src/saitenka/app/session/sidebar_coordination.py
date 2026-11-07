@@ -31,11 +31,11 @@ def open_mined(
     card = view.mined().by_note_id(note_id)
     if card is None:
         return
-    actions.seek("sidebar-seek-mined", card.cue_start)
+    actions.seek("sidebar-seek-mined", card.media_start)
     if view.can_mine:
         preview.preview.present_existing(
             preview.ports,
-            lambda: preview.card_source(at=card.cue_start),
+            lambda: preview.card_source(at=card.media_start),
             preview.toast,
             note_id,
             MinedPreviewCard(card.expression, card.reading),

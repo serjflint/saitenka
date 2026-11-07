@@ -764,6 +764,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 at,
                 owner=Owner.PLAYBACK,
             ),
+            announce=lambda message: notifications.show(message, "warn"),
             bookmark=lambda: run_stateless(mine_intents.MineCommand.BOOKMARK_CUE),
             mine=lambda: run_stateless(mine_intents.MineCommand.WORD),
             open_mined=lambda note_id: sidebar_coordination.open_mined(

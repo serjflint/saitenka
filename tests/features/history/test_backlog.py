@@ -93,3 +93,24 @@ def test_bookmark_key_is_configurable(make_session):
     reader.graph.commands.install_input()
     binds = {k: f"script-message {m}" for k, m in keybind_registry(ipc).items()}
     assert binds["Alt+q"] == "script-message saitenka-toggle-bookmark"
+
+
+def test_legacy_bookmark_migration_preserves_original_replay_times(tmp_path):
+    import sqlite3
+
+    from saitenka.app.backlog import Capture
+
+    path = tmp_path / "legacy.sqlite"
+    with BacklogStore(path) as store:
+        entry = store.toggle_capture(Capture("/video.mkv", 10.0, 12.0, "猫"))
+    with sqlite3.connect(path) as connection:
+        connection.execute("ALTER TABLE entry DROP COLUMN subtitle_delay")
+
+    with BacklogStore(path) as reopened:
+        saved = reopened.entry(entry.id)
+    assert (saved.cue_start, saved.cue_end, saved.media_start, saved.media_end) == (
+        10.0,
+        12.0,
+        10.0,
+        12.0,
+    )

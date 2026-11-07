@@ -364,7 +364,8 @@ def test_mine_tab_does_not_materialise_an_empty_store(tmp_path, monkeypatch):
     assert not (tmp_path / "absent.sqlite").exists()
 
 
-def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
+@pytest.mark.parametrize("delay", [-2.0, 0.0, 2.0])
+def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch, delay):
     from saitenka.app.features.mining import mined_store
 
     video = tmp_path / "Show - 03.mkv"
@@ -374,8 +375,9 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
     store.record(
         note_id=111,
         video_path=str(video),
-        cue_start=0.0,
-        cue_end=0.8,
+        cue_start=10.0,
+        cue_end=10.8,
+        subtitle_delay=delay,
         expression="本",
         reading="ほん",
     )
@@ -392,7 +394,7 @@ def test_clicking_a_mine_row_seeks_to_its_cue_offline(tmp_path, monkeypatch):
 
     reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 10, 10)
 
-    assert ("set_property", "time-pos", 0.0) in ipc.commands  # seeks even with Anki down
+    assert ("set_property", "time-pos", 10.0 + delay) in ipc.commands  # seeks even with Anki down
 
 
 def test_clicking_a_mine_row_opens_the_card_preview_when_anki_is_up(tmp_path, monkeypatch):
@@ -550,3 +552,61 @@ def test_the_track_tab_does_not_open_a_backlog_for_a_session_with_no_video() -> 
     sidebar.draw(reader.graph.sidebar.view())
 
     assert reader.graph.history.backlog is None
+
+
+@pytest.mark.parametrize("delay", [-2.0, 0.0, 2.0])
+def test_bookmark_replay_freezes_media_clock_and_keeps_authored_cue_match(make_session, delay):
+    from saitenka.app.bindings import BOOKMARK_MSG
+
+    ipc = FakeIPC({"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, "sub-delay": delay})
+    reader = make_session(ipc)
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex([Cue(10.0, 12.0, "猫")])
+    reader.graph.playback.observe("sub-text", "猫")
+    reader.command(BOOKMARK_MSG)
+    store = reader.graph.history.ensure_backlog()
+    entry = store.entries_for_path("/video.mkv")[0]
+    with BacklogStore(store.path) as reopened:
+        entry = reopened.entry(entry.id)
+    ipc.props["sub-delay"] = 99.0
+    target = reader.graph.interaction.click_target()
+
+    sidebar.activate_hit(
+        reader.graph.sidebar.view(),
+        target.sidebar_acts,
+        SidebarHitBox("backlog-seek", entry.id, 0, 0, 1, 1),
+    )
+
+    assert (entry.cue_start, entry.cue_end) == (10.0, 12.0)
+    assert (entry.media_start, entry.media_end) == (10.0 + delay, 12.0 + delay)
+    assert ("set_property", "time-pos", 10.0 + delay) in ipc.commands
+    assert sidebar._cue_statuses(reader.graph.sidebar.view().index, "/video.mkv", store) == {
+        0: "open"
+    }
+
+
+@pytest.mark.parametrize(
+    ("property_name", "value"),
+    [
+        ("options/sub-speed", 1.1),
+        ("options/sub-fps", 25),
+        ("options/play-direction", "backward"),
+        ("sub-delay", float("inf")),
+        ("sub-end", 9.0),
+        ("sub-delay", -12.0),
+    ],
+)
+def test_bookmark_rejects_unsupported_or_invalid_timing(
+    monkeypatch, make_session, property_name, value
+):
+    from saitenka.app.bindings import BOOKMARK_MSG
+
+    ipc = FakeIPC({"path": "/video.mkv", "sub-start": 10.0, "sub-end": 12.0, property_name: value})
+    reader = make_session(ipc)
+    reader.graph.playback.observe("sub-text", "猫")
+    messages = []
+    monkeypatch.setattr(
+        reader.graph.notifications, "show", lambda text, *_args: messages.append(text)
+    )
+    reader.command(BOOKMARK_MSG)
+    assert reader.graph.history.ensure_backlog().entries_for_path("/video.mkv") == []
+    assert messages and messages[-1].startswith("bookmark failed:")
