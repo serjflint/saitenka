@@ -447,7 +447,7 @@ def shortcut_bindings(keys: KeyOptions, *scopes: Scope) -> tuple[ActiveBinding, 
     bindings = active_bindings(keys, *scopes)
     claimed = {_normalized_key(row.key) for row in active_bindings(keys)}
     aliases: list[ActiveBinding] = []
-    for row in bindings:
+    for row in reversed(bindings):  # mpv gives later bindings precedence.
         normalized = _normalized_key(row.key)
         prefix, _, character = normalized.rpartition("+")
         translated = _RUSSIAN_KEYS.get(character)

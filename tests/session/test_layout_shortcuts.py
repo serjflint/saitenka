@@ -16,7 +16,9 @@ from saitenka.app.session.factory import SessionServices
 )
 def test_russian_shortcut_opens_the_same_help_surface(make_session, key, russian):
     ipc = FakeIPC()
-    session = make_session(ipc, options=ReaderOptions(keys=KeyOptions(help_key=key)))
+    session = make_session(
+        ipc, options=ReaderOptions(keys=KeyOptions(help_key=key, mine_video_key=""))
+    )
     session.graph.commands.install_input()
 
     press(session, ipc, russian)
@@ -91,3 +93,17 @@ def test_explicit_equivalent_key_spelling_reserves_the_layout_alias(key):
     bindings = shortcut_bindings(KeyOptions(help_key=key), "global")
 
     assert all(b.key != "Ctrl+ь" for b in bindings if b.spec.message == MINE_MSG)
+
+
+@pytest.mark.parametrize("key", ["h", "р"])
+def test_layout_alias_preserves_the_effective_action_for_duplicate_shortcuts(make_session, key):
+    ipc = FakeIPC()
+    session = make_session(
+        ipc, options=ReaderOptions(keys=KeyOptions(help_key="h", sidebar_key="h"))
+    )
+    session.graph.commands.install_input()
+
+    press(session, ipc, key)
+
+    assert session.graph.sidebar.state.open
+    assert not session.graph.help.state.open
