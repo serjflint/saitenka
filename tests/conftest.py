@@ -267,33 +267,92 @@ def diagnostic_trace(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def lookup_session(tmp_path):
-    from dicthelp import load_set, lookup_records, term_zip
+def lookup_session(tmp_path, monkeypatch):
+    """Import real lookup data and close each isolated session after the test."""
+    from dicthelp import load_set, lookup_records, meta_zip, term_zip
     from driver import Driver
+    from saitenka_card import MineConfig
     from util import FakeIPC
 
-    from saitenka.app.config import ReaderOptions
+    from saitenka.app import anki, paths
+    from saitenka.app.config import PanelOptions, ReaderOptions
+    from saitenka.app.features.mining import miner
     from saitenka.app.session.factory import SessionServices
 
-    readers = []
+    class Anki:
+        def __init__(self):
+            self.added = []
 
-    def make(dataset="component"):
+        def find_notes(self, _query):
+            return []
+
+        def notes_info(self, _ids):
+            return []
+
+        def can_add(self, _note):
+            return True
+
+        def add_note(self, note):
+            self.added.append(note)
+            return len(self.added)
+
+        def store_media(self, name, _path):
+            return name
+
+    readers = []
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(anki, "anki_reachable", lambda *_args, **_kwargs: True)
+
+    def make(
+        dataset="read",
+        *,
+        mining=True,
+        viewport=(1920, 1080),
+        options=None,
+        records=None,
+    ):
+        data = records if records is not None else lookup_records(dataset)
         directory = tmp_path / str(len(readers))
         directory.mkdir()
-        records = lookup_records(dataset)
-        dictionaries = load_set(
-            [term_zip(directory / "terms.zip", "Fixture terms", records["terms"])]
+        dictionaries = (
+            [term_zip(directory / "terms.zip", "Fixture terms", data["terms"])]
+            if data["terms"]
+            else []
         )
+        frequencies = [
+            meta_zip(
+                directory / f"freq-{i}.zip",
+                item["name"],
+                "freq",
+                item["entries"],
+                frequency_mode=item.get("frequency_mode"),
+            )
+            for i, item in enumerate(data.get("frequencies", []))
+        ]
+
+        def screenshot(_ipc, _path, **_kwargs):
+            raise OSError("no screenshot supplied by this fixture")
+
+        monkeypatch.setattr(miner, "screenshot", screenshot)
         ipc = FakeIPC()
         ipc.props.update({"path": "/fixtures/episode.mkv", "pause": True})
+        client = Anki()
         reader = session_builder.build_session(
             ipc,
-            services=SessionServices(dictionaries=dictionaries, tts=False),
-            options=ReaderOptions().with_overrides(prefetch=False, scan_delay=0.0),
+            services=SessionServices(
+                dictionaries=load_set(dictionaries, frequencies),
+                anki=client if mining else None,
+                mining=MineConfig() if mining else None,
+                tts=False,
+            ),
+            options=(options or ReaderOptions(panels=PanelOptions(scale=1.0))).with_overrides(
+                prefetch=False, scan_delay=0.0, show_preview=False
+            ),
         )
         readers.append(reader)
         reader.start()
-        return Driver(reader).resize(1920, 1080), None
+        ui = Driver(reader).resize(*viewport)
+        return ui, client
 
     yield make
     for reader in reversed(readers):

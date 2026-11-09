@@ -31,8 +31,10 @@ from saitenka.panel import Freq, panel_rows
 from saitenka.runtime import events, hover
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
+    from saitenka_card import CardData
+    from saitenka_tokenize.japanese import Token
     from saitenka_tokenize.registry import Tokenizer
 
     from saitenka.app.features.tooltip.popups import HoverInputs, TooltipState
@@ -201,23 +203,15 @@ def rareness_value(rank: float) -> str:
     return (f"{r // 1000}k" if r % 1000 == 0 else f"{r / 1000:.1f}k") if r >= 1000 else str(r)
 
 
-def rareness_pill(tok, dict_set) -> Freq | None:
-    """The blended-rareness "diff" pill, summarizing the row of 7+ per-dict pills into one read.
-
-    The blend and the band are the dictionary's and the word-state layer's answers; the colour and
-    the ``1.3k`` formatting are this side's. ``None`` when no rank-based freq dict has the word.
-    """
-    if dict_set is None:
-        return None
-    rank = dict_set.rareness_rank(tok)
+def rareness_pill(rank: float | None) -> Freq | None:
+    """Format the selected entry's blended rank; omit the badge without comparable ranks."""
     if rank is None:
         return None
     return Freq("diff", rareness_value(rank), RARENESS_COLORS[rareness_band(rank)])
 
 
 def entry_for_tok(tok, inflected, *, dict_set, scorer, extra_terms: tuple[str, ...] = ()):
-    """Look up the panel entry and fold in the blended-rareness pill and the JLPT pill (leading the
-    frequency pills) when the word has them, so they mirror the subtitle underline / freq row.
+    """Prepend the selected entry's difficulty and the subtitle token's JLPT pill.
     ``extra_terms`` are longer multi-token phrases starting at this word (数ある over 数); the dict set
     stacks them above the bare word.
 
@@ -229,11 +223,17 @@ def entry_for_tok(tok, inflected, *, dict_set, scorer, extra_terms: tuple[str, .
         entry = dict_set.entry_for(tok, inflected=inflected, extra_terms=extra_terms)
     else:
         entry = dict_set.entry_for(tok, inflected)
-    extra = [p for p in (rareness_pill(tok, dict_set), jlpt_pill(tok, scorer)) if p is not None]
+    extra = [
+        p for p in (rareness_pill(entry.frequency_rank), jlpt_pill(tok, scorer)) if p is not None
+    ]
     if extra and hasattr(entry, "freqs"):
         # Build the pill list into a shallow copy — never mutate the cached original.
         entry = _dc.replace(entry, freqs=[*extra, *entry.freqs])
-    return entry
+    groups = []
+    for group in entry.groups:
+        pill = rareness_pill(group.frequency_rank)
+        groups.append(_dc.replace(group, freqs=[pill, *group.freqs]) if pill is not None else group)
+    return _dc.replace(entry, groups=groups)
 
 
 class PanelDictionary(Protocol):
@@ -250,6 +250,8 @@ class PanelDictionary(Protocol):
     def has_term(self, *forms: str | None) -> bool: ...
 
     def rareness_rank(self, token: object) -> float | None: ...
+
+    def cards_for(self, token: Token, *, extra_terms: Sequence[str] = ()) -> list[CardData]: ...
 
 
 @dataclass(frozen=True, slots=True)

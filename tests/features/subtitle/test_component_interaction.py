@@ -1,5 +1,6 @@
-"""Subtitle components replace and restore popups through player input."""
+"""Subtitle scanning through player input and published popup images."""
 
+import pytest
 from util import assert_golden
 
 
@@ -35,3 +36,14 @@ def test_down_scrolls_the_visible_component(lookup_session):
 
     assert len(ui.dictionary_images) == 1
     assert ui.dictionary_images[0].tobytes() != before.tobytes()
+
+
+@pytest.mark.parametrize("offset", [0, 1])
+def test_lookup_starts_at_the_hovered_character(lookup_session, offset):
+    ui, _anki = lookup_session("phrase")
+    ui.subtitle("大活躍でしたね").hover_character(offset)
+    images = ui.read_popup()
+
+    assert len(ui.dictionary_images) == 1
+    assert_golden(images[0], f"phrase_from_character_{offset}.png")
+    assert_golden(images[-1], f"phrase_from_character_{offset}_end.png")

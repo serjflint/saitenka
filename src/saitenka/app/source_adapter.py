@@ -48,7 +48,9 @@ from saitenka.panel import Definition, Entry, EntryGroup, Freq
 from saitenka.render.sc_adapter import collect_img_paths
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
+
+    from saitenka_dict import Frequency
 from saitenka_dict import (
     FrequencySource as SemanticFrequencySource,
 )
@@ -180,6 +182,7 @@ class DictionarySourceAdapter:
         return Entry(
             headword=header,
             freqs=self._frequency_pills(first),
+            frequency_rank=self._frequency_rank(first.frequencies),
             defs=self._fused_definitions(entries),
             inflection_chain=self.options.inflection_chain(surface, inflection_targets),
             reading=reading,
@@ -202,6 +205,7 @@ class DictionarySourceAdapter:
         surface = inflected or token.surface
         return Entry(
             headword=furigana(token.lemma or token.surface, token.reading),
+            frequency_rank=self.rareness_rank(token),
             defs=[Definition("—", [message])],
             inflection_chain=self.options.inflection_chain(
                 surface, tuple(value for value in (token.lemma,) if value and value != surface)
@@ -384,20 +388,18 @@ class DictionarySourceAdapter:
         )
 
     def rareness_rank(self, token) -> float | None:
-        """The harmonic-mean rank of ``token`` across every rank-based frequency dictionary, or
-        ``None`` when none has the word.
-
-        Deliberately the same query as :meth:`frequency_field`, on the same headwords. The two used
-        to be separate readers of ``term_meta`` with different matching rules, so a kana-keyed row
-        could score the card while the pill beside it stayed blank; one call site is what makes that
-        unrepresentable rather than merely fixed.
-        """
-        from saitenka_wordstate.fsrs import harmonic_of
-
+        """Token-scoped blend for callers without a resolved dictionary entry."""
         if not isinstance(self.source, SemanticFrequencySource):
             return None
+        return self._frequency_rank(
+            self.source.frequencies_for(self._headwords(token), self.options.dictionaries)
+        )
+
+    def _frequency_rank(self, frequencies: Iterable[Frequency]) -> float | None:
+        from saitenka_wordstate.fsrs import harmonic_of
+
         best: dict[str, int] = {}
-        for item in self.source.frequencies_for(self._headwords(token), self.options.dictionaries):
+        for item in frequencies:
             value = item.value
             if item.dictionary in self.options.occurrence_based or not isinstance(value, int):
                 continue
@@ -529,6 +531,8 @@ class DictionarySourceAdapter:
                 headword.reading,
                 [self._definition(definition) for definition in entry.definitions],
                 index,
+                freqs=self._frequency_pills(entry),
+                frequency_rank=self._frequency_rank(entry.frequencies),
             )
             for index, entry in enumerate(entries)
             for headword in entry.headwords[:1]

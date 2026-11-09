@@ -23,6 +23,11 @@ logs.
 
 ### Fixed
 
+- Dictionary difficulty and frequency badges follow each displayed entry, including compounds and
+  inflected forms. Tooltips omit duplicate headings, use tighter spacing, and start phrase lookup at
+  the hovered token. Nested-entry mining keeps the selected reading and gloss; stale cached panels
+  are invalidated.
+
 - Component popups replace the prior whole-word popup and restore it when leaving the component.
 
 - Converted subtitle colors and hover geometry follow mpv's margin policy in letterboxed windows.

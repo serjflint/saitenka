@@ -1428,6 +1428,9 @@ class _ScanDS:
             defs=[Definition("MonoC", ["追いかけること。また、その人。"])],
         )
 
+    def cards_for(self, _token, *, extra_terms=()):  # noqa: ARG002  # protocol shape
+        return []
+
     def rareness_rank(self, _token):  # protocol shape
         """No frequency dictionaries, so no blended rank and no pill."""
         return
@@ -1733,7 +1736,7 @@ def test_nested_add_button_mines_inner_word(monkeypatch):
             context,
             actions=replace(
                 context.actions,
-                mine_token=lambda tok: mined.append(tok.surface),
+                mine_token=lambda tok, **_kwargs: mined.append(tok.surface),
             ),
         ),
     )
@@ -2359,7 +2362,7 @@ def test_rareness_pill_blends_ranks_across_freq_dicts(tmp_path, make_session):
     blended = harmonic_of([1000.0, 2000.0])
     assert blended is not None
     assert dict_set.rareness_rank(tok) == pytest.approx(blended)
-    pill = tooltip_panel.rareness_pill(tok, dict_set)
+    pill = tooltip_panel.rareness_pill(dict_set.rareness_rank(tok))
     assert pill is not None and pill.name == "diff"
     # ≈1333 → common (green); the band is the dictionary's answer, the colour is the panel's
     assert pill.color == tooltip_panel.RARENESS_COLORS[rareness_band(blended)]
@@ -2379,7 +2382,7 @@ def test_rareness_pill_excludes_occurrence_based_dicts(tmp_path, make_session):
     ds = dicthelp.load_set(freq_zips=[rank_z, occ_z])
     r = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     pill = tooltip_panel.rareness_pill(
-        Token("猫", "猫", "ねこ", "名詞", 0, 1), r.graph.profile.profile.dict_set
+        r.graph.profile.profile.dict_set.rareness_rank(Token("猫", "猫", "ねこ", "名詞", 0, 1))
     )
     assert pill is not None and pill.value == "1.5k"  # blend of {1500} alone, not pulled toward 1
 
@@ -2393,18 +2396,18 @@ def test_no_rareness_pill_when_word_absent_from_all_freq_dicts(tmp_path, make_se
     r = make_session(FakeIPC(), services=SessionServices(dictionaries=ds))
     assert (
         tooltip_panel.rareness_pill(
-            Token("存在しない語", "存在しない語", "", "名詞", 0, 6),
-            r.graph.profile.profile.dict_set,
+            r.graph.profile.profile.dict_set.rareness_rank(
+                Token("存在しない語", "存在しない語", "", "名詞", 0, 6)
+            )
         )
         is None
     )
     # no freq sources at all → no pill
     assert (
         tooltip_panel.rareness_pill(
-            Token("猫", "猫", "ねこ", "名詞", 0, 1),
             make_session(
                 FakeIPC(), services=SessionServices(dictionaries=_FakeDS())
-            ).graph.profile.profile.dict_set,
+            ).graph.profile.profile.dict_set.rareness_rank(Token("猫", "猫", "ねこ", "名詞", 0, 1))
         )
         is None
     )

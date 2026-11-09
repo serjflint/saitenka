@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING
 
 from saitenka.draw.icon_source import Icon, render_icon
@@ -35,7 +36,7 @@ if TYPE_CHECKING:
     from PIL import Image
 
     from saitenka.model import PitchAccent
-    from saitenka.panel.model import Definition, Entry, EntryGroup
+    from saitenka.panel.model import Definition, Entry, EntryGroup, Freq
 
 
 def _marker_native(size: int) -> Callable[[float], Image.Image]:
@@ -66,7 +67,7 @@ def _headword_kanji_links(scan: list[ScanBox]) -> list[LinkBox]:
 def _flow_row(
     flow,
     content_w: int,
-    scale: float = 1.35,
+    scale: float = 1.15,
     *,
     render_scale: float = 1.0,
     scan_out: list[ScanBox] | None = None,
@@ -186,7 +187,7 @@ def _emit_def_rows(
                 dh.append(ChipBox(tag, ChipStyle(size=theme.px(18), weight=600, bg=theme.tag)))
                 dh.append(Span(" ", Style(size=theme.px(19))))
             dh.append(ChipBox(d.dict_name, ChipStyle(size=theme.px(19), bg=theme.purple)))
-            return _flow_row(dh, content_w, 1.7, render_scale=scale), [], []
+            return _flow_row(dh, content_w, 1.2, render_scale=scale), [], []
 
         rows.append(Row(m, _def_head, section=d.dict_name if sectioned else None))
 
@@ -250,6 +251,14 @@ def _emit_def_rows(
         )
 
 
+def _render_frequencies(freqs: list[Freq], content_w: int, theme: Theme, *, scale: float = 1.0):
+    chips = [
+        ChipBox(f.name, ChipStyle(size=theme.px(16), weight=600, bg=f.color, value=f.value))
+        for f in freqs
+    ]
+    return render_chip_row(chips, theme.px(8), content_w, scale=scale), [], []
+
+
 def _emit_group_rows(
     rows: list[Row],
     groups: list[EntryGroup],
@@ -259,6 +268,7 @@ def _emit_group_rows(
     *,
     add_button: bool,
     group_mined: tuple[bool, ...],
+    skip_first: bool,
 ) -> None:
     """Yomitan-style stacked entries: one block per :class:`EntryGroup` — a ruby'd headword row with
     its own ⊕ (emitted as a ``LinkBox('mine:<card_index>')`` so it rides the existing link hit-test in
@@ -282,8 +292,59 @@ def _emit_group_rows(
                 links.append(LinkBox(f"mine:{g.card_index}", bx, by, add, add))
             return img, [], links
 
-        rows.append(Row(m, _group_head, section=g.reading))
+        if gi or not skip_first:
+            rows.append(Row(m, _group_head, section=g.reading))
+            if g.freqs:
+                rows.append(Row(m, partial(_render_frequencies, g.freqs, content_w, theme)))
         _emit_def_rows(rows, g.defs, content_w, m, theme, sectioned=False)
+
+
+def _render_header(
+    entry: Entry,
+    content_w: int,
+    theme: Theme,
+    *,
+    add_button: bool,
+    mined: bool,
+    speak_button: bool,
+    first_group: EntryGroup | None,
+    scale: float = 1.0,
+) -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
+    # The numbered stroke-order glyph needs room for its stroke numbers to be legible, so draw it 2×
+    # the normal headword size when that font is active (plain headwords stay at the reference size).
+    hw_size = theme.px(46 * (1 + bool(entry.headword_font)))
+    hw = [
+        Span("▶", Style(size=theme.px(28), color=theme.accent)),
+        Span(" ", Style(size=hw_size)),
+    ]
+    hw += inline_flow(
+        entry.headword,
+        Style(size=hw_size, weight=700, color=theme.text, font=entry.headword_font),
+    )
+    # Collect per-CJK-char hitboxes (1× coords) so each headword kanji becomes a click-to-open link
+    # (Yomitan parity): clicking 勉 in 勉強 opens its kanji entry, which the header couldn't do before.
+    scan: list[ScanBox] = []
+    hdr = _flow_row(hw, content_w, render_scale=scale, scan_out=scan)  # native big ruby at scale
+    kanji_links = _headword_kanji_links(scan)
+    right = content_w
+    top = theme.px(_ICON_TOP)
+    if speak_button:  # icons render at native size, composited at scaled positions
+        sz = theme.px(_SPK_SIZE)
+        spk = render_icon(Icon.SPEAKER, round(sz * scale))
+        hdr.alpha_composite(spk, (round((right - sz) * scale), round(top * scale)))
+        right -= sz + theme.px(_ICON_GAP)
+    if add_button:
+        add = theme.px(_ADD_SIZE)
+        btn = render_icon(
+            Icon.MINED if mined else Icon.ADD,
+            round(add * scale),
+        )
+        hdr.alpha_composite(btn, (round((right - add) * scale), round((top + theme.px(2)) * scale)))
+        if first_group is not None:
+            kanji_links.append(
+                LinkBox(f"mine:{first_group.card_index}", right - add, top + theme.px(2), add, add)
+            )
+    return hdr, [], kanji_links
 
 
 def panel_rows(
@@ -300,52 +361,31 @@ def panel_rows(
 
     ``add_button`` draws the header add-to-Anki button (only when mining is available); ``mined`` makes
     it a ✓ instead of ⊕ for a word already in the deck. ``speak_button`` draws the 🔊 TTS button — set
-    False to hide it when no Japanese TTS voice is installed (it would silently do nothing). When
-    ``entry.groups`` is set (Yomitan-style stacked entries), the fused header ⊕ is suppressed and each
-    group gets its own ⊕ (``group_mined[i]`` → ✓ for an already-mined group). Defaults keep
-    ``render_panel`` and its golden unchanged."""
+    False to hide it when no Japanese TTS voice is installed.
+    ``entry.groups`` gives each entry its own ⊕; a matching first group shares the main header."""
     m = theme.margin
     content_w = width - 2 * m
-    header_add = add_button and not entry.groups  # groups carry their own per-entry ⊕
+    first_group = (
+        entry.groups[0]
+        if entry.groups
+        and entry.groups[0].headword == entry.headword
+        and entry.groups[0].reading == entry.reading
+        else None
+    )
+    header_add = add_button and (not entry.groups or first_group is not None)
     rows: list[Row] = []
 
-    # --- header: ▶ + big ruby headword, ⊕/✓ add + 🔊 speaker top-right ---
-    def _header(*, scale: float = 1.0) -> tuple[Image.Image, list[ScanBox], list[LinkBox]]:
-        # The numbered stroke-order glyph needs room for its stroke numbers to be legible, so draw it 2×
-        # the normal headword size when that font is active (plain headwords stay at the reference size).
-        # Branchless (bool→0/1) so it adds no cognitive complexity to the already-ceilinged panel_rows.
-        hw_size = theme.px(46 * (1 + bool(entry.headword_font)))
-        hw = [
-            Span("▶", Style(size=theme.px(28), color=theme.accent)),
-            Span(" ", Style(size=hw_size)),
-        ]
-        hw += inline_flow(
-            entry.headword,
-            Style(size=hw_size, weight=700, color=theme.text, font=entry.headword_font),
-        )
-        # Collect per-CJK-char hitboxes (1× coords) so each headword kanji becomes a click-to-open link
-        # (Yomitan parity): clicking 勉 in 勉強 opens its kanji entry, which the header couldn't do before.
-        scan: list[ScanBox] = []
-        hdr = _flow_row(
-            hw, content_w, render_scale=scale, scan_out=scan
-        )  # native big ruby at scale
-        kanji_links = _headword_kanji_links(scan)
-        right = content_w
-        top = theme.px(_ICON_TOP)
-        if speak_button:  # icons render at native size, composited at scaled positions
-            sz = theme.px(_SPK_SIZE)
-            spk = render_icon(Icon.SPEAKER, round(sz * scale))
-            hdr.alpha_composite(spk, (round((right - sz) * scale), round(top * scale)))
-            right -= sz + theme.px(_ICON_GAP)
-        if header_add:
-            add = theme.px(_ADD_SIZE)
-            btn = render_icon(Icon.MINED if mined else Icon.ADD, round(add * scale))
-            hdr.alpha_composite(
-                btn, (round((right - add) * scale), round((top + theme.px(2)) * scale))
-            )
-        return hdr, [], kanji_links
-
-    rows.append(Row(m, _header))
+    _header = partial(
+        _render_header,
+        entry,
+        content_w,
+        theme,
+        add_button=header_add,
+        mined=group_mined[0] if first_group and group_mined else mined,
+        speak_button=speak_button,
+        first_group=first_group,
+    )
+    rows.append(Row(m, _header, section=first_group.reading if first_group else None))
 
     # --- pitch-accent graphs: one compact graph per distinct accent, in the header area next to
     # the reading; the purple text pill in the freq row stays as the fallback ---
@@ -368,7 +408,7 @@ def panel_rows(
                             native=_pitch_native(reading, pa, theme.scale),
                         )
                     )
-            return _flow_row(flow, content_w, 1.5, render_scale=scale), [], []
+            return _flow_row(flow, content_w, 1.1, render_scale=scale), [], []
 
         rows.append(Row(m, _pitch_row))
 
@@ -387,7 +427,7 @@ def panel_rows(
                 cflow.append(
                     ChipBox(name, ChipStyle(size=theme.px(18), weight=600, bg=INFLECTION_BG))
                 )
-            return _flow_row(cflow, content_w, 1.7, render_scale=scale), [], []
+            return _flow_row(cflow, content_w, 1.2, render_scale=scale), [], []
 
         rows.append(Row(m, _chain))
 
@@ -404,21 +444,8 @@ def panel_rows(
 
         rows.append(Row(m, _tag))
 
-    # --- frequency pills: two-tone (colored name + light value), SubMiner-style ---
     if entry.freqs:
-
-        def _freqs(freqs=tuple(entry.freqs), *, scale: float = 1.0):
-            # freq pills are secondary signal → render a notch smaller than the def pills (px19) and
-            # body (px23), so more fit on the row and they don't compete with the readings. Laid out
-            # through the 2-D seam (solve_row): a uniform gap that wraps to width, replacing the old
-            # "  "-space separators (whose gap drifted with the font metric + left a trailing line).
-            chips = [
-                ChipBox(f.name, ChipStyle(size=theme.px(16), weight=600, bg=f.color, value=f.value))
-                for f in freqs
-            ]
-            return render_chip_row(chips, theme.px(8), content_w, scale=scale), [], []
-
-        rows.append(Row(m, _freqs))
+        rows.append(Row(m, partial(_render_frequencies, entry.freqs, content_w, theme)))
 
     # --- reading label (dict-name pill + reading, e.g. よむ[1]) ---
     if entry.reading_label:
@@ -429,14 +456,21 @@ def panel_rows(
                 ChipBox(dn, ChipStyle(size=theme.px(19), bg=theme.purple)),
                 Span("  " + txt, Style(size=theme.px(20), color=theme.text)),
             ]
-            return _flow_row(flow, content_w, 1.7, render_scale=scale), [], []
+            return _flow_row(flow, content_w, 1.2, render_scale=scale), [], []
 
         rows.append(Row(m, _reading))
 
     # --- numbered definitions --- (def-name chip row is cheap; the body row is the expensive one)
     if entry.groups:
         _emit_group_rows(
-            rows, entry.groups, content_w, m, theme, add_button=add_button, group_mined=group_mined
+            rows,
+            entry.groups,
+            content_w,
+            m,
+            theme,
+            add_button=add_button,
+            group_mined=group_mined,
+            skip_first=first_group is not None,
         )
     else:
         _emit_def_rows(rows, entry.defs, content_w, m, theme, sectioned=True)

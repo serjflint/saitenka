@@ -34,5 +34,733 @@
         ]
       ]
     ]
+  },
+  "phrase": {
+    "terms": [
+      [
+        "大",
+        "だい",
+        [
+          "large"
+        ]
+      ],
+      [
+        "活躍",
+        "かつやく",
+        [
+          "activity"
+        ]
+      ],
+      [
+        "大活躍",
+        "だいかつやく",
+        [
+          "great activity"
+        ]
+      ]
+    ]
+  },
+  "alternate_reading": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "inboard"
+        ]
+      ],
+      [
+        "船内",
+        "ふねうち",
+        [
+          "alternate reading"
+        ]
+      ]
+    ]
+  },
+  "nested_compound": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "超満員"
+        ]
+      ],
+      [
+        "超",
+        "ちょう",
+        [
+          "super"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "overcrowded"
+        ]
+      ]
+    ]
+  },
+  "nested_compound_phrase": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "超満員"
+        ]
+      ],
+      [
+        "船内環境",
+        "せんないかんきょう",
+        [
+          "超満員"
+        ]
+      ],
+      [
+        "超",
+        "ちょう",
+        [
+          "super"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "overcrowded"
+        ]
+      ]
+    ]
+  },
+  "nested_reading": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "人気"
+        ]
+      ],
+      [
+        "人気",
+        "にんき",
+        [
+          "popularity"
+        ]
+      ],
+      [
+        "人気",
+        "ひとけ",
+        [
+          "signs of life"
+        ]
+      ]
+    ]
+  },
+  "nested_reading_phrase": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "人気"
+        ]
+      ],
+      [
+        "船内環境",
+        "せんないかんきょう",
+        [
+          "人気"
+        ]
+      ],
+      [
+        "人気",
+        "にんき",
+        [
+          "popularity"
+        ]
+      ],
+      [
+        "人気",
+        "ひとけ",
+        [
+          "signs of life"
+        ]
+      ]
+    ]
+  },
+  "frequency_compound": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "超",
+            1000
+          ],
+          [
+            "超満員",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "超",
+        "ちょう",
+        [
+          "short entry"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "full entry"
+        ]
+      ]
+    ]
+  },
+  "frequency_many": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "数",
+            1000
+          ],
+          [
+            "数ある",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "数",
+        "かず",
+        [
+          "short entry"
+        ]
+      ],
+      [
+        "数ある",
+        "かずある",
+        [
+          "full entry"
+        ]
+      ]
+    ]
+  },
+  "frequency_honorific_rest": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "お",
+            1000
+          ],
+          [
+            "お休み",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "お",
+        "お",
+        [
+          "short entry"
+        ]
+      ],
+      [
+        "お休み",
+        "おやすみ",
+        [
+          "full entry"
+        ]
+      ]
+    ]
+  },
+  "frequency_honorific_care": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "お",
+            1000
+          ],
+          [
+            "お世話",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "お",
+        "お",
+        [
+          "short entry"
+        ]
+      ],
+      [
+        "お世話",
+        "おせわ",
+        [
+          "full entry"
+        ]
+      ]
+    ]
+  },
+  "frequency_person": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "人気",
+            1000
+          ],
+          [
+            "人気者",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "人気",
+        "にんき",
+        [
+          "short entry"
+        ]
+      ],
+      [
+        "人気者",
+        "にんきもの",
+        [
+          "full entry"
+        ]
+      ]
+    ]
+  },
+  "frequency_sources": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "超",
+            1591
+          ],
+          [
+            "超満員",
+            61665
+          ]
+        ],
+        "name": "RankA"
+      },
+      {
+        "entries": [
+          [
+            "超",
+            1169
+          ],
+          [
+            "超満員",
+            56230
+          ],
+          [
+            "超満員",
+            379002
+          ]
+        ],
+        "name": "RankB"
+      },
+      {
+        "entries": [
+          [
+            "超",
+            1478
+          ],
+          [
+            "超満員",
+            47630
+          ]
+        ],
+        "name": "RankC"
+      },
+      {
+        "entries": [
+          [
+            "超満員",
+            999999
+          ]
+        ],
+        "frequency_mode": "occurrence-based",
+        "name": "Count"
+      },
+      {
+        "entries": [
+          [
+            "超満員",
+            "N2"
+          ]
+        ],
+        "name": "Level"
+      }
+    ],
+    "terms": [
+      [
+        "超",
+        "ちょう",
+        [
+          "super"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "overcrowded"
+        ]
+      ]
+    ]
+  },
+  "missing_frequency": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "超",
+            1000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "超",
+        "ちょう",
+        [
+          "super"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "overcrowded"
+        ]
+      ]
+    ]
+  },
+  "canonical_spelling": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "仕方ない",
+            1000
+          ],
+          [
+            "仕方無い",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "仕方無い",
+        "しかたない",
+        [
+          "meaning"
+        ]
+      ]
+    ]
+  },
+  "canonical_verb": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "読んだ",
+            1000
+          ],
+          [
+            "読む",
+            50000
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": [
+      [
+        "読む",
+        "よむ",
+        [
+          "meaning"
+        ]
+      ]
+    ]
+  },
+  "frequency_only": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "猫",
+            1500
+          ]
+        ],
+        "name": "Rank"
+      }
+    ],
+    "terms": []
+  },
+  "dense": {
+    "frequencies": [
+      {
+        "entries": [
+          [
+            "船内",
+            1000
+          ]
+        ],
+        "name": "LongDictionary0"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1001
+          ]
+        ],
+        "name": "LongDictionary1"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1002
+          ]
+        ],
+        "name": "LongDictionary2"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1003
+          ]
+        ],
+        "name": "LongDictionary3"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1004
+          ]
+        ],
+        "name": "LongDictionary4"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1005
+          ]
+        ],
+        "name": "LongDictionary5"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1006
+          ]
+        ],
+        "name": "LongDictionary6"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1007
+          ]
+        ],
+        "name": "LongDictionary7"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1008
+          ]
+        ],
+        "name": "LongDictionary8"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1009
+          ]
+        ],
+        "name": "LongDictionary9"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1010
+          ]
+        ],
+        "name": "LongDictionary10"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1011
+          ]
+        ],
+        "name": "LongDictionary11"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1012
+          ]
+        ],
+        "name": "LongDictionary12"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1013
+          ]
+        ],
+        "name": "LongDictionary13"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1014
+          ]
+        ],
+        "name": "LongDictionary14"
+      },
+      {
+        "entries": [
+          [
+            "船内",
+            1015
+          ]
+        ],
+        "name": "LongDictionary15"
+      }
+    ],
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "船の中。"
+        ]
+      ]
+    ]
+  },
+  "read": {
+    "terms": [
+      [
+        "読む",
+        "よむ",
+        [
+          "read"
+        ]
+      ]
+    ]
+  },
+  "unavailable": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "inboard"
+        ]
+      ],
+      [
+        "船内",
+        "ふねうち",
+        [
+          "alternate"
+        ]
+      ]
+    ]
+  },
+  "nested_single_compound": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "超満員"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "overcrowded"
+        ]
+      ]
+    ]
+  },
+  "nested_single_compound_phrase": {
+    "terms": [
+      [
+        "船内",
+        "せんない",
+        [
+          "超満員"
+        ]
+      ],
+      [
+        "船内環境",
+        "せんないかんきょう",
+        [
+          "超満員"
+        ]
+      ],
+      [
+        "超満員",
+        "ちょうまんいん",
+        [
+          "overcrowded"
+        ]
+      ]
+    ]
   }
 }

@@ -153,6 +153,14 @@ def test_get_misses_across_config_partitions(tmp_path):
     assert cache.peek_compressed("v1|w640|c432|test-dicts", "kakeru") is None
 
 
+def test_stem_scored_tooltip_pixels_are_not_reused_for_selected_entry_difficulty(tmp_path):
+    cache = _cache(tmp_path)
+    cache.put("v1|w384|c260|test-dicts", "compound", 260, 260, 4000, _view())
+    current = config_signature(width=384, cap=260, dict_sig="test-dicts")
+
+    assert cache.peek_compressed(current, "compound") is None
+
+
 def test_put_is_idempotent_last_write_wins(tmp_path):
     cache = _cache(tmp_path)
     cache.put(SIG, "kakeru", 260, 260, 4000, _view(fill=1))

@@ -40,6 +40,8 @@ class EntryGroup:
     reading: str
     defs: list[Definition] = field(default_factory=list)
     card_index: int = 0
+    freqs: list[Freq] = field(default_factory=list)
+    frequency_rank: float | None = None
 
 
 @dataclass
@@ -61,6 +63,7 @@ class Entry:
     # Force a vendored font file for the big headword glyph (kanji panel → stroke-order font); None =
     # the normal coverage chain. Purely visual — set by the caller from the tooltip toggle.
     headword_font: str | None = None
+    frequency_rank: float | None = None  # blended rank of the selected dictionary entry
 
 
 def _hex(s: str) -> RGBA:

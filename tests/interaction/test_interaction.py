@@ -341,12 +341,26 @@ def test_move_off_words_does_not_hover():
     assert ui.hover == -1
 
 
+def _move_to_visible_scan_cell(ui):
+    view = ui.r.tooltip.surface_state().view
+    cell = next(
+        cell
+        for cell in view.state.windowed.scan_boxes()
+        if view.scroll <= cell.y and cell.y + cell.h < view.scroll + view.view_h
+    )
+    scale = ui.r.tooltip.scale().raster
+    return ui.move(
+        view.xy[0] + (cell.x + cell.w / 2) * scale,
+        view.xy[1] + (cell.y + cell.h / 2 - view.scroll) * scale,
+    )
+
+
 def test_move_inside_tooltip_opens_nested_scan_popup():
     r = _reader()
     ui = Driver(r)  # instant → scan_delay 0
     ui.move_to_word(_content_word(r))
     assert ui.tip_shown
-    ui.move_into_tip(0.5, 0.6)  # rest on a word INSIDE the tooltip body
+    _move_to_visible_scan_cell(ui)  # rest on a word INSIDE the tooltip body
     assert ui.nested_shown, "hovering a word inside the tooltip must open a nested scan popup"
 
 
@@ -369,7 +383,7 @@ def test_full_stress_chain_through_the_hit_test_path():
         "wheel over the tip scrolls it (hit-test-routed)"
     )
 
-    ui.move_into_tip(0.5, 0.6)  # rest on an inner word → nested scan popup
+    _move_to_visible_scan_cell(ui)  # rest on an inner word → nested scan popup
     assert ui.nested_shown, "hovering inside the body opens the nested popup"
 
     ui.wheel(1)  # scroll while the nested popup is up — no crash, session stays coherent
@@ -464,7 +478,7 @@ def test_golden_base_and_nested_render():
         tol=3.0,
     )
 
-    ui.move_into_tip(0.5, 0.6)  # open the nested scan popup
+    _move_to_visible_scan_cell(ui)  # open the nested scan popup
     assert r.graph.tooltip.hover_view().nested.shown
     assert_golden(
         _full_panel_image(r.graph.tooltip.surface_state().nest.state),
