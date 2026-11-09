@@ -40,23 +40,29 @@ def load_servers() -> dict:
     return data["servers"]
 
 
+def _transport(spec: dict, *, claude: bool = False) -> dict:
+    if spec.get("type") == "http":
+        return {"type": "http", "url": spec["url"]} if claude else {"url": spec["url"]}
+    entry = {"command": spec["command"], "args": spec.get("args", [])}
+    if spec.get("env"):
+        entry["env"] = spec["env"]
+    return entry
+
+
 def render_claude(servers: dict) -> str:
-    out: dict[str, dict] = {}
-    for name, spec in servers.items():
-        entry = {"command": spec["command"], "args": spec.get("args", [])}
-        if spec.get("env"):
-            entry["env"] = spec["env"]
-        out[name] = entry
-    return json.dumps({"mcpServers": out}, indent=2) + "\n"
+    return (
+        json.dumps(
+            {"mcpServers": {name: _transport(spec, claude=True) for name, spec in servers.items()}},
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def render_codex(servers: dict) -> str:
     out: dict[str, dict] = {}
     for name, spec in servers.items():
-        entry: dict = {"command": spec["command"], "args": spec.get("args", [])}
-        if spec.get("env"):
-            entry["env"] = spec["env"]
-        # codex approval hints -> [mcp_servers.<name>.tools.<tool>] approval_mode
+        entry = _transport(spec)
         approval = (spec.get("codex") or {}).get("approval") or {}
         if approval:
             entry["tools"] = {tool: {"approval_mode": mode} for tool, mode in approval.items()}
