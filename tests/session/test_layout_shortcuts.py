@@ -76,8 +76,11 @@ def test_layout_aliases_do_not_duplicate_the_shortcut_catalog():
 )
 def test_layout_aliases_cover_configured_modifiers_and_punctuation(make_session, key, russian):
     ipc = FakeIPC()
-    session = make_session(ipc, options=ReaderOptions(keys=KeyOptions(help_key=key)))
+    session = make_session(
+        ipc, options=ReaderOptions(keys=KeyOptions(help_key=key, sidebar_key="", analysis_key=""))
+    )
     session.graph.commands.install_input()
+    assert keybind_registry(ipc)[key] == HELP_TOGGLE_MSG
     assert keybind_registry(ipc)[russian] == HELP_TOGGLE_MSG
 
 
