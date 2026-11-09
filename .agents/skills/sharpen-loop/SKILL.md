@@ -20,10 +20,10 @@ Read `.agents/sharpen/SPEC.md` completely, then run one existing-test audit.
 3. Confirm the mapped tests are green. Edit only the selected existing test; missing behavior routes to
    Grow and production/tool changes route to `contribute`.
    If several internal tests own the same user-visible proposition, stop the bounded audit and hand off a
-   priced portable-corpus migration. Sharpen records the duplicate family; it does not polish or migrate
-   every internal owner one at a time.
-   If the portable corpus already owns the proposition, ask which distinct fault class the selected test
-   preserves. No schedule, real boundary, composition, diagnostic, or minimal production-path distinction
+   priced migration to application pytest tests. Sharpen records the duplicate family; it does not
+   polish or migrate every internal owner one at a time.
+   If application pytest tests already own the proposition, ask which distinct fault class the selected
+   test preserves. No schedule, real boundary, composition, diagnostic, or minimal production-path distinction
    means the improvement is retirement or consolidation, not a sharper internal assertion.
 4. Run focused affected tests and `sharpen_gate.py anticheat` for every assertion edit, then the relevant
    objective proof:

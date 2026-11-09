@@ -1,0 +1,2838 @@
+{
+  "extract": [
+    {
+      "id": "subtitle-artifact-policy-11",
+      "input": {
+        "codec": "ass"
+      },
+      "expected": {
+        "suffix": ".ass",
+        "args": [
+          "-c:s",
+          "copy"
+        ]
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-12",
+      "input": {
+        "codec": "ssa"
+      },
+      "expected": {
+        "suffix": ".ass",
+        "args": [
+          "-c:s",
+          "copy"
+        ]
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-13",
+      "input": {
+        "codec": "subrip"
+      },
+      "expected": {
+        "suffix": ".srt",
+        "args": [
+          "-c:s",
+          "copy"
+        ]
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-14",
+      "input": {
+        "codec": "mov_text"
+      },
+      "expected": {
+        "suffix": ".srt",
+        "args": [
+          "-c:s",
+          "srt"
+        ]
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-15",
+      "input": {
+        "codec": "webvtt"
+      },
+      "expected": {
+        "suffix": ".srt",
+        "args": [
+          "-c:s",
+          "srt"
+        ]
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-16",
+      "input": {
+        "codec": ""
+      },
+      "expected": {
+        "suffix": ".srt",
+        "args": [
+          "-c:s",
+          "srt"
+        ]
+      }
+    }
+  ],
+  "on-screen": [
+    {
+      "id": "subtitle-navigation-policy-0",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "いち",
+        "sub_start": null,
+        "time_pos": null
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-1",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "",
+        "sub_start": 1.5,
+        "time_pos": null
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-2",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "",
+        "sub_start": null,
+        "time_pos": 2.0
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-3",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "",
+        "sub_start": 4.0,
+        "time_pos": 4.0
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-4",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "   ",
+        "sub_start": null,
+        "time_pos": null
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-5",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "",
+        "sub_start": 3.0,
+        "time_pos": null
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-6",
+      "input": {
+        "cue": {
+          "start": 1.0,
+          "end": 3.0,
+          "text": "いち"
+        },
+        "text": "",
+        "sub_start": 2.999,
+        "time_pos": null
+      },
+      "expected": true
+    }
+  ],
+  "filters-can-drop": [
+    {
+      "id": "subtitle-navigation-policy-24",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": true
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-25",
+      "input": {
+        "settings": {
+          "sub-filter-regex": [
+            "^SIGN:"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-26",
+      "input": {
+        "settings": {
+          "sub-filter-jsre": [
+            "/^\\[.*\\]$/"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-27",
+      "input": {
+        "settings": {
+          "sub-filter-regex-enable": true,
+          "sub-filter-regex": [
+            "x"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-28",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": "yes"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-29",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": "YES"
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-30",
+      "input": {
+        "settings": {
+          "sub-filter-regex-enable": "yes",
+          "sub-filter-regex": [
+            "^SIGN:"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-31",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": 1
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-navigation-policy-32",
+      "input": {
+        "settings": {}
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-33",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": false,
+          "sub-filter-regex": [],
+          "sub-filter-jsre": []
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-34",
+      "input": {
+        "settings": {
+          "sub-filter-regex": null,
+          "sub-filter-jsre": null
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-35",
+      "input": {
+        "settings": {
+          "sub-filter-regex": ""
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-36",
+      "input": {
+        "settings": {
+          "sub-filter-regex-enable": false,
+          "sub-filter-regex": [
+            "^SIGN:"
+          ]
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-37",
+      "input": {
+        "settings": {
+          "sub-filter-regex-enable": "no",
+          "sub-filter-regex": [
+            "^SIGN:"
+          ]
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-38",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": "no"
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-39",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": 0
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-40",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": "maybe"
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-navigation-policy-41",
+      "input": {
+        "settings": {
+          "sub-filter-sdh": 7
+        }
+      },
+      "expected": false
+    }
+  ],
+  "fetch-first": [
+    {
+      "id": "subtitle-provider-policy-0",
+      "input": {
+        "attempts": [
+          {
+            "name": "jimaku",
+            "path": null,
+            "status": "jimaku: miss"
+          },
+          {
+            "name": "tsukihime",
+            "path": "episode.ja.ass",
+            "status": "tsukihime: added"
+          },
+          {
+            "name": "later",
+            "path": null,
+            "status": "unexpected"
+          }
+        ]
+      },
+      "expected": {
+        "calls": [
+          "jimaku",
+          "tsukihime"
+        ],
+        "path": "episode.ja.ass",
+        "status": "tsukihime: added"
+      }
+    },
+    {
+      "id": "subtitle-provider-policy-1",
+      "input": {
+        "attempts": []
+      },
+      "expected": {
+        "calls": [],
+        "path": null,
+        "status": "no Japanese subtitle providers enabled"
+      }
+    }
+  ],
+  "providers-for-language": [
+    {
+      "id": "subtitle-provider-policy-2",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "tsukihime",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "universal",
+            "languages": []
+          }
+        ],
+        "language": "jp"
+      },
+      "expected": [
+        "jimaku",
+        "tsukihime",
+        "universal"
+      ]
+    },
+    {
+      "id": "subtitle-provider-policy-3",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "tsukihime",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "universal",
+            "languages": []
+          }
+        ],
+        "language": "fr"
+      },
+      "expected": [
+        "universal"
+      ]
+    },
+    {
+      "id": "subtitle-provider-policy-4",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "german",
+            "languages": [
+              "de"
+            ]
+          }
+        ],
+        "language": "JA-jp"
+      },
+      "expected": [
+        "jimaku"
+      ]
+    },
+    {
+      "id": "subtitle-provider-policy-5",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "german",
+            "languages": [
+              "de"
+            ]
+          }
+        ],
+        "language": "de-CH"
+      },
+      "expected": [
+        "german"
+      ]
+    },
+    {
+      "id": "subtitle-provider-policy-6",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          }
+        ],
+        "language": "jp",
+        "candidates": [
+          "jimaku",
+          "ghost"
+        ]
+      },
+      "expected": [
+        "jimaku"
+      ]
+    }
+  ],
+  "enabled-providers": [
+    {
+      "id": "subtitle-provider-policy-7",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "tsukihime",
+            "languages": [
+              "jp"
+            ]
+          }
+        ],
+        "language": "jp",
+        "flags": [
+          [
+            "jimaku",
+            true
+          ],
+          [
+            "tsukihime",
+            true
+          ]
+        ]
+      },
+      "expected": [
+        "jimaku",
+        "tsukihime"
+      ]
+    },
+    {
+      "id": "subtitle-provider-policy-8",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "tsukihime",
+            "languages": [
+              "jp"
+            ]
+          }
+        ],
+        "language": "fr",
+        "flags": [
+          [
+            "jimaku",
+            true
+          ],
+          [
+            "tsukihime",
+            true
+          ]
+        ]
+      },
+      "expected": []
+    },
+    {
+      "id": "subtitle-provider-policy-9",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          },
+          {
+            "name": "tsukihime",
+            "languages": [
+              "jp"
+            ]
+          }
+        ],
+        "language": "jp",
+        "flags": [
+          [
+            "jimaku",
+            false
+          ],
+          [
+            "tsukihime",
+            true
+          ]
+        ]
+      },
+      "expected": [
+        "tsukihime"
+      ]
+    }
+  ],
+  "get-provider": [
+    {
+      "id": "subtitle-provider-policy-10",
+      "input": {
+        "providers": [],
+        "name": "jimaku"
+      },
+      "expected": false
+    }
+  ],
+  "duplicate-register": [
+    {
+      "id": "subtitle-provider-policy-11",
+      "input": {
+        "providers": [
+          {
+            "name": "jimaku",
+            "languages": [
+              "jp"
+            ]
+          }
+        ],
+        "duplicate": {
+          "name": "jimaku",
+          "languages": [
+            "fr"
+          ]
+        }
+      },
+      "expected": "ValueError"
+    }
+  ],
+  "launch-builtins": [
+    {
+      "id": "subtitle-provider-policy-12",
+      "input": {
+        "jimaku": true,
+        "tsukihime": true,
+        "language": "jp"
+      },
+      "expected": {
+        "names": [
+          "jimaku",
+          "tsukihime"
+        ],
+        "tsukihime_registered": true
+      }
+    },
+    {
+      "id": "subtitle-provider-policy-13",
+      "input": {
+        "jimaku": true,
+        "tsukihime": true,
+        "language": "fr"
+      },
+      "expected": {
+        "names": [
+          "tsukihime"
+        ],
+        "tsukihime_registered": true
+      }
+    },
+    {
+      "id": "subtitle-provider-policy-14",
+      "input": {
+        "jimaku": true,
+        "tsukihime": true,
+        "language": "de-CH"
+      },
+      "expected": {
+        "names": [
+          "tsukihime"
+        ],
+        "tsukihime_registered": true
+      }
+    }
+  ],
+  "context-default": [
+    {
+      "id": "subtitle-provider-policy-15",
+      "input": {},
+      "expected": "jp"
+    }
+  ],
+  "render-inputs": [
+    {
+      "id": "render-profile-refusals-and-geometry-0",
+      "input": {
+        "settings": {
+          "sub-scale": 1.5
+        }
+      },
+      "expected": {
+        "error": "sub-scale"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-1",
+      "input": {
+        "settings": {
+          "sub-pos": 50.0
+        }
+      },
+      "expected": {
+        "error": "sub-pos"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-2",
+      "input": {
+        "settings": {
+          "sub-ass-override": "force"
+        }
+      },
+      "expected": {
+        "error": "sub-ass-override"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-3",
+      "input": {
+        "settings": {
+          "sub-ass-scale-with-window": true
+        }
+      },
+      "expected": {
+        "error": "sub-ass-scale-with-window"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-4",
+      "input": {
+        "settings": {
+          "sub-ass-use-video-data": "aspect-only"
+        }
+      },
+      "expected": {
+        "error": "sub-ass-use-video-data"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-5",
+      "input": {
+        "settings": {
+          "sub-ass-style-overrides": [
+            "Default.FontSize=60"
+          ]
+        }
+      },
+      "expected": {
+        "error": "sub-ass-style-overrides"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-6",
+      "input": {
+        "settings": {
+          "blend-subtitles": "video"
+        }
+      },
+      "expected": {
+        "error": "blend-subtitles"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-7",
+      "input": {
+        "authored": false,
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-scale": 1.5
+        }
+      },
+      "expected": {
+        "error": "sub-scale"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-8",
+      "input": {
+        "authored": false,
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-pos": 90.0
+        }
+      },
+      "expected": {
+        "error": "sub-pos"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-9",
+      "input": {
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-ass-justify": true
+        }
+      },
+      "expected": {
+        "error": "sub-ass-justify"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-10",
+      "input": {
+        "settings": {
+          "sub-use-margins": false
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-11",
+      "input": {
+        "authored": false,
+        "settings": {
+          "sub-use-margins": false
+        }
+      },
+      "expected": {
+        "error": "sub-use-margins"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-12",
+      "input": {
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-ass-styles": "~~/styles.ass"
+        }
+      },
+      "expected": {
+        "error": "sub-ass-styles"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-13",
+      "input": {
+        "settings": {
+          "sub-ass-override": "no",
+          "sub-ass-styles": "~~/styles.ass"
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-14",
+      "input": {
+        "osd": {
+          "w": 1920,
+          "h": 1080,
+          "mt": 140,
+          "mb": 140,
+          "ml": 0,
+          "mr": 0
+        },
+        "settings": {
+          "blend-subtitles": "yes"
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          800
+        ],
+        "margins": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "box_origin": [
+          0,
+          140
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-15",
+      "input": {
+        "osd": {
+          "w": 1920,
+          "h": 1080,
+          "mt": 140,
+          "mb": 140,
+          "ml": 0,
+          "mr": 0
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ],
+        "margins": [
+          140,
+          140,
+          0,
+          0
+        ],
+        "box_origin": [
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-16",
+      "input": {
+        "osd": {
+          "w": 1920,
+          "h": 1080,
+          "mt": 140,
+          "mb": 140,
+          "ml": 0,
+          "mr": 0,
+          "par": 2.0
+        },
+        "video": {
+          "par": 1.5
+        },
+        "settings": {
+          "blend-subtitles": "yes"
+        }
+      },
+      "expected": {
+        "pixel_aspect": 1.5
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-17",
+      "input": {
+        "settings": {
+          "video-crop": "1280x720",
+          "blend-subtitles": "yes"
+        }
+      },
+      "expected": {
+        "error": "video-crop"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-18",
+      "input": {
+        "settings": {
+          "video-crop": "1280x720"
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-19",
+      "input": {
+        "settings": {
+          "video-rotate": 90,
+          "blend-subtitles": "yes"
+        }
+      },
+      "expected": {
+        "error": "video-rotate"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-20",
+      "input": {
+        "settings": {
+          "video-rotate": 90
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-21",
+      "input": {
+        "settings": {
+          "sub-scale-with-window": true,
+          "sub-scale-by-window": true
+        }
+      },
+      "expected": {
+        "scale_with_window": true,
+        "scale_by_window": true
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-22",
+      "input": {
+        "settings": {
+          "sub-scale-with-window": false,
+          "sub-scale-by-window": true
+        }
+      },
+      "expected": {
+        "scale_with_window": false,
+        "scale_by_window": true
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-23",
+      "input": {
+        "settings": {
+          "sub-scale-with-window": true,
+          "sub-scale-by-window": false
+        }
+      },
+      "expected": {
+        "scale_with_window": true,
+        "scale_by_window": false
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-24",
+      "input": {
+        "settings": {
+          "sub-scale-with-window": false,
+          "sub-scale-by-window": false
+        }
+      },
+      "expected": {
+        "scale_with_window": false,
+        "scale_by_window": false
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-25",
+      "input": {
+        "settings": {
+          "embeddedfonts": true
+        },
+        "font_option": "embeddedfonts"
+      },
+      "expected": {
+        "font_option_accepted": true
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-26",
+      "input": {
+        "settings": {
+          "sub-fonts-dir": "/fonts"
+        },
+        "font_option": "sub-fonts-dir"
+      },
+      "expected": {
+        "font_option_accepted": true
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-27",
+      "input": {
+        "settings": {
+          "sub-font-provider": "fontconfig"
+        },
+        "font_option": "sub-font-provider"
+      },
+      "expected": {
+        "font_option_accepted": true
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-28",
+      "input": {
+        "settings": {
+          "sub-font": "Symbola"
+        },
+        "font_option": "sub-font"
+      },
+      "expected": {
+        "font_option_accepted": true
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-29",
+      "input": {
+        "video": {
+          "w": 1920,
+          "h": 1080
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ],
+        "storage_size": [
+          1920,
+          1080
+        ],
+        "pixel_aspect": 1.0
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-30",
+      "input": {
+        "video": {
+          "w": 1280,
+          "h": 720
+        }
+      },
+      "expected": {
+        "frame_size": [
+          1920,
+          1080
+        ],
+        "storage_size": [
+          1280,
+          720
+        ],
+        "pixel_aspect": 1.0
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-31",
+      "input": {
+        "osd": {
+          "w": null,
+          "h": null
+        },
+        "frame_size": [
+          1280,
+          720
+        ]
+      },
+      "expected": {
+        "frame_size": [
+          1280,
+          720
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-32",
+      "input": {
+        "osd": {
+          "mt": 600,
+          "mb": 600
+        }
+      },
+      "expected": {
+        "error": "osd-margins"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-33",
+      "input": {
+        "osd": {
+          "mt": 89,
+          "mb": 89,
+          "ml": -17,
+          "mr": -18
+        }
+      },
+      "expected": {
+        "margins": [
+          89,
+          89,
+          -17,
+          -18
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-34",
+      "input": {
+        "osd": {
+          "mt": 89,
+          "mb": 89,
+          "ml": -17,
+          "mr": -18
+        },
+        "frame_size": [
+          3024,
+          1898
+        ],
+        "settings": {
+          "blend-subtitles": true
+        }
+      },
+      "expected": {
+        "frame_size": [
+          3059,
+          1720
+        ],
+        "box_origin": [
+          -17,
+          89
+        ]
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-35",
+      "input": {
+        "video": {
+          "par": -1.0
+        }
+      },
+      "expected": {
+        "error": "pixel-aspect"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-36",
+      "input": {
+        "video": {
+          "par": "$nan"
+        }
+      },
+      "expected": {
+        "error": "pixel-aspect"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-37",
+      "input": {
+        "video": {
+          "par": "$inf"
+        }
+      },
+      "expected": {
+        "error": "pixel-aspect"
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-38",
+      "input": {
+        "video": {
+          "par": 0
+        }
+      },
+      "expected": {
+        "pixel_aspect": 1.0
+      }
+    },
+    {
+      "id": "render-profile-refusals-and-geometry-39",
+      "input": {
+        "osd": {
+          "par": 0
+        },
+        "video": {
+          "par": 2.0
+        }
+      },
+      "expected": {
+        "pixel_aspect": 2.0
+      }
+    }
+  ],
+  "renderer-state": [
+    {
+      "id": "renderer-state-follows-mpv-scale-semantics-0",
+      "input": {
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-scale": 0.7,
+          "sub-pos": 95.0
+        }
+      },
+      "expected": {
+        "font_scale": 0.7,
+        "line_position": 5.0,
+        "line_spacing": 0.0,
+        "hinting": 0,
+        "selective_font_scale": true
+      }
+    },
+    {
+      "id": "renderer-state-follows-mpv-scale-semantics-1",
+      "input": {
+        "settings": {}
+      },
+      "expected": {
+        "font_scale": 1.0,
+        "line_position": 0.0,
+        "line_spacing": 0.0,
+        "hinting": 0,
+        "selective_font_scale": false
+      }
+    },
+    {
+      "id": "renderer-state-follows-mpv-scale-semantics-2",
+      "input": {
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-scale": 1.2,
+          "sub-scale-signs": false
+        }
+      },
+      "expected": {
+        "font_scale": 1.2,
+        "line_position": 0.0,
+        "line_spacing": 0.0,
+        "hinting": 0,
+        "selective_font_scale": true
+      }
+    },
+    {
+      "id": "renderer-state-follows-mpv-scale-semantics-3",
+      "input": {
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-scale": 1.2,
+          "sub-scale-signs": true
+        }
+      },
+      "expected": {
+        "font_scale": 1.2,
+        "line_position": 0.0,
+        "line_spacing": 0.0,
+        "hinting": 0,
+        "selective_font_scale": false
+      }
+    },
+    {
+      "id": "renderer-state-follows-mpv-scale-semantics-4",
+      "input": {
+        "settings": {
+          "sub-ass-override": "scale",
+          "sub-scale": 1.0,
+          "sub-scale-signs": false
+        }
+      },
+      "expected": {
+        "font_scale": 1.0,
+        "line_position": 0.0,
+        "line_spacing": 0.0,
+        "hinting": 0,
+        "selective_font_scale": false
+      }
+    }
+  ],
+  "discover": [
+    {
+      "id": "subtitle-selection-policy-0",
+      "input": {
+        "tracks": [
+          {
+            "id": 1,
+            "lang": "eng",
+            "type": "sub"
+          },
+          {
+            "id": 2,
+            "lang": null,
+            "type": "sub",
+            "selected": true
+          }
+        ],
+        "primary": "ja,jpn,jp"
+      },
+      "expected": {
+        "jp_sid": 2,
+        "en_sid": 1
+      }
+    },
+    {
+      "id": "subtitle-selection-policy-1",
+      "input": {
+        "tracks": [
+          {
+            "id": 7,
+            "lang": null,
+            "type": "sub"
+          }
+        ],
+        "primary": "ja,jpn,jp"
+      },
+      "expected": {
+        "jp_sid": 7,
+        "en_sid": null
+      }
+    }
+  ],
+  "initial": [
+    {
+      "id": "subtitle-selection-policy-2",
+      "input": {
+        "tracks": [
+          {
+            "id": 7,
+            "lang": "eng",
+            "type": "sub",
+            "selected": true
+          }
+        ],
+        "primary": "fr",
+        "secondary": "de"
+      },
+      "expected": {
+        "tracks": {
+          "jp_sid": null,
+          "en_sid": null
+        },
+        "active": null
+      }
+    }
+  ],
+  "toggle": [
+    {
+      "id": "subtitle-selection-policy-3",
+      "input": {
+        "jp_sid": 2,
+        "en_sid": 1,
+        "active_sid": 2,
+        "language": "jp"
+      },
+      "expected": {
+        "target": "en",
+        "sid": 1,
+        "available": true
+      }
+    },
+    {
+      "id": "subtitle-selection-policy-4",
+      "input": {
+        "jp_sid": 2,
+        "en_sid": 1,
+        "active_sid": 1,
+        "language": "en"
+      },
+      "expected": {
+        "target": "jp",
+        "sid": 2,
+        "available": true
+      }
+    },
+    {
+      "id": "subtitle-selection-policy-5",
+      "input": {
+        "jp_sid": 2,
+        "en_sid": 1,
+        "active_sid": null,
+        "language": "jp"
+      },
+      "expected": {
+        "target": "jp",
+        "sid": 2,
+        "available": true
+      }
+    },
+    {
+      "id": "subtitle-selection-policy-6",
+      "input": {
+        "jp_sid": 2,
+        "en_sid": 1,
+        "active_sid": null,
+        "language": "en"
+      },
+      "expected": {
+        "target": "en",
+        "sid": 1,
+        "available": true
+      }
+    },
+    {
+      "id": "subtitle-selection-policy-7",
+      "input": {
+        "jp_sid": null,
+        "en_sid": null,
+        "active_sid": null,
+        "language": "jp"
+      },
+      "expected": {
+        "target": "en",
+        "sid": null,
+        "available": false
+      }
+    }
+  ],
+  "role": [
+    {
+      "id": "subtitle-selection-policy-8",
+      "input": {
+        "sid": 2,
+        "jp_sid": 2,
+        "en_sid": 1,
+        "track_lang": "eng",
+        "sample": "hello"
+      },
+      "expected": "jp"
+    },
+    {
+      "id": "subtitle-selection-policy-9",
+      "input": {
+        "sid": 1,
+        "jp_sid": 2,
+        "en_sid": 1,
+        "track_lang": "jpn",
+        "sample": "猫"
+      },
+      "expected": "en"
+    },
+    {
+      "id": "subtitle-selection-policy-10",
+      "input": {
+        "sid": 9,
+        "jp_sid": null,
+        "en_sid": null,
+        "track_lang": "jpn",
+        "sample": "hello"
+      },
+      "expected": "jp"
+    },
+    {
+      "id": "subtitle-selection-policy-11",
+      "input": {
+        "sid": 9,
+        "jp_sid": null,
+        "en_sid": null,
+        "track_lang": "eng",
+        "sample": "猫を見る"
+      },
+      "expected": "en"
+    },
+    {
+      "id": "subtitle-selection-policy-12",
+      "input": {
+        "sid": 9,
+        "jp_sid": 6,
+        "en_sid": 8,
+        "track_lang": "fra",
+        "sample": "Bonjour",
+        "primary": "fr",
+        "secondary": "de"
+      },
+      "expected": "jp"
+    },
+    {
+      "id": "subtitle-selection-policy-13",
+      "input": {
+        "sid": 9,
+        "jp_sid": null,
+        "en_sid": null,
+        "track_lang": null,
+        "sample": "猫を見る"
+      },
+      "expected": "jp"
+    },
+    {
+      "id": "subtitle-selection-policy-14",
+      "input": {
+        "sid": 9,
+        "jp_sid": null,
+        "en_sid": null,
+        "track_lang": null,
+        "sample": "just english here"
+      },
+      "expected": "en"
+    },
+    {
+      "id": "subtitle-selection-policy-15",
+      "input": {
+        "sid": 9,
+        "jp_sid": null,
+        "en_sid": null,
+        "track_lang": null,
+        "sample": ""
+      },
+      "expected": "jp"
+    }
+  ],
+  "language-name": [
+    {
+      "id": "subtitle-selection-policy-16",
+      "input": {
+        "language": "jpn"
+      },
+      "expected": "Japanese"
+    },
+    {
+      "id": "subtitle-selection-policy-17",
+      "input": {
+        "language": "jp-JP"
+      },
+      "expected": "Japanese"
+    },
+    {
+      "id": "subtitle-selection-policy-18",
+      "input": {
+        "language": "eng"
+      },
+      "expected": "English"
+    },
+    {
+      "id": "subtitle-selection-policy-19",
+      "input": {
+        "language": "kor"
+      },
+      "expected": "kor"
+    },
+    {
+      "id": "subtitle-selection-policy-20",
+      "input": {
+        "language": null
+      },
+      "expected": "unknown language"
+    }
+  ],
+  "fetch": [
+    {
+      "id": "subtitle-selection-policy-21",
+      "input": {
+        "path_available": false,
+        "force_select": true,
+        "replace": true,
+        "language": "jp"
+      },
+      "expected": "report-failure"
+    },
+    {
+      "id": "subtitle-selection-policy-22",
+      "input": {
+        "path_available": true,
+        "force_select": true,
+        "replace": false,
+        "language": "jp"
+      },
+      "expected": "replace"
+    },
+    {
+      "id": "subtitle-selection-policy-23",
+      "input": {
+        "path_available": true,
+        "force_select": true,
+        "replace": false,
+        "language": "en"
+      },
+      "expected": "replace"
+    },
+    {
+      "id": "subtitle-selection-policy-24",
+      "input": {
+        "path_available": true,
+        "force_select": false,
+        "replace": true,
+        "language": "jp"
+      },
+      "expected": "replace"
+    },
+    {
+      "id": "subtitle-selection-policy-25",
+      "input": {
+        "path_available": true,
+        "force_select": false,
+        "replace": true,
+        "language": "en"
+      },
+      "expected": "background-add"
+    },
+    {
+      "id": "subtitle-selection-policy-26",
+      "input": {
+        "path_available": true,
+        "force_select": false,
+        "replace": false,
+        "language": "jp"
+      },
+      "expected": "background-add"
+    }
+  ],
+  "background-select": [
+    {
+      "id": "subtitle-selection-policy-27",
+      "input": {
+        "select_if_unchanged": true,
+        "had_japanese": false,
+        "current_sid": 1,
+        "initial_sid": 1,
+        "jp_sid": 3
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-28",
+      "input": {
+        "select_if_unchanged": true,
+        "had_japanese": false,
+        "current_sid": 2,
+        "initial_sid": 1,
+        "jp_sid": 3
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-selection-policy-29",
+      "input": {
+        "select_if_unchanged": true,
+        "had_japanese": true,
+        "current_sid": 1,
+        "initial_sid": 1,
+        "jp_sid": 3
+      },
+      "expected": false
+    },
+    {
+      "id": "subtitle-selection-policy-30",
+      "input": {
+        "select_if_unchanged": false,
+        "had_japanese": false,
+        "current_sid": 1,
+        "initial_sid": 1,
+        "jp_sid": 3
+      },
+      "expected": false
+    }
+  ],
+  "matches-language": [
+    {
+      "id": "subtitle-selection-policy-31",
+      "input": {
+        "tag": "ar",
+        "target": "ar"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-32",
+      "input": {
+        "tag": "cs",
+        "target": "cs"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-33",
+      "input": {
+        "tag": "da",
+        "target": "da"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-34",
+      "input": {
+        "tag": "de",
+        "target": "de"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-35",
+      "input": {
+        "tag": "el",
+        "target": "el"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-36",
+      "input": {
+        "tag": "en",
+        "target": "en"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-37",
+      "input": {
+        "tag": "es-419",
+        "target": "es"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-38",
+      "input": {
+        "tag": "es-ES",
+        "target": "es"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-39",
+      "input": {
+        "tag": "fi",
+        "target": "fi"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-40",
+      "input": {
+        "tag": "fr",
+        "target": "fr"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-41",
+      "input": {
+        "tag": "fr-FR",
+        "target": "fr"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-42",
+      "input": {
+        "tag": "he",
+        "target": "he"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-43",
+      "input": {
+        "tag": "hr",
+        "target": "hr"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-44",
+      "input": {
+        "tag": "hu",
+        "target": "hu"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-45",
+      "input": {
+        "tag": "id",
+        "target": "id"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-46",
+      "input": {
+        "tag": "it",
+        "target": "it"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-47",
+      "input": {
+        "tag": "ja",
+        "target": "ja"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-48",
+      "input": {
+        "tag": "ko",
+        "target": "ko"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-49",
+      "input": {
+        "tag": "ms",
+        "target": "ms"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-50",
+      "input": {
+        "tag": "nb",
+        "target": "nb"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-51",
+      "input": {
+        "tag": "nl",
+        "target": "nl"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-52",
+      "input": {
+        "tag": "pl",
+        "target": "pl"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-53",
+      "input": {
+        "tag": "pt",
+        "target": "pt"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-54",
+      "input": {
+        "tag": "pt-BR",
+        "target": "pt"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-55",
+      "input": {
+        "tag": "pt-PT",
+        "target": "pt"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-56",
+      "input": {
+        "tag": "ro",
+        "target": "ro"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-57",
+      "input": {
+        "tag": "ru",
+        "target": "ru"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-58",
+      "input": {
+        "tag": "sv",
+        "target": "sv"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-59",
+      "input": {
+        "tag": "th",
+        "target": "th"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-60",
+      "input": {
+        "tag": "tr",
+        "target": "tr"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-61",
+      "input": {
+        "tag": "uk",
+        "target": "uk"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-62",
+      "input": {
+        "tag": "vi",
+        "target": "vi"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-63",
+      "input": {
+        "tag": "zh-Hans",
+        "target": "zh"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-64",
+      "input": {
+        "tag": "zh-Hant",
+        "target": "zh"
+      },
+      "expected": true
+    },
+    {
+      "id": "subtitle-selection-policy-65",
+      "input": {
+        "tag": "enm",
+        "target": "en"
+      },
+      "expected": false
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "subtitle-artifact-policy-0",
+      "input": {
+        "track": {
+          "external": true,
+          "external-filename": "/subs/ep1.ass"
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "kind": "external",
+        "path": "/subs/ep1.ass"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-1",
+      "input": {
+        "track": {
+          "external": true,
+          "external-filename": "/subs/ep1.ass"
+        },
+        "media_path": null
+      },
+      "expected": {
+        "kind": "external",
+        "path": "/subs/ep1.ass"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-2",
+      "input": {
+        "track": {
+          "external": null,
+          "ff-index": 0,
+          "codec": "ass"
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "kind": "embedded",
+        "media_path": "/media/ep1.mkv",
+        "stream_index": 0,
+        "codec": "ass"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-3",
+      "input": {
+        "track": {
+          "external": null,
+          "ff-index": 3,
+          "codec": "ass"
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "kind": "embedded",
+        "media_path": "/media/ep1.mkv",
+        "stream_index": 3,
+        "codec": "ass"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-4",
+      "input": {
+        "track": {
+          "external": false,
+          "ff-index": 3
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "kind": "embedded",
+        "media_path": "/media/ep1.mkv",
+        "stream_index": 3,
+        "codec": ""
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-5",
+      "input": {
+        "track": null,
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "unavailable": "no-track-selected"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-6",
+      "input": {
+        "track": {
+          "external": true,
+          "external-filename": null
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "unavailable": "external-path-missing"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-7",
+      "input": {
+        "track": {
+          "external": true
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "unavailable": "external-path-missing"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-8",
+      "input": {
+        "track": {
+          "external": false
+        },
+        "media_path": "/media/ep1.mkv"
+      },
+      "expected": {
+        "unavailable": "embedded-stream-unidentified"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-9",
+      "input": {
+        "track": {
+          "external": false,
+          "ff-index": 3
+        },
+        "media_path": null
+      },
+      "expected": {
+        "unavailable": "media-path-missing"
+      }
+    },
+    {
+      "id": "subtitle-artifact-policy-10",
+      "input": {
+        "track": {
+          "external": false,
+          "ff-index": 3
+        },
+        "media_path": ""
+      },
+      "expected": {
+        "unavailable": "media-path-missing"
+      }
+    }
+  ],
+  "navigation": [
+    {
+      "id": "subtitle-navigation-policy-7",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": -1,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": -1
+      },
+      "expected": {
+        "start": 1,
+        "text": "前"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-8",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": -1,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 1
+      },
+      "expected": {
+        "start": 1,
+        "text": "前"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-9",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": -1,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 2
+      },
+      "expected": {
+        "start": 1,
+        "text": "前"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-10",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 0,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": -1
+      },
+      "expected": {
+        "start": 5,
+        "text": "上"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-11",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 0,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 1
+      },
+      "expected": {
+        "start": 5,
+        "text": "上"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-12",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 0,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 2
+      },
+      "expected": {
+        "start": 5,
+        "text": "上"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-13",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 1,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": -1
+      },
+      "expected": {
+        "start": 9,
+        "text": "次"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-14",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 1,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 1
+      },
+      "expected": {
+        "start": 9,
+        "text": "次"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-15",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 1,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 2
+      },
+      "expected": {
+        "start": 9,
+        "text": "次"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-16",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 2,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": -1
+      },
+      "expected": {
+        "start": 13,
+        "text": "後"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-17",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 2,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 1
+      },
+      "expected": {
+        "start": 13,
+        "text": "後"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-18",
+      "input": {
+        "cues": [
+          {
+            "start": 1,
+            "end": 3,
+            "text": "前"
+          },
+          {
+            "start": 5,
+            "end": 7,
+            "text": "上"
+          },
+          {
+            "start": 5,
+            "end": 8,
+            "text": "下"
+          },
+          {
+            "start": 9,
+            "end": 11,
+            "text": "次"
+          },
+          {
+            "start": 13,
+            "end": 15,
+            "text": "後"
+          }
+        ],
+        "delta": 2,
+        "text": "上\n下",
+        "sub_start": 5,
+        "time_pos": 6,
+        "nav_idx": 2
+      },
+      "expected": {
+        "start": 13,
+        "text": "後"
+      }
+    },
+    {
+      "id": "subtitle-navigation-policy-19",
+      "input": {
+        "cues": [],
+        "delta": 1,
+        "text": "いち",
+        "sub_start": 1.0,
+        "time_pos": 2.0,
+        "nav_idx": -1
+      },
+      "expected": null
+    },
+    {
+      "id": "subtitle-navigation-policy-20",
+      "input": {
+        "cues": [
+          {
+            "start": 1.0,
+            "end": 3.0,
+            "text": "いち"
+          },
+          {
+            "start": 5.0,
+            "end": 7.0,
+            "text": "に"
+          },
+          {
+            "start": 9.0,
+            "end": 11.0,
+            "text": "さん"
+          }
+        ],
+        "delta": 1,
+        "text": "どれでもない",
+        "sub_start": null,
+        "time_pos": null,
+        "nav_idx": -1
+      },
+      "expected": null
+    },
+    {
+      "id": "subtitle-navigation-policy-21",
+      "input": {
+        "cues": [
+          {
+            "start": 1.0,
+            "end": 3.0,
+            "text": "いち"
+          },
+          {
+            "start": 5.0,
+            "end": 7.0,
+            "text": "に"
+          },
+          {
+            "start": 9.0,
+            "end": 11.0,
+            "text": "さん"
+          }
+        ],
+        "delta": 1,
+        "text": "さん",
+        "sub_start": 9.0,
+        "time_pos": 10.0,
+        "nav_idx": -1
+      },
+      "expected": null
+    },
+    {
+      "id": "subtitle-navigation-policy-22",
+      "input": {
+        "cues": [
+          {
+            "start": 1.0,
+            "end": 3.0,
+            "text": "いち"
+          },
+          {
+            "start": 5.0,
+            "end": 7.0,
+            "text": "に"
+          },
+          {
+            "start": 9.0,
+            "end": 11.0,
+            "text": "さん"
+          }
+        ],
+        "delta": -1,
+        "text": "いち",
+        "sub_start": 1.0,
+        "time_pos": 2.0,
+        "nav_idx": -1
+      },
+      "expected": null
+    },
+    {
+      "id": "subtitle-navigation-policy-23",
+      "input": {
+        "cues": [
+          {
+            "start": 1.0,
+            "end": 3.0,
+            "text": "いち"
+          },
+          {
+            "start": 5.0,
+            "end": 7.0,
+            "text": "に"
+          },
+          {
+            "start": 9.0,
+            "end": 11.0,
+            "text": "さん"
+          }
+        ],
+        "delta": 1,
+        "text": "に",
+        "sub_start": 1.0,
+        "time_pos": 2.0,
+        "nav_idx": 1
+      },
+      "expected": {
+        "start": 9.0,
+        "text": "さん"
+      }
+    }
+  ],
+  "render_defaults": {
+    "sub-ass-override": "no",
+    "sub-ass-scale-with-window": false,
+    "sub-scale": 1.0,
+    "sub-pos": 100.0,
+    "sub-use-margins": true,
+    "sub-ass-force-margins": false,
+    "sub-ass-video-aspect-override": null,
+    "sub-ass-use-video-data": "all",
+    "sub-ass-style-overrides": null,
+    "sub-scale-with-window": true,
+    "sub-scale-by-window": true,
+    "blend-subtitles": false,
+    "sub-filter-sdh": false,
+    "video-crop": "",
+    "video-rotate": 0,
+    "sub-font-provider": "auto",
+    "embeddedfonts": false,
+    "sub-fonts-dir": null,
+    "sub-shaper": "complex",
+    "sub-ass-justify": false,
+    "sub-line-spacing": 0.0,
+    "sub-hinting": "none",
+    "sub-scale-signs": false
+  }
+}

@@ -187,21 +187,19 @@ when you touch them, never in a big-bang sweep. Tiers run via `poe test` (the fa
 assert); their exact flags and marker exclusions live in `[tool.poe.tasks]` (SSOT). Adequacy beyond the
 unit suite is its own contract: see **Mutation auditing** and **Fuzzing & symbolic checks** below.
 
-Permanent tests are compatibility assets. User-visible multi-component behavior belongs in the portable
-scenario corpus under `tests/contracts/corpus/`; public package laws, real external boundaries,
-deterministic schedule controls, and composition-totality checks remain at their stable seams. A test of a reducer, controller,
-helper, or private state is temporary scaffolding unless it names the invariant owner and its retirement
-condition. The `write-test` skill owns the classification procedure.
-
-Retention is a revisitable hypothesis, not proof that a test is necessary. Two tests may assert the same
-outcome only when they preserve different fault classes: for example a portable scenario plus a stale-work
-schedule or real boundary. An abstraction does not earn one test per reducer/controller instance. When a
-portable scenario takes ownership, retire superseded internal examples and keep the smallest explicit
-wiring net. A clean audit means every survivor has a defensible role; it never means the suite is minimal.
+Permanent tests are compatibility assets. Multi-component application behavior uses ordinary pytest
+through production input and observable output. Public package laws, external boundaries, deterministic
+schedule controls and composition checks stay at their stable seams. Keep two tests for the same outcome
+only when they detect different fault classes; retire superseded implementation examples.
 
 The rules below are the *invariants*; the step-by-step procedure for authoring one test — decision tree,
 recipes against the real fakes, when-not-to-test — is the **write-test skill** (`.agents/skills/write-test/`).
 Consult it when adding or rewriting a test.
+
+- **Application behavior uses ordinary pytest.** Put setup, actions, waits, and assertions in Python
+  beside the owning feature. JSON/JSONL is for datasets and expected-output fixtures, never executable
+  test instructions or a contract protocol. Reuse existing input helpers and assert emitted output;
+  do not add an interpreter or framework for hypothetical implementations.
 
 - **Test the seam, not the shell.** Pure core (`sub_index`, `tokenize`, `scoring`, `render.flow`,
   `anki.build_note`, deinflect behind the chokepoint) gets fast default-tier tests against constructed
@@ -253,7 +251,7 @@ Consult it when adding or rewriting a test.
   tests. Match the existing descriptive style (`test_doctor_warns_when_subminer_running`), not a rigid
   template.
 - **Duplicate outcome needs a distinct failure mode.** Before keeping a unit/reducer assertion beside an
-  integration or portable scenario, state which fault only that test can catch. If the answer is merely
+  application behavior test, state which fault only that test can catch. If the answer is merely
   localization, delete or keep it as temporary scaffolding with a retirement condition.
 - **Assertion ladder.** Plain `assert` by default → `dirty-equals` (`IsPartialDict`, `IsStr(regex=…)`,
   `Contains`) when a dict/IPC/Anki-note payload has keys you don't care about or volatile

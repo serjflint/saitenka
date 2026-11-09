@@ -74,6 +74,85 @@ def _capture_render(monkeypatch):
     return calls
 
 
+def test_toggle_opens_centered_on_active_cue_without_pausing(monkeypatch):
+    reader, ipc = _reader(active=12, props={"sub-start": 120.2, "time-pos": 120.3})
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
+        [
+            Cue(i * 10.0, i * 10.0 + 0.8, "same line" if i in {3, 12} else f"cue {i}")
+            for i in range(20)
+        ]
+    )
+    reader.graph.playback.install_seed({"sub-text": "same line"})
+    calls = _capture_render(monkeypatch)
+
+    (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
+
+    assert reader.graph.sidebar.state.open is True
+    assert [row.value for row in calls[-1][0]] == list(range(8, 17))
+    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+
+def test_active_row_uses_timing_to_disambiguate_repeated_text():
+    reader, _ipc = _reader(props={"sub-start": 5.2, "time-pos": 5.3})
+    reader.graph.track_commands.navigation.current.sub_index = CueIndex(
+        [Cue(1.0, 2.0, "same line"), Cue(5.0, 6.0, "same line")]
+    )
+    reader.graph.playback.install_seed({"sub-text": "same line"})
+
+    assert (
+        sidebar._active_index(
+            reader.graph.track_commands.navigation.current.sub_index,
+            reader.graph.playback.cue.text,
+            sub_start=reader.graph.playback.query("sub-start"),
+            time_pos=reader.graph.playback.query("time-pos"),
+            preferred=reader.graph.track_commands.navigation.current.nav_idx,
+        )
+        == 1
+    )
+
+
+def test_manual_scroll_holds_then_returns_to_active_cue(monkeypatch):
+    """The hold ends on its own deadline, and that deadline re-runs the follow itself. Waiting for
+    the next `update` would leave the sidebar off-target for as long as the cue happened to last."""
+    reader, ipc = _reader(active=10, props={"mouse-pos": {"x": 1000, "y": 100}})
+    calls = _capture_render(monkeypatch)
+    (sidebar.hide if reader.graph.sidebar.state.open else sidebar.show)(reader.graph.sidebar.view())
+    reader.graph.sidebar.panel.rect = (900, 50, 360, 600)
+
+    assert reader.graph.sidebar.scroll(reader.graph.interaction.wheel_step(), -3) is True
+    held_scroll = reader.graph.sidebar.state.scroll
+    assert held_scroll == 0
+    reader.graph.playback.install_seed({"sub-text": "cue 18"})
+    sidebar.follow(reader.graph.sidebar.view())
+    assert reader.graph.sidebar.state.scroll == held_scroll
+
+    before_expiry = len(calls)
+    assert ipc.fire_runtime_timer("lifecycle:sidebar-manual-hold")
+
+    assert reader.graph.sidebar.state.scroll == 14
+    assert len(calls) == before_expiry + 1
+
+
+@pytest.mark.parametrize("delay", [0, -2, 2])
+def test_clicking_cue_seeks_without_changing_pause_state(monkeypatch, delay):
+    reader, ipc = _reader(active=3, props={"sub-delay": delay})
+    _capture_render(monkeypatch)
+    reader.graph.sidebar.store.dispatch(
+        events.SidebarShown(
+            reader.graph.sidebar.view().active,
+            reader.graph.sidebar.view().capacity,
+        )
+    )
+    reader.graph.sidebar.panel.rect = (100, 100, 400, 500)
+    reader.graph.sidebar.panel.hits = (SidebarHitBox("seek", 7, 0, 0, 200, 40),)
+
+    assert reader.graph.sidebar.on_click(reader.graph.interaction.click_target(), 110, 110) is True
+    assert [
+        command[2] for command in ipc.commands if command[:2] == ("set_property", "time-pos")
+    ] == [7.01 + delay]
+    assert not any(command[:2] == ("set_property", "pause") for command in ipc.commands)
+
+
 @pytest.mark.parametrize(
     ("kind", "command", "active"),
     [

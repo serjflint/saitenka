@@ -1,0 +1,433 @@
+{
+  "hit-testing": [
+    {
+      "id": "tooltip-token-hit-testing-0",
+      "input": {
+        "boxes": [
+          [
+            0,
+            10,
+            20,
+            30,
+            10
+          ],
+          [
+            1,
+            40,
+            20,
+            30,
+            10
+          ]
+        ],
+        "point": [
+          55,
+          25
+        ],
+        "origin": [
+          0,
+          0
+        ],
+        "skippable": []
+      },
+      "expected": 1
+    },
+    {
+      "id": "tooltip-token-hit-testing-1",
+      "input": {
+        "boxes": [
+          [
+            0,
+            10,
+            20,
+            30,
+            10
+          ],
+          [
+            1,
+            40,
+            20,
+            30,
+            10
+          ]
+        ],
+        "point": [
+          95,
+          625
+        ],
+        "origin": [
+          40,
+          600
+        ],
+        "skippable": []
+      },
+      "expected": 1
+    },
+    {
+      "id": "tooltip-token-hit-testing-2",
+      "input": {
+        "boxes": [
+          [
+            0,
+            10,
+            20,
+            30,
+            10
+          ],
+          [
+            1,
+            40,
+            20,
+            30,
+            10
+          ]
+        ],
+        "point": [
+          25,
+          25
+        ],
+        "origin": [
+          0,
+          0
+        ],
+        "skippable": [
+          0
+        ]
+      },
+      "expected": -1
+    }
+  ],
+  "scale": [
+    {
+      "id": "tooltip-scale-and-placement-0",
+      "input": {
+        "osd_h": 1080,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 1.0,
+        "raster": 1.0,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-1",
+      "input": {
+        "osd_h": 2160,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 2.0,
+        "raster": 2.0,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-2",
+      "input": {
+        "osd_h": 1080,
+        "override": 1.5,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 1.5,
+        "raster": 1.5,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-3",
+      "input": {
+        "osd_h": 2160,
+        "override": 1.5,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 1.5,
+        "raster": 1.5,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-4",
+      "input": {
+        "osd_h": 2161,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 2.0009259259259258,
+        "raster": 2.0,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-5",
+      "input": {
+        "osd_h": 2159,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 1.999074074074074,
+        "raster": 2.0,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-6",
+      "input": {
+        "osd_h": 1621,
+        "override": 0.0,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 1.500925925925926,
+        "raster": 1.5,
+        "cap": 432
+      }
+    },
+    {
+      "id": "tooltip-scale-and-placement-7",
+      "input": {
+        "osd_h": 1080,
+        "override": 1.53,
+        "max_frac": 0.4
+      },
+      "expected": {
+        "display": 1.53,
+        "raster": 1.55,
+        "cap": 432
+      }
+    }
+  ],
+  "cap": [
+    {
+      "id": "tooltip-scale-and-placement-8",
+      "input": {
+        "fraction": 0.9
+      },
+      "expected": 972
+    },
+    {
+      "id": "tooltip-scale-and-placement-9",
+      "input": {
+        "fraction": 0.5
+      },
+      "expected": 540
+    },
+    {
+      "id": "tooltip-scale-and-placement-10",
+      "input": {
+        "fraction": 1.0
+      },
+      "expected": 972
+    }
+  ],
+  "nested-height": [
+    {
+      "id": "tooltip-scale-and-placement-11",
+      "input": {
+        "full_h": 800,
+        "word_y": 246,
+        "osd_h": 1080,
+        "max_frac": 1.0
+      },
+      "expected": 180
+    },
+    {
+      "id": "tooltip-scale-and-placement-12",
+      "input": {
+        "full_h": 800,
+        "word_y": 205,
+        "osd_h": 1080,
+        "max_frac": 1.0
+      },
+      "expected": 800
+    },
+    {
+      "id": "tooltip-scale-and-placement-13",
+      "input": {
+        "full_h": 10000,
+        "word_y": 10000,
+        "osd_h": 1080,
+        "max_frac": 0.5
+      },
+      "expected": 540
+    }
+  ],
+  "place": [
+    {
+      "id": "tooltip-scale-and-placement-14",
+      "input": {
+        "width": 300,
+        "word_x": 100,
+        "word_y": 600,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        100,
+        388
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-15",
+      "input": {
+        "width": 300,
+        "word_x": 100,
+        "word_y": 40,
+        "word_h": 40,
+        "height": 400,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        100,
+        92
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-16",
+      "input": {
+        "width": 300,
+        "word_x": 0,
+        "word_y": 0,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        54,
+        54
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-17",
+      "input": {
+        "width": 300,
+        "word_x": 1919,
+        "word_y": 1079,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        1566,
+        826
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-18",
+      "input": {
+        "width": 300,
+        "word_x": 0,
+        "word_y": 1079,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        54,
+        826
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-19",
+      "input": {
+        "width": 300,
+        "word_x": 1919,
+        "word_y": 0,
+        "word_h": 40,
+        "height": 200,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        1566,
+        54
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-20",
+      "input": {
+        "width": 300,
+        "word_x": 900,
+        "word_y": 900,
+        "word_h": 40,
+        "height": 300,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        900,
+        588
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-21",
+      "input": {
+        "width": 300,
+        "word_x": 900,
+        "word_y": 900,
+        "word_h": 40,
+        "height": 300,
+        "scale": 2.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        900,
+        288
+      ]
+    },
+    {
+      "id": "tooltip-scale-and-placement-22",
+      "input": {
+        "width": 300,
+        "word_x": 900,
+        "word_y": 560,
+        "word_h": 40,
+        "height": 520,
+        "scale": 1.0,
+        "osd": [
+          1920,
+          1080
+        ]
+      },
+      "expected": [
+        900,
+        54
+      ]
+    }
+  ]
+}
