@@ -94,18 +94,24 @@ def test_phrase_terms_orders_longest_first_when_nested_terms_exist():
     assert got == (["数ある程", "数ある"], 0, 3)
 
 
-def test_phrase_terms_folds_in_a_leading_honorific_prefix():
+@pytest.mark.parametrize(("prefix", "word"), [("大", "活躍"), ("お", "休み"), ("ご", "協力")])
+def test_phrase_terms_never_reaches_back_over_a_prefix(prefix, word):
     from saitenka_tokenize.japanese import phrase_terms
 
-    # お休み → お(接頭辞, 0-1) + 休み(1-3). Hovering 休み must still find お休み (the tiny お is behind the
-    # cursor, so a forward-only scan would miss it) — the span reaches back over the prefix.
-    toks = [_at("お", 0, "接頭辞"), _at("休み", 1)]
-    assert phrase_terms(toks, 1, lambda s: s == "お休み") == (["お休み"], 0, 2)
-    # hovering the prefix お itself finds it forward, too
-    assert phrase_terms(toks, 0, lambda s: s == "お休み") == (["お休み"], 0, 2)
-    # only a real 接頭辞 folds in — an ordinary preceding noun does not extend backward
-    plain = [_at("本", 0), _at("休み", 1)]
-    assert phrase_terms(plain, 1, lambda s: s == "本休み") is None
+    toks = [_at(prefix, 0, "接頭辞"), _at(word, len(prefix))]
+    assert phrase_terms(toks, 1, lambda surface: surface == prefix + word) is None
+
+
+@pytest.mark.parametrize(("prefix", "word"), [("大", "活躍"), ("お", "休み"), ("ご", "協力")])
+def test_hovering_the_prefix_still_finds_the_whole_phrase(prefix, word):
+    from saitenka_tokenize.japanese import phrase_terms
+
+    toks = [_at(prefix, 0, "接頭辞"), _at(word, len(prefix))]
+    assert phrase_terms(toks, 0, lambda surface: surface == prefix + word) == (
+        [prefix + word],
+        0,
+        2,
+    )
 
 
 def test_phrase_terms_anchors_at_cursor_and_returns_none_off_a_phrase():

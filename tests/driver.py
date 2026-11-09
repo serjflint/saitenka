@@ -141,3 +141,84 @@ class Driver:
             for oid in (OverlayId.TIP, OverlayId.NESTED)
             if (frame := overlay_frame(self.ipc, oid)) is not None
         ]
+
+    def _popup(self):
+        tip = self.r.tooltip.surface_state()
+        return tip.nest if tip.nest.rect is not None else tip.view
+
+    def scan_text(self, text):
+        popup = self._popup()
+        cell = next(
+            cell
+            for cell in popup.state.windowed.scan_boxes()
+            if cell.text.startswith(text)
+            and popup.scroll <= cell.y
+            and cell.y + cell.h <= popup.scroll + popup.view_h
+        )
+        scale = self.r.tooltip.scale().raster
+        return self.move(
+            popup.xy[0] + (cell.x + cell.w / 2) * scale,
+            popup.xy[1] + (cell.y + cell.h / 2 - popup.scroll) * scale,
+        )
+
+    def add_entry(self, entry=0):
+        for _ in range(100):
+            popup = self._popup()
+            links = popup.state.windowed.link_boxes()
+            target = next(
+                (
+                    link
+                    for link in links
+                    if link.query == f"mine:{entry}"
+                    and popup.scroll <= link.y
+                    and link.y + link.h <= popup.scroll + popup.view_h
+                ),
+                None,
+            )
+            if target is not None:
+                scale = self.r.tooltip.scale().raster
+                self.move(
+                    popup.xy[0] + (target.x + target.w / 2) * scale,
+                    popup.xy[1] + (target.y + target.h / 2 - popup.scroll) * scale,
+                )
+                return self.press("MBTN_LEFT")
+            if entry == 0 and not any(link.query.startswith("mine:") for link in links):
+                from saitenka.panel import header_add_rect
+
+                x, y, width, height = header_add_rect(
+                    self.r.tooltip.scale().width, speak_button=False
+                )
+                scale = self.r.tooltip.scale().raster
+                self.move(
+                    popup.xy[0] + (x + width / 2) * scale,
+                    popup.xy[1] + (y + height / 2 - popup.scroll) * scale,
+                )
+                return self.press("MBTN_LEFT")
+            self.press("DOWN")
+        raise AssertionError("dictionary entry has no reachable add button")
+
+    def read_popup(self):
+        images = [self.dictionary_images[-1]]
+        for _ in range(100):
+            self.press("DOWN")
+            image = self.dictionary_images[-1]
+            if image.tobytes() == images[-1].tobytes():
+                return images
+            images.append(image)
+        raise AssertionError("popup never reached its end")
+
+    def click_link(self, query):
+        popup = self._popup()
+        link = next(
+            link
+            for link in popup.state.windowed.link_boxes()
+            if link.query == query
+            and popup.scroll <= link.y
+            and link.y + link.h <= popup.scroll + popup.view_h
+        )
+        scale = self.r.tooltip.scale().raster
+        self.move(
+            popup.xy[0] + (link.x + link.w / 2) * scale,
+            popup.xy[1] + (link.y + link.h / 2 - popup.scroll) * scale,
+        )
+        return self.press("MBTN_LEFT")

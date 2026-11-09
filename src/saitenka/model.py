@@ -43,7 +43,7 @@ class Theme:
     scale: float = 1.0
     # Reference-size structural paddings (at scale 1.0); the scaled values are the properties below.
     _MARGIN: ClassVar[int] = 16
-    _GAP: ClassVar[int] = 7
+    _GAP: ClassVar[int] = 4
     _BODY_INDENT: ClassVar[int] = 20
 
     def px(self, v: float) -> int:

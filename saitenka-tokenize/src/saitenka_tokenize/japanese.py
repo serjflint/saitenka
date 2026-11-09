@@ -212,10 +212,6 @@ def inflected_in(tokens: list[Token], index: int) -> str:
 
 
 _MAX_MERGE_SPAN = 4  # forward longest-match window; unidic over-splits compounds/set phrases by 2-3
-_PREFIX_POS = {
-    "接頭辞",
-    "接頭詞",
-}  # honorific/attached prefix (お・ご) — fold into the word it precedes
 
 
 def _scan_from(
@@ -240,23 +236,12 @@ def _scan_from(
 def phrase_terms(
     tokens: list[Token], index: int, has_term: Callable[[str], bool]
 ) -> tuple[list[str], int, int] | None:
-    """Multi-token dictionary terms covering ``tokens[index]``, longest first. unidic over-splits set
-    phrases and compounds (数+ある → 数ある) and detaches honorific prefixes (お+休み → お休み); before a
-    tooltip, probe whether the hovered token plus its neighbours concatenate to terms the dictionaries
-    actually have, so the tooltip can stack them above the bare word — Yomitan-style longest-match-first.
-    The scan runs forward from the hovered token, and also from an immediately-preceding prefix (お/ご) so
-    hovering the content word 休み — not the tiny 接頭辞 お — still finds お休み. Returns
-    ``(terms, start, end)`` (``terms`` longest-first, ``[start, end)`` the token span of the longest) or
-    ``None`` when no multi-token term covers the hovered word.
+    """Dictionary phrases starting at the hovered token, longest first.
 
-    ``has_term`` is the dict-set membership seam, kept a callable so this stays dict-free and the whole
-    search strategy is swappable (a future char-level line scanner drops in here). These surfaces are
-    fed to :meth:`DictionarySet.entry_for` as extra lookup terms; the dictionary supplies each reading."""
-    starts = [index]
-    prev = tokens[index - 1] if index > 0 else None
-    if prev is not None and prev.pos in _PREFIX_POS and prev.end == tokens[index].start:
-        starts.append(index - 1)
-    hits = [h for s in starts for h in _scan_from(tokens, s, index, has_term)]
+    Only scan forward: hovering 活躍 must not include the preceding 大. Hover the prefix itself
+    to find 大活躍. Returns ``(terms, start, end)`` for the longest matching token span.
+    """
+    hits = _scan_from(tokens, index, index, has_term)
     if not hits:
         return None
     hits.sort(key=lambda h: -h[0])  # longest (most tokens) first

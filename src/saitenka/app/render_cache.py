@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 # layout, the compositor's pixel output) — an old row then can't match a new config_sig, so a format
 # change invalidates the whole cache instead of serving stale pixels. Theme is folded in here rather
 # than hashed per-panel because it is a process-wide constant today (the default theme).
-_FORMAT_VERSION = 1
+_FORMAT_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS heads (

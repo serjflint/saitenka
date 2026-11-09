@@ -32,6 +32,7 @@ from saitenka.app.features.tooltip.popups import (
     hovered_meta,
 )
 from saitenka.app.features.tooltip.tooltip_panel import (
+    PanelKey,
     PanelPorts,
     compose_kind,
     decorate_and_upload,
@@ -604,20 +605,26 @@ def _click_nested(
     if nest.rect is None or not in_rect(nest.rect, x, y):
         return False
     chrome = chrome_for(nest, scale=ports.scale, style=panel.style)
-    if hit_header_add(chrome, x, y) and nest.token is not None:
-        click.mine_token(nest.token)  # ⊕ → mine the *inner* (scanned) word
+    lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=True)
+    terms = nest.key.phrase_terms if isinstance(nest.key, PanelKey) else ()
+    if (
+        hit_header_add(chrome, x, y)
+        and nest.token is not None
+        and not (lb and lb.query.startswith("mine:"))
+    ):
+        dictionaries = panel.style.dict_set
+        cards = dictionaries.cards_for(nest.token, extra_terms=terms) if dictionaries else []
+        click.mine_token(nest.token, card=cards[0] if cards else None)
     elif hit_header_speaker(chrome, x, y) and nest.state:
         speak(nest.state.reading)  # 🔊 → read the inner word aloud
-    else:
-        lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=True)
-        if lb is not None and not _mine_link(
-            panel.style.dict_set,
-            hovered_meta(ports.word_store).terms,
-            click.mine_token,
-            lb,
-            nest.token,
-        ):
-            nested_popup.open_link(ports, panel, lb, nest.xy, nest.scroll)  # cross-ref → navigate
+    elif lb is not None and not _mine_link(
+        panel.style.dict_set,
+        terms,
+        click.mine_token,
+        lb,
+        nest.token,
+    ):
+        nested_popup.open_link(ports, panel, lb, nest.xy, nest.scroll)  # cross-ref → navigate
     return True
 
 
@@ -635,13 +642,13 @@ def _click_tip(
     chrome = chrome_for(
         ports.tip.view, scale=ports.scale, style=panel.style
     )  # one snapshot: both buttons, same geometry
-    if hit_header_add(chrome, x, y):
+    lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=False)
+    if hit_header_add(chrome, x, y) and not (lb and lb.query.startswith("mine:")):
         click.mine_current()  # ⊕ → mine the hovered word into Anki
         return True
     if hit_header_speaker(chrome, x, y):
         click.speak_hovered()  # 🔊 → hear the word (TTS)
         return True
-    lb = link_hit_at(ports.tip, ports.scale.raster, x, y, nested=False)
     if lb is not None:
         hovered = inputs.hover()
         tok = inputs.tokens[hovered] if 0 <= hovered < len(inputs.tokens) else None
