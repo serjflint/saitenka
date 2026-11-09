@@ -105,6 +105,7 @@ class ScanBox:
     y: int
     w: int
     h: int
+    subtitle: bool = False
 
 
 @dataclass(frozen=True, slots=True)

@@ -93,3 +93,51 @@ class Driver:
     @property
     def nested_shown(self) -> bool:
         return self.r.tooltip.surface_state().nest.state is not None
+
+    def subtitle(self, text):
+        self.ipc.set_prop("sub-text", text)
+        self.session.pump()
+        return self
+
+    def press(self, key):
+        from util import press
+
+        press(self.session, self.ipc, key)
+        return self
+
+    def hover_character(self, offset):
+        cue = self.r.subtitle_presentation.cue.current
+        index = next(i for i, token in enumerate(cue.tokens) if token.start <= offset < token.end)
+        box = next(box for box in cue.boxes if box.index == index)
+        local = offset - cue.tokens[index].start
+        char = next((char for char in box.characters if char.offset == local), None)
+        rect = char.bounds if char is not None else box
+        width, height = (rect.width, rect.height) if char is not None else (rect.w, rect.h)
+        return self.move(cue.origin[0] + rect.x + width / 2, cue.origin[1] + rect.y + height / 2)
+
+    def finish_hover_delay(self):
+        for timer in ("lifecycle:nested-hide", "lifecycle:tooltip-hide"):
+            self.ipc.fire_runtime_timer(timer)
+        self.session.pump()
+        return self
+
+    def resize(self, width, height):
+        self.ipc.set_prop("osd-dimensions", {"w": width, "h": height})
+        self.session.pump()
+        return self
+
+    @property
+    def dictionary_images(self):
+        return [frame[0] for frame in self.dictionary_frames]
+
+    @property
+    def dictionary_frames(self):
+        from util import overlay_frame
+
+        from saitenka.app.overlay_ids import OverlayId
+
+        return [
+            frame
+            for oid in (OverlayId.TIP, OverlayId.NESTED)
+            if (frame := overlay_frame(self.ipc, oid)) is not None
+        ]

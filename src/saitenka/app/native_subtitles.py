@@ -30,6 +30,7 @@ from saitenka_subtitles import (
     whole_cue,
 )
 from saitenka_subtitles.ass_geometry import active_ass_text
+from saitenka_subtitles.character_scan import prepare_character_map
 
 from saitenka import otel_metrics
 from saitenka.app import subtitle_fonts
@@ -1667,6 +1668,9 @@ class NativeSubtitleGeometry:
             coloring=self.coloring,
             whole_cue=whole,
             osd_font_setup=fonts.osd_setup,
+            character_map=prepare_character_map(
+                source, track_id, active_rows=cue.active_rows, text=cue.text, tokens=annotations
+            ),
         )
 
     def _render_inputs(self, prop: Callable[[str], Any], osd: tuple[int, int]) -> _RenderInputs:
@@ -2312,6 +2316,19 @@ class NativeSubtitleGeometry:
                 item.bounds.width,
                 item.bounds.height,
                 item.event_id,
+                characters=tuple(
+                    replace(
+                        char,
+                        bounds=replace(
+                            char.bounds, x=char.bounds.x + origin[0], y=char.bounds.y + origin[1]
+                        ),
+                        regions=tuple(
+                            replace(rect, x=rect.x + origin[0], y=rect.y + origin[1])
+                            for rect in char.regions
+                        ),
+                    )
+                    for char in item.characters
+                ),
             )
             for item in snapshot.tokens
         ]

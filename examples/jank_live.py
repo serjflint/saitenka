@@ -128,11 +128,13 @@ def _why_stuck(tooltip) -> str:
 def _scroll_four(tooltip, pump) -> None:
     from saitenka.app.session import surfaces
 
-    before = tooltip.surface_state().view.scroll
+    tip = tooltip.surface_state()
+    view = tip.nest if tip.view.rect is None and tip.nest.rect is not None else tip.view
+    before = view.scroll
     for _ in range(4):
         tooltip.scroll_tip(surfaces.tip_wheel_pixels(tooltip.scale().ref_h, 1))
         pump()
-    if tooltip.surface_state().view.scroll == before:
+    if view.scroll == before:
         raise RuntimeError(
             f"live scroll workload did not advance the tooltip viewport ({_why_stuck(tooltip)})"
         )

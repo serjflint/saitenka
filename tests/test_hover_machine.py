@@ -10,10 +10,9 @@ cannot be armed, which on a real SessionController means no timer service.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
+from saitenka.model import ScanBox
 from saitenka.runtime.hover import (
     Arm,
     Cancel,
@@ -39,7 +38,7 @@ DELAYS = HoverDelays(scan=0.2, hide=0.4, switch=0.3)
 
 def cell(text: str):
     """A scan cell — the machine reads only its ``text``."""
-    return SimpleNamespace(text=text, x=0, y=0, w=8, h=8)
+    return ScanBox(text=text, x=0, y=0, w=8, h=8)
 
 
 FRESH = HoverState()  # nothing armed, nothing pending — the machine's start state
@@ -220,3 +219,15 @@ def test_an_open_that_cannot_be_armed_stays_shut() -> None:
 
     assert refused(state, OpenScan(scan)).decisions == ()
     assert elapsed(state, OpenScan(scan)).decisions == (OpenNested(scan),)  # negative control
+
+
+def test_a_scan_dwell_cannot_open_the_same_text_from_an_old_surface():
+    from dataclasses import replace
+
+    definition = cell("遂げたい")
+    subtitle = replace(definition, subtitle=True)
+    old = turn(hover=0, word=0, scan=definition).state
+    current = decide(old, HoverObservation(hover=0, word=0, scan=subtitle), DELAYS)
+
+    assert elapsed(current.state, OpenScan(definition)).decisions == ()
+    assert elapsed(current.state, OpenScan(subtitle)).decisions == (OpenNested(subtitle),)

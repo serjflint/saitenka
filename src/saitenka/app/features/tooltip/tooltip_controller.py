@@ -448,6 +448,7 @@ class TooltipController:
             boundaries=study_text.lookup_boundaries(view.cue.lines)
             if view.study_rules.enabled
             else (),
+            subtitle=self.hover_inputs,
         )
 
     def apply_context(self) -> TooltipApply:
@@ -494,8 +495,8 @@ class TooltipController:
     def teardown(self) -> None:
         context = self._session()
         self.cancel_jobs()
-        context.actions.hide()
         self.hide_nested()
+        context.actions.hide()
         self.unbind_keybindings()
         self.retire_state()
         self.resume_after_hover_pause()

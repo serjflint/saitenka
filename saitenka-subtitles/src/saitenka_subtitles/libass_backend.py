@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Protocol, cast
 import numpy as np
 
 from saitenka_subtitles import font_names, whole_cue
+from saitenka_subtitles.character_masks import attach_characters
 from saitenka_subtitles.geometry import (
     MAX_BITMAP_BYTES,
     GeometrySnapshot,
@@ -579,6 +580,34 @@ class LibassGeometryBackend:
                 blockers=("shape-mismatch",) if comparison == "shape-mismatch" else (),
             )
 
+    def _characters(self, request, result, tokens):
+        mapping = request.character_map
+        if mapping is None or request.paint_qualification is not PaintQualification.STATIC:
+            return tokens
+        try:
+            if whole_cue.has_occlusion(result.layers, {entry.rgb for entry in request.palette}):
+                return tokens
+            fine_request = replace(
+                request,
+                ass=mapping.ass,
+                palette=mapping.palette,
+                reserved_rgb=mapping.reserved_rgb,
+                native_ass=b"",
+                whole_cue=None,
+                character_map=None,
+            )
+            renderer, _built = self._renderer(fine_request)
+            fine_result = self._render_frame(renderer, fine_request)
+            if whole_cue.has_occlusion(
+                fine_result.layers, {entry.rgb for entry in mapping.palette}
+            ):
+                return tokens
+            fine = extract_token_geometry(fine_result, fine_request, telemetry=self._telemetry)
+            return attach_characters(request, tokens, fine, result.layers, fine_result.layers)
+        except (ValueError, RuntimeError, TypeError, OSError):
+            log.debug("subtitle component geometry unavailable", exc_info=True)
+            return tokens
+
     def render(self, request: GeometryRequest) -> GeometrySnapshot:
         if self._closed:
             raise RuntimeError("libass geometry backend is closed")
@@ -610,6 +639,8 @@ class LibassGeometryBackend:
             span.set("extract_ms", extract_ms)
             span.set("found_tokens", len(tokens))
             self._telemetry.record(EXTRACT_MS, extract_ms)
+        whole = self._whole_cue(request, result.layers)
+        tokens = self._characters(request, result, tokens)
         return GeometrySnapshot(
             request.generation,
             request.track_id,
@@ -625,7 +656,7 @@ class LibassGeometryBackend:
                 and whole_cue.has_occlusion(result.layers, {entry.rgb for entry in request.palette})
                 else request.paint_qualification
             ),
-            whole_cue=self._whole_cue(request, result.layers),
+            whole_cue=whole,
         )
 
     def close(self) -> None:

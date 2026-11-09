@@ -7,7 +7,9 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from saitenka_subtitles.ass import decode_ass_event, parse_ass_event_line
+from saitenka_subtitles.character_scan import bounds_of, character_spans, disjoint_characters
 from saitenka_subtitles.document import SubtitleTrackId
+from saitenka_subtitles.geometry import CharacterGeometry
 from saitenka_subtitles.mpv_layout import (
     LayoutSnapshot,
     decode_layout,
@@ -140,9 +142,27 @@ def layout_boxes(layout: LayoutSnapshot, seen: GeometryObservation) -> list[Word
                 right - left,
                 bottom - top,
                 hit_regions=rects,
+                characters=_character_regions(layout, spans[index]),
             )
         )
     return boxes
+
+
+def _character_regions(
+    layout: LayoutSnapshot, span: tuple[int, int]
+) -> tuple[CharacterGeometry, ...]:
+    if len(layout.events) != 1:
+        return ()
+    start, end = span
+    pieces = character_spans(layout.text[start:end])
+    regions = token_regions(layout, tuple((start + a, start + b) for a, b in pieces))
+    if any(not rects for rects in regions):
+        return ()
+    characters = tuple(
+        CharacterGeometry(a, bounds_of(rects), rects)
+        for (a, _b), rects in zip(pieces, regions, strict=True)
+    )
+    return characters if disjoint_characters(characters) else ()
 
 
 def _refusal_reason(error: ValueError | TypeError | OverflowError) -> str:

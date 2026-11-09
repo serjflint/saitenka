@@ -30,6 +30,7 @@ from saitenka.app.features.tooltip.tooltip_panel import (
     render_view,
     rows_panel,
     scan_hit,
+    visible_scan_hit,
 )
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.subtitles import box_for_token
@@ -94,7 +95,11 @@ def show_nested(ports: TipPorts, panel: PanelPorts, lookup: WordLookup, sb) -> N
     if tok is None or lookup.tokenizer.is_skippable(tok):
         hide_nested(ports)
         return
-    if tok.surface == ports.tip.nest.word and ports.tip.nest.state is not None:
+    if (
+        tok.surface == ports.tip.nest.word
+        and ports.tip.nest.state is not None
+        and ports.tip.nest.subtitle == sb.subtitle
+    ):
         ports.tip.nest.tail = sb.text  # same word, new cell → don't re-scan it
         return
     # Longest-match, Yomitan-style: stack any multi-token dictionary term starting under the cursor
@@ -112,6 +117,7 @@ def show_nested(ports: TipPorts, panel: PanelPorts, lookup: WordLookup, sb) -> N
         tok.surface,
         anchor,
         tail=sb.text,
+        subtitle=sb.subtitle,
         extra_terms=extra,
         defer=True,
     )
@@ -135,7 +141,9 @@ def apply_nested_metadata(ports: TipPorts, panel: PanelPorts, lookup: WordLookup
         or key.tooltip_origin != id(ports.tip.view.state)
     ):
         return
-    sb = scan_hit(ports.tip, ports.scale.raster, *ports.tip.last_mouse)
+    sb = visible_scan_hit(
+        ports.tip, ports.scale.raster, *ports.tip.last_mouse, subtitle=lookup.subtitle
+    )
     if sb is None or sb.text != key.tail:
         return
     sx, sy = ports.tip.view.xy
@@ -147,6 +155,7 @@ def apply_nested_metadata(ports: TipPorts, panel: PanelPorts, lookup: WordLookup
         result.token.surface,
         anchor,
         tail=key.tail,
+        subtitle=sb.subtitle,
         extra_terms=result.phrase_terms,
         mined=result.mined,
         group_mined=result.group_mined,
@@ -174,6 +183,7 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     extra_terms: tuple[str, ...] = (),
     *,
     defer: bool = False,
+    subtitle: bool = False,
     mined: bool | None = None,
     group_mined: tuple[bool, ...] | None = None,
 ) -> None:
@@ -185,6 +195,8 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
     show NOTHING — its typed completion re-derives the
     anchor from the scan cell and re-opens warm, keeping the getmask2 raster off the hover tick (#293). A
     clicked link is NOT re-derivable via scan_hit, so it never defers (builds synchronously below)."""
+    hide_nested(ports)
+    ports.tip.nest.subtitle = subtitle
     if mined is None:
         mined = is_mined(tok, panel.mined_set)
     key = panel_key(
@@ -231,6 +243,9 @@ def open_nested(  # noqa: PLR0913 -- identity-qualified prepared metadata crosse
 def place_nested(ports: TipPorts, st, key, token, word: str, anchor: Anchor, tail=None) -> None:
     """Anchor a built :class:`Panel` ``st`` as the nested popup. ``token`` is the inner Token to mine
     via its ⊕ (None for a wildcard-search results popup, whose rows aren't a single word)."""
+    if ports.tip.nest.subtitle:
+        ports.surfaces.remove(OverlayId.TIP)
+        ports.tip.view.rect = None
     ports.tip.nest.state, ports.tip.nest.key = st, key
     ports.tip.nest.token, ports.tip.nest.word = token, word
     ports.tip.nest.tail = tail
@@ -412,7 +427,10 @@ def click_kanji_fallback(ports: TipPorts, panel: PanelPorts, x: float, y: float)
 
 
 def hide_nested(ports: TipPorts) -> None:
+    restore_base = ports.tip.nest.subtitle
     ports.tip.nest.quality.close()
     if ports.tip.nest.state is not None or ports.tip.nest.rect is not None:
         ports.surfaces.remove(OverlayId.NESTED)
     ports.tip.nest = PopupView(OverlayId.NESTED)
+    if restore_base:
+        render_view(ports, ports.tip.view)

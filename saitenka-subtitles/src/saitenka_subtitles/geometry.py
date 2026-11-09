@@ -10,7 +10,12 @@ from functools import lru_cache
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from saitenka_subtitles.document import SubtitleEventId, SubtitleFrameId, SubtitleTrackId
+    from saitenka_subtitles.document import (
+        SubtitleEventId,
+        SubtitleFrameId,
+        SubtitleTrackId,
+        TokenAnnotation,
+    )
     from saitenka_subtitles.whole_cue import WholeCue
 
 MAX_FRAME_PIXELS = 16_777_216
@@ -104,6 +109,13 @@ class RendererState:
 
 
 @dataclass(frozen=True, slots=True)
+class CharacterGeometry:
+    offset: int
+    bounds: Rect
+    regions: tuple[Rect, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class TokenGeometry:
     """Geometry for one semantic token; ``bounds`` is the stable UI anchor."""
 
@@ -111,6 +123,7 @@ class TokenGeometry:
     token_index: int
     bounds: Rect
     regions: tuple[Rect, ...] = ()
+    characters: tuple[CharacterGeometry, ...] = ()
 
 
 class GeometryVariant(StrEnum):
@@ -128,6 +141,14 @@ class GeometryPaletteEntry:
     def __post_init__(self) -> None:
         if self.token_index < 0 or isinstance(self.rgb, bool) or not 0 < self.rgb <= 0xFFFFFF:
             raise ValueError("geometry palette entries require a token index and 24-bit RGB")
+
+
+@dataclass(frozen=True, slots=True)
+class CharacterMap:
+    ass: bytes
+    palette: tuple[GeometryPaletteEntry, ...]
+    reserved_rgb: tuple[int, ...]
+    semantic_spans: tuple[TokenAnnotation, ...]
 
 
 def _validate_render_space(request: GeometryRequest) -> None:
@@ -215,6 +236,7 @@ class GeometryRequest:
     coloring: str = "whole-cue-auto"
     whole_cue: WholeCue | None = None
     osd_font_setup: FontSetup | None = None
+    character_map: CharacterMap | None = None
 
     def __post_init__(self) -> None:
         _validate_render_space(self)
@@ -256,6 +278,18 @@ class GeometryRequest:
         digest.update(self.ass)
         digest.update(b"\0native\0")
         digest.update(self.native_ass)
+        if self.character_map is not None:
+            digest.update(b"\0characters\0")
+            digest.update(self.character_map.ass)
+            digest.update(
+                repr(
+                    (
+                        self.character_map.palette,
+                        self.character_map.reserved_rgb,
+                        self.character_map.semantic_spans,
+                    )
+                ).encode()
+            )
         digest.update(_attachment_fingerprint(self.attachments))
         return digest.hexdigest()
 
