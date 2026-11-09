@@ -1,0 +1,1719 @@
+{
+  "retrievability": [
+    {
+      "id": "fsrs-retrievability-reference-vectors-0",
+      "input": {
+        "s": 1.0,
+        "elapsed": 0.0,
+        "decay": -0.1542
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-1",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-2",
+      "input": {
+        "s": 1.0,
+        "elapsed": 7.0,
+        "decay": -0.1542
+      },
+      "expected": 0.7276209271652226
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-3",
+      "input": {
+        "s": 1.0,
+        "elapsed": 30.0,
+        "decay": -0.1542
+      },
+      "expected": 0.5906333946776322
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-4",
+      "input": {
+        "s": 1.0,
+        "elapsed": 100.0,
+        "decay": -0.1542
+      },
+      "expected": 0.4923224255829389
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-5",
+      "input": {
+        "s": 1.0,
+        "elapsed": 365.0,
+        "decay": -0.1542
+      },
+      "expected": 0.4036796105835889
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-6",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1000.0,
+        "decay": -0.1542
+      },
+      "expected": 0.3456694429039765
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-7",
+      "input": {
+        "s": 5.0,
+        "elapsed": 0.0,
+        "decay": -0.1542
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-8",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9727695594804078
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-9",
+      "input": {
+        "s": 5.0,
+        "elapsed": 7.0,
+        "decay": -0.1542
+      },
+      "expected": 0.8752731808643953
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-10",
+      "input": {
+        "s": 5.0,
+        "elapsed": 30.0,
+        "decay": -0.1542
+      },
+      "expected": 0.742717453487897
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-11",
+      "input": {
+        "s": 5.0,
+        "elapsed": 100.0,
+        "decay": -0.1542
+      },
+      "expected": 0.6271611534010325
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-12",
+      "input": {
+        "s": 5.0,
+        "elapsed": 365.0,
+        "decay": -0.1542
+      },
+      "expected": 0.516506265855453
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-13",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1000.0,
+        "decay": -0.1542
+      },
+      "expected": 0.44276140264235564
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-14",
+      "input": {
+        "s": 10.0,
+        "elapsed": 0.0,
+        "decay": -0.1542
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-15",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9856824087775146
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-16",
+      "input": {
+        "s": 10.0,
+        "elapsed": 7.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9225903960291902
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-17",
+      "input": {
+        "s": 10.0,
+        "elapsed": 30.0,
+        "decay": -0.1542
+      },
+      "expected": 0.8093881035731708
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-18",
+      "input": {
+        "s": 10.0,
+        "elapsed": 100.0,
+        "decay": -0.1542
+      },
+      "expected": 0.6928266345726217
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-19",
+      "input": {
+        "s": 10.0,
+        "elapsed": 365.0,
+        "decay": -0.1542
+      },
+      "expected": 0.5735586746235102
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-20",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1000.0,
+        "decay": -0.1542
+      },
+      "expected": 0.4923224255829389
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-21",
+      "input": {
+        "s": 50.0,
+        "elapsed": 0.0,
+        "decay": -0.1542
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-22",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9970103472148596
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-23",
+      "input": {
+        "s": 50.0,
+        "elapsed": 7.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9803634263310375
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-24",
+      "input": {
+        "s": 50.0,
+        "elapsed": 30.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9311509409583194
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-25",
+      "input": {
+        "s": 50.0,
+        "elapsed": 100.0,
+        "decay": -0.1542
+      },
+      "expected": 0.8458846451494336
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-26",
+      "input": {
+        "s": 50.0,
+        "elapsed": 365.0,
+        "decay": -0.1542
+      },
+      "expected": 0.7235122127567452
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-27",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1000.0,
+        "decay": -0.1542
+      },
+      "expected": 0.6271611534010325
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-28",
+      "input": {
+        "s": 200.0,
+        "elapsed": 0.0,
+        "decay": -0.1542
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-29",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9992462834887489
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-30",
+      "input": {
+        "s": 200.0,
+        "elapsed": 7.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9948113250530306
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-31",
+      "input": {
+        "s": 200.0,
+        "elapsed": 30.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9790667155259011
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-32",
+      "input": {
+        "s": 200.0,
+        "elapsed": 100.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9403442888929227
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-33",
+      "input": {
+        "s": 200.0,
+        "elapsed": 365.0,
+        "decay": -0.1542
+      },
+      "expected": 0.8537066436970501
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-34",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1000.0,
+        "decay": -0.1542
+      },
+      "expected": 0.7605275627180897
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-35",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 0.0,
+        "decay": -0.1542
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-36",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9998489160357104
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-37",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 7.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9989459841945297
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-38",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 30.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9955403011359147
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-39",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 100.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9856824087775146
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-40",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 365.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9539275978340007
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-41",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1000.0,
+        "decay": -0.1542
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-42",
+      "input": {
+        "s": 1.0,
+        "elapsed": 0.0,
+        "decay": -0.1
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-43",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1.0,
+        "decay": -0.1
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-44",
+      "input": {
+        "s": 1.0,
+        "elapsed": 7.0,
+        "decay": -0.1
+      },
+      "expected": 0.7676313078271962
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-45",
+      "input": {
+        "s": 1.0,
+        "elapsed": 30.0,
+        "decay": -0.1
+      },
+      "expected": 0.6673945995546298
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-46",
+      "input": {
+        "s": 1.0,
+        "elapsed": 100.0,
+        "decay": -0.1
+      },
+      "expected": 0.5924218785418421
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-47",
+      "input": {
+        "s": 1.0,
+        "elapsed": 365.0,
+        "decay": -0.1
+      },
+      "expected": 0.520678957837565
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-48",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1000.0,
+        "decay": -0.1
+      },
+      "expected": 0.4708035411268901
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-49",
+      "input": {
+        "s": 5.0,
+        "elapsed": 0.0,
+        "decay": -0.1
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-50",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1.0,
+        "decay": -0.1
+      },
+      "expected": 0.9687554279962358
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-51",
+      "input": {
+        "s": 5.0,
+        "elapsed": 7.0,
+        "decay": -0.1
+      },
+      "expected": 0.8794015732454316
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-52",
+      "input": {
+        "s": 5.0,
+        "elapsed": 30.0,
+        "decay": -0.1
+      },
+      "expected": 0.7786389877830526
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-53",
+      "input": {
+        "s": 5.0,
+        "elapsed": 100.0,
+        "decay": -0.1
+      },
+      "expected": 0.6944048962172256
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-54",
+      "input": {
+        "s": 5.0,
+        "elapsed": 365.0,
+        "decay": -0.1
+      },
+      "expected": 0.6112422329189846
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-55",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1000.0,
+        "decay": -0.1
+      },
+      "expected": 0.5528965400001956
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-56",
+      "input": {
+        "s": 10.0,
+        "elapsed": 0.0,
+        "decay": -0.1
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-57",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1.0,
+        "decay": -0.1
+      },
+      "expected": 0.9830199884248824
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-58",
+      "input": {
+        "s": 10.0,
+        "elapsed": 7.0,
+        "decay": -0.1
+      },
+      "expected": 0.9197807498787648
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-59",
+      "input": {
+        "s": 10.0,
+        "elapsed": 30.0,
+        "decay": -0.1
+      },
+      "expected": 0.8279799993831091
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-60",
+      "input": {
+        "s": 10.0,
+        "elapsed": 100.0,
+        "decay": -0.1
+      },
+      "expected": 0.7423318742583258
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-61",
+      "input": {
+        "s": 10.0,
+        "elapsed": 365.0,
+        "decay": -0.1
+      },
+      "expected": 0.6546381795825722
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-62",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1000.0,
+        "decay": -0.1
+      },
+      "expected": 0.5924218785418421
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-63",
+      "input": {
+        "s": 50.0,
+        "elapsed": 0.0,
+        "decay": -0.1
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-64",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1.0,
+        "decay": -0.1
+      },
+      "expected": 0.996338869914679
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-65",
+      "input": {
+        "s": 50.0,
+        "elapsed": 7.0,
+        "decay": -0.1
+      },
+      "expected": 0.9770363484631605
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-66",
+      "input": {
+        "s": 50.0,
+        "elapsed": 30.0,
+        "decay": -0.1
+      },
+      "expected": 0.9275778569857871
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-67",
+      "input": {
+        "s": 50.0,
+        "elapsed": 100.0,
+        "decay": -0.1
+      },
+      "expected": 0.8559715777712449
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-68",
+      "input": {
+        "s": 50.0,
+        "elapsed": 365.0,
+        "decay": -0.1
+      },
+      "expected": 0.764640293219649
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-69",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1000.0,
+        "decay": -0.1
+      },
+      "expected": 0.6944048962172256
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-70",
+      "input": {
+        "s": 200.0,
+        "elapsed": 0.0,
+        "decay": -0.1
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-71",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1.0,
+        "decay": -0.1
+      },
+      "expected": 0.9990707806764092
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-72",
+      "input": {
+        "s": 200.0,
+        "elapsed": 7.0,
+        "decay": -0.1
+      },
+      "expected": 0.9936869492848392
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-73",
+      "input": {
+        "s": 200.0,
+        "elapsed": 30.0,
+        "decay": -0.1
+      },
+      "expected": 0.9756012773050937
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-74",
+      "input": {
+        "s": 200.0,
+        "elapsed": 100.0,
+        "decay": -0.1
+      },
+      "expected": 0.9361698871825541
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-75",
+      "input": {
+        "s": 200.0,
+        "elapsed": 365.0,
+        "decay": -0.1
+      },
+      "expected": 0.8621156096867889
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-76",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1000.0,
+        "decay": -0.1
+      },
+      "expected": 0.7916779232120423
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-77",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 0.0,
+        "decay": -0.1
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-78",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1.0,
+        "decay": -0.1
+      },
+      "expected": 0.9998133944629071
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-79",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 7.0,
+        "decay": -0.1
+      },
+      "expected": 0.998701738112307
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-80",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 30.0,
+        "decay": -0.1
+      },
+      "expected": 0.9945623112767191
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-81",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 100.0,
+        "decay": -0.1
+      },
+      "expected": 0.9830199884248824
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-82",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 365.0,
+        "decay": -0.1
+      },
+      "expected": 0.9493411643768397
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-83",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1000.0,
+        "decay": -0.1
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-84",
+      "input": {
+        "s": 1.0,
+        "elapsed": 0.0,
+        "decay": -0.2
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-85",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1.0,
+        "decay": -0.2
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-86",
+      "input": {
+        "s": 1.0,
+        "elapsed": 7.0,
+        "decay": -0.2
+      },
+      "expected": 0.7022651645252054
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-87",
+      "input": {
+        "s": 1.0,
+        "elapsed": 30.0,
+        "decay": -0.2
+      },
+      "expected": 0.5398681821049076
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-88",
+      "input": {
+        "s": 1.0,
+        "elapsed": 100.0,
+        "decay": -0.2
+      },
+      "expected": 0.42711625065589665
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-89",
+      "input": {
+        "s": 1.0,
+        "elapsed": 365.0,
+        "decay": -0.2
+      },
+      "expected": 0.33036084763146534
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-90",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1000.0,
+        "decay": -0.2
+      },
+      "expected": 0.2701870016263482
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-91",
+      "input": {
+        "s": 5.0,
+        "elapsed": 0.0,
+        "decay": -0.2
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-92",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1.0,
+        "decay": -0.2
+      },
+      "expected": 0.974356758459812
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-93",
+      "input": {
+        "s": 5.0,
+        "elapsed": 7.0,
+        "decay": -0.2
+      },
+      "expected": 0.8731051307499524
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-94",
+      "input": {
+        "s": 5.0,
+        "elapsed": 30.0,
+        "decay": -0.2
+      },
+      "expected": 0.7201987139282096
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-95",
+      "input": {
+        "s": 5.0,
+        "elapsed": 100.0,
+        "decay": -0.2
+      },
+      "expected": 0.582823132112511
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-96",
+      "input": {
+        "s": 5.0,
+        "elapsed": 365.0,
+        "decay": -0.2
+      },
+      "expected": 0.4543871774777034
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-97",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1000.0,
+        "decay": -0.2
+      },
+      "expected": 0.37235708938392204
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-98",
+      "input": {
+        "s": 10.0,
+        "elapsed": 0.0,
+        "decay": -0.2
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-99",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1.0,
+        "decay": -0.2
+      },
+      "expected": 0.9866791566182725
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-100",
+      "input": {
+        "s": 10.0,
+        "elapsed": 7.0,
+        "decay": -0.2
+      },
+      "expected": 0.9239065222060882
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-101",
+      "input": {
+        "s": 10.0,
+        "elapsed": 30.0,
+        "decay": -0.2
+      },
+      "expected": 0.7985001730858255
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-102",
+      "input": {
+        "s": 10.0,
+        "elapsed": 100.0,
+        "decay": -0.2
+      },
+      "expected": 0.6608298508597908
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-103",
+      "input": {
+        "s": 10.0,
+        "elapsed": 365.0,
+        "decay": -0.2
+      },
+      "expected": 0.5199549225389093
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-104",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1000.0,
+        "decay": -0.2
+      },
+      "expected": 0.42711625065589665
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-105",
+      "input": {
+        "s": 50.0,
+        "elapsed": 0.0,
+        "decay": -0.2
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-106",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1.0,
+        "decay": -0.2
+      },
+      "expected": 0.9972488184483165
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-107",
+      "input": {
+        "s": 50.0,
+        "elapsed": 7.0,
+        "decay": -0.2
+      },
+      "expected": 0.9816382021694664
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-108",
+      "input": {
+        "s": 50.0,
+        "elapsed": 30.0,
+        "decay": -0.2
+      },
+      "expected": 0.9327835795542339
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-109",
+      "input": {
+        "s": 50.0,
+        "elapsed": 100.0,
+        "decay": -0.2
+      },
+      "expected": 0.8402893846730101
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-110",
+      "input": {
+        "s": 50.0,
+        "elapsed": 365.0,
+        "decay": -0.2
+      },
+      "expected": 0.697377634318361
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-111",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1000.0,
+        "decay": -0.2
+      },
+      "expected": 0.582823132112511
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-112",
+      "input": {
+        "s": 200.0,
+        "elapsed": 0.0,
+        "decay": -0.2
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-113",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1.0,
+        "decay": -0.2
+      },
+      "expected": 0.9993079304235853
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-114",
+      "input": {
+        "s": 200.0,
+        "elapsed": 7.0,
+        "decay": -0.2
+      },
+      "expected": 0.9952149043149435
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-115",
+      "input": {
+        "s": 200.0,
+        "elapsed": 30.0,
+        "decay": -0.2
+      },
+      "expected": 0.9804018335640797
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-116",
+      "input": {
+        "s": 200.0,
+        "elapsed": 100.0,
+        "decay": -0.2
+      },
+      "expected": 0.9421983079979164
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-117",
+      "input": {
+        "s": 200.0,
+        "elapsed": 365.0,
+        "decay": -0.2
+      },
+      "expected": 0.8491048094078285
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-118",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1000.0,
+        "decay": -0.2
+      },
+      "expected": 0.7412867443588202
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-119",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 0.0,
+        "decay": -0.2
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-120",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1.0,
+        "decay": -0.2
+      },
+      "expected": 0.9998613559290271
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-121",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 7.0,
+        "decay": -0.2
+      },
+      "expected": 0.9990319056900476
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-122",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 30.0,
+        "decay": -0.2
+      },
+      "expected": 0.995890110851891
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-123",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 100.0,
+        "decay": -0.2
+      },
+      "expected": 0.9866791566182725
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-124",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 365.0,
+        "decay": -0.2
+      },
+      "expected": 0.9558741691464896
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-125",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1000.0,
+        "decay": -0.2
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-126",
+      "input": {
+        "s": 1.0,
+        "elapsed": 0.0,
+        "decay": -0.5
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-127",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1.0,
+        "decay": -0.5
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-128",
+      "input": {
+        "s": 1.0,
+        "elapsed": 7.0,
+        "decay": -0.5
+      },
+      "expected": 0.615227334322197
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-129",
+      "input": {
+        "s": 1.0,
+        "elapsed": 30.0,
+        "decay": -0.5
+      },
+      "expected": 0.35273781075132926
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-130",
+      "input": {
+        "s": 1.0,
+        "elapsed": 100.0,
+        "decay": -0.5
+      },
+      "expected": 0.20220890233055125
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-131",
+      "input": {
+        "s": 1.0,
+        "elapsed": 365.0,
+        "decay": -0.5
+      },
+      "expected": 0.10744784739016382
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-132",
+      "input": {
+        "s": 1.0,
+        "elapsed": 1000.0,
+        "decay": -0.5
+      },
+      "expected": 0.06515412904351259
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-133",
+      "input": {
+        "s": 5.0,
+        "elapsed": 0.0,
+        "decay": -0.5
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-134",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1.0,
+        "decay": -0.5
+      },
+      "expected": 0.977337546216906
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-135",
+      "input": {
+        "s": 5.0,
+        "elapsed": 7.0,
+        "decay": -0.5
+      },
+      "expected": 0.8676336231896614
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-136",
+      "input": {
+        "s": 5.0,
+        "elapsed": 30.0,
+        "decay": -0.5
+      },
+      "expected": 0.6445033866354897
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-137",
+      "input": {
+        "s": 5.0,
+        "elapsed": 100.0,
+        "decay": -0.5
+      },
+      "expected": 0.41917178954936013
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-138",
+      "input": {
+        "s": 5.0,
+        "elapsed": 365.0,
+        "decay": -0.5
+      },
+      "expected": 0.2348980879373463
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-139",
+      "input": {
+        "s": 5.0,
+        "elapsed": 1000.0,
+        "decay": -0.5
+      },
+      "expected": 0.14446767652105405
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-140",
+      "input": {
+        "s": 10.0,
+        "elapsed": 0.0,
+        "decay": -0.5
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-141",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1.0,
+        "decay": -0.5
+      },
+      "expected": 0.9884739856290503
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-142",
+      "input": {
+        "s": 10.0,
+        "elapsed": 7.0,
+        "decay": -0.5
+      },
+      "expected": 0.9268013614149899
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-143",
+      "input": {
+        "s": 10.0,
+        "elapsed": 30.0,
+        "decay": -0.5
+      },
+      "expected": 0.7661308776828738
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-144",
+      "input": {
+        "s": 10.0,
+        "elapsed": 100.0,
+        "decay": -0.5
+      },
+      "expected": 0.5467110653077084
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-145",
+      "input": {
+        "s": 10.0,
+        "elapsed": 365.0,
+        "decay": -0.5
+      },
+      "expected": 0.3233938810863311
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-146",
+      "input": {
+        "s": 10.0,
+        "elapsed": 1000.0,
+        "decay": -0.5
+      },
+      "expected": 0.20220890233055125
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-147",
+      "input": {
+        "s": 50.0,
+        "elapsed": 0.0,
+        "decay": -0.5
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-148",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1.0,
+        "decay": -0.5
+      },
+      "expected": 0.9976625421685446
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-149",
+      "input": {
+        "s": 50.0,
+        "elapsed": 7.0,
+        "decay": -0.5
+      },
+      "expected": 0.9839739009850549
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-150",
+      "input": {
+        "s": 50.0,
+        "elapsed": 30.0,
+        "decay": -0.5
+      },
+      "expected": 0.936281675898539
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-151",
+      "input": {
+        "s": 50.0,
+        "elapsed": 100.0,
+        "decay": -0.5
+      },
+      "expected": 0.8250286473253902
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-152",
+      "input": {
+        "s": 50.0,
+        "elapsed": 365.0,
+        "decay": -0.5
+      },
+      "expected": 0.6071940133664049
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-153",
+      "input": {
+        "s": 50.0,
+        "elapsed": 1000.0,
+        "decay": -0.5
+      },
+      "expected": 0.41917178954936013
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-154",
+      "input": {
+        "s": 200.0,
+        "elapsed": 0.0,
+        "decay": -0.5
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-155",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1.0,
+        "decay": -0.5
+      },
+      "expected": 0.9994140955754637
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-156",
+      "input": {
+        "s": 200.0,
+        "elapsed": 7.0,
+        "decay": -0.5
+      },
+      "expected": 0.9959201658129999
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-157",
+      "input": {
+        "s": 200.0,
+        "elapsed": 30.0,
+        "decay": -0.5
+      },
+      "expected": 0.982858450364341
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-158",
+      "input": {
+        "s": 200.0,
+        "elapsed": 100.0,
+        "decay": -0.5
+      },
+      "expected": 0.946058996209746
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-159",
+      "input": {
+        "s": 200.0,
+        "elapsed": 365.0,
+        "decay": -0.5
+      },
+      "expected": 0.8368020883300299
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-160",
+      "input": {
+        "s": 200.0,
+        "elapsed": 1000.0,
+        "decay": -0.5
+      },
+      "expected": 0.6784005252999682
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-161",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 0.0,
+        "decay": -0.5
+      },
+      "expected": 1.0
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-162",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1.0,
+        "decay": -0.5
+      },
+      "expected": 0.9998827366786379
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-163",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 7.0,
+        "decay": -0.5
+      },
+      "expected": 0.9991800219953497
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-164",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 30.0,
+        "decay": -0.5
+      },
+      "expected": 0.9964999432087317
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-165",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 100.0,
+        "decay": -0.5
+      },
+      "expected": 0.9884739856290503
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-166",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 365.0,
+        "decay": -0.5
+      },
+      "expected": 0.959757745063344
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-167",
+      "input": {
+        "s": 1000.0,
+        "elapsed": 1000.0,
+        "decay": -0.5
+      },
+      "expected": 0.9
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-168",
+      "input": {
+        "s": 0,
+        "elapsed": 10,
+        "decay": -0.1542
+      },
+      "expected": null
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-169",
+      "input": {
+        "s": -5,
+        "elapsed": 10,
+        "decay": -0.1542
+      },
+      "expected": null
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-170",
+      "input": {
+        "s": null,
+        "elapsed": 10,
+        "decay": -0.1542
+      },
+      "expected": null
+    },
+    {
+      "id": "fsrs-retrievability-reference-vectors-171",
+      "input": {
+        "s": 10,
+        "elapsed": -1,
+        "decay": -0.1542
+      },
+      "expected": null
+    }
+  ],
+  "harmonic": [
+    {
+      "id": "frequency-numeric-laws-0",
+      "input": {
+        "values": [
+          1000.0,
+          2000.0
+        ]
+      },
+      "expected": 1333.3333333333333
+    },
+    {
+      "id": "frequency-numeric-laws-1",
+      "input": {
+        "values": []
+      },
+      "expected": null
+    }
+  ],
+  "harmonic-rank": [
+    {
+      "id": "frequency-numeric-laws-2",
+      "input": {
+        "word": "猫",
+        "tables": [
+          {
+            "猫": 500
+          }
+        ]
+      },
+      "expected": 500.0
+    },
+    {
+      "id": "frequency-numeric-laws-3",
+      "input": {
+        "word": "言葉",
+        "tables": [
+          {
+            "言葉": 1000
+          },
+          {
+            "言葉": 2000
+          }
+        ]
+      },
+      "expected": 1333.3333333333333
+    },
+    {
+      "id": "frequency-numeric-laws-4",
+      "input": {
+        "word": "猫",
+        "tables": [
+          {
+            "猫": 500
+          },
+          {
+            "犬": 100
+          }
+        ]
+      },
+      "expected": 500.0
+    },
+    {
+      "id": "frequency-numeric-laws-5",
+      "input": {
+        "word": "猫",
+        "tables": [
+          {
+            "犬": 100
+          }
+        ]
+      },
+      "expected": null
+    },
+    {
+      "id": "frequency-numeric-laws-6",
+      "input": {
+        "word": "猫",
+        "tables": []
+      },
+      "expected": null
+    }
+  ],
+  "freq-band": [
+    {
+      "id": "frequency-numeric-laws-7",
+      "input": {
+        "rank": 1,
+        "top": 10000,
+        "bands": 5
+      },
+      "expected": 1
+    },
+    {
+      "id": "frequency-numeric-laws-8",
+      "input": {
+        "rank": 2000,
+        "top": 10000,
+        "bands": 5
+      },
+      "expected": 1
+    },
+    {
+      "id": "frequency-numeric-laws-9",
+      "input": {
+        "rank": 2001,
+        "top": 10000,
+        "bands": 5
+      },
+      "expected": 2
+    },
+    {
+      "id": "frequency-numeric-laws-10",
+      "input": {
+        "rank": 10000,
+        "top": 10000,
+        "bands": 5
+      },
+      "expected": 5
+    },
+    {
+      "id": "frequency-numeric-laws-11",
+      "input": {
+        "rank": 10001,
+        "top": 10000,
+        "bands": 5
+      },
+      "expected": null
+    }
+  ],
+  "rareness": [
+    {
+      "id": "frequency-numeric-laws-12",
+      "input": {
+        "rank": 500
+      },
+      "expected": "common"
+    },
+    {
+      "id": "frequency-numeric-laws-13",
+      "input": {
+        "rank": 10000
+      },
+      "expected": "common"
+    },
+    {
+      "id": "frequency-numeric-laws-14",
+      "input": {
+        "rank": 10001
+      },
+      "expected": "uncommon"
+    },
+    {
+      "id": "frequency-numeric-laws-15",
+      "input": {
+        "rank": 30000
+      },
+      "expected": "uncommon"
+    },
+    {
+      "id": "frequency-numeric-laws-16",
+      "input": {
+        "rank": 30001
+      },
+      "expected": "rare"
+    }
+  ]
+}

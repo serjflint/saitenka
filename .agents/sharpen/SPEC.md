@@ -24,9 +24,9 @@ recorded as passing.
 1. Select one module that is not under active feature work and one concrete coordinate.
 2. Confirm its mapped tests are green before editing.
 3. Improve only the selected existing test, asserting observable behavior through the nearest stable seam.
-   First check whether a portable scenario already owns the proposition. Keep an internal test only for a
-   distinct schedule, real boundary, composition, diagnostic, or minimal production-path failure; otherwise
-   consolidation or retirement is the improvement.
+   First check whether application pytest tests already own the proposition. Keep an internal test only
+   for a distinct schedule, real boundary, composition, diagnostic, or minimal production-path failure;
+   otherwise consolidation or retirement is the improvement.
 4. Run the focused affected tests.
 5. Prove preservation and gain:
    - run `sharpen_gate.py anticheat` for every assertion edit;

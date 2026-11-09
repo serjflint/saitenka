@@ -6,7 +6,7 @@ test -f "$skill_dir/agents/openai.yaml"
 cd "$skill_dir/../../.."   # -> repository root
 ROOT="."
 fail=0
-need() { grep -rq "$1" "$ROOT/$2" || { echo "MISSING: $1  (in $2)"; fail=1; }; }
+need() { git grep -q -e "$1" -- "$ROOT/$2" || { echo "MISSING: $1  (in $2)"; fail=1; }; }
 
 # Canonical example tests referenced by the skill
 need "def test_card_data_from_token" tests/features/mining/test_mining.py
@@ -19,24 +19,24 @@ need "def test_draw_token_is_byte_identical_to_draw_text_across_subpixel_phases"
 for f in FakeMpvServer FakeTransport FakeAnki; do need "$f" tests; done
 
 # Assertion + timeout deps must be installed (dirty-equals recipe / timeout marker)
-grep -q "dirty-equals" "$ROOT/pyproject.toml" || { echo "MISSING dep: dirty-equals"; fail=1; }
-grep -q "pytest-timeout" "$ROOT/pyproject.toml" || { echo "MISSING dep: pytest-timeout"; fail=1; }
+git grep -q -e "dirty-equals" -- "$ROOT/pyproject.toml" || { echo "MISSING dep: dirty-equals"; fail=1; }
+git grep -q -e "pytest-timeout" -- "$ROOT/pyproject.toml" || { echo "MISSING dep: pytest-timeout"; fail=1; }
 
 # Markers the skill names must be the real declared ones
 for m in live integration slow requires_display e2e; do
-  grep -q "\"$m:" "$ROOT/pyproject.toml" || { echo "MISSING marker: $m"; fail=1; }
+  git grep -q -e "\"$m:" -- "$ROOT/pyproject.toml" || { echo "MISSING marker: $m"; fail=1; }
 done
 
 # The oracle-catalog reference the skill points at, and the canonical oracle examples it cites (test -f is
 # grep-free — safe under the search-shim mock; see AGENTS.md "Tooling").
 test -f "$skill_dir/references/oracle-catalog.md" || { echo "MISSING: references/oracle-catalog.md"; fail=1; }
-test -f "$ROOT/tests/contracts/README.md" || { echo "MISSING: tests/contracts/README.md"; fail=1; }
-test -f "$ROOT/tests/contracts/test_adapter_protocol.py" || { echo "MISSING: portable corpus owner"; fail=1; }
+test -f "$ROOT/tests/session/test_session_input_output.py" || { echo "MISSING: session input/output tests"; fail=1; }
+test -f "$ROOT/tests/test_dictionary_reference.py" || { echo "MISSING: dictionary reference dataset tests"; fail=1; }
 for t in tests/features/tooltip/test_scale_boundary.py tests/features/tooltip/test_tooltip_statemachine.py tests/test_cache_race.py; do
   test -f "$ROOT/$t" || { echo "MISSING oracle example: $t"; fail=1; }
 done
 test -f "$ROOT/tests/util.py" || { echo "MISSING: tests/util.py (PROFILES matrix)"; fail=1; }
 # The test-live task the Verify step invokes
-grep -q "test-live" "$ROOT/pyproject.toml" || { echo "MISSING task: test-live"; fail=1; }
+git grep -q -e "test-live" -- "$ROOT/pyproject.toml" || { echo "MISSING task: test-live"; fail=1; }
 
 if [ "$fail" -eq 0 ]; then echo "write-test smoke OK"; else echo "write-test smoke FAILED"; exit 1; fi

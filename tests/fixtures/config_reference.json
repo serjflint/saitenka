@@ -1,0 +1,1763 @@
+{
+  "resync-split": [
+    {
+      "id": "persistent-config-policy-0",
+      "input": {
+        "config": {}
+      },
+      "expected": null
+    },
+    {
+      "id": "persistent-config-policy-1",
+      "input": {
+        "config": {
+          "resync_split_penalty": 3
+        }
+      },
+      "expected": 3.0
+    },
+    {
+      "id": "persistent-config-policy-2",
+      "input": {
+        "config": {
+          "resync_split_penalty": 0.5
+        }
+      },
+      "expected": 0.5
+    }
+  ],
+  "load": [
+    {
+      "id": "persistent-config-policy-3",
+      "input": {
+        "content": "slang = \"ja\"\n[mine]\ndeck = \"D\"\n"
+      },
+      "expected": {
+        "slang": "ja",
+        "mine": {
+          "deck": "D"
+        }
+      }
+    },
+    {
+      "id": "persistent-config-policy-4",
+      "input": {
+        "content": null
+      },
+      "expected": {}
+    },
+    {
+      "id": "persistent-config-policy-5",
+      "input": {
+        "content": "this is = = not valid toml [[["
+      },
+      "expected": {}
+    }
+  ],
+  "config-path": [
+    {
+      "id": "persistent-config-policy-6",
+      "input": {
+        "explicit": false
+      },
+      "expected": "env.toml"
+    },
+    {
+      "id": "persistent-config-policy-7",
+      "input": {
+        "explicit": true
+      },
+      "expected": "explicit.toml"
+    }
+  ],
+  "expand-paths": [
+    {
+      "id": "persistent-config-policy-8",
+      "input": {
+        "paths": null
+      },
+      "expected": []
+    },
+    {
+      "id": "persistent-config-policy-9",
+      "input": {
+        "paths": [
+          "$SAITENKA_CONFIG/a.zip"
+        ],
+        "env": {
+          "SAITENKA_CONFIG": "/portable"
+        }
+      },
+      "expected": [
+        "/portable/a.zip"
+      ]
+    }
+  ],
+  "telemetry": [
+    {
+      "id": "persistent-config-policy-10",
+      "input": {
+        "config": {},
+        "env": {
+          "OTEL_SDK_DISABLED": null
+        }
+      },
+      "expected": {
+        "enabled": false,
+        "export_dir": null,
+        "sample_hot_path": 0.0
+      }
+    },
+    {
+      "id": "persistent-config-policy-11",
+      "input": {
+        "config": {
+          "telemetry": {
+            "enabled": true,
+            "export_dir": "/tmp/tel",
+            "sample_hot_path": 0.05
+          }
+        },
+        "env": {
+          "OTEL_SDK_DISABLED": null
+        }
+      },
+      "expected": {
+        "enabled": true,
+        "export_dir": "/tmp/tel",
+        "sample_hot_path": 0.05
+      }
+    },
+    {
+      "id": "persistent-config-policy-12",
+      "input": {
+        "config": {
+          "telemetry": {
+            "enabled": true
+          }
+        },
+        "env": {
+          "OTEL_SDK_DISABLED": "true"
+        }
+      },
+      "expected": {
+        "enabled": false,
+        "export_dir": null,
+        "sample_hot_path": 0.0
+      }
+    }
+  ],
+  "retired": [
+    {
+      "id": "persistent-config-policy-13",
+      "input": {
+        "config": {
+          "perf": {
+            "poll_interval": 0.01
+          }
+        }
+      },
+      "expected": [
+        "poll_interval"
+      ]
+    },
+    {
+      "id": "persistent-config-policy-14",
+      "input": {
+        "config": {
+          "perf": {
+            "prefetch_workers": 2
+          },
+          "slang": "ja"
+        }
+      },
+      "expected": []
+    }
+  ],
+  "geometry": [
+    {
+      "id": "persistent-config-policy-15",
+      "input": {
+        "config": {
+          "subtitle_geometry": {
+            "source": "mpv",
+            "coloring": "whole-cue-auto",
+            "native_visible": true,
+            "native_formats": "all",
+            "library_path": "/opt/lib/libass.dylib",
+            "cache_max": 7,
+            "lookahead": 4
+          }
+        }
+      },
+      "expected": {
+        "source": "mpv",
+        "coloring": "whole-cue-auto",
+        "native_visible": true,
+        "native_formats": "all",
+        "library_path": "/opt/lib/libass.dylib",
+        "cache_max": 7,
+        "lookahead": 4
+      }
+    },
+    {
+      "id": "persistent-config-policy-16",
+      "input": {
+        "config": {
+          "subtitle_geometry": {
+            "coloring": "legacy"
+          }
+        }
+      },
+      "expected": {
+        "source": "auto",
+        "coloring": "whole-cue-auto",
+        "native_visible": false,
+        "native_formats": "authored-ass",
+        "library_path": null,
+        "cache_max": 6,
+        "lookahead": 2
+      }
+    },
+    {
+      "id": "persistent-config-policy-17",
+      "input": {
+        "config": {
+          "subtitle_geometry": {
+            "lookahead": 4
+          }
+        }
+      },
+      "expected": {
+        "source": "auto",
+        "coloring": "whole-cue-auto",
+        "native_visible": false,
+        "native_formats": "authored-ass",
+        "library_path": null,
+        "cache_max": 9,
+        "lookahead": 4
+      }
+    },
+    {
+      "id": "persistent-config-policy-18",
+      "input": {
+        "config": {
+          "subtitle_geometry": {
+            "lookahead": 1
+          }
+        }
+      },
+      "expected": {
+        "source": "auto",
+        "coloring": "whole-cue-auto",
+        "native_visible": false,
+        "native_formats": "authored-ass",
+        "library_path": null,
+        "cache_max": 6,
+        "lookahead": 1
+      }
+    },
+    {
+      "id": "persistent-config-policy-19",
+      "input": {
+        "config": {
+          "subtitle_geometry": {
+            "lookahead": 4,
+            "cache_max": 2
+          }
+        }
+      },
+      "expected": {
+        "source": "auto",
+        "coloring": "whole-cue-auto",
+        "native_visible": false,
+        "native_formats": "authored-ass",
+        "library_path": null,
+        "cache_max": 2,
+        "lookahead": 4
+      }
+    }
+  ],
+  "jlpt": [
+    {
+      "id": "persistent-config-policy-20",
+      "input": {
+        "config": {}
+      },
+      "expected": true
+    },
+    {
+      "id": "persistent-config-policy-21",
+      "input": {
+        "config": {
+          "scoring": {}
+        }
+      },
+      "expected": true
+    },
+    {
+      "id": "persistent-config-policy-22",
+      "input": {
+        "config": {
+          "scoring": {
+            "jlpt_underlines": false
+          }
+        }
+      },
+      "expected": false
+    },
+    {
+      "id": "persistent-config-policy-23",
+      "input": {
+        "config": {
+          "scoring": {
+            "jlpt_underlines": "no"
+          }
+        }
+      },
+      "expected": {
+        "error": "scoring.jlpt_underlines must be a boolean"
+      }
+    },
+    {
+      "id": "persistent-config-policy-24",
+      "input": {
+        "config": {
+          "scoring": 3
+        }
+      },
+      "expected": {
+        "error": "scoring must be a table"
+      }
+    }
+  ],
+  "editor-catalog": [
+    {
+      "id": "layout_engine",
+      "input": {
+        "label": "layout_engine"
+      },
+      "expected": {
+        "kind": "select",
+        "choices": [
+          "default",
+          "taffy"
+        ],
+        "path": [
+          "layout_engine"
+        ],
+        "optional": false,
+        "help": true,
+        "default": "default"
+      }
+    },
+    {
+      "id": "annotation_mode",
+      "input": {
+        "label": "annotation_mode"
+      },
+      "expected": {
+        "kind": "select",
+        "choices": [
+          "full",
+          "hover"
+        ],
+        "path": [
+          "annotation_mode"
+        ],
+        "optional": false,
+        "help": true,
+        "default": "full"
+      }
+    },
+    {
+      "id": "render_cache",
+      "input": {
+        "label": "render_cache"
+      },
+      "expected": {
+        "kind": "bool",
+        "choices": [],
+        "path": [
+          "render_cache"
+        ],
+        "optional": false,
+        "help": true,
+        "default": true
+      }
+    },
+    {
+      "id": "max_bulk",
+      "input": {
+        "label": "max_bulk"
+      },
+      "expected": {
+        "kind": "int",
+        "choices": [],
+        "path": [
+          "max_bulk"
+        ],
+        "optional": false,
+        "help": true,
+        "default": 12
+      }
+    },
+    {
+      "id": "anki_ok_ttl",
+      "input": {
+        "label": "anki_ok_ttl"
+      },
+      "expected": {
+        "kind": "float",
+        "choices": [],
+        "path": [
+          "anki_ok_ttl"
+        ],
+        "optional": false,
+        "help": true,
+        "default": 3.0
+      }
+    },
+    {
+      "id": "export_dir",
+      "input": {
+        "label": "export_dir"
+      },
+      "expected": {
+        "kind": "str",
+        "choices": [],
+        "path": [
+          "telemetry",
+          "export_dir"
+        ],
+        "optional": true,
+        "help": true,
+        "default": null
+      }
+    },
+    {
+      "id": "key",
+      "input": {
+        "label": "key"
+      },
+      "expected": {
+        "kind": "str",
+        "choices": [],
+        "path": [
+          "mine",
+          "key"
+        ],
+        "optional": false,
+        "help": true,
+        "default": "Ctrl+m"
+      }
+    },
+    {
+      "id": "ui_scale",
+      "input": {
+        "label": "ui_scale"
+      },
+      "expected": {
+        "kind": "float",
+        "choices": [],
+        "path": [
+          "ui_scale"
+        ],
+        "optional": false,
+        "help": true,
+        "default": 1.0
+      }
+    },
+    {
+      "id": "tip_height",
+      "input": {
+        "label": "tip_height"
+      },
+      "expected": {
+        "kind": "float",
+        "choices": [],
+        "path": [
+          "tip_height"
+        ],
+        "optional": false,
+        "help": true,
+        "default": 0.4
+      }
+    }
+  ],
+  "editor-defaults": [
+    {
+      "id": "editor-default-precedence-0",
+      "input": {
+        "field": "tip_scale",
+        "config": {
+          "tip_scale": 1.5
+        }
+      },
+      "expected": 1.5
+    },
+    {
+      "id": "editor-default-precedence-1",
+      "input": {
+        "field": "tip_scale",
+        "config": {}
+      },
+      "expected": 0.0
+    },
+    {
+      "id": "editor-default-precedence-2",
+      "input": {
+        "field": "mmap_size",
+        "path": [
+          "dictdb",
+          "mmap_size"
+        ],
+        "config": {
+          "dictdb": {
+            "mmap_size": 42
+          }
+        }
+      },
+      "expected": 42
+    },
+    {
+      "id": "editor-default-precedence-3",
+      "input": {
+        "field": "mmap_size",
+        "path": [
+          "dictdb",
+          "mmap_size"
+        ],
+        "config": {
+          "dictdb": {}
+        }
+      },
+      "expected": 268435456
+    }
+  ],
+  "editor-coerce": [
+    {
+      "id": "editor-value-coercion-0",
+      "input": {
+        "field": "max_bulk",
+        "input": "20"
+      },
+      "expected": {
+        "value": 20
+      }
+    },
+    {
+      "id": "editor-value-coercion-1",
+      "input": {
+        "field": "anki_ok_ttl",
+        "input": "2.5"
+      },
+      "expected": {
+        "value": 2.5
+      }
+    },
+    {
+      "id": "editor-value-coercion-2",
+      "input": {
+        "field": "mpv_path",
+        "input": "  "
+      },
+      "expected": {
+        "value": null
+      }
+    },
+    {
+      "id": "editor-value-coercion-3",
+      "input": {
+        "field": "layout_engine",
+        "input": "taffy"
+      },
+      "expected": {
+        "value": "taffy"
+      }
+    },
+    {
+      "id": "editor-value-coercion-4",
+      "input": {
+        "field": "layout_engine",
+        "input": "wgpu"
+      },
+      "expected": {
+        "error": "ValueError"
+      }
+    },
+    {
+      "id": "editor-value-coercion-5",
+      "input": {
+        "field": "slang",
+        "input": "  ja,en  "
+      },
+      "expected": {
+        "value": "ja,en"
+      }
+    }
+  ],
+  "run": [
+    {
+      "id": "run-defaults",
+      "input": {
+        "config": {},
+        "flags": {}
+      },
+      "expected": {
+        "tooltip": {
+          "scan_delay": 1.0,
+          "tip_scale": 0.0
+        },
+        "panels": {
+          "scale": 1.0
+        },
+        "mining": {
+          "show_preview": true
+        }
+      }
+    },
+    {
+      "id": "run-overrides",
+      "input": {
+        "config": {
+          "scan_delay": 1.5,
+          "ui_scale": 1.5,
+          "hover_pause_key": "Alt+q",
+          "subtitle_language_key": "Alt+l",
+          "bookmark_key": "Alt+b",
+          "sidebar_key": "Alt+s",
+          "analysis_key": "Ctrl+d",
+          "annotation_key": "Ctrl+a",
+          "help_key": "Ctrl+h",
+          "subtitle_retry_key": "Ctrl+r",
+          "annotation_mode": "hover",
+          "stats": {
+            "enabled": true,
+            "summary": false
+          }
+        },
+        "flags": {
+          "layout_engine": "taffy",
+          "tip_scale": 1.5,
+          "mine_preview": false
+        }
+      },
+      "expected": {
+        "tooltip": {
+          "scan_delay": 1.5,
+          "layout_engine": "taffy",
+          "tip_scale": 1.5,
+          "annotation_mode": "hover"
+        },
+        "panels": {
+          "scale": 1.5
+        },
+        "mining": {
+          "show_preview": false
+        },
+        "keys": {
+          "hover_pause_key": "Alt+q",
+          "subtitle_language_key": "Alt+l",
+          "bookmark_key": "Alt+b",
+          "sidebar_key": "Alt+s",
+          "analysis_key": "Ctrl+d",
+          "annotation_key": "Ctrl+a",
+          "help_key": "Ctrl+h",
+          "subtitle_retry_key": "Ctrl+r"
+        },
+        "stats": {
+          "enabled": true,
+          "summary": false
+        }
+      }
+    }
+  ],
+  "attach": [
+    {
+      "id": "attach-overrides",
+      "input": {
+        "config": {
+          "layout_engine": "taffy",
+          "tip_scale": 1.5,
+          "ui_scale": 1.5,
+          "pause_on_tooltip": false,
+          "hover_pause_key": "Alt+q",
+          "subtitle_language_key": "Alt+l",
+          "bookmark_key": "Alt+b",
+          "sidebar_key": "Alt+s",
+          "analysis_key": "Ctrl+d",
+          "annotation_key": "Ctrl+a",
+          "help_key": "Ctrl+h",
+          "subtitle_retry_key": "Ctrl+r",
+          "annotation_mode": "hover",
+          "stats": {
+            "enabled": true,
+            "summary": false
+          }
+        },
+        "mine": {
+          "preview": false
+        }
+      },
+      "expected": {
+        "tooltip": {
+          "layout_engine": "taffy",
+          "tip_scale": 1.5,
+          "pause_on_tooltip": false,
+          "annotation_mode": "hover"
+        },
+        "panels": {
+          "scale": 1.5
+        },
+        "mining": {
+          "show_preview": false
+        },
+        "keys": {
+          "hover_pause_key": "Alt+q",
+          "subtitle_language_key": "Alt+l",
+          "bookmark_key": "Alt+b",
+          "sidebar_key": "Alt+s",
+          "analysis_key": "Ctrl+d",
+          "annotation_key": "Ctrl+a",
+          "help_key": "Ctrl+h",
+          "subtitle_retry_key": "Ctrl+r"
+        },
+        "stats": {
+          "enabled": true,
+          "summary": false
+        }
+      }
+    }
+  ],
+  "resolve": [
+    {
+      "id": "profile-configuration-policy-0",
+      "input": {
+        "config": {}
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "jp",
+        "second_language": "en",
+        "tokenizer": "unidic",
+        "slang": null
+      }
+    },
+    {
+      "id": "profile-configuration-policy-1",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": {
+        "name": "fr",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-2",
+      "input": {
+        "config": {
+          "profiles": {
+            "default": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": {
+        "error": "profile name 'default' is reserved for the built-in profile"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-3",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "second": "de"
+            }
+          }
+        }
+      },
+      "expected": {
+        "name": "fr",
+        "main_language": "fr",
+        "second_language": "de",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-4",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "fr",
+            "tokenizer": "latin"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-5",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profile": {
+            "second": "de"
+          },
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": {
+        "name": "fr",
+        "main_language": "fr",
+        "second_language": "de",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-6",
+      "input": {
+        "config": {
+          "active_profile": "ja",
+          "profiles": {
+            "ja": {
+              "language": "jp"
+            },
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        },
+        "override": "fr"
+      },
+      "expected": {
+        "name": "fr",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-7",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "jp"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "jp",
+        "second_language": "en",
+        "tokenizer": "unidic",
+        "slang": null
+      }
+    },
+    {
+      "id": "profile-configuration-policy-8",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "fr"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-9",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "de-CH"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "de-CH",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "de"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-10",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "ru"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "ru",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "ru"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-11",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "zh"
+          }
+        }
+      },
+      "expected": {
+        "error": "no default tokenizer for language 'zh'; set a profile tokenizer explicitly (e.g. tokenizer = \"latin\")"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-12",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "fr",
+            "tokenizer": "latin"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-13",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "de-CH",
+            "tokenizer": "latin"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "de-CH",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "de"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-14",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "zh-Hant",
+            "tokenizer": "latin"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "zh-Hant",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "zh"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-15",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "xyz",
+            "tokenizer": "latin"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "xyz",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "xyz"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-20",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": {
+        "name": "fr",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-21",
+      "input": {
+        "config": {
+          "active_profile": "ch",
+          "profiles": {
+            "ch": {
+              "language": "de-CH",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": {
+        "name": "ch",
+        "main_language": "de-CH",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "de"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-22",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "ja-JP"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "jp-JP",
+        "second_language": "en",
+        "tokenizer": "unidic",
+        "slang": "jp"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-23",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "eng-GB"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "en-GB",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "en"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-24",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "fra-CA"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "fr-CA",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fr"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-25",
+      "input": {
+        "config": {
+          "profile": {
+            "language": "deu-CH"
+          }
+        }
+      },
+      "expected": {
+        "name": "default",
+        "main_language": "de-CH",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "de"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-26",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "slang": "fra,fr"
+            }
+          }
+        }
+      },
+      "expected": {
+        "name": "fr",
+        "main_language": "fr",
+        "second_language": "en",
+        "tokenizer": "latin",
+        "slang": "fra,fr"
+      }
+    }
+  ],
+  "validate-language": [
+    {
+      "id": "profile-configuration-policy-16",
+      "input": {
+        "language": ""
+      },
+      "expected": {
+        "error": "malformed language code '' (expected e.g. 'ja', 'fr', 'de-CH')"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-17",
+      "input": {
+        "language": "!!"
+      },
+      "expected": {
+        "error": "malformed language code '!!' (expected e.g. 'ja', 'fr', 'de-CH')"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-18",
+      "input": {
+        "language": "1"
+      },
+      "expected": {
+        "error": "malformed language code '1' (expected e.g. 'ja', 'fr', 'de-CH')"
+      }
+    },
+    {
+      "id": "profile-configuration-policy-19",
+      "input": {
+        "language": "a b"
+      },
+      "expected": {
+        "error": "malformed language code 'a b' (expected e.g. 'ja', 'fr', 'de-CH')"
+      }
+    }
+  ],
+  "scope": [
+    {
+      "id": "profile-configuration-policy-27",
+      "input": {
+        "config": {
+          "dicts": [
+            "JMdict"
+          ],
+          "freq": [
+            "JPDB"
+          ],
+          "mine": {
+            "deck": "Saitenka::Mining"
+          }
+        }
+      },
+      "expected": {
+        "dicts": [
+          "JMdict"
+        ],
+        "freq": [
+          "JPDB"
+        ],
+        "mine": {
+          "deck": "Saitenka::Mining"
+        }
+      }
+    },
+    {
+      "id": "profile-configuration-policy-28",
+      "input": {
+        "config": {
+          "dicts": [
+            "JMdict",
+            "daijirin"
+          ],
+          "freq": [
+            "JPDB"
+          ],
+          "pitch": [
+            "NHK"
+          ],
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "dicts": [
+                "Le Grand Robert"
+              ],
+              "freq": [
+                "French Freq"
+              ]
+            }
+          }
+        }
+      },
+      "expected": {
+        "dicts": [
+          "Le Grand Robert"
+        ],
+        "freq": [
+          "French Freq"
+        ],
+        "pitch": [
+          "NHK"
+        ],
+        "active_profile": "fr",
+        "profiles": {
+          "fr": {
+            "language": "fr",
+            "tokenizer": "latin",
+            "dicts": [
+              "Le Grand Robert"
+            ],
+            "freq": [
+              "French Freq"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "profile-configuration-policy-29",
+      "input": {
+        "config": {
+          "mine": {
+            "deck": "Saitenka::Mining",
+            "model": "Lapis",
+            "animated_screenshot": true
+          },
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "mine": {
+                "deck": "French::Mining"
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "mine": {
+          "deck": "French::Mining",
+          "model": "Lapis",
+          "animated_screenshot": true
+        },
+        "active_profile": "fr",
+        "profiles": {
+          "fr": {
+            "language": "fr",
+            "tokenizer": "latin",
+            "mine": {
+              "deck": "French::Mining"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "profile-configuration-policy-30",
+      "input": {
+        "config": {
+          "dicts": [
+            "JMdict"
+          ],
+          "active_profile": "ja",
+          "profiles": {
+            "ja": {
+              "language": "jp"
+            },
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "dicts": [
+                "Le Grand Robert"
+              ]
+            }
+          }
+        },
+        "override": "fr"
+      },
+      "expected": {
+        "dicts": [
+          "Le Grand Robert"
+        ],
+        "active_profile": "ja",
+        "profiles": {
+          "ja": {
+            "language": "jp"
+          },
+          "fr": {
+            "language": "fr",
+            "tokenizer": "latin",
+            "dicts": [
+              "Le Grand Robert"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "mine-config": [
+    {
+      "id": "profile-configuration-policy-31",
+      "input": {
+        "config": {
+          "mine": {
+            "deck": "Saitenka::Mining",
+            "model": "Lapis"
+          },
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "mine": {
+                "deck": "French::Mining",
+                "model": "FrenchNote",
+                "fields": {
+                  "expression": "Mot",
+                  "sentence": "Phrase"
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "deck": "French::Mining",
+        "model": "FrenchNote",
+        "fields": {
+          "expression": "Mot",
+          "sentence": "Phrase"
+        }
+      }
+    }
+  ],
+  "mine-target": [
+    {
+      "id": "profile-configuration-policy-32",
+      "input": {
+        "mine": {}
+      },
+      "expected": [
+        "Saitenka::Mining",
+        "Lapis"
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-33",
+      "input": {
+        "mine": {
+          "preset": "Kiku"
+        }
+      },
+      "expected": [
+        "Saitenka::Mining",
+        "Kiku"
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-34",
+      "input": {
+        "mine": {
+          "deck": "D",
+          "model": "M",
+          "preset": "Kiku"
+        }
+      },
+      "expected": [
+        "D",
+        "M"
+      ]
+    }
+  ],
+  "run-mine-target": [
+    {
+      "id": "profile-configuration-policy-35",
+      "input": {
+        "config": {
+          "mine": {
+            "deck": "Saitenka::Mining",
+            "model": "Lapis"
+          },
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "mine": {
+                "deck": "French::Mining",
+                "model": "FrenchNote"
+              }
+            }
+          }
+        },
+        "slang": "ja,jpn,jp"
+      },
+      "expected": [
+        "French::Mining",
+        "FrenchNote"
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-36",
+      "input": {
+        "config": {
+          "mine": {
+            "deck": "Saitenka::Mining",
+            "model": "Lapis"
+          },
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "mine": {
+                "deck": "French::Mining"
+              }
+            }
+          }
+        },
+        "slang": "ja,jpn,jp",
+        "mine_deck": "CLI::Explicit"
+      },
+      "expected": [
+        "CLI::Explicit",
+        "Lapis"
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-37",
+      "input": {
+        "config": {
+          "mine": {
+            "deck": "Other::TopLevel",
+            "model": "Lapis"
+          },
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "mine": {
+                "deck": "French::Mining"
+              }
+            }
+          }
+        },
+        "slang": "ja,jpn,jp"
+      },
+      "expected": [
+        "French::Mining",
+        "Lapis"
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-38",
+      "input": {
+        "config": {
+          "mine": {
+            "deck": "Other::TopLevel"
+          }
+        },
+        "slang": "ja,jpn,jp"
+      },
+      "expected": [
+        "Other::TopLevel",
+        "Lapis"
+      ]
+    }
+  ],
+  "configured": [
+    {
+      "id": "profile-configuration-policy-39",
+      "input": {
+        "config": {}
+      },
+      "expected": [
+        {
+          "name": "default",
+          "main_language": "jp",
+          "second_language": "en",
+          "tokenizer": "unidic",
+          "slang": null
+        }
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-40",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin"
+            },
+            "de": {
+              "language": "de",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": [
+        {
+          "name": "default",
+          "main_language": "jp",
+          "second_language": "en",
+          "tokenizer": "unidic",
+          "slang": null
+        },
+        {
+          "name": "de",
+          "main_language": "de",
+          "second_language": "en",
+          "tokenizer": "latin",
+          "slang": "de"
+        },
+        {
+          "name": "fr",
+          "main_language": "fr",
+          "second_language": "en",
+          "tokenizer": "latin",
+          "slang": "fr"
+        }
+      ]
+    },
+    {
+      "id": "profile-configuration-policy-41",
+      "input": {
+        "config": {
+          "active_profile": "fr",
+          "profile": {
+            "second": "de"
+          },
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        }
+      },
+      "expected": [
+        {
+          "name": "default",
+          "main_language": "jp",
+          "second_language": "de",
+          "tokenizer": "unidic",
+          "slang": null
+        },
+        {
+          "name": "fr",
+          "main_language": "fr",
+          "second_language": "de",
+          "tokenizer": "latin",
+          "slang": "fr"
+        }
+      ]
+    }
+  ],
+  "launch": [
+    {
+      "id": "profile-configuration-policy-42",
+      "input": {
+        "config": {
+          "slang": "ja,jpn,jp",
+          "dicts": [
+            "JP dict"
+          ],
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "dicts": [
+                "FR dict"
+              ]
+            }
+          }
+        },
+        "override": "fr",
+        "slang": "ja,jpn,jp"
+      },
+      "expected": {
+        "profile": {
+          "name": "fr",
+          "main_language": "fr",
+          "second_language": "en",
+          "tokenizer": "latin",
+          "slang": "fr"
+        },
+        "language": "fr",
+        "slang": "fr",
+        "config": {
+          "slang": "ja,jpn,jp",
+          "dicts": [
+            "FR dict"
+          ],
+          "profiles": {
+            "fr": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "dicts": [
+                "FR dict"
+              ]
+            }
+          },
+          "active_profile": "fr"
+        }
+      }
+    },
+    {
+      "id": "profile-configuration-policy-43",
+      "input": {
+        "config": {
+          "slang": "ja,jpn,jp"
+        },
+        "slang": "en"
+      },
+      "expected": {
+        "profile": {
+          "name": "default",
+          "main_language": "jp",
+          "second_language": "en",
+          "tokenizer": "unidic",
+          "slang": null
+        },
+        "language": "jp",
+        "slang": "en",
+        "config": {
+          "slang": "ja,jpn,jp"
+        }
+      }
+    }
+  ],
+  "primary-font": [
+    {
+      "id": "profile-configuration-policy-44",
+      "input": {
+        "language": "fr"
+      },
+      "expected": "NotoSans.ttf"
+    },
+    {
+      "id": "profile-configuration-policy-45",
+      "input": {
+        "language": "ru"
+      },
+      "expected": "NotoSans.ttf"
+    },
+    {
+      "id": "profile-configuration-policy-46",
+      "input": {
+        "language": "el"
+      },
+      "expected": "NotoSans.ttf"
+    },
+    {
+      "id": "profile-configuration-policy-47",
+      "input": {
+        "language": "de-CH"
+      },
+      "expected": "NotoSans.ttf"
+    },
+    {
+      "id": "profile-configuration-policy-48",
+      "input": {
+        "language": "jp"
+      },
+      "expected": null
+    },
+    {
+      "id": "profile-configuration-policy-49",
+      "input": {
+        "language": "zh"
+      },
+      "expected": null
+    }
+  ],
+  "mine-model": [
+    {
+      "id": "mine-model-0",
+      "input": {},
+      "expected": "Lapis"
+    },
+    {
+      "id": "mine-model-1",
+      "input": {
+        "preset": "Kiku"
+      },
+      "expected": "Kiku"
+    },
+    {
+      "id": "mine-model-2",
+      "input": {
+        "model": "Custom",
+        "preset": "Kiku"
+      },
+      "expected": "Custom"
+    }
+  ]
+}

@@ -1,0 +1,938 @@
+{
+  "mpv-launch": [
+    {
+      "id": "mpv-launch-default",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-screenshot",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": true
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
+        "--pause",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-native-visible",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false,
+          "native_visible": true
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-visibility=yes",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-native-visible-shadow",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false,
+          "native_visible": true,
+          "geometry_source": "shadow"
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-visibility=yes",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-subtitle-order",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false
+        },
+        "sub_path": "a.srt",
+        "second_sub_path": "b.srt",
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "--sub-file=a.srt",
+        "--sub-file=b.srt",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-no-config-fullscreen",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false,
+          "use_config": false,
+          "fullscreen": true
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--fullscreen",
+        "--no-config",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-extra-argument-precedence",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false,
+          "extra_args": [
+            "--slang=en",
+            "--input-ipc-server=/tmp/evil.sock",
+            "--script-opts=saitenka-managed=no",
+            "--log-file=/tmp/evil.log"
+          ]
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "darwin"
+      },
+      "expected": [
+        "mpv",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
+        "--slang=en",
+        "--input-ipc-server=/tmp/evil.sock",
+        "--script-opts=saitenka-managed=no",
+        "--log-file=/tmp/evil.log",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    },
+    {
+      "id": "mpv-launch-windows-swapchain",
+      "input": {
+        "binary": "mpv",
+        "ipc_path": "/tmp/s.sock",
+        "log_path": "/tmp/mpv.log",
+        "video": "video.mkv",
+        "options": {
+          "slang": "jpn",
+          "start": "1",
+          "screenshot": false
+        },
+        "sub_path": null,
+        "second_sub_path": null,
+        "platform": "win32"
+      },
+      "expected": [
+        "mpv",
+        "--d3d11-flip=no",
+        "--force-window=yes",
+        "--keep-open=yes",
+        "--slang=jpn",
+        "--sub-visibility=no",
+        "--osd-level=1",
+        "--start=1",
+        "--sub-align-x=center",
+        "--sub-justify=center",
+        "--sub-ass-justify=yes",
+        "--input-ipc-server=/tmp/s.sock",
+        "--script-opts=saitenka-managed=yes",
+        "--log-file=/tmp/mpv.log",
+        "video.mkv"
+      ]
+    }
+  ],
+  "native-geometry-version": [
+    {
+      "id": "mpv-version-0",
+      "input": "mpv v0.40.0",
+      "expected": true
+    },
+    {
+      "id": "mpv-version-1",
+      "input": "mpv 0.41.0",
+      "expected": true
+    },
+    {
+      "id": "mpv-version-2",
+      "input": "mpv v0.39.0",
+      "expected": false
+    },
+    {
+      "id": "mpv-version-3",
+      "input": "mpv v0.38.0",
+      "expected": false
+    },
+    {
+      "id": "mpv-version-4",
+      "input": "mpv.net",
+      "expected": false
+    }
+  ],
+  "profile-commands": [
+    {
+      "id": "profile-cli-commands-0",
+      "input": {
+        "config": "dicts = [\"JP\"]\nfreq = [\"JPDB\"]\npitch = [\"NHK\"]\n",
+        "args": [
+          "profile",
+          "add",
+          "french",
+          "--language",
+          "fr",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "dicts": [
+            "JP"
+          ],
+          "freq": [
+            "JPDB"
+          ],
+          "pitch": [
+            "NHK"
+          ],
+          "profiles": {
+            "french": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "dicts": [],
+              "freq": [],
+              "pitch": []
+            }
+          }
+        },
+        "stdout": [
+          "backed up existing config"
+        ]
+      }
+    },
+    {
+      "id": "profile-cli-commands-1",
+      "input": {
+        "config": "dicts = [\"JP\"]\nfreq = [\"JPDB\"]\npitch = [\"NHK\"]\n",
+        "args": [
+          "profile",
+          "add",
+          "french",
+          "--language",
+          "fr",
+          "--second",
+          "en",
+          "--dicts",
+          "FR-EN",
+          "--freq",
+          "FR Freq",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "dicts": [
+            "JP"
+          ],
+          "freq": [
+            "JPDB"
+          ],
+          "pitch": [
+            "NHK"
+          ],
+          "profiles": {
+            "french": {
+              "language": "fr",
+              "tokenizer": "latin",
+              "second": "en",
+              "dicts": [
+                "FR-EN"
+              ],
+              "freq": [
+                "FR Freq"
+              ],
+              "pitch": []
+            }
+          }
+        },
+        "stdout": [
+          "backed up existing config"
+        ]
+      }
+    },
+    {
+      "id": "profile-cli-commands-2",
+      "input": {
+        "config": null,
+        "args": [
+          "profile",
+          "add",
+          "chinese",
+          "--language",
+          "zh",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": null,
+        "error": "no default tokenizer for language 'zh'; set a profile tokenizer explicitly (e.g. tokenizer = \"latin\")",
+        "config": null,
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-3",
+      "input": {
+        "config": null,
+        "args": [
+          "profile",
+          "add",
+          "chinese",
+          "--language",
+          "zh",
+          "--tokenizer",
+          "latin",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "profiles": {
+            "chinese": {
+              "language": "zh",
+              "tokenizer": "latin",
+              "dicts": [],
+              "freq": [],
+              "pitch": []
+            }
+          }
+        },
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-4",
+      "input": {
+        "config": null,
+        "args": [
+          "profile",
+          "add",
+          "",
+          "--language",
+          "fr",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": null,
+        "error": "profile name must be non-empty",
+        "config": null,
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-5",
+      "input": {
+        "config": null,
+        "args": [
+          "profile",
+          "add",
+          "default",
+          "--language",
+          "fr",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": null,
+        "error": "profile name 'default' is reserved for the built-in profile",
+        "config": null,
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-6",
+      "input": {
+        "config": "active_profile = \"german\"\n",
+        "args": [
+          "profile",
+          "use",
+          "french",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "active_profile": "french"
+        },
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-7",
+      "input": {
+        "config": "active_profile = \"german\"\n",
+        "args": [
+          "profile",
+          "use",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "active_profile": ""
+        },
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-8",
+      "input": {
+        "config": "active_profile = \"french\"\n[profiles.french]\n[profiles.german]\n",
+        "args": [
+          "profile",
+          "remove",
+          "french",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "profiles": {
+            "german": {}
+          }
+        },
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-9",
+      "input": {
+        "config": "active_profile = \"german\"\n[profiles.french]\n[profiles.german]\n",
+        "args": [
+          "profile",
+          "remove",
+          "french",
+          "--yes"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "active_profile": "german",
+          "profiles": {
+            "german": {}
+          }
+        },
+        "stdout": []
+      }
+    },
+    {
+      "id": "profile-cli-commands-10",
+      "input": {
+        "config": "active_profile = \"french\"\n[profiles.german]\nlanguage = \"de\"\ntokenizer = \"latin\"\n[profiles.french]\nlanguage = \"fr\"\ntokenizer = \"latin\"\n",
+        "args": [
+          "profile",
+          "list"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "active_profile": "french",
+          "profiles": {
+            "german": {
+              "language": "de",
+              "tokenizer": "latin"
+            },
+            "french": {
+              "language": "fr",
+              "tokenizer": "latin"
+            }
+          }
+        },
+        "stdout": [
+          "  default          jp→en  [unidic]",
+          "* french           fr→en  [latin]",
+          "  german           de→en  [latin]"
+        ]
+      }
+    },
+    {
+      "id": "profile-cli-commands-11",
+      "input": {
+        "config": "[profiles.french]\nlanguage = \"fr\"\ndicts = [\"FR-EN\"]\n",
+        "args": [
+          "profile",
+          "show",
+          "french"
+        ]
+      },
+      "expected": {
+        "exit_code": 0,
+        "error": null,
+        "config": {
+          "profiles": {
+            "french": {
+              "language": "fr",
+              "dicts": [
+                "FR-EN"
+              ]
+            }
+          }
+        },
+        "stdout": [
+          "profile:   french",
+          "language:  fr  (second: en)",
+          "tokenizer: latin",
+          "dicts:     FR-EN",
+          "freq:      —",
+          "pitch:     —"
+        ]
+      }
+    }
+  ],
+  "parse": [
+    {
+      "id": "repeatable-resource-flags-preserve-order",
+      "input": {
+        "args": [
+          "run",
+          "--dict",
+          "a.zip",
+          "--dict",
+          "b.zip",
+          "--freq",
+          "f.zip",
+          "--pitch",
+          "p.zip",
+          "--pitch",
+          "q.zip"
+        ]
+      },
+      "expected": {
+        "dicts": [
+          "a.zip",
+          "b.zip"
+        ],
+        "freq": [
+          "f.zip"
+        ],
+        "pitch": [
+          "p.zip",
+          "q.zip"
+        ]
+      }
+    },
+    {
+      "id": "negative-switches",
+      "input": {
+        "args": [
+          "run",
+          "--no-audio-play",
+          "--no-prefetch",
+          "--no-mine-preview"
+        ]
+      },
+      "expected": {
+        "no_audio_play": true,
+        "prefetch": false,
+        "mine_preview": false
+      }
+    },
+    {
+      "id": "switch-defaults",
+      "input": {
+        "args": [
+          "run"
+        ]
+      },
+      "expected": {
+        "no_audio_play": false,
+        "prefetch": true,
+        "mine_preview": true
+      }
+    },
+    {
+      "id": "legacy-run-defaults",
+      "input": {
+        "args": [
+          "run"
+        ]
+      },
+      "expected": {
+        "slang": "ja,jpn,jp",
+        "start": "1",
+        "width": 1920,
+        "height": 1080,
+        "seconds": 60.0,
+        "tip_height": 0.4,
+        "hover_switch_delay": 0.15,
+        "mine_deck": null,
+        "mine_model": null,
+        "mine_key": "Ctrl+m",
+        "mine_all_key": "Shift+m",
+        "translate_key": "t",
+        "preview_key": "p",
+        "video": null,
+        "demo_scroll": 0
+      }
+    },
+    {
+      "id": "video-positional",
+      "input": {
+        "args": [
+          "run",
+          "/tmp/x.mkv"
+        ]
+      },
+      "expected": {
+        "video": "/tmp/x.mkv"
+      }
+    }
+  ],
+  "parse-config": [
+    {
+      "id": "toml-feeds-cli-defaults",
+      "input": {
+        "config": "slang = \"en,eng\"\ntip_height = 0.4\npause_on_tooltip = true\n",
+        "args": [
+          "run"
+        ]
+      },
+      "expected": {
+        "slang": "en,eng",
+        "tip_height": 0.4,
+        "pause_on_tooltip": true
+      }
+    },
+    {
+      "id": "explicit-cli-wins-over-toml",
+      "input": {
+        "config": "slang = \"en,eng\"\n",
+        "args": [
+          "run",
+          "--slang",
+          "ja"
+        ]
+      },
+      "expected": {
+        "slang": "ja"
+      }
+    }
+  ],
+  "resolve-names": [
+    {
+      "id": "resource-name-precedence-0",
+      "input": {
+        "flags": [
+          "FlagDict"
+        ],
+        "config": {
+          "dicts": [
+            "ConfigDict"
+          ]
+        },
+        "key": "dicts"
+      },
+      "expected": [
+        "FlagDict"
+      ]
+    },
+    {
+      "id": "resource-name-precedence-1",
+      "input": {
+        "flags": [],
+        "config": {
+          "dicts": [
+            "ConfigDict"
+          ]
+        },
+        "key": "dicts"
+      },
+      "expected": [
+        "ConfigDict"
+      ]
+    },
+    {
+      "id": "resource-name-precedence-2",
+      "input": {
+        "flags": null,
+        "config": {},
+        "key": "dicts"
+      },
+      "expected": []
+    }
+  ],
+  "jimaku-decision": [
+    {
+      "id": "jimaku-fetch-policy-0",
+      "input": {
+        "explicit": true,
+        "configured": false,
+        "video": "v.mkv",
+        "probe": true
+      },
+      "expected": true
+    },
+    {
+      "id": "jimaku-fetch-policy-1",
+      "input": {
+        "explicit": true,
+        "configured": true,
+        "video": null,
+        "probe": null
+      },
+      "expected": false
+    },
+    {
+      "id": "jimaku-fetch-policy-2",
+      "input": {
+        "explicit": false,
+        "configured": true,
+        "video": "v.mkv",
+        "probe": false
+      },
+      "expected": true
+    },
+    {
+      "id": "jimaku-fetch-policy-3",
+      "input": {
+        "explicit": false,
+        "configured": true,
+        "video": "v.mkv",
+        "probe": true
+      },
+      "expected": false
+    },
+    {
+      "id": "jimaku-fetch-policy-4",
+      "input": {
+        "explicit": false,
+        "configured": true,
+        "video": "v.mkv",
+        "probe": null
+      },
+      "expected": true
+    },
+    {
+      "id": "jimaku-fetch-policy-5",
+      "input": {
+        "explicit": false,
+        "configured": false,
+        "video": "v.mkv",
+        "probe": false
+      },
+      "expected": false
+    }
+  ],
+  "inventory": {
+    "flags": [
+      "--config",
+      "--sub-file",
+      "--slang",
+      "--dict",
+      "--translate-key",
+      "--start",
+      "--jimaku",
+      "--jimaku-key",
+      "--jimaku-title",
+      "--episode",
+      "--width",
+      "--height",
+      "--fullscreen",
+      "--use-config",
+      "--demo-word",
+      "--demo-translate",
+      "--demo-scroll",
+      "--bulk",
+      "--screenshot",
+      "--seconds",
+      "--color",
+      "--known",
+      "--anki-decks",
+      "--freq",
+      "--pitch",
+      "--mine",
+      "--mine-deck",
+      "--mine-model",
+      "--mine-key",
+      "--mine-all-key",
+      "--preview-key",
+      "--no-audio-play",
+      "--tip-height",
+      "--pause-on-tooltip",
+      "--no-prefetch",
+      "--auto-translate",
+      "--hover-switch-delay",
+      "--no-resync"
+    ],
+    "commands": [
+      "run",
+      "doctor",
+      "init",
+      "import-settings",
+      "install-plugin",
+      "uninstall-plugin",
+      "attach",
+      "setup"
+    ]
+  }
+}

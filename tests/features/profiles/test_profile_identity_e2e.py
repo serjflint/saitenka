@@ -69,9 +69,15 @@ def _restore_tokenizer_registry():
     mod._FACTORIES.update(saved)
 
 
-def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
-    profile = resolve_profile(cfg)
-    reader = build_session(_FakeIPC(), identity=SessionIdentity(profile=profile))
+def _resolve_identity(cfg: dict) -> tuple[str, str, str, tuple[str, ...]]:
+    """Reproduce how ``run``/``attach`` resolve the reading identity, through the REAL wiring, and
+    return what each component OBSERVABLY selected: (active tokenizer name, main language code, the
+    enabled attach providers). ``resolve_profile`` → the real ``SessionController`` construction line → the real
+    ``prepare_attach_startup`` provider gate, all keyed on the one resolved ``langs.main``."""
+    profile = resolve_profile(cfg)  # exactly what run_impl / attach do after load_config
+    reader = build_session(
+        _FakeIPC(), identity=SessionIdentity(profile=profile)
+    )  # the real SessionController(ipc, options, profile=…) line
     ipc = _FakeIPC(tracks=[EN], path="/v/Show - 01.mkv")  # no JP track → the provider gate fires
     _startup, _status, providers = subselect.prepare_attach_startup(
         ipc,
@@ -80,8 +86,25 @@ def _resolve_identity(cfg: dict) -> tuple[str, str, tuple[str, ...]]:
     return (
         reader.graph.profile.profile.tokenizer.name,
         reader.graph.profile.profile.langs.main,
+        reader.graph.profile.profile.langs.second,
         providers,
     )
+
+
+# --- 1. default scenario: the JP identity resolves consistently, byte-identical to today ----------
+
+
+def test_default_scenario_resolves_the_japanese_identity_end_to_end():
+    """No [profile] configured → the whole JP identity agrees through the real path: unidic tokenizer,
+    jp language, jimaku+tsukihime providers. The characterization control for #254."""
+    tokenizer, main, second, providers = _resolve_identity({})
+    assert tokenizer == "unidic"
+    assert main == "jp"
+    assert second == "en"
+    assert providers == ("jimaku", "tsukihime")
+
+
+# --- 2. cross-component consistency oracle: every JP alias ≡ canonical "jp" end-to-end -------------
 
 
 @pytest.mark.parametrize("alias", ["jp", "ja", "jpn", "japanese"])
@@ -91,7 +114,7 @@ def test_jp_aliases_yield_the_identical_identity_as_canonical_jp(alias):
     no configuration where the tokenizer resolves JP but providers resolve non-JP (or vice-versa)."""
     canonical = _resolve_identity({})
     aliased = _resolve_identity({"profile": {"language": alias}})
-    assert aliased == canonical == ("unidic", "jp", ("jimaku", "tsukihime"))
+    assert aliased == canonical == ("unidic", "jp", "en", ("jimaku", "tsukihime"))
 
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
@@ -101,9 +124,10 @@ def test_non_jp_profile_yields_a_distinct_identity_end_to_end():
     because it is language-agnostic (#495), which is the point: the gate keys on capability, not on a
     provider name."""
     register_tokenizer("latin", _FakeLatin)
-    tokenizer, main, providers = _resolve_identity(
+    tokenizer, main, second, providers = _resolve_identity(
         {"profile": {"language": "fr", "tokenizer": "latin"}}
     )
     assert tokenizer == "latin"  # distinct from the JP unidic
     assert main == "fr"
+    assert second == "en"
     assert providers == ("tsukihime",)  # jp-only jimaku gated out; the agnostic source remains
