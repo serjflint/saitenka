@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794224098913,
+  "lastUpdate": 1794226716665,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19625,6 +19625,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.018907,
             "range": "3 replicas; min 1.00092; max 1.48501; MAD 0.017989; worst 1.48501",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dba8b35fef94f142b473b01570a1e204a0afac51",
+          "message": "Merge pull request #574 from serjflint/fix/russian-layout-shortcuts\n\nfix(input): keep shortcuts working with the Russian keyboard layout",
+          "timestamp": "2026-11-09T15:15:07+03:00",
+          "tree_id": "1363fcf1105b5a993ece3fb2ae96e132c6d75cf3",
+          "url": "https://github.com/serjflint/saitenka/commit/dba8b35fef94f142b473b01570a1e204a0afac51"
+        },
+        "date": 1794226715589,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 8.087418,
+            "range": "3 replicas; min 6.70231; max 9.1064; MAD 1.01898",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.624926,
+            "range": "3 replicas; min 7.21054; max 9.68322; MAD 1.05829; worst 9.68322",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 18.910419,
+            "range": "3 replicas; min 14.6565; max 21.9721; MAD 3.06171",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 19.113004,
+            "range": "3 replicas; min 14.7616; max 22.2831; MAD 3.17011; worst 22.2831",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.536741,
+            "range": "3 replicas; min 11.4484; max 32.1609; MAD 3.08834",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.091024,
+            "range": "3 replicas; min 0.067539; max 0.124303; MAD 0.023485; worst 0.124303",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 43.426087,
+            "range": "3 replicas; min 30.287; max 46.6114; MAD 3.18533; worst 46.6114",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.057682,
+            "range": "3 replicas; min 2.40475; max 8.69018; MAD 0.652936; worst 8.69018",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.783735,
+            "range": "3 replicas; min 0.935348; max 3.1053; MAD 0.848387; worst 3.1053",
             "unit": "ms"
           }
         ]
