@@ -207,7 +207,7 @@ BINDINGS: tuple[BindingSpec, ...] = (
         "Capture & mining",
         "Close card preview",
         PREVIEW_CLOSE_MSG,
-        scope="preview",  # bound on show_preview, handed back on hide_preview
+        scope="preview",
         key="ESC",
         context="card preview",
         requires="anki",

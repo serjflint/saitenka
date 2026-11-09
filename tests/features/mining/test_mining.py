@@ -813,30 +813,6 @@ def test_preview_replay_key_is_tooltip_scoped():
     assert PREVIEW_MSG in tooltip_msgs
 
 
-def test_esc_closes_card_preview_and_hands_key_back(monkeypatch, make_session):
-    """Showing the preview grabs Esc → close; pressing it hides the preview; closing hands Esc back
-    to a no-op when no tooltip is up."""
-    from util import FakeIPC
-
-    from saitenka.app.bindings import PREVIEW_CLOSE_MSG
-    from saitenka.app.features.preview.card_preview import PreviewData
-
-    ipc = FakeIPC()
-    r = make_session(ipc, services=SessionServices(anki=object(), mining=MineConfig()))
-    # skip the PIL render
-    monkeypatch.setattr(miner_ui, "render_preview", lambda *_args, **_kwargs: None)
-    pv = PreviewData(
-        "exists", "読む", "よむ", ["本を読む"], "読む", ["to read"], None, None, "deck"
-    )
-
-    miner_ui.show_preview(r.graph.preview_commands.ports(), pv, None)
-    assert ("keybind", "ESC", f"script-message {PREVIEW_CLOSE_MSG}") in ipc.commands
-
-    r.command(PREVIEW_CLOSE_MSG)
-    assert not r.graph.preview.state.open  # Esc dismissed it
-    assert ("keybind", "ESC", "ignore") in ipc.commands  # handed back (no tooltip up)
-
-
 @pytest.mark.integration
 @pytest.mark.timeout(5)
 def test_add_anyway_after_exists_creates_an_explicit_duplicate(monkeypatch, make_session):

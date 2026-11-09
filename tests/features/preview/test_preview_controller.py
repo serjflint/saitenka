@@ -7,7 +7,6 @@ from types import SimpleNamespace
 import pytest
 from util import FakeIPC
 
-from saitenka.app.config import KeyOptions
 from saitenka.app.features.preview.miner_ui import CardSource, PreviewPorts
 from saitenka.app.features.preview.preparation import PreviewDestination
 from saitenka.app.features.preview.preview_controller import PreviewController
@@ -76,16 +75,12 @@ def source(*, note_info=None):
     )
 
 
-def ports(preview, ipc):
+def ports(preview, _ipc):
     return PreviewPorts(
         preview=preview,
-        help_open=False,
-        tip_keys_bound=False,
         surfaces=Surface(),
         osd=(1280, 720),
         tip_width=440,
-        ipc=ipc,
-        keys=KeyOptions(),
         add_duplicate=lambda: None,
         play_audio=False,
     )

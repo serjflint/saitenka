@@ -400,3 +400,37 @@ def test_closing_the_tooltip_restores_the_players_up_shortcut(tmp_path: Path, ke
             "tooltip teardown did not restore the player's Up binding",
         )
         assert ipc.command("get_property", "volume").get("data") == 37
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_preview_and_tooltip_teardown_restore_the_players_escape(tmp_path: Path) -> None:
+    from live_harness import poll_until
+
+    from saitenka.app.features.preview.card_preview import PreviewData
+    from saitenka.app.features.preview.miner_ui import show_preview
+
+    config_dir = tmp_path / "mpv-config"
+    config_dir.mkdir()
+    (config_dir / "input.conf").write_text("ESC set volume 37\n", encoding="utf-8")
+    with _live_reader(config_dir=config_dir) as (_tmp, reader, ipc):
+        reader.graph.tooltip.bind_keybindings()
+        show_preview(
+            reader.graph.preview_commands.ports(),
+            PreviewData("mined", "読む", "よむ", ["本を読む"]),
+            None,
+        )
+        reader.graph.interaction.settle()
+        ipc.command("keypress", "ESC")
+        poll_until(reader, lambda: not reader.graph.preview.state.open, "preview did not close")
+        reader.graph.tooltip.unbind_keybindings()
+        reader.graph.interaction.settle()
+
+        ipc.command("keypress", "ESC")
+
+        poll_until(
+            reader,
+            lambda: ipc.command("get_property", "volume").get("data") == 37,
+            "preview teardown replaced the player's Escape binding",
+        )
+        assert ipc.command("get_property", "volume").get("data") == 37

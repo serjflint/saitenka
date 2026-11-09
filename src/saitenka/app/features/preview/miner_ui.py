@@ -20,14 +20,12 @@ from typing import TYPE_CHECKING, cast
 from PIL import Image
 from saitenka_card import strip_field_html
 
-from saitenka.app.bindings import TIP_CLOSE_MSG, active_bindings
 from saitenka.app.features.preview.card_preview import PreviewData, render_card_preview
 from saitenka.app.media import audio_duration, play_audio
-from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.procutil import kill_process_tree
 from saitenka.model import Theme, in_rect
-from saitenka.runtime import Owner, events
+from saitenka.runtime import events
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -35,7 +33,6 @@ if TYPE_CHECKING:
     from PIL.Image import Image as PILImage
     from saitenka_tokenize.japanese import Token
 
-    from saitenka.app.config import KeyOptions
     from saitenka.app.features.preview.card_preview import PreviewPanel
     from saitenka.app.features.preview.preview_controller import PreviewController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
@@ -46,14 +43,10 @@ class PreviewPorts:
     """The preview owner, physical sinks, and per-turn facts used by its UI operations."""
 
     preview: PreviewController
-    help_open: bool
-    tip_keys_bound: bool
     surfaces: LifecycleSurfaces
     osd: tuple[int, int]
     #: The tooltip's width, which the preview matches so the two read as one card at one size.
     tip_width: int
-    ipc: object
-    keys: KeyOptions
     add_duplicate: Callable[[], None]
     play_audio: bool
     merge_duplicate: Callable[[], None] = lambda: None
@@ -170,38 +163,6 @@ def prepare_existing(source: CardSource, note_id: int, card, status: str) -> Pre
     return PreparedPreview(pv, mp3)
 
 
-def _grab_preview_keys(ipc, bindings) -> None:
-    """Route the preview-scoped keys (Esc → close) to the preview while it's on screen."""
-    for b in bindings:
-        send_correlated(
-            ipc,
-            f"preview-keybind:{b.key}",
-            "keybind",
-            b.key,
-            f"script-message {b.spec.message}",
-            owner=Owner.INTERACTION,
-        )
-
-
-def _release_preview_keys(ipc, bindings, *, help_open: bool, tip_keys_bound: bool) -> None:
-    """Hand the preview's keys back when it closes. Esc is shared with the tooltip, so return it there
-    if a tooltip is still up (the help overlay, if open, owns Esc itself — leave it alone)."""
-    if help_open:
-        return
-    for b in bindings:
-        command = (
-            f"script-message {TIP_CLOSE_MSG}" if b.key == "ESC" and tip_keys_bound else "ignore"
-        )
-        send_correlated(
-            ipc,
-            f"preview-keybind-release:{b.key}",
-            "keybind",
-            b.key,
-            command,
-            owner=Owner.INTERACTION,
-        )
-
-
 def _stop_preview_audio(preview: PreviewPanel) -> None:
     """Kill the ▶ clip's player if one is running (afplay / mpv --no-video / ffplay) — the fire-and-
     forget Popen outlives the panel otherwise, so a dismiss left the clip playing (#251). Idempotent."""
@@ -218,8 +179,6 @@ def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
     _stop_preview_audio(ports.preview.panel)
     ports.preview.store.dispatch(events.PreviewShown(pv, audio_path))
     render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width, scale=ports.scale)
-    _grab_preview_keys(ports.ipc, active_bindings(ports.keys, "preview"))
-    ports.preview.panel.keys_grabbed = True
 
 
 def render_preview(
@@ -246,11 +205,21 @@ def render_preview(
     width = round(reference_width * scale)
     pr = render_card_preview(pv, width=width, theme=theme, zoom=shown.zoom)
     px, py = round(osd[0] * 0.03), round(osd[1] * 0.06)
+    height = max(1, osd[1] - py - round(osd[1] * 0.03))
+    fit = min(1.0, height / pr.image.height)
+    if fit < 1:
+        pr.image = pr.image.resize(
+            (max(1, round(pr.image.width * fit)), height), Image.Resampling.LANCZOS
+        )
     surfaces.present(pr.image, px, py, oid=OverlayId.PREVIEW)
     panel.rect = (px, py, pr.image.width, pr.image.height)
 
     def _screen(r):
-        return (px + r[0], py + r[1], r[2], r[3]) if r else None
+        return (
+            (px + round(r[0] * fit), py + round(r[1] * fit), round(r[2] * fit), round(r[3] * fit))
+            if r
+            else None
+        )
 
     panel.close_rect = _screen(pr.close_rect)
     panel.audio_rect = _screen(pr.audio_rect)
@@ -268,17 +237,6 @@ def hide_preview(ports: PreviewPorts) -> None:
     ports.preview.store.dispatch(events.PreviewDismissed())
     panel = ports.preview.panel
     panel.clear()
-    if not panel.keys_grabbed:
-        return  # nothing was bound: every cue change dismisses, and most have no preview up
-    _release_preview_keys(
-        ports.ipc,
-        active_bindings(ports.keys, "preview"),
-        help_open=ports.help_open,
-        tip_keys_bound=ports.tip_keys_bound,
-    )
-    # An open help overlay owns Esc and the release stands down; the keys stay owed, so the next
-    # dismiss retries rather than leaving them bound to a preview that is gone.
-    panel.keys_grabbed = ports.help_open
 
 
 def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:

@@ -493,13 +493,9 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
     preview_commands = preview_ref.bind(
         PreviewCommandEndpoint(
             preview=preview_controller,
-            help=help_controller,
-            tip_keys_bound=lambda: tooltip_controller.keybindings_bound,
             mining=mining_controller,
             surfaces=lifecycle_surfaces,
             screen=screen,
-            ipc=ipc,
-            keys=assembly.keys,
             tip_scale_override=tooltip_controller.visual.scale_override,
             tip_max_frac=tooltip_controller.visual.base_height_fraction,
             play_audio=mining_controller.play_audio,
