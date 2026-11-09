@@ -9,6 +9,9 @@ logs.
 
 ### Added
 
+- Saitenka shortcuts accept the equivalent standard Russian layout keys while preserving explicitly
+  configured shortcuts and the configured names in help.
+
 - Scan a component inside a Japanese subtitle word from the pointed character without recoloring it.
 
 - Kiku duplicate previews can attach another admitted scene to the existing note with an explicit

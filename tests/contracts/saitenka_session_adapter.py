@@ -106,7 +106,7 @@ class SaitenkaSessionAdapter:
                     "legacy_keybind_count": len(self._legacy_bindings),
                 },
             )
-            for section, (flags, bindings, unique) in self._binding_sections.items():
+            for section, (flags, _bindings, unique) in self._binding_sections.items():
                 self._append(
                     "binding",
                     {
@@ -114,7 +114,6 @@ class SaitenkaSessionAdapter:
                         "kind": "binding-section",
                         "name": section,
                         "flags": flags,
-                        "binding_count": len(bindings),
                         "unique_keys": unique,
                     },
                 )

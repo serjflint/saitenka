@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.bindings import GLOBAL_SECTION, active_bindings, section_contents
+from saitenka.app.bindings import GLOBAL_SECTION, section_contents, shortcut_bindings
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.runtime import (
     COMMAND_SPECS,
@@ -73,7 +73,7 @@ class CommandRuntime:
     def install_input(self) -> None:
         ports = self._ports
         bindings = [
-            row for row in active_bindings(ports.keys, "global") if row.spec.message is not None
+            row for row in shortcut_bindings(ports.keys, "global") if row.spec.message is not None
         ]
         contents = section_contents(bindings)
         if contents:
@@ -98,7 +98,7 @@ class CommandRuntime:
             len(bindings),
             ports.mining.configured,
         )
-        ports.mouse.define(active_bindings(ports.keys, "mouse"))
+        ports.mouse.define(shortcut_bindings(ports.keys, "mouse"))
 
     @property
     def specs(self) -> tuple[CommandSpec, ...]:

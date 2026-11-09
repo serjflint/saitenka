@@ -11,7 +11,7 @@ from saitenka_tokenize.languages import MAIN_LANG
 
 from saitenka import otel_metrics
 from saitenka.app import study_text, subtitles
-from saitenka.app.bindings import TOOLTIP_SECTION, active_bindings, section_contents
+from saitenka.app.bindings import TOOLTIP_SECTION, section_contents, shortcut_bindings
 from saitenka.app.feature_bindings import (
     HOVER_PAUSE_STATEFUL_BINDING,
     HOVER_STATEFUL_BINDING,
@@ -978,7 +978,7 @@ class TooltipController:
         self._ipc.command_async(
             "define-section",
             TOOLTIP_SECTION,
-            section_contents(active_bindings(self._keys, "tooltip")),
+            section_contents(shortcut_bindings(self._keys, "tooltip")),
             "force",
         )
         if not self._help.state.open:
