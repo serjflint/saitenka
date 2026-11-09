@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw
+from saitenka_subtitles.character_scan import character_spans
+from saitenka_subtitles.geometry import CharacterGeometry, Rect
 
 from saitenka import fonts
 from saitenka.model import Span, Style
@@ -21,7 +23,7 @@ from saitenka.render.layout import NO_START, Block
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from saitenka_subtitles import Rect, SubtitleEventId
+    from saitenka_subtitles import SubtitleEventId
     from saitenka_tokenize.japanese import Token
 
 WHITE = (255, 255, 255, 255)
@@ -53,6 +55,7 @@ class WordBox:
     event_id: SubtitleEventId | None = None
     #: Disjoint logical regions; the outer box remains the tooltip anchor.
     hit_regions: tuple[Rect, ...] | None = None
+    characters: tuple[CharacterGeometry, ...] = ()
 
     def contains(self, px: float, py: float) -> bool:
         if self.hit_regions is not None:
@@ -474,7 +477,22 @@ def _draw_token(draw, tok: Token, place: _Place, style, st: _SubStyle, *, hovere
         draw.line(
             [(place.x, uy), (place.x + place.w, uy)], fill=underline, width=max(2, st.size // 14)
         )
-    return WordBox(place.gi, int(place.x), place.y + st.pad_y, int(place.w), st.text_h)
+    characters = tuple(
+        CharacterGeometry(
+            start,
+            Rect(
+                round(place.x + draw.textlength(tok.surface[:start], font=st.font)),
+                place.y + st.pad_y,
+                round(place.x + draw.textlength(tok.surface[:end], font=st.font))
+                - round(place.x + draw.textlength(tok.surface[:start], font=st.font)),
+                st.text_h,
+            ),
+        )
+        for start, end in character_spans(tok.surface)
+    )
+    return WordBox(
+        place.gi, int(place.x), place.y + st.pad_y, int(place.w), st.text_h, characters=characters
+    )
 
 
 def _draw_visual_lines(

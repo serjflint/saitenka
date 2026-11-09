@@ -122,6 +122,7 @@ class HoverState:
     scan_target: str | None = None  # scan cell whose open dwell is armed
     tip_hide_pending: bool = False
     nest_hide_pending: bool = False
+    scan_subtitle: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,7 +168,11 @@ def elapsed(state: HoverState, intent: Intent, *, nest_tail: str | None = None) 
     outlived what armed it must decide nothing, not act on a target the cursor has left."""
     match intent:
         case OpenScan(scan):
-            if state.scan_target == scan.text and nest_tail != scan.text:
+            if (
+                state.scan_target == scan.text
+                and state.scan_subtitle == scan.subtitle
+                and nest_tail != scan.text
+            ):
                 return HoverTurn(state, (OpenNested(scan),))
             return HoverTurn(state)
         case SwitchTo(index):
@@ -216,9 +221,9 @@ def _nested(
         state = replace(state, nest_hide_pending=False)
         out: tuple[Decision, ...] = (Cancel(Dwell.HIDE_NESTED),)
         text = obs.scan.text
-        if text == state.scan_target:
+        if text == state.scan_target and obs.scan.subtitle == state.scan_subtitle:
             return state, out  # this cell's dwell is already armed, or already resolved
-        state = replace(state, scan_target=text)
+        state = replace(state, scan_target=text, scan_subtitle=obs.scan.subtitle)
         if obs.nest_tail == text:
             return state, out  # already shown
         return state, (*out, Arm(Dwell.OPEN_SCAN, delays.scan, OpenScan(obs.scan)))

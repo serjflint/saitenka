@@ -26,6 +26,7 @@ from saitenka.app.features.tooltip.popups import Panel, PanelCache, PopupView, T
 from saitenka.app.features.tooltip.prefetch import SCALE_BUCKET
 from saitenka.app.lookup import card_for, entry_for
 from saitenka.app.overlay_ids import OverlayId
+from saitenka.model import ScanBox, in_rect
 from saitenka.panel import Freq, panel_rows
 from saitenka.runtime import events, hover
 
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 
     from saitenka_tokenize.registry import Tokenizer
 
-    from saitenka.app.features.tooltip.popups import TooltipState
+    from saitenka.app.features.tooltip.popups import HoverInputs, TooltipState
     from saitenka.render.layout_backend import LayoutBackend
 
 TIP_GAP = 12  # px between an anchored popup and the word it points at
@@ -632,6 +633,8 @@ def render_view(ports: TipPorts, view: PopupView) -> None:
     st = view.state
     if st is None:
         return
+    if view is ports.tip.view and ports.tip.nest.subtitle and ports.tip.nest.state is not None:
+        return
     view.quality.prepare(
         view.key if view.key is not None else st, (view.scroll, view.view_h, ports.scale.raster)
     )
@@ -782,13 +785,53 @@ def apply_pending_scroll(ports: TipPorts, view: PopupView) -> None:
     render_view(ports, view)
 
 
-def scan_hit(tip: TooltipState, raster_scale: float, mx: float, my: float):
-    """Which per-character scan cell of the base tooltip is under (mx, my)? Maps screen → panel
-    coords (accounting for scroll) and returns the :class:`~saitenka.model.ScanBox`, or None. Hit-tests the
-    panel actually DRAWN (crisp native when shown, else reference) so a hover lands on the right cell.
+def _subtitle_scan(tip: TooltipState, inputs: HoverInputs, mx: float, my: float) -> ScanBox | None:
+    index = inputs.hover()
+    if index < 0 or index >= len(inputs.tokens) or inputs.hit(mx, my) != index:
+        return None
+    token = inputs.tokens[index]
+    ox, oy = inputs.sub_origin
+    sx, sy = tip.view.xy
+    for box in inputs.boxes:
+        if box.index != index:
+            continue
+        for char in box.characters:
+            regions = char.regions or (char.bounds,)
+            if char.offset > 0 and any(rect.contains(mx - ox, my - oy) for rect in regions):
+                rect = char.bounds
+                return ScanBox(
+                    token.surface[char.offset :],
+                    rect.x + ox - sx,
+                    rect.y + oy - sy + tip.view.scroll,
+                    rect.width,
+                    rect.height,
+                    subtitle=True,
+                )
+    return None
 
-    Five of the six things this needed live on the tooltip state; only the raster scale does not.
-    """
+
+def visible_scan_hit(
+    tip: TooltipState,
+    raster_scale: float,
+    mx: float,
+    my: float,
+    *,
+    subtitle: HoverInputs | None = None,
+):
+    """Resolve visible scan targets with nested > base popup > subtitle precedence."""
+    if tip.view.state is None:
+        return None
+    if subtitle is not None and not (subtitle.mouse_pos() or {}).get("hover"):
+        return None
+    if tip.nest.rect is not None and in_rect(tip.nest.rect, mx, my):
+        return None
+    if tip.view.rect is None or not in_rect(tip.view.rect, mx, my):
+        return _subtitle_scan(tip, subtitle, mx, my) if subtitle is not None else None
+    return scan_hit(tip, raster_scale, mx, my)
+
+
+def scan_hit(tip: TooltipState, raster_scale: float, mx: float, my: float):
+    """Map screen coordinates to retained panel geometry, including offscreen cells."""
     if tip.view.state is None or tip.view.rect is None:
         return None
     panel, s, scroll = hit_target(  # the on-screen panel + its scale/scroll

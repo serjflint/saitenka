@@ -149,6 +149,11 @@ and unsupported rendering options are refused by that source. `auto` can retain 
 qualified shadow geometry for those cases. Invisible or unlit karaoke syllables can remain
 scannable: these are logical text regions, not a visibility mask.
 
+[Component scanning](features.md#hover-multi-dictionary-tooltip) additionally requires unambiguous
+character cells. Shadow geometry qualifies static, unobscured Japanese text against its rendered
+ink; patched-mpv geometry requires separable clusters in a single event. Other cues retain ordinary
+whole-word interaction.
+
 In `auto`, static dialogue, including authored speaker colors, may retain independently qualified
 shadow coloring. Karaoke and unqualified alpha effects receive invisible scan regions only: no Saitenka text overprint,
 tint, hover outline, or level underline. Tooltip and mining behavior use the same cue and token

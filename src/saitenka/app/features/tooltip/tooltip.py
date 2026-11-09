@@ -45,8 +45,8 @@ from saitenka.app.features.tooltip.tooltip_panel import (
     place_tip,
     render_view,
     rows_panel,
-    scan_hit,
     scroll_view,
+    visible_scan_hit,
 )
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 from saitenka.app.media import copy_clipboard, speak
@@ -146,7 +146,13 @@ def _perform(ports: TipPorts, actions: HoverActions, decision: hover_machine.Dec
 
 
 def _dwell_elapsed(ports: TipPorts, actions: HoverActions, intent: hover_machine.Intent) -> None:
-    route_hover(ports, actions, events.HoverDwellElapsed(intent, ports.tip.nest.tail))
+    tail = ports.tip.nest.tail
+    if (
+        isinstance(intent, hover_machine.OpenScan)
+        and intent.scan.subtitle != ports.tip.nest.subtitle
+    ):
+        tail = None
+    route_hover(ports, actions, events.HoverDwellElapsed(intent, tail))
 
 
 def _target_outcome(
@@ -185,8 +191,17 @@ def observe_hover(ports: TipPorts, inputs: HoverInputs, mx: float, my: float, *,
         nest_rect=ports.tip.nest.rect,
         hit=lambda x, y: inputs.hit(x, y) if inputs.tokens else -1,
     )
-    scan = scan_hit(ports.tip, ports.scale.raster, mx, my) if (over_tip and not over_nest) else None
-    if scan is not None and link_hit_at(ports.tip, ports.scale.raster, mx, my, nested=False):
+    can_scan = not over_nest and (over_tip or (over_word >= 0 and over_word == inputs.hover()))
+    scan = (
+        visible_scan_hit(ports.tip, ports.scale.raster, mx, my, subtitle=inputs)
+        if can_scan
+        else None
+    )
+    if (
+        scan is not None
+        and over_tip
+        and link_hit_at(ports.tip, ports.scale.raster, mx, my, nested=False)
+    ):
         scan = None
     if otel_metrics.hover_target_outcomes is not None:
         outcome = _target_outcome(
@@ -205,7 +220,11 @@ def observe_hover(ports: TipPorts, inputs: HoverInputs, mx: float, my: float, *,
             over_nest=over_nest,
             scan=scan,
             nest_open=ports.tip.nest.state is not None,
-            nest_tail=ports.tip.nest.tail,
+            nest_tail=(
+                ports.tip.nest.tail
+                if scan is None or scan.subtitle == ports.tip.nest.subtitle
+                else None
+            ),
         ),
         (over_word, over_tip, over_nest),
     )
@@ -977,16 +996,17 @@ def _apply_engaged_base(
     show_tooltip(ports, panel, inputs, show, i)
 
 
-def _apply_engaged_nested(ports: TipPorts, tail: str) -> None:
+def _apply_engaged_nested(ports: TipPorts, tail: str, inputs: HoverInputs) -> None:
     """Show the nested scan popup for a composed cold-miss head, iff the cursor still rests on the same
     inner word — re-run the scan hit-test at the current mouse and match its tail. This re-derives a fresh
     anchor (the inner cell may have scrolled) and re-opens through the (now-warm, worker-composed) panel:
     a cache hit whose bands the worker already rastered, so no getmask2 lands on this tick."""
     if ports.tip.nest.state is not None:
         return  # a nested popup already showing
-    sb = scan_hit(ports.tip, ports.scale.raster, *ports.tip.last_mouse)
+    sb = visible_scan_hit(ports.tip, ports.scale.raster, *ports.tip.last_mouse, subtitle=inputs)
     if sb is None or sb.text != tail:
         return  # cursor left the inner word — never flash a stale nested popup
+    ports.tip.nest.subtitle = sb.subtitle
     key, token = ports.tip.nest.key, ports.tip.nest.token
     panel = None if key is None else ports.tip.panel_cache.get(key)
     if panel is None or token is None:
@@ -1015,7 +1035,7 @@ def apply_engaged_hover(
     if popup.job_id != result.job_id:
         return
     if result.nested:
-        _apply_engaged_nested(ports, result.tail)
+        _apply_engaged_nested(ports, result.tail, inputs)
     else:
         _apply_engaged_base(ports, panel, inputs, show, result.key)
 
@@ -1144,7 +1164,9 @@ def tip_back(ports: TipPorts) -> bool:
 
 def scroll_tip(ports: TipPorts, actions: HoverActions, delta: int) -> None:
     # route the wheel to whichever popup the cursor is over (nested sits on top)
-    if ports.tip.nest.rect is not None and in_rect(ports.tip.nest.rect, *ports.tip.last_mouse):
+    if ports.tip.nest.rect is not None and (
+        ports.tip.nest.subtitle or in_rect(ports.tip.nest.rect, *ports.tip.last_mouse)
+    ):
         scroll_view(ports, ports.tip.nest, delta)
         return
     if scroll_view(ports, ports.tip.view, delta):

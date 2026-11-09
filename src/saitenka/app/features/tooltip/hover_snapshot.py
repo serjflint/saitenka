@@ -59,14 +59,14 @@ def snapshot(
     base_panel = tip.state
     return HoverView(
         nested=NestedView(
-            shown=nested_panel is not None,
+            shown=nested_panel is not None and nest.rect is not None,
             word=nest.word,
             has_token=nest.token is not None,
             key=nest.key,
             rect=nest.rect,
         ),
         tip=TipView(
-            shown=base_panel is not None,
+            shown=base_panel is not None and tip.rect is not None,
             panel_id=id(base_panel) if base_panel is not None else None,
             full_height=base_panel.full_height if base_panel is not None else 0,
             links=tuple(base_panel.windowed.link_boxes()) if base_panel is not None else (),

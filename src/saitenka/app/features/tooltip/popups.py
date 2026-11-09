@@ -181,6 +181,7 @@ class WordLookup:
     deferred: bool
     submit: Callable[..., bool]
     boundaries: tuple[int, ...] = ()
+    subtitle: HoverInputs | None = None
 
 
 class MinedSnapshot(Protocol):
@@ -427,6 +428,7 @@ class PopupView:
         self.token: Token | None = None  # the inner Token (for mining via the popup's ⊕)
         self.word: str | None = None  # inner word surface — dedup against re-opening
         self.tail: str | None = None  # scan-cell tail that opened it — skip re-scanning
+        self.subtitle = False
         self.xy: tuple[int, int] = (0, 0)
         self.view_h = 0
         self.scroll = 0
@@ -595,4 +597,4 @@ class TooltipState:
     def open(self) -> bool:
         """Shown iff a tooltip rect is placed — the uniform ``SurfaceState`` predicate the surface
         registry (app/surfaces.py) reads for mouse-capture/routing."""
-        return self.view.rect is not None
+        return self.view.rect is not None or self.nest.rect is not None

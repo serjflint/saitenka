@@ -264,3 +264,37 @@ def diagnostic_trace(monkeypatch, tmp_path):
     finally:
         if not finished:
             provider.shutdown()
+
+
+@pytest.fixture
+def lookup_session(tmp_path):
+    from dicthelp import load_set, lookup_records, term_zip
+    from driver import Driver
+    from util import FakeIPC
+
+    from saitenka.app.config import ReaderOptions
+    from saitenka.app.session.factory import SessionServices
+
+    readers = []
+
+    def make(dataset="component"):
+        directory = tmp_path / str(len(readers))
+        directory.mkdir()
+        records = lookup_records(dataset)
+        dictionaries = load_set(
+            [term_zip(directory / "terms.zip", "Fixture terms", records["terms"])]
+        )
+        ipc = FakeIPC()
+        ipc.props.update({"path": "/fixtures/episode.mkv", "pause": True})
+        reader = session_builder.build_session(
+            ipc,
+            services=SessionServices(dictionaries=dictionaries, tts=False),
+            options=ReaderOptions().with_overrides(prefetch=False, scan_delay=0.0),
+        )
+        readers.append(reader)
+        reader.start()
+        return Driver(reader).resize(1920, 1080), None
+
+    yield make
+    for reader in reversed(readers):
+        reader.close()

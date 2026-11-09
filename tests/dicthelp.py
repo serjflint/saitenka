@@ -73,3 +73,11 @@ def load_jlpt(*, on: DictionaryDb | None = None) -> JlptDict:
     from saitenka.app.dict_meta import load_jlpt
 
     return load_jlpt(on or db())
+
+
+def lookup_records(name):
+    """Dictionary and frequency records for the small imported lookup fixtures."""
+    from pathlib import Path
+
+    data = Path(__file__).with_name("fixtures") / "lookup_records.json"
+    return json.loads(data.read_text(encoding="utf-8"))[name]

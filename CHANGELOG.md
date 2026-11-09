@@ -9,6 +9,8 @@ logs.
 
 ### Added
 
+- Scan a component inside a Japanese subtitle word from the pointed character without recoloring it.
+
 - Kiku duplicate previews can attach another admitted scene to the existing note with an explicit
   merge adapter, preserving its cards and scheduling and refusing observed field conflicts.
 
@@ -20,6 +22,8 @@ logs.
   preserving mpv's subtitle settings and falling back for unsupported markup.
 
 ### Fixed
+
+- Component popups replace the prior whole-word popup and restore it when leaving the component.
 
 - Converted subtitle colors and hover geometry follow mpv's margin policy in letterboxed windows.
 

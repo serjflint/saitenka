@@ -67,6 +67,11 @@ dictionary entry.
   optional GPL deinflect add-on is installed.
 - **Nested lookups:** cross-references inside a definition are themselves scannable, and the
   tooltip supports wildcard search and in-tooltip word scanning.
+- **Components inside subtitle words:** after a word's tooltip opens, rest the pointer on a later
+  Japanese character to open a component popup. For example, hovering 遂 in やり遂げたい looks up
+  遂げたい → 遂げる. The component popup has its own copy, pronunciation and mining controls;
+  the subtitle's word colors and whole-word selection stay intact. When character geometry is
+  ambiguous or covered, scanning remains at whole-word granularity.
 
 A bilingual entry can be long, so **scroll the mouse wheel over the tooltip** to reach the
 lower (monolingual) sections. With no dictionary configured, Saitenka falls back to JMdict.

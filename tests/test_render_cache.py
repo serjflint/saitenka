@@ -1169,11 +1169,11 @@ def test_engaged_nested_drain_reopens_warm(tmp_path, monkeypatch):
         r.graph.tooltip.surface_state().view.xy,
         r.graph.tooltip.surface_state().view.scroll,
     ) = (0, 0), 0
-    sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20)
+    sb = SimpleNamespace(text=tok.surface, x=10, y=10, h=20, subtitle=False)
     # Both lookup sites: the metadata completion re-derives through `nested_popup`, the composed
     # head through `tooltip`.
     for module in (tooltip, nested_popup):
-        monkeypatch.setattr(module, "scan_hit", lambda _tip, _scale, _mx, _my: sb)
+        monkeypatch.setattr(module, "visible_scan_hit", lambda _tip, _scale, _mx, _my, **_kw: sb)
 
     r.graph.tooltip.surface_state().panel_cache.clear()
     nested_popup.show_nested(

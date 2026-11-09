@@ -82,7 +82,8 @@ def test_to_bench_json_keeps_the_frame_sentinel_and_trends_live_latency():
     assert [e["value"] for e in out] == [3, 1, 12.5, 30.0]
 
 
-def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
+@pytest.mark.parametrize("component", [False, True])
+def test_scroll_workload_requires_the_tooltip_viewport_to_advance(component):
     mod = _jank_module()
 
     class SessionController:
@@ -90,14 +91,18 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
         tip_scale = SimpleNamespace(ref_h=1080)
 
         def __init__(self):
-            self.tip = SimpleNamespace(view=SimpleNamespace(scroll=0))
+            self.tip = SimpleNamespace(
+                view=SimpleNamespace(scroll=0, rect=None if component else (0, 0, 400, 300)),
+                nest=SimpleNamespace(scroll=0, rect=(0, 0, 400, 300) if component else None),
+            )
+            target = self.tip.nest if component else self.tip.view
             self.tooltip_controller = SimpleNamespace(
                 surface_state=lambda: self.tip,
                 scale=lambda: SimpleNamespace(ref_h=1080),
                 scroll_tip=lambda delta: setattr(
-                    self.tip.view,
+                    target,
                     "scroll",
-                    self.tip.view.scroll + delta,
+                    target.scroll + delta,
                 ),
             )
 
@@ -108,7 +113,8 @@ def test_scroll_workload_requires_the_tooltip_viewport_to_advance():
     mod._scroll_four(reader.tooltip_controller, reader.pump)
     # Through the shared conversion, not a second copy of the arithmetic: a hard-coded fraction
     # here would keep passing after the wheel's step changed.
-    assert reader.tip.view.scroll == 4 * surfaces.tip_wheel_pixels(1080, 1)
+    target = reader.tip.nest if component else reader.tip.view
+    assert target.scroll == 4 * surfaces.tip_wheel_pixels(1080, 1)
 
 
 def _stuck_controller(mod_state):

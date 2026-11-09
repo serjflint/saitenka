@@ -1087,3 +1087,18 @@ def pinned_ass_renderer(libasslite, ass: bytes, **kwargs):
         default_family=PINNED_FAMILY,
         **kwargs,
     )
+
+
+def overlay_frame(ipc, oid):
+    """Read the currently published BGRA artifact at the mpv command boundary."""
+    for command in reversed(ipc.commands):
+        if command[:2] == ("overlay-remove", oid):
+            return None
+        if command[:2] == ("overlay-add", oid):
+            _, _, x, y, path, offset, fmt, width, height, stride = command
+            assert fmt == "bgra"
+            raw = Path(path).read_bytes()[offset : offset + height * stride]
+            pixels = np.frombuffer(raw, dtype=np.uint8).reshape(height, stride)
+            image = bgra_to_image(pixels[:, : width * 4].reshape(height, width, 4))
+            return image, x, y
+    return None
