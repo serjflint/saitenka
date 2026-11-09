@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794228762911,
+  "lastUpdate": 1794235647668,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -22537,6 +22537,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 9.089024,
             "range": "3 replicas; min 8.76954; max 9.16275; MAD 0.073728",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "306c357afc4f2dae435cba6cbdd4fd2582e1d674",
+          "message": "Merge pull request #576 from serjflint/docs/architecture-review-evidence\n\ndocs(architecture): archive the scoped owner-thread review",
+          "timestamp": "2026-11-09T12:50:25Z",
+          "url": "https://github.com/serjflint/saitenka/commit/306c357afc4f2dae435cba6cbdd4fd2582e1d674"
+        },
+        "date": 1794235645249,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 21.308574,
+            "range": "3 replicas; min 20.9549; max 22.8356; MAD 0.353643; worst 22.8356",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 119.843559,
+            "range": "3 replicas; min 29.0363; max 121.081; MAD 1.23741; worst 121.081",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 4.849664,
+            "range": "3 replicas; min 4.74726; max 5.27974; MAD 0.1024",
             "unit": "MB"
           }
         ]
