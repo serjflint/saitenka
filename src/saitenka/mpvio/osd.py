@@ -201,6 +201,7 @@ class Overlay:
         self._in_flight: dict[Path, int] = {}
         self._repaint_pending: set[tuple[int, Path]] = set()
         self._repaint_lock = threading.RLock()
+        self._lifecycle_pending: set[int] = set()
         #: Frames a sweep could not delete (Windows holds them open) — retried on the next sweep.
         self._pending_deletion: set[Path] = set()
 
@@ -307,6 +308,15 @@ class Overlay:
             self.lifecycle_oids.discard(oid)
         self._retire_frame_path(physical_oid)
         self._retire(physical_oid, path)
+
+    def begin_lifecycle_update(self, oid: int) -> None:
+        # Order any already-snapshotted replay before the new lifecycle command.
+        with self._repaint_lock, self._state_lock:
+            self._lifecycle_pending.add(self._oid(oid))
+
+    def finish_lifecycle_update(self, oid: int) -> None:
+        with self._state_lock:
+            self._lifecycle_pending.discard(self._oid(oid))
 
     def remove_lifecycle_now(self, oid: int) -> dict:
         """Synchronously place a final remove behind any queued add before detaching from mpv."""
@@ -441,6 +451,7 @@ class Overlay:
                     (oid, tail)
                     for oid, tail in self._live.items()
                     if self.visible
+                    and oid not in self._lifecycle_pending
                     and (force or (oid, _tail_path(tail)) not in self._repaint_pending)
                 ]
                 self._hold([_tail_path(tail) for _, tail in pending])

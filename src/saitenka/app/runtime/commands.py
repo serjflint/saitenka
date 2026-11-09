@@ -177,6 +177,7 @@ _CUE_INDEPENDENT = frozenset(
 )
 _HELP_COMMANDS = frozenset(
     {
+        TIP_CLOSE_MSG,
         HELP_TOGGLE_MSG,
         HELP_PREV_MSG,
         HELP_NEXT_MSG,

@@ -222,3 +222,54 @@ class Driver:
             popup.xy[1] + (link.y + link.h / 2 - popup.scroll) * scale,
         )
         return self.press("MBTN_LEFT")
+
+    @property
+    def preview_frame(self):
+        from util import overlay_frame
+
+        from saitenka.app.overlay_ids import OverlayId
+
+        return overlay_frame(self.ipc, OverlayId.PREVIEW)
+
+    @property
+    def help_visible(self):
+        from util import overlay_frame
+
+        from saitenka.app.overlay_ids import OverlayId
+
+        return overlay_frame(self.ipc, OverlayId.HELP) is not None
+
+    @property
+    def preview_close_bounds(self):
+        """Locate the close button in the published preview image."""
+        import numpy as np
+
+        image, x, y = self.preview_frame
+        pixels = np.asarray(image)[: image.height // 3, image.width // 2 :]
+        mask = np.all(pixels == (225, 225, 225, 255), axis=2)
+        # Filled rows exclude antialiased text and divider pixels.
+        ys = np.flatnonzero(mask.sum(axis=1) >= 8)
+        runs = np.split(ys, np.flatnonzero(np.diff(ys) > 1) + 1)
+        row = next((run for run in runs if len(run) >= 8), None)
+        if row is None:
+            raise AssertionError("preview has no visible close button")
+        xs = np.flatnonzero(mask[row].sum(axis=0) >= len(row) / 2)
+        return (
+            x + image.width // 2 + int(xs.min()),
+            y + int(row[0]),
+            int(xs.max() - xs.min() + 1),
+            int(row[-1] - row[0] + 1),
+        )
+
+    def close_preview(self):
+        x, y, width, height = self.preview_close_bounds
+        self.move(x + width * 0.85, y + height * 0.85)
+        return self.press("MBTN_LEFT")
+
+    def wait_for_preview(self):
+        from util import await_ready
+
+        await_ready(
+            lambda: self.preview_frame is not None, "preview did not appear", pump=self.session.pump
+        )
+        return self

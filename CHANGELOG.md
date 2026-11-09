@@ -23,6 +23,10 @@ logs.
 
 ### Fixed
 
+- Esc closes the top open widget after the tooltip disappears, and closing utility panels restores
+  the player's shortcuts. Card previews use the shared UI scale with a larger, visible close button;
+  expired mining messages no longer return during paused repaints.
+
 - Dictionary difficulty and frequency badges follow each displayed entry, including compounds and
   inflected forms. Tooltips omit duplicate headings, use tighter spacing, and start phrase lookup at
   the hovered token. Nested-entry mining keeps the selected reading and gloss; stale cached panels

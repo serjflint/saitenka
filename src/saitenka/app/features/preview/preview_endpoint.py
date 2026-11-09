@@ -12,26 +12,20 @@ from saitenka.app.features.tooltip import prefetch
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from saitenka.app.config import KeyOptions
-    from saitenka.app.features.help.help_controller import HelpController, ScreenState
+    from saitenka.app.features.help.help_controller import ScreenState
     from saitenka.app.features.mining.mining_controller import MiningController
     from saitenka.app.features.preview.preview_controller import PreviewController
     from saitenka.app.lifecycle_surfaces import LifecycleSurfaces
     from saitenka.app.session.playback_observation import PlaybackObservationController
     from saitenka.app.subtitle_presentation import CueRenderStore
-    from saitenka.mpvio.ipc import MpvIPC
 
 
 @dataclass(frozen=True, slots=True)
 class PreviewCommandEndpoint:
     preview: PreviewController
-    help: HelpController
-    tip_keys_bound: Callable[[], bool]
     mining: MiningController
     surfaces: LifecycleSurfaces
     screen: ScreenState
-    ipc: MpvIPC
-    keys: KeyOptions
     tip_scale_override: float
     tip_max_frac: float
     play_audio: bool
@@ -47,17 +41,14 @@ class PreviewCommandEndpoint:
         ).width
         return PreviewPorts(
             preview=self.preview,
-            help_open=self.help.state.open,
-            tip_keys_bound=self.tip_keys_bound(),
             surfaces=self.surfaces,
             osd=self.screen.osd,
             tip_width=tip_width,
-            ipc=self.ipc,
-            keys=self.keys,
             add_duplicate=self.add_duplicate,
             play_audio=self.play_audio,
             merge_duplicate=self.merge_duplicate,
             cancel_merge=self.mining.cancel_merge,
+            scale=self.screen.chrome_scale(),
         )
 
     def add_duplicate(self) -> None:
@@ -129,6 +120,7 @@ class PreviewCommandEndpoint:
             self.surfaces,
             self.screen.osd,
             self.ports().tip_width,
+            scale=self.screen.chrome_scale(),
         )
 
     def hide(self) -> None:

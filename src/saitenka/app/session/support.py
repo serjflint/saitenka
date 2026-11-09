@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from saitenka import otel_metrics
 from saitenka.app import session_stats
+from saitenka.app.features.preview.miner_ui import render_preview
 from saitenka.app.lifecycle_timers import LifecycleTimerKind
 
 if TYPE_CHECKING:
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from saitenka.app.features.history.history_owner import HistoryOwner
     from saitenka.app.features.mining.mining_controller import MiningController
     from saitenka.app.features.picker.picker_controller import PickerController
+    from saitenka.app.features.preview.preview_controller import PreviewController
     from saitenka.app.features.profiles.profile_session import ProfileSession
     from saitenka.app.features.sidebar.sidebar_controller import SidebarController
     from saitenka.app.features.tooltip.tooltip_controller import TooltipController
@@ -51,6 +53,7 @@ class SessionPresentation:
     help_controller: HelpController
     analysis: AnalysisController
     sidebar: SidebarController
+    preview: PreviewController
     surfaces: LifecycleSurfaces
     timers: LifecycleTimers
     overlay: Overlay
@@ -101,6 +104,13 @@ class SessionPresentation:
         self.help_controller.redraw()
         self.analysis.redraw()
         self.sidebar.follow()
+        render_preview(
+            self.preview,
+            self.surfaces,
+            self.screen.osd,
+            self.tooltip.scale().width,
+            scale=self.screen.chrome_scale(),
+        )
 
     def schedule_paused_nudge(self, operations_before: int) -> None:
         if self.overlay.ops == operations_before or not self.playback().value("pause"):

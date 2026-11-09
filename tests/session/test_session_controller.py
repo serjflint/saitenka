@@ -820,6 +820,15 @@ def test_a_burst_of_paused_draws_repaints_once(make_session):
     r.pump()
     r.graph.playback.observe("sub-text", "に")
     r.pump()  # a second paused draw, before the first nudge was ever delivered
+    await_ready(
+        lambda: (
+            "".join(token.surface for token in r.graph.subtitle_presentation.cue.current.tokens)
+            == "に"
+            and r.graph.lifecycle_surfaces.settled()
+        ),
+        "replacement subtitle surface was not acknowledged",
+        pump=r.pump,
+    )
     before = _count_adds(ipc)
 
     assert ipc.fire_runtime_timer("lifecycle:paused-repaint")

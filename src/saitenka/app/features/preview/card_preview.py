@@ -31,7 +31,7 @@ RED: RGBA = (200, 60, 60, 255)
 OUTLINE: RGBA = (200, 200, 200, 255)  # thumbnail / screenshot border
 DUP_CHIP: RGBA = (120, 90, 150, 255)  # the ＋ "add anyway" affordance
 DUP_LABEL = "＋ add anyway (different scene)"
-CLOSE = 20  # ✕ close button size
+CLOSE = 36  # ✕ close button size
 ZOOM_MAX = (700, 620)  # enlarged screenshot bounds (verify the frame)
 STATUS = {
     "mined": ("✚ mined", (90, 150, 90, 255)),
@@ -93,9 +93,6 @@ class PreviewPanel:
     image_rect: Rect | None = None
     dup_rect: Rect | None = None
     merge_rect: Rect | None = None
-    #: Whether the preview's keys are currently bound in mpv, so a dismiss on a cue with no preview
-    #: up does not send a `keybind` command per cue.
-    keys_grabbed: bool = False
 
     def clear(self) -> None:
         """Dismiss: forget every clickable region in one move."""
@@ -204,13 +201,30 @@ def render_card_preview(
     hw = inline_flow(
         furigana(pv.expression, pv.reading), Style(size=theme.px(34), weight=700, color=theme.text)
     )
-    hw_img = flow_row(hw)
-    header = Image.new("RGBA", (cw, max(chip.height, hw_img.height) + theme.px(6)), (0, 0, 0, 0))
+    hw_img = render_flow(
+        hw,
+        Block(
+            width=max(1, cw - chip.width - close - theme.px(24)),
+            padding=0,
+            line_height_scale=1.3,
+            background=(0, 0, 0, 0),
+        ),
+    )
+    header = Image.new(
+        "RGBA", (cw, max(chip.height, hw_img.height, close) + theme.px(6)), (0, 0, 0, 0)
+    )
     header.alpha_composite(chip, (0, (header.height - chip.height) // 2))
     header.alpha_composite(
         hw_img, (chip.width + theme.px(12), (header.height - hw_img.height) // 2)
     )
-    header.alpha_composite(render_icon(Icon.CLOSE, close), (cw - close, 0))
+    button = Image.new("RGBA", (close, close), (0, 0, 0, 0))
+    ImageDraw.Draw(button).rounded_rectangle(
+        (0, 0, close - 1, close - 1), radius=theme.px(6), fill=(225, 225, 225, 255)
+    )
+    button.alpha_composite(
+        render_icon(Icon.CLOSE, theme.px(24), color=theme.text), (theme.px(6), theme.px(6))
+    )
+    header.alpha_composite(button, (cw - close, 0))
     close_rect = (m + cw - close, m, close, close)  # header sits at (m, m)
     rows.append(header)
 

@@ -11,7 +11,7 @@ from saitenka_tokenize.languages import MAIN_LANG
 
 from saitenka import otel_metrics
 from saitenka.app import study_text, subtitles
-from saitenka.app.bindings import active_bindings
+from saitenka.app.bindings import TOOLTIP_SECTION, active_bindings, section_contents
 from saitenka.app.feature_bindings import (
     HOVER_PAUSE_STATEFUL_BINDING,
     HOVER_STATEFUL_BINDING,
@@ -973,20 +973,20 @@ class TooltipController:
         return self._key_context.release()
 
     def bind_keybindings(self) -> None:
-        if not self.claim_keybindings() or self._help.state.open:
+        if not self.claim_keybindings():
             return
-        for binding in active_bindings(self._keys, "tooltip"):
-            self._ipc.command_async(
-                "keybind",
-                binding.key,
-                f"script-message {binding.spec.message}",
-            )
+        self._ipc.command_async(
+            "define-section",
+            TOOLTIP_SECTION,
+            section_contents(active_bindings(self._keys, "tooltip")),
+            "force",
+        )
+        if not self._help.state.open:
+            self._ipc.command_async("enable-section", TOOLTIP_SECTION)
 
     def unbind_keybindings(self) -> None:
-        if not self.release_keybindings() or self._help.state.open:
-            return
-        for binding in active_bindings(self._keys, "tooltip"):
-            self._ipc.command_async("keybind", binding.key, "ignore")
+        if self.release_keybindings():
+            self._ipc.command_async("disable-section", TOOLTIP_SECTION)
 
     def retire_state(self) -> None:
         """Clear mutable tooltip facts after their physical surfaces and keys retire."""

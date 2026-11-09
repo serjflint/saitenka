@@ -345,3 +345,92 @@ def test_a_deselected_sid_reads_back_as_false(tmp_path: Path) -> None:
 
     assert queried is False
     assert _changes(events, "sid")[-1] is False  # last value, not the count — see the note above
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_surface_escape_survives_default_binding_release() -> None:
+    from saitenka.app.bindings import MOUSE_SECTION, TIP_CLOSE_MSG
+    from saitenka.app.features.preview.card_preview import PreviewData
+    from saitenka.app.features.preview.miner_ui import show_preview
+
+    with _live_reader() as (_tmp, reader, ipc):
+        show_preview(
+            reader.graph.preview_commands.ports(),
+            PreviewData("mined", "読む", "よむ", ["本を読む"]),
+            None,
+        )
+        reader.graph.interaction.settle()
+        ipc.command("keybind", "ESC", "ignore")
+        bindings = ipc.command("get_property", "input-bindings").get("data") or []
+        active = [b for b in bindings if b.get("key") == "ESC" and b.get("priority", -1) >= 0]
+        winner = max(active, key=lambda b: b["priority"])
+        assert winner["section"] == MOUSE_SECTION
+        assert TIP_CLOSE_MSG in winner["cmd"]
+
+        ipc.command("keypress", "ESC")
+        for _ in range(30):
+            reader.pump()
+            if not reader.graph.preview.state.open:
+                break
+            time.sleep(0.02)
+        assert not reader.graph.preview.state.open
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("key", ["UP", "PGUP", "ESC"])
+def test_closing_the_tooltip_restores_the_players_up_shortcut(tmp_path: Path, key) -> None:
+    from live_harness import poll_until
+
+    config_dir = tmp_path / "mpv-config"
+    config_dir.mkdir()
+    (config_dir / "input.conf").write_text(f"{key} set volume 37\n", encoding="utf-8")
+    with _live_reader(config_dir=config_dir) as (_tmp, reader, ipc):
+        from saitenka.runtime.help import HelpCommand
+
+        reader.graph.tooltip.bind_keybindings()
+        reader.graph.help.run(HelpCommand.TOGGLE)
+        reader.graph.help.run(HelpCommand.CLOSE)
+        reader.graph.tooltip.unbind_keybindings()
+        ipc.command("keypress", key)
+        poll_until(
+            reader,
+            lambda: ipc.command("get_property", "volume").get("data") == 37,
+            "tooltip teardown did not restore the player's Up binding",
+        )
+        assert ipc.command("get_property", "volume").get("data") == 37
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_preview_and_tooltip_teardown_restore_the_players_escape(tmp_path: Path) -> None:
+    from live_harness import poll_until
+
+    from saitenka.app.features.preview.card_preview import PreviewData
+    from saitenka.app.features.preview.miner_ui import show_preview
+
+    config_dir = tmp_path / "mpv-config"
+    config_dir.mkdir()
+    (config_dir / "input.conf").write_text("ESC set volume 37\n", encoding="utf-8")
+    with _live_reader(config_dir=config_dir) as (_tmp, reader, ipc):
+        reader.graph.tooltip.bind_keybindings()
+        show_preview(
+            reader.graph.preview_commands.ports(),
+            PreviewData("mined", "読む", "よむ", ["本を読む"]),
+            None,
+        )
+        reader.graph.interaction.settle()
+        ipc.command("keypress", "ESC")
+        poll_until(reader, lambda: not reader.graph.preview.state.open, "preview did not close")
+        reader.graph.tooltip.unbind_keybindings()
+        reader.graph.interaction.settle()
+
+        ipc.command("keypress", "ESC")
+
+        poll_until(
+            reader,
+            lambda: ipc.command("get_property", "volume").get("data") == 37,
+            "preview teardown replaced the player's Escape binding",
+        )
+        assert ipc.command("get_property", "volume").get("data") == 37

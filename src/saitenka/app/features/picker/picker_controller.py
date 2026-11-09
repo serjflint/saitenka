@@ -148,6 +148,7 @@ class PickerController:
             state_of=self.surface_state,
             suppress_hover=self.suppress_hover,
             scroll=self.scroll,
+            close=self.close,
             on_click=self.on_click,
             click_without_cue=True,
         )

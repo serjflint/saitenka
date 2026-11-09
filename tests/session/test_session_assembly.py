@@ -50,7 +50,7 @@ def test_assembly_constructs_surface_owners_from_registered_state_factories():
     assert assembly.preview.store.current == bindings["card-preview"].initial().preview
     assert assembly.picker.surface_binding().state_of() is assembly.picker.state
     assert assembly.sidebar.surface_binding().state_of() is assembly.sidebar.state
-    assert assembly.preview.surface_binding().state_of() is assembly.preview.state
+    assert assembly.preview.surface_binding(lambda: None).state_of() is assembly.preview.state
 
 
 def test_assembly_constructs_the_analysis_owner_without_session_facts():
