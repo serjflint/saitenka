@@ -5,6 +5,11 @@ focus). What each action does is described in [Features](features.md); to rebind
 [Configuration](configuration.md). This table mirrors the in-player ++F1++ reference (both are
 generated from the same binding catalog), grouped the same way.
 
+English shortcuts also accept the characters produced by the same keys on the standard Russian
+layout (for example, ++ctrl+m++ and `Ctrl+ь`). Aliases follow the same widget scope and modifiers;
+explicitly configured keys take precedence. The reference keeps the configured English names.
+This applies to Saitenka actions; mpv’s own controls keep their mpv bindings.
+
 ## Essentials & language
 
 | Key | Action |

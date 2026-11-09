@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -387,3 +388,73 @@ def active_bindings(keys: KeyOptions, *scopes: Scope) -> tuple[ActiveBinding, ..
 
 
 HELP_MESSAGES = frozenset((HELP_TOGGLE_MSG, HELP_PREV_MSG, HELP_NEXT_MSG, HELP_CLOSE_MSG))
+
+
+# Physical US → standard Russian keys; macOS places ё on backslash and ] on backquote.
+_RUSSIAN_KEYS: dict[str, str] = dict(
+    zip(
+        "`qwertyuiop[]\\asdfghjkl;'zxcvbnm,./",
+        "]йцукенгшщзхъёфывапролджэячсмитьбю/"
+        if sys.platform == "darwin"
+        else "ёйцукенгшщзхъ\\фывапролджэячсмитьбю.",
+        strict=True,
+    )
+)
+_RUSSIAN_KEYS.update(
+    zip(
+        '~QWERTYUIOP{}|ASDFGHJKL:"ZXCVBNM<>?',
+        "[ЙЦУКЕНГШЩЗХЪЁФЫВАПРОЛДЖЭЯЧСМИТЬБЮ?"
+        if sys.platform == "darwin"
+        else "ЁЙЦУКЕНГШЩЗХЪ/ФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,",
+        strict=True,
+    )
+)
+_RUSSIAN_KEYS.update(
+    zip(
+        "!@#$%^&*()",
+        '!"№%:,.;()' if sys.platform == "darwin" else '!"№;%:?*()',
+        strict=True,
+    )
+)
+
+
+def _key_character(key: str) -> str:
+    if key.upper() == "SHARP":
+        return "#"
+    if key.startswith("0x"):
+        try:
+            code = int(key, 16)
+            if 32 <= code <= 0x10FFFF:
+                return chr(code)
+        except ValueError:
+            pass
+    return key
+
+
+def _normalized_key(key: str) -> str:
+    *raw_modifiers, character = key.split("+")
+    character = _key_character(character)
+    modifiers = {modifier.title() for modifier in raw_modifiers}
+    if len(character) == 1:
+        if "Shift" in modifiers and "a" <= character <= "z":
+            character = character.upper()
+        modifiers.discard("Shift")
+    return "+".join([*sorted(modifiers), character])
+
+
+def shortcut_bindings(keys: KeyOptions, *scopes: Scope) -> tuple[ActiveBinding, ...]:
+    """Registration-only English/Russian aliases; configured bindings take precedence."""
+    bindings = active_bindings(keys, *scopes)
+    claimed = {_normalized_key(row.key) for row in active_bindings(keys)}
+    aliases: list[ActiveBinding] = []
+    for row in reversed(bindings):  # mpv gives later bindings precedence.
+        normalized = _normalized_key(row.key)
+        prefix, _, character = normalized.rpartition("+")
+        translated = _RUSSIAN_KEYS.get(character)
+        if translated is None:
+            continue
+        alias = f"{prefix}+{translated}" if prefix else translated
+        if alias != normalized and alias not in claimed:
+            aliases.append(ActiveBinding(alias, row.spec))
+            claimed.add(alias)
+    return (*bindings, *aliases)

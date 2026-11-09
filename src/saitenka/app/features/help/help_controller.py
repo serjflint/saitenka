@@ -10,6 +10,7 @@ from saitenka.app.bindings import (
     TOOLTIP_SECTION,
     active_bindings,
     section_contents,
+    shortcut_bindings,
 )
 from saitenka.app.features.help import help_overlay
 from saitenka.app.interaction.surfaces import SurfaceSpec
@@ -150,7 +151,7 @@ class HelpController:
         self._ipc.command_async(
             "define-section",
             HELP_SECTION,
-            section_contents(active_bindings(self._keys, "help")),
+            section_contents(shortcut_bindings(self._keys, "help")),
             "force",
         )
         self._ipc.command_async("enable-section", HELP_SECTION)

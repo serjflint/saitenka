@@ -155,10 +155,10 @@ def test_every_shortcut_we_register_outranks_the_user_s_own_binding(tmp_path: Pa
     how many sections mpv happens to have up — 31 on 0.41, 19 on 0.37, and it moves again whenever a
     release adds a script. Only the ordering is ours to claim.
     """
-    from saitenka.app.bindings import GLOBAL_SECTION, active_bindings
+    from saitenka.app.bindings import GLOBAL_SECTION, shortcut_bindings
     from saitenka.app.config import KeyOptions
 
-    keys = [b.key for b in active_bindings(KeyOptions(), "global") if b.spec.message]
+    keys = [b.key for b in shortcut_bindings(KeyOptions(), "global") if b.spec.message]
     config_dir = tmp_path / "mpv-config"
     config_dir.mkdir()
     (config_dir / "input.conf").write_text(
@@ -434,3 +434,56 @@ def test_preview_and_tooltip_teardown_restore_the_players_escape(tmp_path: Path)
             "preview teardown replaced the player's Escape binding",
         )
         assert ipc.command("get_property", "volume").get("data") == 37
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+def test_russian_layout_keypress_runs_the_registered_saitenka_action() -> None:
+    from live_harness import poll_until
+
+    with _live_reader() as (_tmp, reader, ipc):
+        assert reader.graph.overlay.visible
+
+        ipc.command("keypress", "Alt+щ")
+        poll_until(reader, lambda: not reader.graph.overlay.visible, "Russian toggle did not fire")
+
+        assert not reader.graph.overlay.visible
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(
+    ("english", "russian"), [("Ctrl+m", "Ctrl+ь"), ("Ctrl+M", "Ctrl+Ь"), ("M", "Ь")]
+)
+def test_mpv_normalizes_shifted_layout_aliases_to_the_same_command(english, russian) -> None:
+    from saitenka.app.bindings import GLOBAL_SECTION
+
+    with _live_reader() as (_tmp, _reader, ipc):
+        bindings = ipc.command("get_property", "input-bindings").get("data") or []
+        commands = {b["key"]: b["cmd"] for b in bindings if b.get("section") == GLOBAL_SECTION}
+        assert commands[russian] == commands[english]
+
+
+@pytest.mark.live
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize(("configured", "russian"), [("SHARP", "№"), ("Ctrl+0x44c", "Ctrl+ь")])
+def test_mpv_key_spellings_keep_explicit_shortcut_precedence(configured, russian) -> None:
+    from saitenka.app.bindings import HELP_TOGGLE_MSG, section_contents, shortcut_bindings
+    from saitenka.app.config import KeyOptions
+
+    proc, ipc = _bare_mpv()
+    try:
+        contents = section_contents(shortcut_bindings(KeyOptions(help_key=configured), "global"))
+        ipc.command("define-section", "layout-parser", contents, "force")
+        ipc.command("enable-section", "layout-parser")
+        bindings = ipc.command("get_property", "input-bindings").get("data") or []
+        commands = [
+            b["cmd"]
+            for b in bindings
+            if b.get("section") == "layout-parser" and b["key"] == russian
+        ]
+        assert commands == [f"script-message {HELP_TOGGLE_MSG}"]
+    finally:
+        ipc.command("quit")
+        ipc.close()
+        proc.wait(timeout=5)
