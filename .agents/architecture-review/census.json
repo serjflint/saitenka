@@ -10,7 +10,9 @@
     "src/saitenka/app/session/routes.py",
     "src/saitenka/runtime/reactor.py",
     "src/saitenka/runtime/jobs.py",
-    "src/saitenka/runtime/loop.py"
+    "src/saitenka/runtime/loop.py",
+    "src/saitenka/app/session/playback_observation.py",
+    "src/saitenka/app/features/tooltip/prefetch.py"
   ],
   "claims": [
     {
@@ -327,6 +329,33 @@
       "status": "argued",
       "evidence": "no performance claim was admitted by the review: the structural censuses do not measure runtime cost, and no live mpv profile compared the pre- and post-pilot paths",
       "settles": "dated live Perfetto or py-spy traces for cue settlement, hover, profile cycling, and scroll, isolating owner-thread self-time and queue transitions against BENCHMARKS.md"
+    },
+    {
+      "id": "MT1",
+      "module": "src/saitenka/app/session/playback_observation.py",
+      "claim": "Remaining synchronous playback reads, paused repaint, track preparation and preview process cleanup meet interactive latency budgets in representative viewing",
+      "class": 3,
+      "status": "argued",
+      "evidence": "Historical commit a78d4b5d; not revalidated on current main. 2026-10-11 scoped main-thread review establishes conditional owner-thread waits but does not measure live latency",
+      "settles": "dated live owner-thread profile for indexed word mine, click, paused lifecycle redraw, cold track change and stubborn preview-audio dismissal; separate IPC, subprocess waits and CPU self-time"
+    },
+    {
+      "id": "MT2",
+      "module": "src/saitenka/app/features/tooltip/prefetch.py",
+      "claim": "Raw tooltip speculative tokenization can be replaced with shared annotation results without changing word or score semantics",
+      "class": null,
+      "status": "argued",
+      "evidence": "Historical commit a78d4b5d; not revalidated on current main. 2026-10-11 review found duplicate inline future-cue tokenization and scoring; dictionary-aware and overlapping-event annotation can differ",
+      "settles": "differential cases for dictionary compounds, co-timed events, inflection and profile/dependency replacement before consolidating preparation"
+    },
+    {
+      "id": "MT3",
+      "module": "src/saitenka/runtime/jobs.py",
+      "claim": "Bounded worker-lane close implies bounded CLI process exit with noncooperative worker dependencies",
+      "class": null,
+      "status": "argued",
+      "evidence": "Historical commit a78d4b5d; not revalidated on current main. 2026-10-11 review inspected the lane deadline but did not exercise executor interpreter exit with a blocked worker",
+      "settles": "controlled blocked worker and child-process shutdown at the actual CLI process boundary on GIL and free-threaded builds"
     }
   ]
 }
