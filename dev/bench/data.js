@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794222776444,
+  "lastUpdate": 1794224098913,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19547,6 +19547,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.334518,
             "range": "3 replicas; min 1.13352; max 1.63175; MAD 0.201; worst 1.63175",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cc84c7993b4c27e7bb2171296e59f42d7b9b1ed0",
+          "message": "Merge pull request #573 from serjflint/fix/widget-input-preview\n\nfix(widgets): restore player shortcuts and fit readable previews",
+          "timestamp": "2026-11-09T14:31:07+03:00",
+          "tree_id": "5457e056ede0beadd46eba0bd7897c49314e6d0d",
+          "url": "https://github.com/serjflint/saitenka/commit/cc84c7993b4c27e7bb2171296e59f42d7b9b1ed0"
+        },
+        "date": 1794224097916,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 7.2137,
+            "range": "3 replicas; min 5.01932; max 9.03285; MAD 1.81915",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 8.004486,
+            "range": "3 replicas; min 5.67103; max 10.1999; MAD 2.19539; worst 10.1999",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.884258,
+            "range": "3 replicas; min 10.7078; max 21.8811; MAD 4.17649",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.98577,
+            "range": "3 replicas; min 10.9081; max 22.2364; MAD 4.07767; worst 22.2364",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.439783,
+            "range": "3 replicas; min 11.4997; max 14.536; MAD 0.940125",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.06745,
+            "range": "3 replicas; min 0.050236; max 0.122969; MAD 0.017214; worst 0.122969",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 31.340986,
+            "range": "3 replicas; min 22.3985; max 44.3453; MAD 8.94252; worst 44.3453",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.504095,
+            "range": "3 replicas; min 2.41413; max 3.38678; MAD 0.089963; worst 3.38678",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.018907,
+            "range": "3 replicas; min 1.00092; max 1.48501; MAD 0.017989; worst 1.48501",
             "unit": "ms"
           }
         ]
