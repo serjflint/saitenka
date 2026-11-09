@@ -17,7 +17,6 @@ from saitenka_tokenize.registry import register_tokenizer
 from session_builder import TestSession, build_session
 from util import (
     FakeIPC,
-    assert_golden,
     await_ready,
     keybind_registry,
     overlay_frame,
@@ -737,15 +736,19 @@ def _stub_provider(name, languages):
 
 @pytest.mark.usefixtures("_restore_tokenizer_registry")
 @pytest.mark.parametrize(
-    ("initial", "profiles", "image"),
+    ("initial", "profiles", "message"),
     [
-        (DEFAULT_PROFILE, [DEFAULT_PROFILE, _FR_SUBS], "profile_notice_french.png"),
-        (_FR_SUBS, [_FR_SUBS, DEFAULT_PROFILE], "profile_notice_japanese.png"),
-        (_FR_SUBS, [_FR_SUBS, _FR_DE_SUBS], "profile_notice_translation.png"),
+        (DEFAULT_PROFILE, [DEFAULT_PROFILE, _FR_SUBS], "profile: fr (fr)"),
+        (_FR_SUBS, [_FR_SUBS, DEFAULT_PROFILE], "profile: default (jp)"),
+        (_FR_SUBS, [_FR_SUBS, _FR_DE_SUBS], "profile: fr-de (fr)"),
     ],
 )
-def test_committed_profile_cycle_reports_the_selected_language(request, initial, profiles, image):
+def test_committed_profile_cycle_reports_the_selected_language(request, initial, profiles, message):
     register_tokenizer("latin", lambda: _MinimalTokenizer("latin"))
+    reference = _headless(request, profile=profiles[1])
+    reference.graph.notifications.show(message)
+    expected = overlay_frame(reference.graph.ipc, OverlayId.TOAST)
+    assert expected is not None
     reader = _headless(request, profile=initial, profiles=profiles)
     reader.graph.ipc.props["track-list"] = _JA_FR_TRACKS
     reader.graph.commands.install_input()
@@ -754,7 +757,9 @@ def test_committed_profile_cycle_reports_the_selected_language(request, initial,
 
     frame = overlay_frame(reader.graph.ipc, OverlayId.TOAST)
     assert frame is not None
-    assert_golden(frame[0], image)
+    assert frame[0].size == expected[0].size
+    assert frame[0].tobytes() == expected[0].tobytes()
+    assert frame[1:] == expected[1:]
 
 
 def test_cycle_is_a_noop_with_a_single_profile(request):
