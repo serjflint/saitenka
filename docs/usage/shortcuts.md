@@ -54,12 +54,15 @@ generated from the same binding catalog), grouped the same way.
 | k | Open the kanji panel, or cycle through the word's kanji |
 | Left-click | Activate the control under the pointer (buttons, links) |
 | Right-click | Copy the word under the pointer |
-| Esc | Close the tooltip (also the card preview / shortcut reference) |
+| Esc | Close the top open widget, including a card preview after its tooltip closes |
 
 ## Useful mpv controls (passthrough)
 
 Saitenka only intercepts the keys above; every other mpv binding still works. These are mpv's own
 defaults, passed straight through:
+
+Closing a tooltip or the shortcut reference restores the player's existing bindings for arrows,
+Page Up / Down and Esc.
 
 | Key | Action |
 |---|---|

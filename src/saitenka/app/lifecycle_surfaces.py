@@ -99,6 +99,7 @@ class LifecycleSurfaces:
     ) -> SurfaceTransaction:
         with self._request_lock:
             transaction = self._runtime.request(str(oid), SurfaceAction.PRESENT)
+            self._overlay.begin_lifecycle_update(oid)
             prepared = None
             try:
                 prepared = stage(transaction.revision)
@@ -116,6 +117,7 @@ class LifecycleSurfaces:
     ) -> SurfaceTransaction:
         with self._request_lock:
             transaction = self._runtime.request(str(oid), SurfaceAction.REMOVE)
+            self._overlay.begin_lifecycle_update(oid)
             try:
                 command = ("overlay-remove", self._overlay.physical_oid(oid))
                 self._submit(transaction, command, None, owner, on_settled)
@@ -177,26 +179,28 @@ class LifecycleSurfaces:
         on_settled: Callable[[bool], None] | None = None,
     ) -> None:
         def finished(completion: EffectFinished) -> bool:
-            accepted = self._runtime.finish(
-                SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
-            )
-            if not accepted:
-                # Superseded by a newer revision for this slot: the pixels it staged are not ours
-                # to commit, and its caller is no longer waiting on an answer.
-                if prepared is not None:
+            with self._request_lock:
+                accepted = self._runtime.finish(
+                    SurfaceTransactionOutcome(transaction, completion.outcome, completion.error)
+                )
+                if not accepted:
+                    # Superseded by a newer revision for this slot: the pixels it staged are not ours
+                    # to commit, and its caller is no longer waiting on an answer.
+                    if prepared is not None:
+                        self._overlay.discard_prepared(prepared)
+                    return False
+                committed = completion.outcome is EffectOutcome.SUCCEEDED
+                if committed:
+                    if prepared is None:
+                        self._overlay.commit_remove(int(transaction.slot))
+                    else:
+                        self._overlay.commit_prepared(prepared)
+                elif prepared is not None:
                     self._overlay.discard_prepared(prepared)
-                return False
-            committed = completion.outcome is EffectOutcome.SUCCEEDED
-            if committed:
-                if prepared is None:
-                    self._overlay.commit_remove(int(transaction.slot))
-                else:
-                    self._overlay.commit_prepared(prepared)
-            elif prepared is not None:
-                self._overlay.discard_prepared(prepared)
-            if on_settled is not None:
-                on_settled(committed)
-            return True
+                self._overlay.finish_lifecycle_update(int(transaction.slot))
+                if on_settled is not None:
+                    on_settled(committed)
+                return True
 
         self._route(owner, transaction, command, finished)
 
@@ -271,7 +275,7 @@ class LifecycleSurfaces:
         prepared: PreparedOverlay | None,
         on_settled: Callable[[bool], None] | None = None,
     ) -> None:
-        self._runtime.finish(
+        accepted = self._runtime.finish(
             SurfaceTransactionOutcome(
                 transaction,
                 EffectOutcome.FAILED,
@@ -280,5 +284,7 @@ class LifecycleSurfaces:
         )
         if prepared is not None:
             self._overlay.discard_prepared(prepared)
+        if accepted:
+            self._overlay.finish_lifecycle_update(int(transaction.slot))
         if on_settled is not None:
             on_settled(False)  # noqa: FBT003  # the settlement flag is the whole payload

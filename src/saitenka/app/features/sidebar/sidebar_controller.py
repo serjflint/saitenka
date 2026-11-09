@@ -163,5 +163,6 @@ class SidebarController:
             state_of=self.surface_state,
             suppress_hover=self.suppress_hover,
             scroll=self.scroll,
+            close=self.hide,
             on_click=self.on_click,
         )

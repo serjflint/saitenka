@@ -49,8 +49,8 @@ class PreviewController:
     def surface_state(self) -> CardPreview:
         return self.state
 
-    def surface_binding(self) -> SurfaceSpec:
-        return SurfaceSpec("preview", state_of=self.surface_state)
+    def surface_binding(self, close: Callable[[], None]) -> SurfaceSpec:
+        return SurfaceSpec("preview", state_of=self.surface_state, close=close)
 
     def reset_capture(self) -> None:
         self.cancel()

@@ -458,6 +458,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             help_controller=help_controller,
             analysis=analysis_controller,
             sidebar=sidebar_controller,
+            preview=preview_controller,
             surfaces=lifecycle_surfaces,
             timers=lifecycle_timers,
             overlay=overlay,
@@ -548,6 +549,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         sidebar_controller,
         preview_controller,
         tooltip_controller,
+        preview_commands.hide,
     )
     mouse = mouse_capture.MouseCapture(
         ipc,

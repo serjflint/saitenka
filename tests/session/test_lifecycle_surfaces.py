@@ -92,6 +92,34 @@ def test_late_present_ack_cannot_restore_removed_lifecycle_surface():
     assert surfaces.snapshot(OverlayId.TOAST).status is SurfaceStatus.ABSENT
 
 
+@pytest.mark.parametrize("id_base", [1, 27])
+def test_paused_repaint_cannot_readd_a_toast_awaiting_remove_ack(id_base):
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc, id_base=id_base, runtime_submit=ipc.submit_runtime_mpv)
+    surfaces = LifecycleSurfaces(overlay)
+    surfaces.present(Image.new("RGBA", (2, 2), "white"), 4, 5, oid=OverlayId.TOAST)
+    ipc.finish(0)
+    surfaces.remove(OverlayId.TOAST)
+
+    surfaces.repaint()
+
+    assert ipc.commands[-1] == ("overlay-remove", overlay.physical_oid(OverlayId.TOAST))
+
+
+def test_paused_repaint_cannot_replace_pending_new_pixels_with_old_pixels():
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv)
+    surfaces = LifecycleSurfaces(overlay)
+    surfaces.present(Image.new("RGBA", (2, 2), "white"), 4, 5, oid=OverlayId.TOAST)
+    ipc.finish(0)
+    surfaces.present(Image.new("RGBA", (3, 2), "black"), 4, 5, oid=OverlayId.TOAST)
+    newest = ipc.commands[-1]
+
+    surfaces.repaint()
+
+    assert ipc.commands[-1] == newest
+
+
 def test_rejected_surface_submission_is_terminally_failed():
     ipc = _DeferredIPC(accepted=False)
     surfaces = LifecycleSurfaces(Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv))
@@ -136,6 +164,12 @@ class _BlockingOverlay:
         self.prepare_count = 0
         self.submitted: list[int] = []
         self.lifecycle_oids: set[int] = set()
+
+    def begin_lifecycle_update(self, _oid):
+        pass
+
+    def finish_lifecycle_update(self, _oid):
+        pass
 
     def prepare(self, _img, _x, _y, *, oid, revision):
         self.prepare_count += 1
@@ -352,3 +386,34 @@ def module_action():
     from saitenka.runtime.surfaces import SurfaceAction
 
     return SurfaceAction.PRESENT
+
+
+def test_a_stale_ack_cannot_release_the_newer_removal_repaint_fence():
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv)
+    surfaces = LifecycleSurfaces(overlay)
+    surfaces.present(Image.new("RGBA", (2, 2)), 0, 0, oid=OverlayId.TOAST)
+    ipc.finish(0)
+    surfaces.present(Image.new("RGBA", (3, 2)), 0, 0, oid=OverlayId.TOAST)
+    surfaces.remove(OverlayId.TOAST)
+    ipc.finish(1)
+
+    surfaces.repaint()
+
+    assert ipc.commands[-1] == ("overlay-remove", overlay.physical_oid(OverlayId.TOAST))
+
+
+def test_an_acknowledged_replacement_can_be_repainted():
+    ipc = _DeferredIPC()
+    overlay = Overlay(ipc, runtime_submit=ipc.submit_runtime_mpv)
+    surfaces = LifecycleSurfaces(overlay)
+    surfaces.present(Image.new("RGBA", (2, 2)), 0, 0, oid=OverlayId.TOAST)
+    ipc.finish(0)
+    surfaces.present(Image.new("RGBA", (3, 2)), 0, 0, oid=OverlayId.TOAST)
+    ipc.finish(1)
+    newest = ipc.commands[-1]
+    ipc.commands.clear()
+
+    surfaces.repaint()
+
+    assert ipc.commands == [newest]

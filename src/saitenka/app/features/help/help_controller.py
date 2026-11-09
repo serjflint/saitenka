@@ -5,12 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from saitenka.app.bindings import active_bindings
+from saitenka.app.bindings import (
+    HELP_SECTION,
+    TOOLTIP_SECTION,
+    active_bindings,
+    section_contents,
+)
 from saitenka.app.features.help import help_overlay
 from saitenka.app.interaction.surfaces import SurfaceSpec
-from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
-from saitenka.runtime import Owner
 from saitenka.runtime.help import (
     CloseHelp,
     HelpCommand,
@@ -89,6 +92,7 @@ class HelpController:
             state_of=self.surface_state,
             suppress_hover=self.suppress_hover,
             scroll=self.scroll,
+            close=lambda: self.run(HelpCommand.CLOSE),
         )
 
     def document(self):
@@ -143,28 +147,15 @@ class HelpController:
             self.redraw()
 
     def _bind_keys(self) -> None:
-        for binding in active_bindings(self._keys, "help"):
-            if binding.spec.message is not None:
-                send_correlated(
-                    self._ipc,
-                    f"help-keybind:{binding.key}",
-                    "keybind",
-                    binding.key,
-                    f"script-message {binding.spec.message}",
-                    owner=Owner.INTERACTION,
-                )
+        self._ipc.command_async(
+            "define-section",
+            HELP_SECTION,
+            section_contents(active_bindings(self._keys, "help")),
+            "force",
+        )
+        self._ipc.command_async("enable-section", HELP_SECTION)
 
     def _restore_context_keys(self) -> None:
-        tooltip_by_key = {
-            binding.key: binding.spec.message for binding in active_bindings(self._keys, "tooltip")
-        }
-        for binding in active_bindings(self._keys, "help"):
-            message = tooltip_by_key.get(binding.key) if self._tooltip_keys.bound else None
-            send_correlated(
-                self._ipc,
-                f"help-keybind-restore:{binding.key}",
-                "keybind",
-                binding.key,
-                f"script-message {message}" if message else "ignore",
-                owner=Owner.INTERACTION,
-            )
+        self._ipc.command_async("disable-section", HELP_SECTION)
+        if self._tooltip_keys.bound:
+            self._ipc.command_async("enable-section", TOOLTIP_SECTION)

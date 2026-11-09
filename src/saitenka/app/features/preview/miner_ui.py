@@ -26,7 +26,7 @@ from saitenka.app.media import audio_duration, play_audio
 from saitenka.app.mpv_egress import send_correlated
 from saitenka.app.overlay_ids import OverlayId
 from saitenka.app.procutil import kill_process_tree
-from saitenka.model import in_rect
+from saitenka.model import Theme, in_rect
 from saitenka.runtime import Owner, events
 
 if TYPE_CHECKING:
@@ -58,6 +58,7 @@ class PreviewPorts:
     play_audio: bool
     merge_duplicate: Callable[[], None] = lambda: None
     cancel_merge: Callable[..., None] = lambda *_args: None
+    scale: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,13 +217,18 @@ def show_preview(ports: PreviewPorts, pv: PreviewData, audio_path) -> None:
     # replay (P) / a new mine silences any clip still playing
     _stop_preview_audio(ports.preview.panel)
     ports.preview.store.dispatch(events.PreviewShown(pv, audio_path))
-    render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width)
+    render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width, scale=ports.scale)
     _grab_preview_keys(ports.ipc, active_bindings(ports.keys, "preview"))
     ports.preview.panel.keys_grabbed = True
 
 
 def render_preview(
-    preview: PreviewController, surfaces, osd: tuple[int, int], tip_width: int
+    preview: PreviewController,
+    surfaces,
+    osd: tuple[int, int],
+    tip_width: int,
+    *,
+    scale: float = 1.0,
 ) -> None:
     """Blit the card preview and record where each of its buttons landed.
 
@@ -234,7 +240,11 @@ def render_preview(
         return
     pv = cast("PreviewData", shown.content)
     panel = preview.panel
-    pr = render_card_preview(pv, width=max(440, tip_width), zoom=shown.zoom)
+    reference_width = max(440, tip_width)
+    scale = min(scale, osd[0] * 0.94 / reference_width)
+    theme = Theme(scale=scale)
+    width = round(reference_width * scale)
+    pr = render_card_preview(pv, width=width, theme=theme, zoom=shown.zoom)
     px, py = round(osd[0] * 0.03), round(osd[1] * 0.06)
     surfaces.present(pr.image, px, py, oid=OverlayId.PREVIEW)
     panel.rect = (px, py, pr.image.width, pr.image.height)
@@ -286,7 +296,7 @@ def click_preview(ports: PreviewPorts, x: float, y: float) -> bool:
     elif panel.image_rect and in_rect(panel.image_rect, x, y):
         # enlarge to verify the frame / shrink back
         ports.preview.store.dispatch(events.PreviewZoomToggled())
-        render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width)
+        render_preview(ports.preview, ports.surfaces, ports.osd, ports.tip_width, scale=ports.scale)
     elif (
         panel.audio_rect
         and in_rect(panel.audio_rect, x, y)

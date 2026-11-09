@@ -121,7 +121,7 @@ saitenka-click|interaction|global|modal
 saitenka-kanji|interaction|cue|modal
 saitenka-tip-up|interaction|global|modal
 saitenka-tip-down|interaction|global|modal
-saitenka-tip-close|interaction|global|modal
+saitenka-tip-close|interaction|global|help
 saitenka-sub-picker|interaction|global|modal"""
 
 

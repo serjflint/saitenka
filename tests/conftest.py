@@ -306,9 +306,12 @@ def lookup_session(tmp_path, monkeypatch):
     def make(
         dataset="read",
         *,
+        preview=False,
         mining=True,
         viewport=(1920, 1080),
         options=None,
+        image_size=None,
+        shortcuts=None,
         records=None,
     ):
         data = records if records is not None else lookup_records(dataset)
@@ -330,12 +333,19 @@ def lookup_session(tmp_path, monkeypatch):
             for i, item in enumerate(data.get("frequencies", []))
         ]
 
-        def screenshot(_ipc, _path, **_kwargs):
-            raise OSError("no screenshot supplied by this fixture")
+        def screenshot(_ipc, path, **_kwargs):
+            if image_size is None:
+                raise OSError("no screenshot supplied by this fixture")
+            from PIL import Image
+
+            Image.new("RGB", image_size, (40, 100, 180)).save(path)
+            return path
 
         monkeypatch.setattr(miner, "screenshot", screenshot)
         ipc = FakeIPC()
         ipc.props.update({"path": "/fixtures/episode.mkv", "pause": True})
+        for key, command in (shortcuts or {}).items():
+            ipc.command("keybind", key, f"script-message {command}")
         client = Anki()
         reader = session_builder.build_session(
             ipc,
@@ -346,7 +356,7 @@ def lookup_session(tmp_path, monkeypatch):
                 tts=False,
             ),
             options=(options or ReaderOptions(panels=PanelOptions(scale=1.0))).with_overrides(
-                prefetch=False, scan_delay=0.0, show_preview=False
+                prefetch=False, scan_delay=0.0, show_preview=preview
             ),
         )
         readers.append(reader)

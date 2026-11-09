@@ -50,7 +50,7 @@ Scope = Literal["global", "tooltip", "help", "mpv", "preview", "mouse"]
 Requirement = Literal["always", "anki", "tts"]
 
 # "mouse"-scoped bindings live in this FORCED mpv input section, enabled only while a saitenka surface
-# is up (MouseCapture.sync) so clicks/wheel outrank other scripts' forced MBTN_LEFT.
+# is up (MouseCapture.sync) so clicks/wheel/Esc outrank other scripts' forced MBTN_LEFT.
 MOUSE_SECTION = "saitenka-mouse"
 
 # "global"-scoped bindings live in this FORCED mpv input section. One `define-section` rather than a
@@ -63,6 +63,8 @@ MOUSE_SECTION = "saitenka-mouse"
 # The priority numbers are mpv's to choose (section index + active-section count, so they move with
 # the release); `test_every_shortcut_we_register_outranks_the_user_s_own_binding` asks mpv.
 GLOBAL_SECTION = "saitenka-global"
+TOOLTIP_SECTION = "saitenka-tooltip"
+HELP_SECTION = "saitenka-help"
 
 
 def section_contents(bindings) -> str:
@@ -278,6 +280,14 @@ BINDINGS: tuple[BindingSpec, ...] = (
         scope="tooltip",
         key="ESC",
         context="tooltip only",
+    ),
+    BindingSpec(
+        "Tooltip actions",
+        "Close top widget",
+        TIP_CLOSE_MSG,
+        scope="mouse",
+        key="ESC",
+        show_in_help=False,
     ),
     BindingSpec(
         "Useful mpv controls",

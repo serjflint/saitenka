@@ -78,6 +78,7 @@ class SurfaceSpec:
     scroll: Callable[[WheelStep, int], bool] = _no_scroll
     on_click: Callable[[ClickTarget, float, float], bool] = _no_click
     click_without_cue: bool = False
+    close: Callable[[], None] | None = None
 
     def captures(self) -> bool:
         return self.state_of().open

@@ -31,6 +31,7 @@ class InteractionCommandPorts:
     retire_hover: Callable[[], None]
     route_click: Callable[[], None]
     copy_click: Callable[[], None]
+    close_surface: Callable[[], bool]
 
 
 class InteractionCommandCoordinator:
@@ -52,9 +53,11 @@ class InteractionCommandCoordinator:
         elif isinstance(effect, interaction_intents.ScrollTooltip):
             ports.scroll_tip(effect.pixels)
         elif isinstance(effect, interaction_intents.NavigateBack):
-            ports.navigation.back()
+            if not ports.close_surface():
+                ports.navigation.back()
         elif isinstance(effect, DismissHover):
-            ports.retire_hover()
+            if not ports.close_surface():
+                ports.retire_hover()
         elif isinstance(effect, interaction_intents.RouteClick):
             ports.route_click()
         elif isinstance(effect, interaction_intents.CopyUnderCursor):
@@ -163,5 +166,6 @@ class InteractionCoordinator:
                 retire_hover=tooltip.retire_hover,
                 route_click=self.route_click,
                 copy_click=tooltip.copy_click,
+                close_surface=self.router.close_top,
             )
         )

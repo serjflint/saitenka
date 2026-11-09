@@ -657,27 +657,34 @@ class FakeIPC:
 
 
 def keybind_registry(ipc: FakeIPC) -> dict[str, str]:
-    """The ``{key: message}`` map mpv would hold after registration, reconstructed from the recorded
-    ``keybind`` commands. Honours later-binds-over-earlier and the ``keybind KEY ignore`` unbinds that
-    surface teardown emits (a key bound then neutralised drops out). FakeIPC only *records* the bind
-    string — it can't fire the handler — so this is the seam :func:`press` dispatches through."""
+    """Resolve default keybinds beneath the enabled forced sections, in activation order."""
     reg: dict[str, str] = {}
+    sections: dict[str, dict[str, str]] = {}
+    enabled: list[str] = []
     for cmd in ipc.commands:
         if len(cmd) >= 3 and cmd[0] == "define-section":
-            # The "global" scope installs as ONE section rather than a keybind per key. Parsed here
-            # so `press` dispatches through the same registry either way — a test asserting a
-            # shortcut works must not have to know which form registered it.
+            section = {}
             for line in str(cmd[2]).splitlines():
                 key, _, spec = line.partition(" ")
                 if spec.startswith("script-message "):
-                    reg[key] = spec.removeprefix("script-message ")
-            continue
-        if len(cmd) >= 3 and cmd[0] == "keybind":
+                    section[key] = spec.removeprefix("script-message ")
+            sections[str(cmd[1])] = section
+        elif len(cmd) >= 2 and cmd[0] == "enable-section":
+            name = str(cmd[1])
+            if name in enabled:
+                enabled.remove(name)
+            enabled.append(name)
+        elif len(cmd) >= 2 and cmd[0] == "disable-section":
+            if cmd[1] in enabled:
+                enabled.remove(cmd[1])
+        elif len(cmd) >= 3 and cmd[0] == "keybind":
             key, spec = cmd[1], cmd[2]
             if isinstance(spec, str) and spec.startswith("script-message "):
                 reg[key] = spec.removeprefix("script-message ")
-            else:  # "ignore" (or any non-script-message) neutralises the key
+            else:
                 reg.pop(key, None)
+    for name in enabled:
+        reg.update(sections.get(name, {}))
     return reg
 
 

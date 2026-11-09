@@ -13,6 +13,8 @@ from saitenka.app.interaction.surfaces import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from saitenka.app.features.help.help_controller import HelpController
     from saitenka.app.features.picker.picker_controller import PickerController
     from saitenka.app.features.preview.preview_controller import PreviewController
@@ -38,6 +40,13 @@ class SurfaceRouter:
 
     def wants_mouse_capture(self) -> bool:
         return any(spec.captures() for spec in self.specs)
+
+    def close_top(self) -> bool:
+        for spec in self.specs:
+            if spec.captures() and spec.close is not None:
+                spec.close()
+                return True
+        return False
 
     def suppress_hover(self, suppression: HoverSuppression) -> bool:
         return any(spec.suppress_hover(suppression) for spec in self.specs)
@@ -66,6 +75,7 @@ def build_surface_router(
     sidebar_controller: SidebarController,
     preview_controller: PreviewController,
     tooltip_controller: TooltipController,
+    close_preview: Callable[[], None],
 ) -> SurfaceRouter:
     """Assemble feature-owned rows under the explicit global z-order."""
     return SurfaceRouter(
@@ -73,7 +83,7 @@ def build_surface_router(
             help_controller.surface_binding(),
             picker_controller.surface_binding(),
             sidebar_controller.surface_binding(),
-            preview_controller.surface_binding(),
+            preview_controller.surface_binding(close_preview),
             tooltip_controller.surface_binding(),
         )
     )

@@ -291,10 +291,10 @@ class StatsOptions:
 
 @dataclass(frozen=True)
 class PanelOptions:
-    """Scale for the help, sidebar, and episode-analysis utility surfaces."""
+    """Scale for utility surfaces including help, sidebar, analysis, and card preview."""
 
     scale: float = field(
-        default=1.0, metadata={"help": "Scale for the help/sidebar/analysis panels."}
+        default=1.0, metadata={"help": "Scale for the help/sidebar/analysis/preview panels."}
     )
 
 

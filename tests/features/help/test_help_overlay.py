@@ -118,7 +118,7 @@ def test_toggle_navigation_and_escape_are_playback_neutral(make_session):
     reader.graph.screen.osd = (480, 220)
 
     reader.command(HELP_TOGGLE_MSG)
-    assert any(command[:2] == ("keybind", "ESC") for command in ipc.commands)
+    assert keybind_registry(ipc)["ESC"] in {"saitenka-help-close", "saitenka-tip-close"}
     assert any(command[:2] == ("overlay-add", OverlayId.HELP) for command in ipc.commands)
 
     adds_before = sum(command[0] == "overlay-add" for command in ipc.commands)
@@ -160,8 +160,7 @@ def test_closing_help_restores_active_tooltip_escape_binding(make_session):
     reader.command(HELP_TOGGLE_MSG)
     reader.command(HELP_CLOSE_MSG)
 
-    esc_commands = [command for command in ipc.commands if command[:2] == ("keybind", "ESC")]
-    assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-tip-close")
+    assert keybind_registry(ipc)["ESC"] == "saitenka-tip-close"
 
 
 def test_tooltip_teardown_does_not_steal_escape_while_help_is_open(make_session):
@@ -172,8 +171,8 @@ def test_tooltip_teardown_does_not_steal_escape_while_help_is_open(make_session)
     reader.command(HELP_TOGGLE_MSG)
     reader.graph.tooltip.unbind_keybindings()
 
-    esc_commands = [command for command in ipc.commands if command[:2] == ("keybind", "ESC")]
-    assert esc_commands[-1] == ("keybind", "ESC", "script-message saitenka-help-close")
+    assert keybind_registry(ipc)["PGUP"] == "saitenka-help-prev"
+    assert keybind_registry(ipc)["ESC"] in {"saitenka-help-close", "saitenka-tip-close"}
     reader.command(HELP_CLOSE_MSG)
     assert any(command[:2] == ("overlay-remove", OverlayId.HELP) for command in ipc.commands)
 

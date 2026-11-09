@@ -44,6 +44,12 @@ class FakeOverlay:
         self.lifecycle_oids: set[int] = set()
         self.ops = 0
 
+    def begin_lifecycle_update(self, _oid):
+        pass
+
+    def finish_lifecycle_update(self, _oid):
+        pass
+
     def prepare(self, image, x=0, y=0, *, oid=0, revision=0):  # noqa: ARG002
         self.ops += 1
         self.shown.append((image, x, y, oid))

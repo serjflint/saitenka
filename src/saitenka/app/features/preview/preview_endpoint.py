@@ -58,6 +58,7 @@ class PreviewCommandEndpoint:
             play_audio=self.play_audio,
             merge_duplicate=self.merge_duplicate,
             cancel_merge=self.mining.cancel_merge,
+            scale=self.screen.chrome_scale(),
         )
 
     def add_duplicate(self) -> None:
@@ -129,6 +130,7 @@ class PreviewCommandEndpoint:
             self.surfaces,
             self.screen.osd,
             self.ports().tip_width,
+            scale=self.screen.chrome_scale(),
         )
 
     def hide(self) -> None:
