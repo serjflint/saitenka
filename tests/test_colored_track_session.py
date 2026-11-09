@@ -73,23 +73,35 @@ class ColorJobs:
         return result
 
 
-def _origin(tmp_path: Path) -> tuple[Path, dict]:
-    path = tmp_path / "episode.ja.ass"
-    path.write_text(ASS, encoding="utf-8")
+def _origin(tmp_path: Path, extension=".ass") -> tuple[Path, dict]:
+    path = tmp_path / f"episode.ja{extension}"
+    path.write_text(
+        ASS if extension == ".ass" else "1\n00:00:01,000 --> 00:00:03,000\n私は本を読む\n",
+        encoding="utf-8",
+    )
     track = {
         "id": 2,
         "type": "sub",
         "lang": "jpn",
         "title": "Japanese",
-        "codec": "ass",
+        "codec": "ass" if extension == ".ass" else "subrip",
         "external": True,
         "external-filename": str(path),
     }
     return path, track
 
 
-def _session(tmp_path, monkeypatch, *, coloring="whole-cue-auto", tracks=None, real_index=False):
-    origin, track = _origin(tmp_path)
+def _session(
+    tmp_path,
+    monkeypatch,
+    *,
+    coloring="whole-cue-auto",
+    tracks=None,
+    real_index=False,
+    extension=".ass",
+    native_formats="all",
+):
+    origin, track = _origin(tmp_path, extension)
     ipc = FakeIPC(tracks if tracks is not None else [EN.copy(), track])
     ipc.props["path"] = "/videos/episode.mkv"
     ipc.props["sub-text"] = ""
@@ -102,7 +114,9 @@ def _session(tmp_path, monkeypatch, *, coloring="whole-cue-auto", tracks=None, r
     reader = build_session(
         ipc,
         options=ReaderOptions(
-            subtitle_geometry=SubtitleGeometryOptions(native_visible=True, coloring=coloring),
+            subtitle_geometry=SubtitleGeometryOptions(
+                native_visible=True, coloring=coloring, native_formats=native_formats
+            ),
             prefetch=False,
         ),
     )
@@ -124,6 +138,47 @@ def _ready(reader) -> None:
 
 def _added(ipc) -> list[tuple]:
     return [command for command in ipc.commands if command[0] == "sub-add"]
+
+
+def test_srt_copy_requires_converted_native_formats(tmp_path, monkeypatch):
+    reader, _ipc, jobs, _origin_path, _toasts = _session(
+        tmp_path, monkeypatch, extension=".srt", native_formats="authored-ass"
+    )
+
+    _ready(reader)
+
+    assert jobs.accepted == []
+
+
+def test_srt_copy_adoption_keeps_the_original_for_regeneration(tmp_path, monkeypatch):
+    reader, ipc, jobs, origin, _toasts = _session(tmp_path, monkeypatch, extension=".srt")
+    _ready(reader)
+    jobs.finish()
+    installed = Path(_added(ipc)[0][1])
+
+    _colored_track(reader).dependencies_changed()
+
+    assert jobs.accepted[-1]["request"].source == origin
+    assert installed.suffix == ".srt"
+    assert colored_subs.copy_origin(ipc.tracks[-1]) == f"external:{origin}"
+
+
+def test_reattaching_adopts_the_existing_srt_copy(tmp_path, monkeypatch):
+    first, ipc, jobs, origin, _toasts = _session(tmp_path, monkeypatch, extension=".srt")
+    _ready(first)
+    jobs.finish()
+    tracks = deepcopy(ipc.tracks)
+    first.close()
+    attached, player, new_jobs, _origin_path, _toasts = _session(
+        tmp_path, monkeypatch, tracks=tracks, extension=".srt"
+    )
+
+    _ready(attached)
+    new_jobs.finish()
+
+    assert attached.graph.track_commands.current().jp_sid == 9
+    assert new_jobs.accepted[0]["request"].source == origin
+    assert _added(player) == []
 
 
 def test_a_generated_copy_becomes_the_japanese_track(tmp_path, monkeypatch) -> None:
@@ -257,8 +312,9 @@ def test_late_copy_verification_preserves_a_cue_that_has_already_arrived(tmp_pat
     assert reader.graph.playback.cue.text == "犬も見る"
 
 
-def test_a_ready_copy_waits_for_a_cue_gap(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_a_ready_copy_waits_for_a_cue_gap(tmp_path, monkeypatch, extension) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch, extension=extension)
     _ready(reader)
     ipc.set_prop("sub-text", "私は本を読む")
     reader.pump()
@@ -304,8 +360,9 @@ def test_the_live_copy_is_not_regenerated_for_its_own_index(tmp_path, monkeypatc
     assert len(jobs.accepted) == 1
 
 
-def test_new_dependencies_regenerate_and_replace_the_copy(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch)
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_new_dependencies_regenerate_and_replace_the_copy(tmp_path, monkeypatch, extension) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch, extension=extension)
     _ready(reader)
     jobs.finish()
     first = _added(ipc)[0][1]
@@ -331,8 +388,13 @@ def test_new_dependencies_regenerate_and_replace_the_copy(tmp_path, monkeypatch)
     assert not Path(first).exists()
 
 
-def test_choosing_the_origin_removes_the_copy_for_the_episode(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, _origin_path, _toasts = _session(tmp_path, monkeypatch, real_index=True)
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_choosing_the_origin_removes_the_copy_for_the_episode(
+    tmp_path, monkeypatch, extension
+) -> None:
+    reader, ipc, jobs, _origin_path, _toasts = _session(
+        tmp_path, monkeypatch, real_index=True, extension=extension
+    )
     _ready(reader)
     jobs.finish()
 
@@ -379,8 +441,9 @@ def test_an_option_that_repaints_the_track_refuses_the_copy(
     assert jobs.accepted == []
 
 
-def test_resyncing_the_copy_retimes_its_origin(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, origin, _toasts = _session(tmp_path, monkeypatch)
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_resyncing_the_copy_retimes_its_origin(tmp_path, monkeypatch, extension) -> None:
+    reader, ipc, jobs, origin, _toasts = _session(tmp_path, monkeypatch, extension=extension)
     _ready(reader)
     jobs.finish()
 
@@ -404,8 +467,9 @@ def test_replacing_a_copy_or_its_origin_retires_both(tmp_path, monkeypatch, sele
     assert {2, 9} <= removed
 
 
-def test_a_bookmark_names_the_origin_not_the_copy(tmp_path, monkeypatch) -> None:
-    reader, ipc, jobs, origin, _toasts = _session(tmp_path, monkeypatch)
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_a_bookmark_names_the_origin_not_the_copy(tmp_path, monkeypatch, extension) -> None:
+    reader, ipc, jobs, origin, _toasts = _session(tmp_path, monkeypatch, extension=extension)
     _ready(reader)
     jobs.finish()
 
@@ -646,3 +710,7 @@ def test_a_copy_finishing_after_the_user_picked_the_origin_is_not_forced_on(
 
     assert ipc.props["sid"] == 2
     assert not any(colored_subs.is_copy(track) for track in ipc.tracks)
+
+
+def _colored_track(reader):
+    return reader.graph.profile_integration.colored_track

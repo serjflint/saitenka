@@ -3817,6 +3817,36 @@ def test_no_gate_row_is_satisfied_only_by_an_option_mpv_does_not_have() -> None:
         assert accepted, f"{name} is accepted only when mpv does not report it"
 
 
+def test_sub_use_margins_is_read_only_where_mpv_reads_it() -> None:
+    """mpv hands `sub-use-margins` to libass on the converted and `force` branches only; an authored
+    track under `no` or `scale` uses `sub-ass-force-margins`. Refusing it there cost hover for a
+    setting that moves nothing."""
+    from saitenka.app.native_subtitles import unsupported_render_settings
+
+    off = {"sub-use-margins": False}
+
+    assert (
+        unsupported_render_settings(off),
+        unsupported_render_settings(off, authored=False),
+    ) == ((), ("sub-use-margins",))
+
+
+@pytest.mark.parametrize("authored", [False, True])
+@pytest.mark.parametrize("blended", [False, True])
+def test_shadow_margin_policy_matches_the_selected_track_kind(authored, blended):
+    inputs = _inputs(
+        authored=authored,
+        osd={"mt": 112, "mb": 112},
+        **{
+            "sub-use-margins": True,
+            "sub-ass-force-margins": False,
+            "blend-subtitles": blended,
+        },
+    )
+
+    assert inputs.use_margins is (not authored)
+
+
 LETTERBOX = {"w": 1920, "h": 1080, "mt": 140, "mb": 140, "ml": 0, "mr": 0, "par": 1.0}
 
 

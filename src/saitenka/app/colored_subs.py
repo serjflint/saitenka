@@ -1,13 +1,14 @@
-"""Colored copies of authored subtitle tracks on disk, and the track-list view that hides their origin.
+"""Colored subtitle copies on disk, and the track-list view that hides their origin.
 
 A copy stands in for the authored track it was made from: while one is loaded, the origin is left out
 of discovery, so the Japanese role, Alt+t and the translation lease all land on the copy. The copy is
-identified by where it lives, not by its title, and names its origin in its own header.
+identified by where it lives, not by its title. ASS records its origin in a header; SRT uses a sidecar.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import tempfile
@@ -16,7 +17,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from saitenka_subtitles import MAX_ASS_SOURCE_BYTES, UnsupportedAssEvent
+from saitenka_subtitles import (
+    MAX_ASS_SOURCE_BYTES,
+    UnsupportedAssEvent,
+    canonical_active_ass_rows,
+    colored_srt,
+)
 from saitenka_subtitles.colored_track import (
     HEAD_BYTES,
     INJECTED,
@@ -59,12 +65,41 @@ def is_copy(track: Mapping[str, object]) -> bool:
 @lru_cache(maxsize=32)
 def _recorded_origin(path: str) -> str | None:
     # Copies are content-addressed, so a path never changes what it holds.
+    if Path(path).suffix == ".srt":
+        metadata = _srt_copy(path)
+        return None if metadata is None else metadata.origin
     try:
         with Path(path).open("rb") as copy:
             head = copy.read(HEAD_BYTES)
     except OSError:
         return None
     return colored_origin(head.decode("utf-8", errors="replace"))
+
+
+@dataclass(frozen=True, slots=True)
+class _SrtCopy:
+    origin: str
+    painted_rows: frozenset[str]
+
+
+@lru_cache(maxsize=32)
+def _srt_copy(path: str) -> _SrtCopy | None:
+    try:
+        with Path(f"{path}.json").open("rb") as handle:
+            raw = handle.read(MAX_ASS_SOURCE_BYTES + 1)
+        if len(raw) > MAX_ASS_SOURCE_BYTES:
+            return None
+        metadata = json.loads(raw)
+        if not isinstance(metadata, dict) or metadata.get("version") != 1:
+            return None
+        origin, rows = metadata.get("origin"), metadata.get("painted_rows")
+        if not isinstance(origin, str) or not origin.startswith("external:"):
+            return None
+        if not isinstance(rows, list) or not all(isinstance(row, str) for row in rows):
+            return None
+        return _SrtCopy(origin, frozenset(rows))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
 
 
 def copy_origin(track: Mapping[str, object]) -> str | None:
@@ -129,8 +164,6 @@ def track_paints(value: Callable[[str], object]) -> bool:
     copy is one under this cache's `colored-subs/` with a header, so an attached session recognizes
     one it did not load, but not one written under another cache directory.
     """
-    if not frame_colored(value("sub-text/ass-full")):
-        return False
     tracks = value("track-list")
     sid = value("sid")
     selected = next(
@@ -142,11 +175,23 @@ def track_paints(value: Callable[[str], object]) -> bool:
         None,
     )
     options = {name: value(f"options/{name}") for name in REFUSING_OPTIONS}
-    return (
-        selected is not None
-        and copy_origin(selected) is not None
-        and refusing_options(options) is None
-    )
+    if selected is None or copy_origin(selected) is None or refusing_options(options) is not None:
+        return False
+    path = _external(selected)
+    rows = value("sub-text/ass-full")
+    if path is None or Path(path).suffix != ".srt":
+        return frame_colored(rows)
+    metadata = _srt_copy(path)
+    if metadata is None or not isinstance(rows, str) or not rows.strip():
+        return False
+    try:
+        return all(
+            canonical_active_ass_rows(row) in metadata.painted_rows
+            for row in rows.split("\n")
+            if row.strip()
+        )
+    except ValueError:
+        return False
 
 
 def event_colors(
@@ -175,12 +220,15 @@ def _digest(value: str) -> str:
     return hashlib.blake2s(value.encode("utf-8"), digest_size=8).hexdigest()
 
 
-def write_copy(origin_key: str, text: str) -> Path:
+def write_copy(
+    origin_key: str, text: str, *, suffix: str = ".ass", metadata: str | None = None
+) -> Path:
     """Publish `text` under a content-addressed name. Older copies stay until the swap retires them."""
     directory = colored_subs_dir()
     directory.mkdir(parents=True, exist_ok=True)
     prefix = _digest(origin_key)
-    path = directory / f"{prefix}-{_digest(text)}.ass"
+    content = text if metadata is None else f"{text}\0{metadata}"
+    path = directory / f"{prefix}-{_digest(content)}{suffix}"
     if not path.exists():
         descriptor, temporary = tempfile.mkstemp(dir=directory, suffix=".tmp")
         try:
@@ -196,9 +244,11 @@ def write_copy(origin_key: str, text: str) -> Path:
 def evict_siblings(path: Path) -> None:
     """Delete the other copies of `path`'s origin, once mpv no longer has one selected."""
     prefix = path.name.partition("-")[0]
-    for sibling in path.parent.glob(f"{prefix}-*.ass"):
+    for sibling in path.parent.glob(f"{prefix}-*{path.suffix}"):
         if sibling != path:
             sibling.unlink(missing_ok=True)
+            if sibling.suffix == ".srt":
+                Path(f"{sibling}.json").unlink(missing_ok=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +279,24 @@ def _read_origin(source: Path) -> str:
     if len(raw) > MAX_ASS_SOURCE_BYTES:
         raise UnsupportedAssEvent("subtitle-source-too-large")
     text = raw.decode("utf-8")
-    return strip_colors(text) if colored_origin(text) is not None else text
+    return (
+        strip_colors(text)
+        if source.suffix.casefold() != ".srt" and colored_origin(text) is not None
+        else text
+    )
+
+
+def _srt_metadata(origin: str, rows: tuple[str, ...]) -> str:
+    metadata = json.dumps(
+        {
+            "version": 1,
+            "origin": origin,
+            "painted_rows": [canonical_active_ass_rows(row) for row in rows],
+        }
+    )
+    if len(metadata.encode("utf-8")) > MAX_ASS_SOURCE_BYTES:
+        raise UnsupportedAssEvent("subtitle-metadata-too-large")
+    return metadata
 
 
 def generate(request: object, cancelled: threading.Event) -> object:
@@ -243,7 +310,16 @@ def generate(request: object, cancelled: threading.Event) -> object:
         return request.colors(text)
 
     try:
-        document = color_document(_read_origin(request.source), request.origin, colors)
+        source = _read_origin(request.source)
+        srt = (
+            colored_srt.color_document(source, colors)
+            if request.source.suffix.casefold() == ".srt"
+            else None
+        )
+        document = (
+            srt.document if srt is not None else color_document(source, request.origin, colors)
+        )
+        metadata = _srt_metadata(request.origin, srt.painted_rows) if srt is not None else None
     except Superseded:
         return ColorResult(None, "superseded")
     except (OSError, UnicodeDecodeError):
@@ -256,7 +332,13 @@ def generate(request: object, cancelled: threading.Event) -> object:
     if not document.colored:
         return ColorResult(None, "nothing-colored", 0, verbatim)
     try:
-        path = write_copy(request.origin_key, document.text)
+        path = write_copy(
+            request.origin_key, document.text, suffix=".srt" if srt else ".ass", metadata=metadata
+        )
+        if metadata is not None:
+            from saitenka.app.paths import atomic_write_text
+
+            atomic_write_text(f"{path}.json", metadata)
     except OSError:
         log.warning("colored track: cannot write the copy", exc_info=True)
         return ColorResult(None, "write-failed", document.colored, verbatim)

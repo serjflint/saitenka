@@ -78,11 +78,17 @@ class ColoredTrackController:
     """
 
     def __init__(
-        self, ports: ColoredTrackPorts, *, enabled: bool, submit: JobSubmitter | None
+        self,
+        ports: ColoredTrackPorts,
+        *,
+        enabled: bool,
+        submit: JobSubmitter | None,
+        allow_srt: bool = False,
     ) -> None:
         self._ports = ports
         self._enabled = enabled
         self._submit = submit
+        self._allow_srt = allow_srt
         self._sequence = 0
         self._pending: tuple[str, str, int] | None = None
         self._ready: _Copy | None = None
@@ -353,6 +359,10 @@ class ColoredTrackController:
             origin = colored_subs.copy_origin(selected)
             path = selected.get("external-filename")
             described = colored_subs.origin_track(loaded, selected) or selected
+            if path and Path(str(path)).suffix == ".srt" and origin is not None:
+                if not self._allow_srt:
+                    return None
+                path = origin.removeprefix("external:")
             return (
                 None
                 if origin is None or not path
@@ -368,7 +378,8 @@ class ColoredTrackController:
         external = track.get("external-filename")
         if track.get("external"):
             path = Path(str(external)) if external else None
-            return path if path is not None and path.suffix.casefold() == ".ass" else None
+            suffixes = {".ass", ".srt"} if self._allow_srt else {".ass"}
+            return path if path is not None and path.suffix.casefold() in suffixes else None
         media = self._ports.value("path")
         ff_index = track.get("ff-index")
         if str(track.get("codec") or "") not in {"ass", "ssa"} or not media or ff_index is None:
