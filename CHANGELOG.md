@@ -16,7 +16,12 @@ logs.
   retaining the authored subtitle on screen. Speaker, accessibility and music presets are opt-in;
   custom patterns use a validated, bounded regex dialect.
 
+- Native colored subtitle copies support external and cached SRT with `native_formats = "all"`,
+  preserving mpv's subtitle settings and falling back for unsupported markup.
+
 ### Fixed
+
+- Converted subtitle colors and hover geometry follow mpv's margin policy in letterboxed windows.
 
 - ASS study indexes collapse exact authored duplicates and positively identified animation bursts,
   reducing repeated sidebar, navigation, analysis and warm-cache rows while preserving native frames.

@@ -20,7 +20,7 @@ Set `coloring` under `[subtitle_geometry]` alongside `native_visible = true`:
 
 | Coloring | Behavior |
 |---|---|
-| `whole-cue-auto` (default) | A [colored copy](#colored-track) of an authored ASS track; for the events it cannot color, whole-event ASS OSD when qualified, otherwise whole-cue raster, otherwise scan boxes only. |
+| `whole-cue-auto` (default) | A [colored copy](#colored-track) of an authored ASS or supported SRT track; for the events it cannot color, whole-event ASS OSD when qualified, otherwise whole-cue raster, otherwise scan boxes only. |
 | `whole-cue-osd` | Qualified whole-event ASS OSD, otherwise scan boxes only. |
 | `whole-cue-overpaint` | Whole-cue raster, otherwise scan boxes only. |
 | `boxes-only` | Scanning without coloring or level underlines. |
@@ -91,6 +91,14 @@ changes; it is swapped in during a gap between cues, so a line you paused on kee
 It lives under `colored-subs/` in the cache directory: one file per track you have watched,
 kept until you clear the cache.
 
+With `native_formats = "all"`, external SRT tracks (including downloaded and cached subtitles) also
+get a colored copy. The copy stays SRT, using `<font color>` tags so mpv retains its subtitle font,
+margin, scaling and timing behavior. Plain text and basic bold, italic and underline markup are
+supported; font tags, positioning escapes, unusual whitespace and unsupported markup keep the
+overlay fallback. Co-timed cues are preserved independently. A `.srt.json` sidecar records the origin
+and colored events for reattachment; keep it with the copy. Profile changes regenerate SRT colors
+from the original file, which must remain available.
+
 The copy stands in for the original everywhere Saitenka chooses a track — the Japanese role,
 Alt+t, the translation slot. Re-timing (Ctrl+Shift+T) re-times the original and colors the result;
 bookmarks record the original. Selecting the original in mpv removes the copy; that track is not colored again this episode
@@ -105,7 +113,7 @@ An event is copied without colors when coloring it could change how it looks: fa
 transforms, karaoke, clipping, alpha, drawings, or effects. Those events keep the OSD and raster
 paths above. So do tracks under `sub-ass-override=strip` or `force`, `sub-filter-sdh`, or a
 `sub-ass-style-overrides` that sets a color, where mpv would not show the copy's colors as written.
-SubRip and other converted tracks are not copied.
+Embedded converted tracks and converted formats other than external SRT are not copied.
 
 With telemetry enabled, reports retain a bounded history of whole-cue decisions, submissions,
 acknowledgments and terminal outcomes. Enable telemetry before reproducing a problem; disabled

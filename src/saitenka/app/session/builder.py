@@ -606,6 +606,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
         and o.subtitle_geometry.source != "mpv"
         and o.subtitle_geometry.coloring == "whole-cue-auto",
         submit=configure_colored_track_job(ipc),
+        allow_srt=o.subtitle_geometry.native_formats == "all",
     )
     translation_store = TranslationStore(ipc)
     translation_controller = translation_ref.bind(

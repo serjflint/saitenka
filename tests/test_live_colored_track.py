@@ -11,8 +11,8 @@ import time
 
 import numpy as np
 import pytest
-from live_harness import LayoutLiveOptions, live_reader, poll_until
-from PIL import Image
+from live_harness import LayoutLiveOptions, live_reader, make_clip_and_sub, poll_until
+from PIL import Image, ImageFilter
 
 from saitenka.app import colored_subs
 from saitenka.app.subtitle_render import whole_cue_device
@@ -59,17 +59,24 @@ def _swap_in_a_gap(reader, ipc) -> None:
     ipc.command("seek", "0.6", "absolute+exact")
 
 
-def _capture(ipc, tmp, name: str) -> object:
+def _capture(ipc, tmp, name: str, mode="subtitles") -> object:
     path = tmp / f"{name}.png"
-    reply = ipc.command("screenshot-to-file", str(path), "subtitles")
+    reply = ipc.command("screenshot-to-file", str(path), mode)
     assert reply.get("error") == "success", reply
     return path
 
 
 @pytest.mark.parametrize("override", ["no", "scale"])
-def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render(override: str) -> None:
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render(
+    tmp_path, override: str, extension
+) -> None:
     from test_cue_color_timeline import _coloring
 
+    source = {}
+    if extension == ".srt":
+        clip, subtitles = make_clip_and_sub(tmp_path, CUES)
+        source = {"media": clip, "subtitles": subtitles}
     with live_reader(
         native_visible=True,
         scorer=_coloring(),
@@ -80,6 +87,7 @@ def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render(override: str) -> N
             (f"--sub-ass-override={override}", "--blend-subtitles=no"),
             start_seconds=0.6,
             prefetch=False,
+            **source,
         ),
     ) as (tmp, reader, ipc):
         _swap_in_a_gap(reader, ipc)
@@ -113,9 +121,14 @@ def test_the_copy_colors_the_cue_in_mpvs_own_subtitle_render(override: str) -> N
         assert painted > 10 * max(authored, 5), (painted, authored)
 
 
-def test_the_next_cue_is_colored_on_the_frame_a_sub_seek_lands_on() -> None:
+@pytest.mark.parametrize("extension", [".ass", ".srt"])
+def test_the_next_cue_is_colored_on_the_frame_a_sub_seek_lands_on(tmp_path, extension) -> None:
     from test_cue_color_timeline import _coloring
 
+    source = {}
+    if extension == ".srt":
+        clip, subtitles = make_clip_and_sub(tmp_path, CUES)
+        source = {"media": clip, "subtitles": subtitles}
     with live_reader(
         native_visible=True,
         scorer=_coloring(),
@@ -126,6 +139,7 @@ def test_the_next_cue_is_colored_on_the_frame_a_sub_seek_lands_on() -> None:
             ("--sub-ass-override=no", "--blend-subtitles=no"),
             start_seconds=0.6,
             prefetch=False,
+            **source,
         ),
     ) as (tmp, reader, ipc):
         _swap_in_a_gap(reader, ipc)
@@ -156,3 +170,56 @@ def test_the_next_cue_is_colored_on_the_frame_a_sub_seek_lands_on() -> None:
 
         painted, authored = _colored_pixels(landed, boxes, rgb), _colored_pixels(plain, boxes, rgb)
         assert painted > 10 * max(authored, 5), (painted, authored)
+
+
+def test_srt_colored_track_keeps_native_alignment_in_a_letterbox(tmp_path):
+    from test_cue_color_timeline import _coloring
+
+    clip, source = make_clip_and_sub(tmp_path, CUES)
+    with live_reader(
+        native_visible=True,
+        scorer=_coloring(),
+        layout=LayoutLiveOptions(
+            media=clip,
+            subtitles=source,
+            start_seconds=0.6,
+            prefetch=False,
+            extra_args=(
+                "--geometry=1280x800",
+                "--hidpi-window-scale=no",
+                "--sub-font-size=52",
+                "--sub-margin-y=60",
+                "--sub-use-margins=yes",
+                "--sub-ass-force-margins=no",
+                "--blend-subtitles=no",
+                "--osd-level=0",
+                "--vo=gpu",
+                "--gpu-sw=yes",
+            ),
+        ),
+    ) as (tmp, reader, ipc):
+        _swap_in_a_gap(reader, ipc)
+        poll_until(
+            reader,
+            lambda: whole_cue_device(reader.graph.cue.draw_request()) == ("track", "track"),
+            "SRT copy never claimed its paint",
+        )
+        assert ipc.query("osd-dimensions")["mb"] > 20
+        reader.graph.subtitle_presentation.clear_pixels()
+        ipc.command("show-text", "", 0)
+        colored = np.asarray(Image.open(_capture(ipc, tmp, "colored", "window")).convert("RGB"))
+        original = next(
+            track
+            for track in ipc.command("get_property", "track-list")["data"]
+            if track.get("type") == "sub" and not colored_subs.is_copy(track)
+        )
+        ipc.command("set_property", "sid", original["id"])
+        time.sleep(0.2)
+        native = np.asarray(Image.open(_capture(ipc, tmp, "native", "window")).convert("RGB"))
+        native, colored = native[native.shape[0] // 2 :], colored[colored.shape[0] // 2 :]
+        changed = np.max(np.abs(colored.astype(int) - native.astype(int)), axis=2) > 20
+        support = np.asarray(
+            Image.fromarray(np.all(native > 100, axis=2)).filter(ImageFilter.MaxFilter(7))
+        )
+        assert np.count_nonzero(changed) > 100
+        assert np.count_nonzero(changed & ~support) / np.count_nonzero(changed) < 0.02

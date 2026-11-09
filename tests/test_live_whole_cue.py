@@ -46,6 +46,53 @@ def _character_masks():
     return module
 
 
+def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
+    from live_harness import make_clip_and_sub
+    from test_cue_color_timeline import _coloring
+
+    clip, source = make_clip_and_sub(tmp_path, ((0.0, 8.0, "猫を見る"), (0.0, 8.0, "犬も見る")))
+    with live_reader(
+        native_visible=True,
+        scorer=_coloring(),
+        layout=LayoutLiveOptions(
+            media=clip,
+            subtitles=source,
+            coloring="whole-cue-overpaint",
+            extra_args=(
+                "--sub-use-margins=yes",
+                "--sub-ass-force-margins=no",
+                "--sub-margin-y=60",
+                "--blend-subtitles=no",
+                "--osd-level=0",
+                "--geometry=1280x800",
+                "--hidpi-window-scale=no",
+                "--vo=gpu",
+                "--gpu-sw=yes",
+            ),
+        ),
+    ) as (tmp, session, ipc):
+        poll_until(
+            session,
+            lambda: session.graph.cue.draw_request().whole_cue is not None,
+            "converted cue never prepared",
+        )
+        dimensions = ipc.query("osd-dimensions")
+        assert dimensions["mb"] > 20
+        path = tmp / "colored.png"
+        assert ipc.command("screenshot-to-file", str(path), "window")["error"] == "success"
+        colored = np.asarray(Image.open(path).convert("RGB"))
+        session.graph.subtitle_presentation.clear_pixels()
+        path = tmp / "native.png"
+        assert ipc.command("screenshot-to-file", str(path), "window")["error"] == "success"
+        native = np.asarray(Image.open(path).convert("RGB"))
+
+        changed = np.max(np.abs(colored.astype(int) - native.astype(int)), axis=2) > 20
+        ink = np.all(native > 100, axis=2)
+        support = np.asarray(Image.fromarray(ink).filter(ImageFilter.MaxFilter(7)))
+        assert np.count_nonzero(changed) > 100
+        assert np.count_nonzero(changed & ~support) / np.count_nonzero(changed) < 0.02
+
+
 @pytest.mark.parametrize("delay", [0.0, 1.25])
 @pytest.mark.parametrize(
     "coloring",

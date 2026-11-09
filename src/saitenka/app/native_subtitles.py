@@ -644,6 +644,7 @@ def render_inputs_of(
         raise ValueError(", ".join(f"{name}={_short_repr(settings[name])}" for name in unsupported))
     _validate_frame(frame_size, margins)
     override = _scale_override_inputs(settings, authored=authored)
+    use_margins = cast("bool", settings["sub-ass-force-margins" if authored else "sub-use-margins"])
     blended = _blend_space(frame_size, margins, video) if _blends_into_video(settings) else None
     if blended is not None:
         return _RenderInputs(
@@ -651,7 +652,7 @@ def render_inputs_of(
             storage_size,
             blended.pixel_aspect,
             (0, 0, 0, 0),
-            cast("bool", settings["sub-ass-force-margins"]),
+            use_margins,
             tuple(sorted((name, repr(value)) for name, value in settings.items())),
             subtitle_fonts.option_snapshot(settings),
             settings["sub-scale-with-window"] is not False,
@@ -665,7 +666,7 @@ def render_inputs_of(
         storage_size,
         _pixel_aspect(osd, video),
         margins,
-        cast("bool", settings["sub-ass-force-margins"]),
+        use_margins,
         tuple(sorted((name, repr(value)) for name, value in settings.items())),
         subtitle_fonts.option_snapshot(settings),
         settings["sub-scale-with-window"] is not False,
