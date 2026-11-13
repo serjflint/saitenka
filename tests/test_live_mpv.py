@@ -78,7 +78,19 @@ def _targets_for(reader, x, y):
 @pytest.mark.live
 @pytest.mark.timeout(30)
 def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
+    from saitenka.app.overlay_ids import OverlayId
+    from saitenka.runtime import SurfaceStatus
+
     with _live_reader() as (tmp, reader, ipc):
+        _poll_until(
+            reader,
+            lambda: (
+                ipc.query("vo-configured") is True
+                and reader.graph.lifecycle_surfaces.snapshot(OverlayId.SUB).status
+                is SurfaceStatus.PRESENT
+            ),
+            "subtitle pixels were not acknowledged before aiming the mouse",
+        )
         # aim a REAL mouse move at the screen centre of a content word
         i = next(
             k
@@ -90,11 +102,21 @@ def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
         cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
         ipc.command("mouse", cx, cy)
 
-        _poll_until(
-            reader,
-            lambda: reader.graph.tooltip.surface_state().view.rect is not None,
-            "a real mouse over a word did not show a tooltip",
-        )
+        try:
+            _poll_until(
+                reader,
+                lambda: reader.graph.tooltip.surface_state().view.rect is not None,
+                "a real mouse over a word did not show a tooltip",
+            )
+        except pytest.fail.Exception as failure:
+            failure.add_note(
+                f"aim=({cx}, {cy}); mouse={ipc.query('mouse-pos')}; "
+                f"observed={reader.graph.playback.value('mouse-pos')}; "
+                f"selected={reader.graph.tooltip.observation().selected}; "
+                f"origin={reader.graph.subtitle_presentation.cue.current.origin}; "
+                f"dimensions={ipc.query('osd-dimensions')}"
+            )
+            raise
         ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
 
         # R1: the hovered word must be the one we aimed at — this is the mouse-pos→OSD alignment the

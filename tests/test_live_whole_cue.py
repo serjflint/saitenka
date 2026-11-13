@@ -51,6 +51,9 @@ def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
     from live_harness import make_clip_and_sub
     from test_cue_color_timeline import _coloring
 
+    from saitenka.app.overlay_ids import OverlayId
+    from saitenka.runtime import SurfaceStatus
+
     clip, source = make_clip_and_sub(tmp_path, ((0.0, 8.0, "猫を見る"), (0.0, 8.0, "犬も見る")))
     with live_reader(
         native_visible=True,
@@ -72,10 +75,14 @@ def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
             ),
         ),
     ) as (tmp, session, ipc):
+        surfaces = session.graph.lifecycle_surfaces
         poll_until(
             session,
-            lambda: session.graph.cue.draw_request().whole_cue is not None,
-            "converted cue never prepared",
+            lambda: (
+                (surface := surfaces.snapshot(OverlayId.OVERPAINT)) is not None
+                and surface.status is SurfaceStatus.PRESENT
+            ),
+            "converted cue colors were not acknowledged",
         )
         dimensions = ipc.query("osd-dimensions")
         assert dimensions["mb"] > 20
@@ -83,6 +90,11 @@ def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
         assert ipc.command("screenshot-to-file", str(path), "window")["error"] == "success"
         colored = np.asarray(Image.open(path).convert("RGB"))
         session.graph.subtitle_presentation.clear_pixels()
+        poll_until(
+            session,
+            lambda: surfaces.snapshot(OverlayId.OVERPAINT).status is SurfaceStatus.ABSENT,
+            "converted cue colors were not cleared",
+        )
         path = tmp / "native.png"
         assert ipc.command("screenshot-to-file", str(path), "window")["error"] == "success"
         native = np.asarray(Image.open(path).convert("RGB"))
@@ -624,8 +636,11 @@ def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kernin
     ) as (_tmp, session, ipc):
         poll_until(
             session,
-            lambda: session.graph.cue.draw_request().whole_cue is not None,
-            "attachment cue never prepared",
+            lambda: (
+                (request := session.graph.cue.draw_request()).whole_cue is not None
+                and bool(request.boxes)
+            ),
+            "attachment cue never acquired prepared scan geometry",
         )
         request = session.graph.cue.draw_request()
         assert request.boxes
