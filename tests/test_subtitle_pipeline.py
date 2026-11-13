@@ -1085,6 +1085,24 @@ class SplitLane(DeferredLane):
         on_finished(EffectFinished(EffectId(0), owner, identity, EffectOutcome.SUCCEEDED))
 
 
+def test_repeated_lookahead_does_not_queue_the_frame_already_rendering() -> None:
+    lane = SplitLane()
+    coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())
+    worker = SubtitleGeometryWorker(coordinator, submit=lane)
+    future = request(coordinator.generation, 1_300)
+    build = prefetch_builder(lambda: future)
+    worker.prefetch("future", build)
+    try:
+        assert not worker.prefetch("future", build)
+
+        lane.run_body()
+        lane.deliver(Owner.SUBTITLE)
+        assert worker.publish_prefetched("future", coordinator.generation) == future
+        assert worker.stats.prefetched == 1
+    finally:
+        worker.close()
+
+
 def test_prefetch_delivers_the_tokenization_that_built_its_geometry() -> None:
     lane = SplitLane()
     coordinator = SubtitleModeCoordinator(FakeCurrentRenderer(), FakeGeometryBackend())

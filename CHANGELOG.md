@@ -26,6 +26,9 @@ logs.
 
 ### Fixed
 
+- Repeated subtitle lookahead requests no longer queue another render for a frame already being
+  prepared.
+
 - Esc closes the top open widget after the tooltip disappears, and closing utility panels restores
   the player's shortcuts. Card previews use the shared UI scale with a larger, visible close button;
   expired mining messages no longer return during paused repaints.
