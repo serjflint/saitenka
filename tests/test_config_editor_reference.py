@@ -7,7 +7,9 @@ import pytest
 
 from saitenka.app import config_editor as editor
 
-DATA = json.loads((Path(__file__).parent / "fixtures/config_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parent / "fixtures/config_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["editor-catalog"], ids=lambda r: r["id"])

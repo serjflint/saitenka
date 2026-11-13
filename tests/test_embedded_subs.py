@@ -18,6 +18,7 @@ def test_no_selected_track_leaves_index_unset():
     assert prepare_track(request, threading.Event()) is None
 
 
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 @pytest.mark.parametrize(
     ("codec", "cached"),
     [
@@ -26,7 +27,7 @@ def test_no_selected_track_leaves_index_unset():
     ],
 )
 def test_preparation_preserves_the_authored_format_and_reuses_cached_extraction(
-    tmp_path, monkeypatch, codec, cached
+    tmp_path, monkeypatch, codec, cached, newline
 ):
     video = tmp_path / "ep.mkv"
     video.write_bytes(b"x")
@@ -40,6 +41,7 @@ def test_preparation_preserves_the_authored_format_and_reuses_cached_extraction(
         if suffix == ".ass"
         else "1\n00:00:01,000 --> 00:00:02,000\n本を読む\n"
     )
+    raw = content.replace("\n", newline).encode("utf-8")
     path = (
         tmp_path / "external.srt"
         if codec == "external"
@@ -47,14 +49,14 @@ def test_preparation_preserves_the_authored_format_and_reuses_cached_extraction(
     )
     if codec == "external" or cached:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        path.write_bytes(raw)
 
     def extract(video_arg, ff_index, dest, codec_args, **_kwargs):
         assert codec != "external" and not cached
         assert (Path(video_arg), ff_index, dest) == (video, 10, path)
         assert codec_args == ("-c:s", "srt" if codec == "webvtt" else "copy")
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+        dest.write_bytes(raw)
         return True
 
     monkeypatch.setattr(es, "extract_embedded_track", extract)
@@ -78,7 +80,7 @@ def test_preparation_preserves_the_authored_format_and_reuses_cached_extraction(
     assert result.path == path
     assert result.sid == 9
     assert result.index.cues[0].text == "本を読む"
-    assert result.source.raw == content.encode("utf-8")
+    assert result.source.raw == raw
 
 
 def test_failed_extraction_does_not_publish_a_partial_cache(tmp_path, monkeypatch):

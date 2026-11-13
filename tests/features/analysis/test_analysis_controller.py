@@ -53,7 +53,7 @@ def analysis_reader(make_session):
 
 def _load_episode(reader, tmp_path, text="私は本を読む。"):
     path = tmp_path / "episode.srt"
-    path.write_text(f"1\n00:00:00,000 --> 00:00:01,000\n{text}\n")
+    path.write_text(f"1\n00:00:00,000 --> 00:00:01,000\n{text}\n", encoding="utf-8")
     reader.graph.subtitle_navigation.load_index(path)
 
 

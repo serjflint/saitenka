@@ -11,7 +11,9 @@ from saitenka.app.features.tooltip.prefetch import cap_for, tip_scale
 from saitenka.app.features.tooltip.tooltip_panel import place_panel
 from saitenka.app.subtitles import WordBox, token_at
 
-DATA = json.loads((Path(__file__).parents[2] / "fixtures/tooltip_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parents[2] / "fixtures/tooltip_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["scale"], ids=lambda r: r["id"])

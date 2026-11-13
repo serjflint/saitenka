@@ -155,7 +155,9 @@ def test_run_carries_every_config_table_the_dependency_build_reads():
     assert effective["dicts"] == ["from the flag"]
 
 
-_REFERENCE = json.loads((Path(__file__).parent / "fixtures/config_reference.json").read_text())
+_REFERENCE = json.loads(
+    (Path(__file__).parent / "fixtures/config_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", _REFERENCE["run"], ids=lambda r: r["id"])
