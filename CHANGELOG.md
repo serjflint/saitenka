@@ -26,6 +26,9 @@ logs.
 
 ### Fixed
 
+- Dependency requirements exclude vulnerable Pillow, filelock, certifi and OpenTelemetry releases;
+  the lock also includes urllib3 security fixes.
+
 - Repeated subtitle lookahead requests no longer queue another render for a frame already being
   prepared.
 
