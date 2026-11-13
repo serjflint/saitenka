@@ -8,6 +8,10 @@ extension evicts the stale sibling so the glob never returns two files for one l
 
 from __future__ import annotations
 
+import os
+
+import pytest
+
 from saitenka.app import subtitle_cache as cache
 
 
@@ -194,17 +198,31 @@ def test_japanese_keeps_the_unmarked_legacy_slot(monkeypatch, tmp_path):
     assert "-jp" not in legacy.name
 
 
-def test_a_retimed_hand_pick_stays_in_its_language(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("raw_time", "retimed_time", "expected"),
+    [(1, 1, "retimed"), (1, 2, "retimed"), (2, 1, "raw")],
+)
+def test_a_retimed_hand_pick_stays_in_its_language(
+    monkeypatch, tmp_path, raw_time, retimed_time, expected
+):
     monkeypatch.setenv("SAITENKA_CACHE_DIR", str(tmp_path / "cache"))
     video = _video(tmp_path)
     src = tmp_path / "picked.ass"
     src.write_text("[Script Info]", encoding="utf-8")
     retimed = tmp_path / "retimed.ass"
     retimed.write_text("[Script Info]\n[Events]\nretimed", encoding="utf-8")
+    os.utime(src, (1_700_000_000 + raw_time,) * 2)
+    os.utime(retimed, (1_700_000_000 + retimed_time,) * 2)
 
     fr_raw = cache.store_subs(video, "Show", 1, src, resync=False, language="fr")
     published = cache.publish_retimed(fr_raw, retimed)
 
     assert published is not None
-    assert cache.cached_subs(video, "Show", 1, language="fr") == published
+    assert (
+        cache.cached_subs(video, "Show", 1, language="fr")
+        == {
+            "raw": fr_raw,
+            "retimed": published,
+        }[expected]
+    )
     assert cache.cached_subs(video, "Show", 1, language="jp") is None

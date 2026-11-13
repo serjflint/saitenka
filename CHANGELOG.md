@@ -26,6 +26,9 @@ logs.
 
 ### Fixed
 
+- Retimed subtitles win cache ties at the same format and timestamp, preserving timing corrections
+  on coarse filesystem clocks.
+
 - Dependency requirements exclude vulnerable Pillow, filelock, certifi and OpenTelemetry releases;
   the lock also includes urllib3 security fixes.
 
