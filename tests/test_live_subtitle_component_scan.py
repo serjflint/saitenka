@@ -7,6 +7,8 @@ from live_harness import LayoutLiveOptions, live_reader, make_clip_and_sub, poll
 from test_cue_color_timeline import _coloring
 from test_live_colored_track import _swap_in_a_gap
 
+from saitenka.mpvio.launch import NATIVE_GEOMETRY_MPV_MIN
+
 pytestmark = [
     pytest.mark.live,
     pytest.mark.timeout(30),
@@ -14,7 +16,14 @@ pytestmark = [
 ]
 
 
-@pytest.mark.parametrize("renderer", ["pillow", "ass", "srt"])
+@pytest.mark.parametrize(
+    "renderer",
+    [
+        "pillow",
+        pytest.param("ass", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)),
+        pytest.param("srt", marks=pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)),
+    ],
+)
 def test_real_cursor_scans_the_component_inside_yaritogetai(tmp_path, renderer):
     cues = ((0.5, 3.0, "やり遂げたい"), (4.0, 6.5, "猫を見る"))
     source = {}

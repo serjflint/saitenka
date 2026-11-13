@@ -8,7 +8,9 @@ from saitenka_subtitles import Cue, CueIndex
 
 from saitenka.app import subnav_policy
 
-DATA = json.loads((Path(__file__).parents[2] / "fixtures/subtitle_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parents[2] / "fixtures/subtitle_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["on-screen"], ids=lambda r: r["id"])

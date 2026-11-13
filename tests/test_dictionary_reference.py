@@ -10,9 +10,9 @@ from saitenka_tokenize.japanese import Token
 
 from saitenka.app.dictionary import DictionarySet
 
-DATA = json.loads((Path(__file__).parent / "fixtures/dictionary_reference.json").read_text())[
-    "lookup"
-]
+DATA = json.loads(
+    (Path(__file__).parent / "fixtures/dictionary_reference.json").read_text(encoding="utf-8")
+)["lookup"]
 
 
 @pytest.mark.parametrize("record", DATA, ids=lambda r: r["id"])

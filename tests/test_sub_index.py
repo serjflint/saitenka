@@ -312,9 +312,9 @@ def test_a_drawn_frame_locates_back_to_the_cue_it_was_drawn_for():
     assert idx.locate(text=drawn, preferred=second) == second
 
 
-CORPUS = json.loads((Path(__file__).parent / "fixtures/ass_collapse/cases.json").read_text())[
-    "cases"
-]
+CORPUS = json.loads(
+    (Path(__file__).parent / "fixtures/ass_collapse/cases.json").read_text(encoding="utf-8")
+)["cases"]
 
 
 @pytest.mark.parametrize("case", CORPUS, ids=lambda case: case["name"])

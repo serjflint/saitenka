@@ -9,7 +9,9 @@ from saitenka.app import subtitle_providers as providers
 from saitenka.app.launch import run
 from saitenka.app.subtitle_providers import ProviderContext, SubtitleProvider
 
-DATA = json.loads((Path(__file__).parents[2] / "fixtures/subtitle_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parents[2] / "fixtures/subtitle_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.fixture

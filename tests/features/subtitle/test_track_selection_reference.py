@@ -8,7 +8,9 @@ import pytest
 
 from saitenka.app import subtitle_selection as selection
 
-DATA = json.loads((Path(__file__).parents[2] / "fixtures/subtitle_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parents[2] / "fixtures/subtitle_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["discover"], ids=lambda r: r["id"])
