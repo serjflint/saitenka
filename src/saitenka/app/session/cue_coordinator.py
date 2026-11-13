@@ -86,6 +86,7 @@ class CueOwners:
     translation: TranslationController
     colored_track: ColoredTrackController
     cancel_mining: Callable[[], None]
+    recheck_hover: Callable[[], None]
 
 
 class CueCoordinator:
@@ -98,6 +99,7 @@ class CueCoordinator:
         self._settled_hooks: list[Callable[[], None]] = []
         self._settling = False
         self._cue_start_ms: int | None = None
+        self._hover_restore: int | None = None
         self._track_preparation = TrackPreparation(
             owners.ipc,
             self._track_properties,
@@ -119,6 +121,11 @@ class CueCoordinator:
             subtitle_modes.on_primary_changed(self._o.track_commands.ports(), sid, prepared=track)
 
     def _adopt_track(self, prepared) -> None:
+        # Installing the index retires an active hover without another pointer observation.
+        hovered = (
+            self._o.tooltip.observation().selected >= 0 or self._hover_restore == self.revision
+        )
+        self._hover_restore = None
         self._o.colored_track.source_prepared(prepared)
         self._o.navigation.load_index(prepared.path, prepared=prepared)
         state = self._o.tracks.current
@@ -126,6 +133,23 @@ class CueCoordinator:
             subtitle_modes.on_primary_changed(
                 self._o.track_commands.ports(), prepared.sid, prepared=prepared.track
             )
+        if hovered:
+            self._hover_restore = self.revision
+            self.restore_hover()
+
+    def restore_hover(self) -> None:
+        if self._hover_restore is None:
+            return
+        if self._hover_restore != self.revision:
+            self._hover_restore = None
+            return
+        if not self._o.presentation.cue.current.boxes:
+            return
+        self._hover_restore = None
+        self._o.recheck_hover()
+
+    def cancel_hover_restore(self) -> None:
+        self._hover_restore = None
 
     def _track_properties(self) -> dict:
         from saitenka.app.subtitle_fonts import FONT_OPTIONS
@@ -524,6 +548,7 @@ class CueCoordinator:
         self._request_playback_retirement()
 
     def retire(self, reason: str) -> None:
+        self.cancel_hover_restore()
         if reason in {
             "connection-lost",
             playback.RetireReason.SOURCE.value,

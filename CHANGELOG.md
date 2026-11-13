@@ -26,6 +26,9 @@ logs.
 
 ### Fixed
 
+- Tooltips recover under a stationary pointer when background subtitle preparation reinstalls the
+  current cue.
+
 - Retimed subtitles win cache ties at the same format and timestamp, preserving timing corrections
   on coarse filesystem clocks.
 
