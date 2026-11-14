@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794653074027,
+  "lastUpdate": 1794657514597,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -20069,6 +20069,138 @@ window.BENCHMARK_DATA = {
             "name": "scroll: worker preparation median (2x)",
             "value": 2.72968,
             "range": "3 replicas; min 2.0711; max 2.79731; MAD 0.06763",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "3c51e501053d6eab2a3e543319cbf849cc3db072",
+          "message": "chore(release): release 4.8.1\n\nPrepare the patch release containing the native subtitle alignment and tooltip scrolling fixes from #578. Package and lockfile versions agree at 4.8.1; the curated changelog is promoted and Unreleased is empty.\n\nValidated with the complete pre-release gate, 67 real-mpv smoke tests, an isolated built-wheel install reporting 4.8.1, two artifact reviews, and all 32 active release-PR checks.",
+          "timestamp": "2026-11-14T14:54:05+03:00",
+          "tree_id": "27ac19a0f3441a2102f6a0852fb607d5324227c3",
+          "url": "https://github.com/serjflint/saitenka/commit/3c51e501053d6eab2a3e543319cbf849cc3db072"
+        },
+        "date": 1794657513300,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 19.61784,
+            "range": "3 replicas; min 14.1782; max 19.6255; MAD 0.007616",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 20.428495,
+            "range": "3 replicas; min 14.6983; max 24.8838; MAD 4.45527; worst 24.8838",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 21.628253,
+            "range": "3 replicas; min 14.473; max 21.6639; MAD 0.035602",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 22.068,
+            "range": "3 replicas; min 14.6121; max 22.1883; MAD 0.120251; worst 22.1883",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 14.540826,
+            "range": "3 replicas; min 10.3807; max 16.0097; MAD 1.46891",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.123011,
+            "range": "3 replicas; min 0.07028; max 0.131384; MAD 0.008373; worst 0.131384",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 32.484383,
+            "range": "3 replicas; min 26.9167; max 33.6043; MAD 1.11994; worst 33.6043",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 3.042088,
+            "range": "3 replicas; min 2.33618; max 3.13809; MAD 0.095999; worst 3.13809",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.303339,
+            "range": "3 replicas; min 0.719965; max 1.78156; MAD 0.47822; worst 1.78156",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground CPU p95 (1x)",
+            "value": 0.181618,
+            "range": "3 replicas; min 0.180448; max 0.195923; MAD 0.00117; worst 0.195923",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground elapsed p95 (1x)",
+            "value": 0.435349,
+            "range": "3 replicas; min 0.308073; max 0.438193; MAD 0.002844; worst 0.438193",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: worker preparation median (1x)",
+            "value": 0.029986,
+            "range": "3 replicas; min 0.026103; max 0.030918; MAD 0.000932",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground CPU p95 (1.5x)",
+            "value": 0.270014,
+            "range": "3 replicas; min 0.259163; max 0.359424; MAD 0.010851; worst 0.359424",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground elapsed p95 (1.5x)",
+            "value": 0.412265,
+            "range": "3 replicas; min 0.397357; max 0.589885; MAD 0.014908; worst 0.589885",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: worker preparation median (1.5x)",
+            "value": 3.613562,
+            "range": "3 replicas; min 2.54822; max 3.6649; MAD 0.051341",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground CPU p95 (2x)",
+            "value": 0.476929,
+            "range": "3 replicas; min 0.403282; max 0.674186; MAD 0.073647; worst 0.674186",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground elapsed p95 (2x)",
+            "value": 0.607784,
+            "range": "3 replicas; min 0.591889; max 1.02131; MAD 0.015895; worst 1.02131",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: worker preparation median (2x)",
+            "value": 3.631927,
+            "range": "3 replicas; min 2.66934; max 3.67346; MAD 0.041537",
             "unit": "ms"
           }
         ]
