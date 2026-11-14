@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794642612938,
+  "lastUpdate": 1794653074027,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19937,6 +19937,138 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.085598,
             "range": "3 replicas; min 1.06992; max 1.74705; MAD 0.01568; worst 1.74705",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ce543ac72583cd7e4d3382c5f8cd3b5a5a201370",
+          "message": "fix: align native subtitle colors and keep scrolling responsive\n\nIsolate native subtitle geometry from earlier documents’ fallback-font history and move tooltip scroll preparation onto workers. Foreground reads pin immutable display-ready BGRA bands and copy them outside the cache lock.\n\nPromote positioning invariants into normal tests, enforce complete font coverage in differential fixtures, account for retained pixel copies, and add continuous scroll CPU/elapsed benchmarks.\n\nValidated with poe all (5,012 passed), poe test (4,823 passed), isolated benchmarks, and all 32 active PR checks.",
+          "timestamp": "2026-11-14T13:41:57+03:00",
+          "tree_id": "9f59f8142c66fdcc36787fee9e9f152e4288a5a1",
+          "url": "https://github.com/serjflint/saitenka/commit/ce543ac72583cd7e4d3382c5f8cd3b5a5a201370"
+        },
+        "date": 1794653072954,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 14.667545,
+            "range": "3 replicas; min 10.4344; max 14.8606; MAD 0.193039",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 15.9388,
+            "range": "3 replicas; min 11.0644; max 16.3194; MAD 0.380556; worst 16.3194",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.567146,
+            "range": "3 replicas; min 10.4426; max 14.8548; MAD 0.28766",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.70449,
+            "range": "3 replicas; min 10.6004; max 15.0124; MAD 0.307907; worst 15.0124",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 12.808915,
+            "range": "3 replicas; min 11.6206; max 15.4883; MAD 1.18832",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.066497,
+            "range": "3 replicas; min 0.048894; max 0.066769; MAD 0.000272; worst 0.066769",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 23.955347,
+            "range": "3 replicas; min 17.7685; max 24.2982; MAD 0.342895; worst 24.2982",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 4.643889,
+            "range": "3 replicas; min 2.45877; max 10.952; MAD 2.18512; worst 10.952",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.016256,
+            "range": "3 replicas; min 1.00723; max 2.2298; MAD 0.009024; worst 2.2298",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground CPU p95 (1x)",
+            "value": 0.140229,
+            "range": "3 replicas; min 0.09387; max 0.147791; MAD 0.007562; worst 0.147791",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground elapsed p95 (1x)",
+            "value": 0.368249,
+            "range": "3 replicas; min 0.282006; max 0.415525; MAD 0.047276; worst 0.415525",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: worker preparation median (1x)",
+            "value": 0.028157,
+            "range": "3 replicas; min 0.020185; max 0.029383; MAD 0.001226",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground CPU p95 (1.5x)",
+            "value": 0.173088,
+            "range": "3 replicas; min 0.1617; max 0.214368; MAD 0.011388; worst 0.214368",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground elapsed p95 (1.5x)",
+            "value": 0.259184,
+            "range": "3 replicas; min 0.229647; max 0.314308; MAD 0.029537; worst 0.314308",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: worker preparation median (1.5x)",
+            "value": 2.682605,
+            "range": "3 replicas; min 1.92682; max 2.78757; MAD 0.104966",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground CPU p95 (2x)",
+            "value": 0.327046,
+            "range": "3 replicas; min 0.288389; max 0.347206; MAD 0.02016; worst 0.347206",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: foreground elapsed p95 (2x)",
+            "value": 0.456847,
+            "range": "3 replicas; min 0.405202; max 0.491037; MAD 0.03419; worst 0.491037",
+            "unit": "ms"
+          },
+          {
+            "name": "scroll: worker preparation median (2x)",
+            "value": 2.72968,
+            "range": "3 replicas; min 2.0711; max 2.79731; MAD 0.06763",
             "unit": "ms"
           }
         ]
