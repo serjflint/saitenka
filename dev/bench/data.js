@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794642593542,
+  "lastUpdate": 1794642612938,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -21355,6 +21355,54 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 55.315312,
             "range": "3 replicas; min 31.8446; max 72.409; MAD 17.0937",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b717503c9bca2d07d3286e1ceb771ac6248bd0f",
+          "message": "chore(release): release 4.8.0\n\nPrepare 4.8.0 with curated release notes, dependency security fixes, portable fixtures, and corrected subtitle preparation and hover ordering.\n\nValidated with the pre-release gate, isolated wheel installation, cross-platform E2E, and independent review.",
+          "timestamp": "2026-11-14T10:44:53+03:00",
+          "tree_id": "6374c1f811e66ff95adef79868e629c5207846ca",
+          "url": "https://github.com/serjflint/saitenka/commit/1b717503c9bca2d07d3286e1ceb771ac6248bd0f"
+        },
+        "date": 1794642612173,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 203.864787,
+            "range": "3 replicas; min 147.232; max 213.692; MAD 9.82724",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 68.234471,
+            "range": "3 replicas; min 60.9233; max 170.906; MAD 7.31117",
             "unit": "ms"
           }
         ]
