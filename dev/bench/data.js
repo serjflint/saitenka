@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794642549263,
+  "lastUpdate": 1794642593542,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -22701,6 +22701,48 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 4.849664,
             "range": "3 replicas; min 4.74726; max 5.27974; MAD 0.1024",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b717503c9bca2d07d3286e1ceb771ac6248bd0f",
+          "message": "chore(release): release 4.8.0\n\nPrepare 4.8.0 with curated release notes, dependency security fixes, portable fixtures, and corrected subtitle preparation and hover ordering.\n\nValidated with the pre-release gate, isolated wheel installation, cross-platform E2E, and independent review.",
+          "timestamp": "2026-11-14T10:44:53+03:00",
+          "tree_id": "6374c1f811e66ff95adef79868e629c5207846ca",
+          "url": "https://github.com/serjflint/saitenka/commit/1b717503c9bca2d07d3286e1ceb771ac6248bd0f"
+        },
+        "date": 1794642592112,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 17.188605,
+            "range": "3 replicas; min 16.6527; max 18.1069; MAD 0.5359; worst 18.1069",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 17.536094,
+            "range": "3 replicas; min 16.9423; max 18.8431; MAD 0.593813; worst 18.8431",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 5.26336,
+            "range": "3 replicas; min 5.13229; max 5.3248; MAD 0.06144",
             "unit": "MB"
           }
         ]
