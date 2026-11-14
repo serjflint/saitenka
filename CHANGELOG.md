@@ -7,6 +7,12 @@ logs.
 
 ## [Unreleased]
 
+### Fixed
+
+- Native subtitle coloring stays aligned when earlier cues loaded different fallback fonts.
+- Tooltip scrolling reads display-ready cached bands without foreground layout or pixel conversion;
+  background warming and head preparation release the cache lock during expensive work.
+
 ## [4.8.0] - 2026-11-14
 
 ### Added

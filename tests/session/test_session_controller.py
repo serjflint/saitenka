@@ -10,7 +10,14 @@ import pytest
 from driver import Driver
 from saitenka_card import MineConfig
 from session_builder import TestSession, build_session
-from util import FakeIPC, await_ready, bare_gateway, keybind_registry, session_gateway
+from util import (
+    FakeIPC,
+    ManualRenderAheadSubmitter,
+    await_ready,
+    bare_gateway,
+    keybind_registry,
+    session_gateway,
+)
 
 import saitenka.app.session.builder as session_builder_module
 from saitenka.app import bindings
@@ -1354,12 +1361,16 @@ class _TallDS:
         return
 
 
-def _tall_reader(ipc, *, tts: bool | None = None):
+def _tall_reader(ipc, *, tts: bool | None = None, infrastructure=None):
     from saitenka_tokenize.japanese import Token
 
     from saitenka.app.subtitles import WordBox
 
-    r = build_session(ipc, services=SessionServices(dictionaries=_TallDS(), tts=tts))
+    r = build_session(
+        ipc,
+        services=SessionServices(dictionaries=_TallDS(), tts=tts),
+        infrastructure=infrastructure,
+    )
     r.graph.screen.osd = (1920, 1080)  # REFERENCE res → tooltip scale 1.0 (geometry == display px)
     r.graph.subtitle_presentation.cue.replace_geometry(origin=(0, 0))
     r.graph.subtitle_presentation.cue.replace_tokenized(
@@ -1372,7 +1383,13 @@ def _tall_reader(ipc, *, tts: bool | None = None):
 def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     # Viewport-first, windowed: a tall entry measures only the head that fills the viewport on show;
     # the windowed engine composites (and measures) the deferred tail as the user scrolls down.
-    r = _tall_reader(FakeIPC())
+    submitter = ManualRenderAheadSubmitter()
+    r = _tall_reader(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            tooltip_jobs=lambda jobs: replace(jobs, render_ahead=submitter),
+        ),
+    )
     monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
     Driver(r).move_to_word(0)
     wp = r.graph.tooltip.surface_state().view.state.windowed
@@ -1387,7 +1404,9 @@ def test_show_tooltip_renders_only_the_head_then_grows_on_scroll(monkeypatch):
     r.graph.tooltip.scroll_tip(
         r.graph.tooltip.surface_state().view.state.full_height
     )  # wheel toward the bottom
-    assert wp.measured > before  # scrolling measured more blocks (the deferred tail)
+    while submitter.calls:
+        submitter.finish()
+    assert wp.measured > before
 
 
 def _add_button_center(r) -> tuple[float, float]:
@@ -1520,7 +1539,7 @@ def test_scan_hit_maps_cursor_to_inner_char(monkeypatch):
     assert hit is not None and hit.text.startswith("追")
 
 
-def _tall_nested_reader(ipc):
+def _tall_nested_reader(ipc, *, infrastructure=None):
     """Scan reader whose inner-word lookup returns a TALL entry, so the nested popup must scroll."""
     from saitenka_tokenize.japanese import Token
 
@@ -1532,6 +1551,7 @@ def _tall_nested_reader(ipc):
             dictionaries=_TallDS(),
         ),
         options=ReaderOptions().with_overrides(scan_delay=0.0),
+        infrastructure=infrastructure,
     )
     r.graph.screen.osd = (
         3840,
@@ -1551,7 +1571,13 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
     # while the reference panel it clamped against stayed head-only. The one-panel scale-boundary arch
     # composites the SAME panel on every scroll, so each notch measures more of the tail (full_height
     # grows) and the wheel reaches the true bottom. Driven at 4K to exercise the native compose path.
-    r = _tall_nested_reader(FakeIPC())
+    submitter = ManualRenderAheadSubmitter()
+    r = _tall_nested_reader(
+        FakeIPC(),
+        infrastructure=SessionInfrastructure(
+            tooltip_jobs=lambda jobs: replace(jobs, render_ahead=submitter),
+        ),
+    )
     monkeypatch.setattr(r.graph.subtitle_presentation, "renderer", NullRenderer())
     tok = r.graph.subtitle_presentation.cue.current.tokens[0]
     nested_popup.open_nested(
@@ -1572,6 +1598,8 @@ def test_nested_popup_scroll_reaches_the_bottom(monkeypatch):
             r.graph.tooltip.surface_state().nest,
             10_000,
         )
+        while submitter.calls:
+            submitter.finish()
         if r.graph.tooltip.surface_state().nest.scroll == prev:
             break
         prev = r.graph.tooltip.surface_state().nest.scroll

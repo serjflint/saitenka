@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import math
 import sys
 from pathlib import Path
@@ -47,3 +48,17 @@ def test_dictionary_benchmark_imports_and_queries_generated_archive(tmp_path):
 
     assert set(result) == {"import_median_ms", "lookup_p95_ms"}
     assert all(math.isfinite(value) and value >= 0 for value in result.values())
+
+
+def test_scroll_benchmark_checks_ready_frames_at_every_scale():
+    result = _core_module().benchmark_scroll(reps=1, samples=2)
+
+    assert len(result) == 9
+    assert all(math.isfinite(item["value"]) and item["value"] >= 0 for item in result)
+    assert {item["name"].rsplit("(", 1)[1] for item in result} == {"1x)", "1.5x)", "2x)"}
+    manifest = json.loads(
+        (CORE_PATH.parent.parent / "benchmarks/continuous-core-metrics.json").read_text()
+    )
+    assert [(item["name"], item["unit"]) for item in result] == [
+        (item["name"], item["unit"]) for item in manifest if item["name"].startswith("scroll:")
+    ]

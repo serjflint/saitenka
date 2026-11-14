@@ -18,6 +18,22 @@ separate: it recovers hit boxes for mpv-rendered ASS and does not rasterize dict
 
 ## Layout
 
+### Ready-band scroll contract
+
+`WindowedPanel` foreground reads snapshot immutable, display-ready BGRA bands and their placement
+under a short lock. Buffer allocation, clipping and copying happen after unlocking. Readiness queries
+use that same snapshot: unknown layout or absent BGRA means a miss, even if RGBA is cached.
+Missing bands remain background; `missed_last_assemble` marks the frame for repaint after worker warming.
+Overscan cannot add foreground preparation. Workers measure, rasterize, pack and convert outside the
+publication lock, including idle head preparation. Eviction drops cache ownership; existing snapshots
+keep their pixels alive. Returned display buffers remain independently mutable for decoration.
+
+The retained-byte gauge includes reference/native RGBA, BGRA and the precomposed head; transient
+snapshots and upload buffers are outside that cache-owned total. Scroll timings cover this composition
+boundary, not mpv acknowledgment or physical presentation.
+
+### Modules
+
 - `src/saitenka/` — the library (`fonts`, `render/`, `model`, `sc/`, `panel`, `draw/`).
 - `src/saitenka/assets/fonts/` — **vendored** Noto Sans JP (variable) + Noto Sans, so golden images reproduce
   across machines (macOS / Windows / Linux).

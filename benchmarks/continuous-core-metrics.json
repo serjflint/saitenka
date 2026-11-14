@@ -7,5 +7,14 @@
   {"name": "dictionary: exact lookup p95", "unit": "ms", "value": 0},
   {"name": "click: sidebar redraw p95", "unit": "ms", "value": 0},
   {"name": "click: backlog write p95", "unit": "ms", "value": 0},
-  {"name": "click: mined-card store p95", "unit": "ms", "value": 0}
+  {"name": "click: mined-card store p95", "unit": "ms", "value": 0},
+  {"name": "scroll: foreground CPU p95 (1x)", "unit": "ms", "value": 0},
+  {"name": "scroll: foreground elapsed p95 (1x)", "unit": "ms", "value": 0},
+  {"name": "scroll: worker preparation median (1x)", "unit": "ms", "value": 0},
+  {"name": "scroll: foreground CPU p95 (1.5x)", "unit": "ms", "value": 0},
+  {"name": "scroll: foreground elapsed p95 (1.5x)", "unit": "ms", "value": 0},
+  {"name": "scroll: worker preparation median (1.5x)", "unit": "ms", "value": 0},
+  {"name": "scroll: foreground CPU p95 (2x)", "unit": "ms", "value": 0},
+  {"name": "scroll: foreground elapsed p95 (2x)", "unit": "ms", "value": 0},
+  {"name": "scroll: worker preparation median (2x)", "unit": "ms", "value": 0}
 ]
