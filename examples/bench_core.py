@@ -8,15 +8,20 @@ import statistics
 import tempfile
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import bench_responsiveness as responsiveness
+import numpy as np
 from saitenka_dict import DictionaryDatabase, SqliteDictionaryStore, TermQuery, Translator
 from saitenka_subtitles import CueIndex
 from saitenka_subtitles.parsers import parse_cues
 from saitenka_tokenize.japanese import tokenize
+
+from saitenka.panel import Definition, Entry, panel_rows
+from saitenka.render.banded import WindowedPanel
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +121,63 @@ def _entry(name: str, unit: str, value: float) -> dict[str, Any]:
     return {"name": name, "unit": unit, "value": round(value, 6)}
 
 
+def benchmark_scroll(*, reps: int, samples: int) -> list[dict[str, Any]]:
+    """Foreground CPU/elapsed time with worker lookahead; no display or private dictionary."""
+    entry = Entry(
+        headword="スクロール",
+        defs=[Definition(f"辞書{i}", ["長い説明文。" * 80]) for i in range(12)],
+    )
+    width, view_h = 640, 432
+    results = []
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        for scale in (1.0, 1.5, 2.0):
+            cpu, elapsed, prepare = [], [], []
+            for _ in range(reps):
+                panel = WindowedPanel(panel_rows(entry, width), width)
+                reference = WindowedPanel(panel_rows(entry, width), width)
+                for scroll in (0, 151, 432, 800, 151, 0):
+
+                    def warm(scroll=scroll, panel=panel, scale=scale):
+                        start = time.thread_time_ns()
+                        panel.warm_viewport(scroll, view_h)
+                        if scale != 1:
+                            panel.warm_native_viewport(scroll, view_h, scale)
+                        return (time.thread_time_ns() - start) / 1e6
+
+                    prepare.append(worker.submit(warm).result())
+                    expected = reference.viewport_bgra(scroll, view_h, scale=scale)
+                    ahead = worker.submit(
+                        panel.render_ahead, scroll, view_h, scale=scale, workers=1
+                    )
+                    for _sample in range(samples):
+                        wall_start, cpu_start = time.perf_counter_ns(), time.thread_time_ns()
+                        actual = panel.viewport_bgra(
+                            scroll, view_h, view_h, scale=scale, warm_only=True
+                        )
+                        cpu.append((time.thread_time_ns() - cpu_start) / 1e6)
+                        elapsed.append((time.perf_counter_ns() - wall_start) / 1e6)
+                        if panel.missed_last_assemble or not np.array_equal(actual, expected):
+                            raise RuntimeError("worker-warmed scroll differs from reference")
+                    ahead.result()
+            label = f"{scale:g}x"
+            results.extend(
+                [
+                    _entry(f"scroll: foreground CPU p95 ({label})", "ms", _percentile(cpu, 0.95)),
+                    _entry(
+                        f"scroll: foreground elapsed p95 ({label})",
+                        "ms",
+                        _percentile(elapsed, 0.95),
+                    ),
+                    _entry(
+                        f"scroll: worker preparation median ({label})",
+                        "ms",
+                        statistics.median(prepare),
+                    ),
+                ]
+            )
+    return results
+
+
 def run(config: CoreBenchmarkConfig, output: Path) -> list[dict[str, Any]]:
     if (
         min(
@@ -144,6 +206,7 @@ def run(config: CoreBenchmarkConfig, output: Path) -> list[dict[str, Any]]:
         clicks = json.loads(clicks_path.read_text(encoding="utf-8"))
         subtitles = benchmark_subtitles(cues=config.subtitle_cues, reps=config.latency_samples)
         dictionary = benchmark_dictionary(root, terms=config.dictionary_terms, reps=config.reps)
+        scrolling = benchmark_scroll(reps=config.reps, samples=config.latency_samples)
 
     result = [
         _entry("synth median render", "ms", synth["synth_median_ms"]),
@@ -155,6 +218,7 @@ def run(config: CoreBenchmarkConfig, output: Path) -> list[dict[str, Any]]:
         _entry("click: sidebar redraw p95", "ms", clicks["sidebar_click"]["p95"]),
         _entry("click: backlog write p95", "ms", clicks["backlog_write"]["p95"]),
         _entry("click: mined-card store p95", "ms", clicks["mined_store_write"]["p95"]),
+        *scrolling,
     ]
     output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     return result

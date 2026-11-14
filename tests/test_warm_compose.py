@@ -121,7 +121,8 @@ def test_retained_pixels_stay_bounded_across_a_long_scroll():
     wp = _panel(n_defs=30, length=8)
     wp.measure_to(10**6)
     slack = VIEW_H + _AHEAD_BANDS * _BAND_PX  # `_retention_window`, spelled from the same constants
-    budget = (2 * slack + VIEW_H) * WIDTH * 4
+    # Retention includes both reference RGBA and display-ready BGRA.
+    budget = (2 * slack + VIEW_H) * WIDTH * 4 * 2
 
     assert wp.full_height > 2 * (2 * slack + VIEW_H), "the panel must outrun its retention window"
 

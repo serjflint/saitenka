@@ -158,8 +158,9 @@ def test_raw_band_ceiling_selects_retention_mode():
         wp = _banded_panel([600], compress=True, raw_band_ceiling=ceiling)
         wp.viewport_bgra(0, 300)
         retained.append((wp.cached_blocks, wp.retained_nbytes))
-    assert retained[0] == (2, raw_bytes) and all(
-        blocks == 2 and nbytes < raw_bytes // 2 for blocks, nbytes in retained[1:]
+    # Display-ready BGRA stays raw even when the retained RGBA is packed.
+    assert retained[0] == (2, raw_bytes * 2) and all(
+        blocks == 2 and raw_bytes < nbytes < raw_bytes * 1.5 for blocks, nbytes in retained[1:]
     )
 
 

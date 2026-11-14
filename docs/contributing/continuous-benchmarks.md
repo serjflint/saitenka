@@ -25,6 +25,7 @@ benchmark writers share one concurrency group, so the render and live-player his
 | Tier | Trigger | Surface | Why it belongs there |
 | --- | --- | --- | --- |
 | Core | pull request, push to `main`, manual | deterministic synthetic panel layout and viewport rendering | Primary hover-to-paint CPU path; dictionary- and display-independent |
+| Core | pull request, push to `main`, manual | worker-warmed scrolling at reference and native scales, with concurrent lookahead | Separates foreground CPU and elapsed p95 from worker preparation |
 | Core | pull request, push to `main`, manual | subtitle parse, cue indexing, and tokenization | Bounds the scanning work before dictionary lookup |
 | Core | pull request, push to `main`, manual | generated Yomitan archive import and exact SQLite lookup | Exercises the offline-cache build and decoded-entry query boundary without private dictionaries |
 | Core | pull request, push to `main`, manual | click/store actions against temporary SQLite and fake IPC | Covers synchronous mining/bookkeeping work without Anki or network noise |
@@ -32,7 +33,7 @@ benchmark writers share one concurrency group, so the render and live-player his
 | Live | weekly, release tag, manual | real mpv/Xvfb frame counters plus hover and scroll latency | Only this tier sees compositor and player interaction |
 | Local | developer-invoked | installed-dictionary pathological/vocabulary, render-cache prewarm, trace replay, profiler runs | Requires private corpora, true disk-cold state, or diagnostic interpretation |
 
-The continuous core suite publishes render, subtitle, generated-dictionary, and click/store metrics.
+The continuous core suite publishes render, scroll, subtitle, generated-dictionary, and click/store metrics.
 The weekly suite publishes bounded-cache lifecycle and real-player metrics. The live charts retain
 mpv's decoder-late and VO/compositor-delayed counters as playback sentinels and add non-zero latency for two directly observable paths:
 opening a tooltip and applying four scroll updates. Dwell-based nested/switch/dismiss steps remain in

@@ -301,6 +301,26 @@ def _fill_bgra(out: np.ndarray, pixel: np.ndarray) -> None:
     out.view(np.uint32)[:] = np.frombuffer(pixel.tobytes(), np.uint32)[0]
 
 
+@dataclass(frozen=True, slots=True)
+class _ViewportSnapshot:
+    width: int
+    height: int
+    background: np.ndarray
+    bands: tuple[tuple[int, np.ndarray], ...]
+    missing: bool
+
+    def compose(self) -> np.ndarray:
+        """Copy pinned immutable bands into an independently mutable display buffer."""
+        out = np.empty((self.height, self.width, 4), np.uint8)
+        _fill_bgra(out, self.background)
+        for top, array in self.bands:
+            placed = _clip_band(top, array.shape[0], self.height)
+            if placed is not None:
+                src_y, dst_y, height = placed
+                out[dst_y : dst_y + height] = array[src_y : src_y + height]
+        return out
+
+
 class WindowedPanel:
     """Drive :func:`saitenka.panel.panel_rows` from the geometry core: MEASURE a row's height when the
     visible range reaches it, rasterise + retain it in viewport-sized BANDS, and composite viewports
@@ -371,7 +391,10 @@ class WindowedPanel:
         # ``_scaled_blocks``; evicted in tandem.
         self._scaled_bgra: dict[tuple[int, int, float], np.ndarray] = {}
         self._scaled_cap = 64
-        self._bg_bgra: np.ndarray | None = None  # theme.bg as a (4,) premul-BGRA pixel; memoised
+        from saitenka.bgra import to_bgra_array
+
+        self._bg_bgra = to_bgra_array(Image.new("RGBA", (1, 1), self.theme.bg))[0, 0]
+        self._bg_bgra.setflags(write=False)
         #: Did the last warm-only assemble leave a band as background? The caller warms and re-blits.
         self._missed_last_assemble = False
         # Retained per-ROW hit geometry, accumulated across the row's bands (row-local boxes), NEVER
@@ -435,14 +458,15 @@ class WindowedPanel:
         ``packed_nbytes``. Includes the idle-precomposed first viewport (raw premul-BGRA)."""
         with self._lock:
             fv = self._first_view[2].nbytes if self._first_view is not None else 0
-            return sum(b.nbytes for b in self._blocks.values()) + fv
+            blocks = sum(b.nbytes for b in (*self._blocks.values(), *self._scaled_blocks.values()))
+            arrays = sum(a.nbytes for a in (*self._bgra.values(), *self._scaled_bgra.values()))
+            return blocks + arrays + fv
 
     def measure_to(self, px: int) -> None:
         """Render + cache blocks top-down until the exact-offset prefix covers ``px`` px — warms the
         head and tightens :attr:`full_height` without compositing a viewport image. Used to warm a
         panel's head for placement (a real hover) and for speculative prefetch."""
-        with self._lock:
-            self._grow_prefix(px)
+        self.warm_measure_to(px)
 
     def _add_geom(self, i: int, x: int, scan: list, links: list) -> None:
         """Accumulate a band's ROW-LOCAL hit boxes into row ``i``'s retained geometry (never evicted, so
@@ -469,19 +493,44 @@ class WindowedPanel:
         """Cache a rendered BAND's pixels + row-local geometry. Call under ``self._lock``. Row heights
         are set at MEASURE time (:meth:`_ensure_measured`), not here — a band doesn't know the row's full
         height. Idempotent: re-storing overwrites/re-touches the LRU entry and is deduped in geometry."""
+        block, array = self._prepare_block(rb, compress=self._compress_bands())
+        self._publish_block(rb, block, array)
+        return block
+
+    def _prepare_block(
+        self, rb: RenderedBlock, *, compress: bool
+    ) -> tuple[CachedBlock, np.ndarray]:
         from saitenka.model import LinkBox, ScanBox
 
-        scan_rl = [ScanBox(s.text, s.x, s.y + rb.y0, s.w, s.h) for s in rb.scan]  # band → row-local
-        links_rl = [LinkBox(k.query, k.x, k.y + rb.y0, k.w, k.h) for k in rb.links]
-        self._add_geom(rb.index, rb.x, scan_rl, links_rl)
-        block = CachedBlock.make(
-            rb.x, rb.y0, rb.image, scan_rl, links_rl, compress=self._compress_bands()
-        )
+        scan = [ScanBox(s.text, s.x, s.y + rb.y0, s.w, s.h) for s in rb.scan]
+        links = [LinkBox(k.query, k.x, k.y + rb.y0, k.w, k.h) for k in rb.links]
+        block = CachedBlock.make(rb.x, rb.y0, rb.image, scan, links, compress=compress)
+        return block, self._compose_band_bgra(rb.image, rb.x, 1.0)
+
+    def _publish_block(self, rb: RenderedBlock, block: CachedBlock, array: np.ndarray) -> None:
+        self._add_geom(rb.index, rb.x, block.scan, block.links)
         key = (rb.index, rb.band)
         self._blocks[key] = block
-        self._blocks.move_to_end(key)  # LRU touch
-        self._bgra.pop(key, None)  # a re-store replaces the pixels → the BGRA memo is stale
-        return block
+        self._blocks.move_to_end(key)
+        self._bgra[key] = array
+
+    def _store_ready(self, rb: RenderedBlock) -> None:
+        with self._lock:
+            compress = self._compress_bands()
+        block, array = self._prepare_block(rb, compress=compress)
+        with self._lock:
+            self._publish_block(rb, block, array)
+
+    def _compose_band_bgra(self, image: Image.Image, x: int, scale: float) -> np.ndarray:
+        from saitenka.bgra import to_bgra_array
+
+        if otel_metrics.bgra_memo_misses is not None:
+            otel_metrics.bgra_memo_misses.add(1)
+        canvas = Image.new("RGBA", (round(self.width * scale), image.height), self.theme.bg)
+        canvas.alpha_composite(image, (round(x * scale), 0))
+        array = to_bgra_array(canvas)
+        array.setflags(write=False)
+        return array
 
     def _compress_bands(self) -> bool:
         """Whether to zlib a band on store. With a ``raw_band_ceiling`` set, keep bands RAW (fast first
@@ -574,36 +623,40 @@ class WindowedPanel:
             self._ensure_measured(i, cache_nonbody=cache_nonbody)
             i += 1
 
-    def warm_measure_to(self, target_y: int) -> None:
-        """Learn row heights up to ``target_y`` with the measure itself OUTSIDE the lock.
-
-        `row.measure()` is a layout walk over immutable rows — calculation, not shared state — but
-        `_grow_prefix` runs it inside its caller's lock, and it was the last multi-millisecond hold
-        left on the warm path (2.73ms of a 3.06ms total, everything else under 0.1ms). A worker calls
-        this before touching the lock, so the `_grow_prefix` that follows finds the rows known and
-        returns immediately.
-
-        Advisory: it measures one row per turn and re-checks, so a concurrent measure of the same row
-        costs a duplicate layout, never a wrong offset — `set_height` is idempotent.
-        """
+    def warm_measure_to(self, target_y: int, *, cache_nonbody: bool = True) -> None:
+        """Measure outside the lock; competing workers may duplicate preparation, never publication."""
         while True:
             with self._lock:
                 i = self._offsets.prefix_len
                 if i >= len(self._rows) or self._offsets.start(i) >= target_y:
                     return
-                row = self._rows[i]
-                measured = self._offsets.known(i)
-            if measured or row.measure is None:  # non-body rows render to learn their height
-                with self._lock:
-                    self._ensure_measured(i)
-                continue
-            height = row.measure()
-            geometry = row.geometry() if row.geometry is not None else None
+            height, geometry, pixels = self._measure_row(i, cache_nonbody=cache_nonbody)
             with self._lock:
                 if not self._offsets.known(i):
                     self._offsets.set_height(i, height)
+                    if pixels is not None:
+                        self._publish_block(*pixels)
                     if geometry is not None:
-                        self._add_geom(i, row.x, *geometry)
+                        self._add_geom(i, self._rows[i].x, *geometry)
+
+    def _measure_row(
+        self, i: int, *, cache_nonbody: bool
+    ) -> tuple[
+        int,
+        tuple[list[ScanBox], list[LinkBox]] | None,
+        tuple[RenderedBlock, CachedBlock, np.ndarray] | None,
+    ]:
+        row = self._rows[i]
+        if row.measure is not None:
+            return row.measure(), row.geometry() if row.geometry is not None else None, None
+        image, scan, links = row.render()
+        pixels = None
+        if cache_nonbody:
+            rendered = RenderedBlock(i, 0, row.x, 0, image, scan, links)
+            with self._lock:
+                compress = self._compress_bands()
+            pixels = (rendered, *self._prepare_block(rendered, compress=compress))
+        return image.height, None, pixels
 
     def _band_top(self, key: tuple[int, int], cb: CachedBlock) -> int | None:
         """Absolute (content-space) top of a cached band, or ``None`` if its row isn't measured."""
@@ -736,83 +789,47 @@ class WindowedPanel:
                 out[dst_y : dst_y + h] = self._band_bgra((i, b), cb)[src_y0 : src_y0 + h]
         return out
 
-    def _warm_head(self, scroll: int, view_h: int, overscan: int) -> np.ndarray | None:
-        """The offline/precomposed head when it answers this exact request — 0 rasters. Under lock."""
-        if scroll != 0 or self._first_view is None:
-            return None
-        vh, ov, arr = self._first_view
-        if vh != view_h or ov != overscan:
-            return None
-        if otel_metrics.precompose_hits is not None:
-            otel_metrics.precompose_hits.add(1)
-        self._last_frame_rasters = 0
-        self._missed_last_assemble = False
-        return arr.copy()  # the caller mutates it in place (scrollbar/flash) — isolate the cache
-
-    def _warm_plan(
-        self, scroll: int, view_h: int, overscan: int
-    ) -> tuple[list[tuple[tuple[int, int], CachedBlock, int]], bool]:
-        """The cached bands covering ``[scroll, scroll+view_h)`` and whether any were missing. Under
-        lock; the returned blocks are immutable, so the caller may use them once it is released.
-
-        Counts a band as missing only when it would contribute PIXELS to this frame. It used to
-        report every uncached band of every row `visible_range` returned — three screens' worth at
-        the ``overscan=view_h`` the blit requests, plus a tall row's bands below the fold — so
-        `missed_last_assemble` was structurally true and `crisp_pending` re-armed on every poll
-        tick, against `viewport_warm` saying warm. Two predicates asking one question have to ask
-        it the same way, and clipping is what "in this frame" means.
-
-        `_row_band_spans`, not `_row_bands`: a non-body row taller than a band is stored as ONE
-        band, and the tiler would invent a second one that is missing forever.
-        """
-        table = self._offsets.estimated_table()
-        start, end = table.visible_range(scroll, view_h, overscan)
-        plan: list[tuple[tuple[int, int], CachedBlock, int]] = []
-        missing = False
-        for i in range(start, end):
-            row_top = table.starts[i]
-            if not self._offsets.known(i):
-                if _clip_band(row_top - scroll, table.ends[i] - row_top, view_h) is not None:
-                    missing = True
-                continue
-            for b, y0, y1 in self._row_band_spans(i):
-                band_top = row_top + y0 - scroll
-                if _clip_band(band_top, y1 - y0, view_h) is None:
-                    continue
-                block = self._blocks.get((i, b))
-                if block is None:
-                    missing = True
-                else:
-                    plan.append(((i, b), block, band_top))
-        return plan, missing
-
-    def _assemble_warm_1x(self, scroll: int, view_h: int, overscan: int) -> np.ndarray:
-        """The main thread's 1× compose: the offline head if it covers this request, else whatever
-        bands are cached, with a brief lock and no raster.
-
-        The 1× tier was the last place the main thread rasterised — `_ensure_bands` inside
-        `_viewport_bgra_locked` — and it was permitted rather than intended: `guard_main_render`
-        forbids it for native bands and had no 1× counterpart. A miss leaves background and
-        `missed_last_assemble` says so, so the caller can warm it on a worker and re-blit.
-        """
+    def _snapshot_viewport(self, v: _NativeView) -> _ViewportSnapshot:
+        """Pin ready pixels under one short lock; missing preparation stays a miss."""
+        width, height, dev_scroll = v.dims(self.width)
         with self._lock:
-            head = self._warm_head(scroll, view_h, overscan)
-            if head is not None:
-                return head
-            plan, missing = self._warm_plan(scroll, view_h, overscan)
-            arrays = {key: self._band_bgra(key, block) for key, block, _ in plan}
-            background = self._bg_bgra_value()
-            self._last_frame_rasters = 0
-            self._missed_last_assemble = missing
-            self._evict(*self._retention_window(scroll, view_h, overscan))
-        out = np.empty((max(view_h, 1), self.width, 4), np.uint8)
-        _fill_bgra(out, background)
-        for key, block, band_top in plan:
-            placed = _clip_band(band_top, block.h, view_h)
-            if placed is not None:
-                src_y0, dst_y, h = placed
-                out[dst_y : dst_y + h] = arrays[key][src_y0 : src_y0 + h]
-        return out
+            if v.scale == 1 and v.scroll == 0 and self._first_view is not None:
+                vh, _overscan, head_array = self._first_view
+                if vh == v.view_h:
+                    return _ViewportSnapshot(
+                        width, height, self._bg_bgra, ((0, head_array),), missing=False
+                    )
+            rows, missing = self._offsets.visible_known(v.scroll, v.view_h)
+            bands = []
+            for i, row_top, row_height in rows:
+                top = round(row_top * v.scale) - dev_scroll
+                for band, _y0, _y1, band_top in self._visible_spans(i, row_height, top, v):
+                    key = (i, band)
+                    array = (
+                        self._bgra.get(key)
+                        if v.scale == 1
+                        else self._scaled_bgra.get((*key, v.skey))
+                    )
+                    if array is None:
+                        missing = True
+                    else:
+                        bands.append((band_top, array))
+            return _ViewportSnapshot(width, height, self._bg_bgra, tuple(bands), missing)
+
+    def _visible_spans(self, i: int, height: int, top: int, v: _NativeView):
+        dev_height = v.dims(self.width)[1]
+        if self._rows[i].render_window is None:
+            if _clip_band(top, round(height * v.scale), dev_height) is not None:
+                yield 0, 0, height, top
+            return
+        band_height = max(1, round(_BAND_PX * v.scale))
+        first = max(0, -top // band_height)
+        end = min(
+            (height + _BAND_PX - 1) // _BAND_PX, (dev_height - top + band_height - 1) // band_height
+        )
+        for band in range(first, end):
+            y0 = band * _BAND_PX
+            yield band, y0, min(height, y0 + _BAND_PX), top + band * band_height
 
     @property
     def missed_last_assemble(self) -> bool:
@@ -846,14 +863,15 @@ class WindowedPanel:
         ``scale`` != 1 is the crisp NATIVE viewport (scale-boundary arch; sub-1080p uses it too): a ``round(view_h×scale) ×
         round(width×scale)`` device buffer assembled from native bands over the SAME 1× geometry — a
         separate cache/code path, so ``scale == 1.0`` stays byte-identical."""
+        if warm_only:
+            snapshot = self._snapshot_viewport(_NativeView(scroll, view_h, overscan, scale))
+            self._last_frame_rasters = 0
+            self._missed_last_assemble = snapshot.missing
+            return snapshot.compose()
         if scale != 1.0:
             v = _NativeView(scroll, view_h, overscan, scale)
-            if warm_only:  # the MAIN-THREAD path — see `_assemble_warm_bgra`
-                return self._assemble_warm_bgra(v)
             with self._lock:
                 return self._scaled_assemble_bgra(v, warm_only=False)
-        if warm_only:  # the MAIN-THREAD 1x path — cache and offline head only, never a raster
-            return self._assemble_warm_1x(scroll, view_h, overscan)
         with self._lock:
             if scroll == 0 and self._first_view is not None:
                 vh, ov, arr = self._first_view
@@ -883,14 +901,17 @@ class WindowedPanel:
         return out
 
     def precompose(self, view_h: int, overscan: int = 0) -> None:
-        """Composite the first viewport (scroll=0) NOW and cache it, so a later warm hover is a copy —
-        the pixels+overscan-raster+BGRA-convert move off the main thread into the prefetch worker that
-        built the head. Idempotent; a differing ``view_h``/``overscan`` recomputes. Under ``self._lock``."""
+        """Prepare the idle head without blocking readers of an existing viewport."""
+        self.warm_viewport(0, view_h + overscan)
+        snapshot = self._snapshot_viewport(_NativeView(0, view_h, 0, 1.0))
+        if snapshot.missing:
+            return
+        array = snapshot.compose()
+        array.setflags(write=False)
         with self._lock:
-            out = self._viewport_bgra_locked(0, view_h, overscan)  # fresh array — store it directly
-            self._first_view = (view_h, overscan, out)
-            if otel_metrics.precompose_builds is not None:
-                otel_metrics.precompose_builds.add(1)
+            self._first_view = (view_h, overscan, array)
+        if otel_metrics.precompose_builds is not None:
+            otel_metrics.precompose_builds.add(1)
 
     @property
     def first_view(self) -> tuple[int, int, np.ndarray] | None:
@@ -905,8 +926,10 @@ class WindowedPanel:
         a :meth:`precompose` that composited ``array`` — a scroll=0 ``viewport_bgra`` of matching
         ``view_h``/``overscan`` then returns a copy of it (0 rasters). The caller guarantees ``array`` was
         composited for THIS panel's content+geometry (matching ``config_sig``/``content_key``)."""
+        owned = array.copy()
+        owned.setflags(write=False)
         with self._lock:
-            self._first_view = (view_h, overscan, array)
+            self._first_view = (view_h, overscan, owned)
 
     def viewport(
         self, scroll: int, view_h: int, overscan: int = 0, *, scale: float = 1.0
@@ -1005,57 +1028,8 @@ class WindowedPanel:
             self._bg_bgra = bg
         return bg
 
-    def _assemble_warm_bgra(self, v: _NativeView) -> np.ndarray:
-        """The main thread's compose: snapshot the warm bands under a BRIEF lock, then copy rows with
-        it released.
-
-        The reader used to hold the lock across the whole assembly, so a worker warming the next
-        viewport and the frame the user is looking at took turns — measured 2.2ms alone against
-        7.3ms racing a warm, while the *same* worker load on a different panel cost nothing at all.
-        Everything below the snapshot is immutable: a `CachedBlock`'s pixels and a memoised BGRA
-        array are never mutated in place, only replaced, so a reference taken under the lock stays
-        valid outside it.
-        """
-        dev_w, dev_vh, _dev_scroll = v.dims(self.width)
-        with self._lock:
-            self._missed_last_assemble = not self.native_viewport_warm(v.scroll, v.view_h, v.scale)
-            plan = [
-                ((i, span[0], v.skey), band_top)
-                for i, span, cb, band_top in self._scaled_placements(v, warm_only=True)
-                if cb is not None
-            ]
-            arrays = {key: self._scaled_bgra.get(key) for key, _ in plan}
-            blocks = {key: self._scaled_blocks.get(key) for key in arrays if arrays[key] is None}
-            self._trim_scaled()
-            background = self._scaled_bg()
-        # A band warm but not yet converted: do it here, not under the lock. The worker fills both
-        # halves now, so this is the tail, not the common path.
-        for key, block in blocks.items():
-            if block is not None:
-                arrays[key] = self._compose_scaled_bgra(block, v)
-        if fresh := {k: a for k, a in arrays.items() if a is not None and k in blocks}:
-            with self._lock:
-                self._scaled_bgra.update(fresh)
-        out = np.empty((dev_vh, dev_w, 4), np.uint8)
-        _fill_bgra(out, background)
-        for key, band_top in plan:
-            array = arrays.get(key)
-            if array is None:  # cold → leave background; a worker will warm this band
-                continue
-            placed = _clip_band(band_top, array.shape[0], dev_vh)
-            if placed is not None:
-                src_y0, dst_y, h = placed
-                out[dst_y : dst_y + h] = array[src_y0 : src_y0 + h]
-        return out
-
     def _compose_scaled_bgra(self, cb: CachedBlock, v: _NativeView) -> np.ndarray:
-        """The band's device-width premul-BGRA array, touching NO shared state — the lock-free half
-        of `_scaled_band_bgra`, for a worker. `cb` is immutable once stored."""
-        from saitenka.bgra import to_bgra_array
-
-        canvas = Image.new("RGBA", (round(self.width * v.scale), cb.h), self.theme.bg)
-        canvas.alpha_composite(cb.image(), (round(cb.x * v.scale), 0))
-        return to_bgra_array(canvas)
+        return self._compose_band_bgra(cb.image(), cb.x, v.scale)
 
     def _scaled_band_bgra(
         self, key: tuple[int, int, float], cb: CachedBlock, v: _NativeView
@@ -1072,28 +1046,15 @@ class WindowedPanel:
             canvas = Image.new("RGBA", (round(self.width * v.scale), cb.h), self.theme.bg)
             canvas.alpha_composite(cb.image(), (round(cb.x * v.scale), 0))
             arr = to_bgra_array(canvas)
+            arr.setflags(write=False)
             self._scaled_bgra[key] = arr
         elif otel_metrics.bgra_memo_hits is not None:
             otel_metrics.bgra_memo_hits.add(1)
         return arr
 
     def native_viewport_warm(self, scroll: int, view_h: int, scale: float) -> bool:
-        """True when every native band the viewport ``[scroll, scroll+view_h)`` needs is already cached at
-        ``scale`` — so a native compose is a cheap memoised assemble, not a synchronous raster. The blit
-        uses this to paint SOFT (instant) on a cold viewport and upgrade to crisp once the bands warm."""
-        with self._lock:
-            v = _NativeView(scroll, view_h, 0, scale)
-            table, start, end = self._scaled_visible(v)
-            lo, hi = scroll, scroll + view_h
-            for i in range(start, end):
-                if not self._offsets.known(i):
-                    return False
-                row_top = table.starts[i]
-                for b, y0, y1 in self._row_band_spans(i):
-                    overlaps = row_top + y1 > lo and row_top + y0 < hi
-                    if overlaps and (i, b, v.skey) not in self._scaled_blocks:
-                        return False
-            return True
+        """True only when this viewport can be copied from ready BGRA bands."""
+        return not self._snapshot_viewport(_NativeView(scroll, view_h, 0, scale)).missing
 
     def warm_viewport(self, scroll: int, view_h: int) -> None:
         """Raster the 1× bands ``[scroll, scroll+view_h)`` needs, compositing nothing.
@@ -1110,40 +1071,30 @@ class WindowedPanel:
         """
         self.warm_measure_to(scroll + view_h)  # the layout walk, off the lock
         with self._lock:
-            self._grow_prefix(scroll + view_h)
-            table = self._offsets.estimated_table()
-            start, end = table.visible_range(scroll, view_h)
-            rows = [(i, table.starts[i]) for i in range(start, end)]
-        for i, row_top in rows:
+            rows, _missing = self._offsets.visible_known(scroll, view_h)
+        for i, row_top, _height in rows:
             self._warm_row(i, scroll - row_top, scroll + view_h - row_top)
+        with self._lock:
+            self._evict(*self._retention_window(scroll, view_h, view_h))
 
     def _warm_row(self, i: int, lo: int, hi: int) -> None:
-        """Raster row ``i``'s bands over ``[lo, hi)`` OUTSIDE the lock, storing each under it.
-
-        `_render_band` is already pure — "WITHOUT touching shared state … the caller stores the
-        result under the lock" — but `_ensure_bands` rasters inside its caller's, which is what makes
-        a warm serialise against the main thread's compose. The lock protects cache membership, a
-        ~1us dict operation; a band is ~10ms. A duplicate raster from two threads racing the same
-        band is benign: same immutable row in, same pixels out, last store wins.
-        """
+        """Prepare missing reference bands outside the publication lock."""
         row = self._rows[i]
-        if row.render_window is None:  # non-body single band — cheap, and `render` is the measure
-            with self._lock:
-                self._ensure_bands(i, lo, hi)
-            return
         with self._lock:
-            height = self._offsets.height(i)
+            spans = self._row_band_spans(i)
             missing = [
                 (b, y0, y1)
-                for b, y0, y1 in _row_bands(height)
-                if not (y1 <= lo or y0 >= hi) and (i, b) not in self._blocks
+                for b, y0, y1 in spans
+                if y1 > lo and y0 < hi and (i, b) not in self._bgra
             ]
         for b, y0, y1 in missing:
-            rendered = self._render_band(i, b, y0, y1)  # the expensive part, unlocked
-            with self._lock:
-                self._store(rendered)
-                self._miss(y1 - y0)
-                self._sync_rasters += 1
+            if row.render_window is None:
+                image, scan, links = row.render()
+                rendered = RenderedBlock(i, 0, row.x, 0, image, scan, links)
+            else:
+                rendered = self._render_band(i, b, y0, y1)
+            self._store_ready(rendered)
+            self._miss(y1 - y0)
 
     def warm_native_viewport(self, scroll: int, view_h: int, scale: float) -> None:
         """Raster the NATIVE bands ``[scroll, scroll+view_h)`` needs at ``scale``, compositing nothing.
@@ -1159,45 +1110,41 @@ class WindowedPanel:
         v = _NativeView(scroll, view_h, 0, scale)
         self.warm_measure_to(scroll + view_h)  # the layout walk, off the lock
         with self._lock:
-            table, start, end = self._scaled_visible(v)
-            lo, hi = scroll, scroll + view_h
+            rows, _missing = self._offsets.visible_known(scroll, view_h)
+            dev_scroll = v.dims(self.width)[2]
             targets = [
-                (i, span)
-                for i in range(start, end)
-                if self._offsets.known(i)
-                for span in self._row_band_spans(i)
-                if table.starts[i] + span[2] > lo and table.starts[i] + span[1] < hi
+                (i, (band, y0, y1))
+                for i, row_top, height in rows
+                for band, y0, y1, _top in self._visible_spans(
+                    i, height, round(row_top * scale) - dev_scroll, v
+                )
             ]
         for i, span in targets:
-            # Raster AND convert unlocked, store locked — same reason as `_warm_row`. Leaving the
-            # BGRA conversion inside was worth as much as the raster: an `Image.new` +
-            # `alpha_composite` + `to_bgra_array` per band is milliseconds, and the compose it
-            # blocks is the frame the user is looking at.
-            key = (i, span[0], v.skey)
-            block = self._raster_scaled_band(i, span, scale)
-            if block is None:
-                with self._lock:
-                    block = self._scaled_blocks.get(key)
-                if block is None:
-                    continue
-            array = self._compose_scaled_bgra(block, v)
+            self._warm_scaled_band(i, span, v)
+
+    def _warm_scaled_band(self, i: int, span: _BandSpan, v: _NativeView) -> None:
+        """Raster and convert without blocking viewport reads; publish both caches together."""
+        key = (i, span[0], v.skey)
+        with self._lock:
+            if key in self._scaled_blocks and key in self._scaled_bgra:
+                self._scaled_blocks.move_to_end(key)
+                return
+        block = self._raster_scaled_band(i, span, v.scale)
+        if block is None:
             with self._lock:
-                self._scaled_blocks[key] = block
-                self._scaled_bgra[key] = array
-                self._trim_scaled()
+                block = self._scaled_blocks.get(key)
+            if block is None:
+                return
+        array = self._compose_scaled_bgra(block, v)
+        with self._lock:
+            self._scaled_blocks[key] = block
+            self._scaled_blocks.move_to_end(key)
+            self._scaled_bgra[key] = array
+            self._trim_scaled()
 
     def viewport_warm(self, scroll: int, view_h: int) -> bool:
-        """True when a 1x viewport can be assembled without rasterizing a band.
-
-        A dry run of :meth:`_warm_plan`, not a second walk over the bands: this predicate and
-        ``missed_last_assemble`` answer one question, and answering it twice is what let them
-        disagree — `apply_pending_crisp` cleared on this one and re-armed on the other, every tick.
-        The plan clips, so the ``overscan`` it is asked for cannot change the answer.
-        """
-        with self._lock:
-            if scroll == 0 and self._first_view is not None and self._first_view[0] == view_h:
-                return True  # the composited head answers without touching a band
-            return not self._warm_plan(scroll, view_h, 0)[1]
+        """Readiness is the same immutable snapshot consumed by the display path."""
+        return not self._snapshot_viewport(_NativeView(scroll, view_h, 0, 1.0)).missing
 
     def _scaled_placements(self, v: _NativeView, *, warm_only: bool):
         """Yield ``(i, span, cb, band_top)`` for every visible native band, placed by CUMULATIVE device
@@ -1294,18 +1241,17 @@ class WindowedPanel:
     def _scaled_render_ahead(
         self, v: _NativeView, *, direction: int, max_blocks: int, should_cancel
     ) -> int:
-        """Warm up to ``max_blocks`` NATIVE bands just beyond the viewport in ``direction`` into
-        ``_scaled_blocks`` — the crisp counterpart to ``render_ahead``'s 1× overscan, so a scroll under
-        the one-panel path composites native without a synchronous raster. Serial (crisp is opportunistic;
-        no process-pool needed) and cancellable."""
+        """Warm native bands and their BGRA pixels beyond the viewport, serially and cancellably."""
+        self.warm_measure_to(
+            v.scroll + v.view_h + v.overscan + max_blocks * _BAND_PX, cache_nonbody=False
+        )
         with self._lock:
             targets = self._scaled_ahead_targets(v, direction=direction, max_blocks=max_blocks)
         warmed = 0
         for i, span in targets:
             if should_cancel is not None and should_cancel():
                 break
-            with self._lock:
-                self._scaled_band(i, span, v.scale)  # warms into _scaled_blocks
+            self._warm_scaled_band(i, span, v)
             warmed += 1
         return warmed
 
@@ -1344,23 +1290,19 @@ class WindowedPanel:
                 max_blocks=max_blocks,
                 should_cancel=should_cancel,
             )
+        self.warm_measure_to(
+            scroll + view_h + overscan + max_blocks * _BAND_PX, cache_nonbody=False
+        )
         with self._lock:
             targets = self._band_targets(scroll, view_h, overscan, direction, max_blocks)
         if not targets:
             return 0
         if workers > 1 and len(targets) > 1:
-            return self._render_ahead_parallel(targets, workers, should_cancel)
-        rendered = 0
-        for i, b, y0, y1 in targets:
-            if should_cancel is not None and should_cancel():
-                break
-            with self._lock:
-                cached = (i, b) in self._blocks
-            if not cached:  # raster unlocked, store locked — see `_warm_row`
-                block = self._render_band(i, b, y0, y1)
-                with self._lock:
-                    self._store(block)
-            rendered += 1
+            rendered = self._render_ahead_parallel(targets, workers, should_cancel)
+        else:
+            rendered = self._render_serial(targets, should_cancel)
+        with self._lock:
+            self._evict(*self._retention_window(scroll, view_h, overscan))
         return rendered
 
     def _band_targets(
@@ -1378,9 +1320,8 @@ class WindowedPanel:
             for i in range(len(self._rows)):
                 if len(targets) >= max_blocks:
                     break
-                self._ensure_measured(
-                    i, cache_nonbody=False
-                )  # measure/walk ahead off the main thread
+                if not self._offsets.known(i):
+                    break
                 self._collect_bands_below(i, threshold, targets, max_blocks)
         else:
             threshold = (
@@ -1452,8 +1393,7 @@ class WindowedPanel:
                 cached = (i, b) in self._blocks
             if not cached:  # raster unlocked, store locked — see `_warm_row`
                 block = self._render_band(i, b, y0, y1)
-                with self._lock:
-                    self._store(block)
+                self._store_ready(block)
             rendered += 1
         return rendered
 
@@ -1496,12 +1436,10 @@ class WindowedPanel:
                 break
             i, b, y0, _y1 = futures[fut]
             if threaded:
-                with self._lock:
-                    self._store(fut.result())  # progressive: cache each band as it lands
+                self._store_ready(fut.result())
             else:
                 img, scan, links = fut.result()
-                with self._lock:
-                    self._store(RenderedBlock(i, b, self._rows[i].x, y0, img, scan, links))
+                self._store_ready(RenderedBlock(i, b, self._rows[i].x, y0, img, scan, links))
             rendered += 1
         return rendered
 

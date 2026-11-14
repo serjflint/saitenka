@@ -118,6 +118,62 @@ def test_warm_only_never_rasters_on_the_render_loop_even_when_armed():
     assert out.shape == (round(_VH * 2.0), round(_W * 2.0), 4)  # a full (mostly-bg) native frame
 
 
+def test_native_warm_viewport_does_not_convert_offscreen_lookahead(monkeypatch):
+    from saitenka import bgra
+
+    wp, _total = _panel()
+    expected = wp.viewport_bgra(0, _VH, overscan=_VH, scale=1.5)
+
+    def foreground_conversion(_image):
+        raise AssertionError("a warm scroll converted pixels on the foreground path")
+
+    monkeypatch.setattr(bgra, "to_bgra_array", foreground_conversion)
+
+    actual = wp.viewport_bgra(0, _VH, overscan=_VH, scale=1.5, warm_only=True)
+
+    assert np.array_equal(actual, expected)
+
+
+@pytest.mark.timeout(5)
+def test_native_lookahead_raster_cannot_block_a_warm_viewport():
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from PIL import Image
+
+    from saitenka.panel import Row
+
+    entered, release = Event(), Event()
+
+    def render_window(y0, y1, *, scale=1.0):
+        if y0 >= banded._BAND_PX:
+            entered.set()
+            assert release.wait(3), "lookahead raster was never released"
+        image = Image.new("RGBA", (round(_W * scale), round((y1 - y0) * scale)), _ODD_BG)
+        return image, [], []
+
+    row = Row(
+        0,
+        lambda: render_window(0, 4 * banded._BAND_PX),
+        measure=lambda: 4 * banded._BAND_PX,
+        render_window=render_window,
+    )
+    wp = WindowedPanel([row], _W)
+    wp.warm_native_viewport(0, _VH, 1.5)
+    expected = wp.viewport_bgra(0, _VH, scale=1.5, warm_only=True)
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        warming = workers.submit(wp.render_ahead, 0, _VH, scale=1.5, workers=1)
+        try:
+            assert entered.wait(1), "lookahead never reached its raster"
+
+            frame = workers.submit(wp.viewport_bgra, 0, _VH, scale=1.5, warm_only=True)
+
+            assert np.array_equal(frame.result(timeout=1), expected)
+        finally:
+            release.set()
+        warming.result(timeout=1)
+
+
 def test_a_cold_native_frame_is_filled_with_the_theme_background():
     """What a warm_only native compose paints where it has no band — the whole frame, here.
 

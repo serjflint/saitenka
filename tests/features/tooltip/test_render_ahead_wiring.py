@@ -6,6 +6,7 @@ import threading
 from dataclasses import replace
 from weakref import WeakKeyDictionary
 
+import numpy as np
 import pytest
 import util
 from session_builder import TestSession, build_session
@@ -206,6 +207,32 @@ def test_worker_actually_warms_a_real_panel():
     assert (
         r.graph.tooltip.surface_state().view.state.windowed.cached_blocks > 0
     )  # blocks warmed without any viewport() call
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.5, 2.0])
+def test_cold_scroll_worker_completion_fills_output_and_settles_repaint(monkeypatch, scale):
+    r = _reader()
+    r.graph.screen.osd = (round(1920 * scale), round(1080 * scale))
+    view = r.graph.tooltip.surface_state().view
+    view.scroll = view.desired_scroll = 0
+    view.state = _tall_panel()
+    frames = []
+    monkeypatch.setattr(
+        r.graph.overlay, "show_bgra", lambda array, *_a, **_k: frames.append(array.copy())
+    )
+
+    tooltip_panel.scroll_view(r.graph.tooltip.tip_ports, view, 1500)
+    assert view.crisp_pending and frames
+    cold = frames[-1]
+    while _submitter(r).calls:
+        _submitter(r).finish()
+
+    assert not view.crisp_pending
+    assert not view.state.missed_last_assemble
+    assert not np.array_equal(frames[-1], cold)
+    published = len(frames)
+    tooltip_panel.apply_pending_crisp(r.graph.tooltip.tip_ports, view)
+    assert len(frames) == published
 
 
 def test_render_ahead_failure_retires_the_scroll_intent(diagnostic_trace):

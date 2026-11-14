@@ -181,3 +181,41 @@ def test_read_reflects_a_height_set_after_a_prior_read():
     lazy.set_height(0, 30)
     assert lazy.start(1) != before
     assert lazy.start(1) == 10 + 30  # top_pad + block 0's measured height (gap 0)
+
+
+@given(st.lists(st.integers(0, 100), min_size=1, max_size=15), st.data())
+@example([0, 0, 50], None)
+@example([0] * 260, None)
+def test_known_viewport_index_agrees_with_a_prefix_scan(gaps, data):
+    updates = (
+        [(len(gaps) - 1, 30), *((i, 0) for i in range(len(gaps))), (0, 20)]
+        if data is None
+        else data.draw(
+            st.lists(st.tuples(st.integers(0, len(gaps) - 1), st.integers(0, 500)), max_size=30)
+        )
+    )
+    lazy = LazyOffsets(gaps, top_pad=10, bottom_pad=5, seed_height=0)
+    heights = [None] * len(gaps)
+    for index, height in updates:
+        lazy.set_height(index, height)
+        heights[index] = height
+        known = []
+        top = 10
+        for i, h in enumerate(heights):
+            if h is None:
+                break
+            known.append((i, top, h))
+            top += h + (gaps[i] if i < len(gaps) - 1 else 0)
+        for scroll, viewport in [
+            (0, 100),
+            (10, 100),
+            (11, 100),
+            (300, 100),
+            (1000, 100),
+            (top - 10, 10),
+        ]:
+            rows, missing = lazy.visible_known(scroll, viewport)
+            expected = [(i, y, h) for i, y, h in known if y + h > scroll and y < scroll + viewport]
+            assert rows == expected
+            assert missing == (len(known) < len(gaps) and top < scroll + viewport)
+        assert lazy.prefix_len == len(known)

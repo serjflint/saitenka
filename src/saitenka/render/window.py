@@ -131,6 +131,8 @@ class LazyOffsets:
         # Memoised (starts, ends), shared by start/end/total_estimate/estimated_table until the next
         # set_height (the filled heights are the only input that changes). Under the caller's lock.
         self._table: tuple[tuple[int, ...], tuple[int, ...]] | None = None
+        self._known_starts: list[int] = []
+        self._known_ends: list[int] = []
 
     @property
     def count(self) -> int:
@@ -139,8 +141,29 @@ class LazyOffsets:
     def set_height(self, i: int, height: int) -> None:
         if height < 0:
             raise ValueError("block height must be non-negative")
+        if self._heights[i] == height:
+            return
         self._heights[i] = height
         self._table = None  # offsets changed → drop the memo
+        del self._known_starts[i:]
+        del self._known_ends[i:]
+        k = len(self._known_starts)
+        while k < self._n and self._heights[k] is not None:
+            start = self._known_ends[-1] + self._gaps[k - 1] if k else self._top
+            self._known_starts.append(start)
+            self._known_ends.append(start + self.height(k))
+            k += 1
+
+    def visible_known(self, scroll: int, viewport: int) -> tuple[list[tuple[int, int, int]], bool]:
+        """Exact visible rows and whether the viewport reaches the unmeasured suffix.
+
+        Reads only the measured-prefix index; never builds the estimated whole-panel table.
+        """
+        first = bisect_right(self._known_ends, scroll)
+        end = bisect_left(self._known_starts, scroll + viewport)
+        rows = [(i, self._known_starts[i], self.height(i)) for i in range(first, end)]
+        prefix = self.prefix_len
+        return rows, prefix < self._n and self.start(prefix) < scroll + viewport
 
     def known(self, i: int) -> bool:
         return self._heights[i] is not None
@@ -156,10 +179,7 @@ class LazyOffsets:
     @property
     def prefix_len(self) -> int:
         """Number of leading blocks whose heights — hence exact offsets — are all known."""
-        k = 0
-        while k < self._n and self._heights[k] is not None:
-            k += 1
-        return k
+        return len(self._known_starts)
 
     def start_exact(self, i: int) -> bool:
         """True iff :meth:`start` of block ``i`` is exact (every block before it is measured)."""
@@ -180,10 +200,17 @@ class LazyOffsets:
     def start(self, i: int) -> int:
         """Start y of block ``i`` — exact when :meth:`start_exact`, else estimated. Depends only on
         blocks before ``i``, so a visited-prefix offset never moves as later heights arrive."""
+        if i < self.prefix_len:
+            return self._known_starts[i]
+        if i == self.prefix_len:
+            gap = self._gaps[i - 1] if 0 < i < self._n else 0
+            return self._known_ends[-1] + gap if i else self._top
         starts, _ = self._offsets()
         return starts[i] if i < self._n else self.total_estimate() - self._bottom
 
     def end(self, i: int) -> int:
+        if i < self.prefix_len:
+            return self._known_ends[i]
         _, ends = self._offsets()
         return ends[i]
 
