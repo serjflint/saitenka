@@ -416,11 +416,6 @@ class LibassGeometryBackend:
         self._factory = renderer_factory
         self._telemetry: GeometryTelemetry = telemetry or NullTelemetry()
         self._renderers: OrderedDict[str, NativeRenderer] = OrderedDict()
-        #: The document each cached renderer is currently pointed at, by identity rather than by
-        #: value: the bytes are the cue's whole hit-map document, and comparing them per cue would
-        #: cost more than the swap it is trying to avoid. The producer hands the same object back
-        #: for a repeated render, so identity is the right test and a false miss only re-swaps.
-        self._documents: dict[str, bytes] = {}
         self._closed = False
 
     @property
@@ -447,19 +442,7 @@ class LibassGeometryBackend:
         )
 
     def _renderer(self, request: GeometryRequest) -> tuple[NativeRenderer, float]:
-        """This request's renderer, pointed at this request's document, and what building cost.
-
-        Keyed on `renderer_key()` — the font environment and track features — not `cache_key()`,
-        which is the SNAPSHOT's identity and hashes the timestamp, the palette and the document.
-        Those change every cue, so the renderer cache could never hit: it rebuilt libass, rescanned
-        the font directory and discarded the glyph cache once per cue. One live session built a
-        renderer for 16 of 18 renders at 1.4–3.0ms each, against renders of 0.7–4.5ms, with the cache
-        sitting pinned at its bound evicting entries nothing could reuse.
-
-        The document is swapped on the way out rather than left to the caller: a cached renderer
-        still holding the previous cue's track would hand back that cue's boxes, silently, which is
-        the failure class this whole path exists to prevent.
-        """
+        """This document's cached renderer and its construction cost, if any."""
         key = request.renderer_key()
         renderer = self._renderers.pop(key, None)
         built_ms = 0.0
@@ -470,14 +453,9 @@ class LibassGeometryBackend:
                 span.set("document_bytes", len(request.ass))
                 renderer = self._new_renderer(request)
             built_ms = (time.perf_counter_ns() - started) / 1_000_000
-            self._documents[key] = request.ass
-        elif self._documents.get(key) is not request.ass:
-            renderer.set_document(request.ass, list(request.renderer_state.features))
-            self._documents[key] = request.ass
         self._renderers[key] = renderer
         while len(self._renderers) > self._cache_max:
-            evicted_key, evicted = self._renderers.popitem(last=False)
-            self._documents.pop(evicted_key, None)
+            _key, evicted = self._renderers.popitem(last=False)
             evicted.close()
         return renderer, built_ms
 
@@ -663,7 +641,6 @@ class LibassGeometryBackend:
         if self._closed:
             return
         self._closed = True
-        self._documents.clear()
         while self._renderers:
             _key, renderer = self._renderers.popitem(last=False)
             renderer.close()

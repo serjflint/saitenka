@@ -294,19 +294,10 @@ class GeometryRequest:
         return digest.hexdigest()
 
     def renderer_key(self) -> str:
-        """Identity of the libass *renderer* this request needs — a different question from
-        `cache_key`, which is the identity of the SNAPSHOT.
+        """Reuse one document's renderer across timestamps, sizes and render styles.
 
-        libass has three handles with three lifetimes: the library and its font set, the renderer
-        holding the glyph cache built for them, and the track, which is the only per-cue one. A
-        renderer is therefore identified by the font environment and track features. Keying it on
-        `cache_key` instead meant hashing the timestamp, the palette and the document — all of which
-        change every cue — so the renderer cache could never hit: it rebuilt libass, rescanned the
-        font directory, and discarded the glyph cache once per cue, at every frame size.
-
-        Deliberately absent: the frame geometry and the render style, which `render` pushes onto
-        the renderer per call, and the document itself. Track features are included because libass
-        cannot safely enable bracket matching after this renderer has already rendered a track.
+        libass caches fallback faces in discovery order. Sharing that state between documents
+        lets an earlier cue or speculative render change a later cue's glyphs and baseline.
         """
         digest = hashlib.sha256()
         digest.update(repr(self.font_setup).encode())
@@ -314,6 +305,8 @@ class GeometryRequest:
         digest.update(repr(self.renderer_state.features).encode())
         digest.update(b"\0")
         digest.update(_attachment_fingerprint(self.attachments))
+        digest.update(b"\0")
+        digest.update(self.ass)
         return digest.hexdigest()
 
 

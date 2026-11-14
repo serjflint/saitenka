@@ -281,24 +281,77 @@ def _recording_factory(created: list[FakeRenderer]):
     return factory
 
 
-def test_a_new_cue_swaps_the_document_instead_of_rebuilding_libass() -> None:
-    """A renderer is identified by its font environment, not by the cue it happens to hold.
+def test_previous_cue_cannot_change_fallback_glyph_geometry() -> None:
+    from saitenka_subtitles import converted, prepare_ass_hit_map_frame
+    from saitenka_subtitles.whole_cue import WholeCue
+    from util import drawable_font, requires_libass
 
-    Keying it on the snapshot identity — which hashes the timestamp, the palette and the document
-    — meant it could never be reused: one live session built a renderer for 16 of 18 renders, each
-    a libass init and a font-directory rescan, and threw away the glyph cache it had just filled
-    for the same fonts.
-    """
-    created: list[FakeRenderer] = []
-    backend = LibassGeometryBackend(renderer_factory=_recording_factory(created))
+    requires_libass()
+    # Both fallback faces contain '.', so a reused renderer can choose it by cue history.
+    family = "SaitenkaFallbackHistory"
+    attachments = (
+        ("base.ttf", drawable_font(family, "x")),
+        ("first.ttf", drawable_font(family, "a.", design="NotoSansJP.ttf")),
+        ("second.ttf", drawable_font(family, "b.")),
+    )
 
-    backend.render(request())
-    backend.render(request(ass=b"the next cue"))
-    backend.close()
+    def cue(
+        text: str, frame: tuple[int, int], margins: tuple[int, int, int, int]
+    ) -> GeometryRequest:
+        from saitenka_subtitles import TokenAnnotation
 
-    assert len(created) == 1, "a second cue rebuilt the whole library"
-    assert created[0].documents == [b"ass", b"the next cue"]
-    assert created[0].rendered_documents == [b"ass", b"the next cue"]
+        space = converted.RenderSpace(*frame, margins)
+        scale = converted.font_scale(space)
+        rows = f"Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,{text}"
+        source = converted.document(
+            rows,
+            space,
+            style=converted.SubStyle(font=family, margin_y=60, blur=0.5),
+            scale=scale,
+        )
+        track = SubtitleTrackId("fallback-history")
+        prepared = prepare_ass_hit_map_frame(
+            source,
+            track,
+            active_rows=rows,
+            text=text,
+            tokens=(TokenAnnotation(0, 0, len(text)),),
+        )
+        return GeometryRequest(
+            0,
+            track,
+            prepared.frame_id,
+            1250,
+            frame,
+            (1920, 1080),
+            prepared.ass,
+            margins=margins,
+            use_margins=True,
+            attachments=attachments,
+            font_setup=FontSetup(default_family=family, font_provider=FontProvider.NONE),
+            renderer_state=RendererState(
+                font_scale=scale, blur=0.5, features=((1, True), (2, True), (3, True))
+            ),
+            palette=prepared.palette,
+            reserved_rgb=prepared.reserved_rgb,
+            whole_cue=WholeCue(),
+            coloring="whole-cue-overpaint",
+            paint_qualification=prepared.paint_qualification,
+        )
+
+    previous = cue("a", (1280, 720), (0, 0, 0, 0))
+    current = cue("b.", (3456, 2168), (112, 112, 0, 0))
+    warmed, fresh = LibassGeometryBackend(), LibassGeometryBackend()
+    try:
+        warmed.render(previous)
+
+        actual, expected = warmed.render(current), fresh.render(current)
+
+        assert actual.tokens == expected.tokens
+        assert actual.whole_cue == expected.whole_cue
+    finally:
+        warmed.close()
+        fresh.close()
 
 
 def test_a_different_font_environment_gets_its_own_renderer() -> None:
