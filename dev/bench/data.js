@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794235680024,
+  "lastUpdate": 1794642549263,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -19859,6 +19859,84 @@ window.BENCHMARK_DATA = {
             "name": "click: mined-card store p95",
             "value": 1.078779,
             "range": "3 replicas; min 1.07068; max 1.11865; MAD 0.008104; worst 1.11865",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "serjflint@gmail.com",
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1b717503c9bca2d07d3286e1ceb771ac6248bd0f",
+          "message": "chore(release): release 4.8.0\n\nPrepare 4.8.0 with curated release notes, dependency security fixes, portable fixtures, and corrected subtitle preparation and hover ordering.\n\nValidated with the pre-release gate, isolated wheel installation, cross-platform E2E, and independent review.",
+          "timestamp": "2026-11-14T10:44:53+03:00",
+          "tree_id": "6374c1f811e66ff95adef79868e629c5207846ca",
+          "url": "https://github.com/serjflint/saitenka/commit/1b717503c9bca2d07d3286e1ceb771ac6248bd0f"
+        },
+        "date": 1794642547673,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "synth median render",
+            "value": 6.433489,
+            "range": "3 replicas; min 4.78935; max 6.50138; MAD 0.067893",
+            "unit": "ms"
+          },
+          {
+            "name": "synth p99 render",
+            "value": 7.270262,
+            "range": "3 replicas; min 5.64452; max 7.32148; MAD 0.051222; worst 7.32148",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize median",
+            "value": 14.610292,
+            "range": "3 replicas; min 11.0004; max 14.6162; MAD 0.005874",
+            "unit": "ms"
+          },
+          {
+            "name": "subtitles: parse/index/tokenize p95",
+            "value": 14.834339,
+            "range": "3 replicas; min 11.0839; max 14.9085; MAD 0.074117; worst 14.9085",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: generated archive import",
+            "value": 11.969568,
+            "range": "3 replicas; min 11.6867; max 14.029; MAD 0.282895",
+            "unit": "ms"
+          },
+          {
+            "name": "dictionary: exact lookup p95",
+            "value": 0.067961,
+            "range": "3 replicas; min 0.057527; max 0.068483; MAD 0.000522; worst 0.068483",
+            "unit": "ms"
+          },
+          {
+            "name": "click: sidebar redraw p95",
+            "value": 24.036383,
+            "range": "3 replicas; min 18.2881; max 24.1393; MAD 0.102906; worst 24.1393",
+            "unit": "ms"
+          },
+          {
+            "name": "click: backlog write p95",
+            "value": 2.646722,
+            "range": "3 replicas; min 2.62848; max 8.0569; MAD 0.018241; worst 8.0569",
+            "unit": "ms"
+          },
+          {
+            "name": "click: mined-card store p95",
+            "value": 1.085598,
+            "range": "3 replicas; min 1.06992; max 1.74705; MAD 0.01568; worst 1.74705",
             "unit": "ms"
           }
         ]
