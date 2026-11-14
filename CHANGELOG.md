@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.8.0] - 2026-11-14
+
 ### Added
 
 - Saitenka shortcuts accept the equivalent standard Russian layout keys while preserving explicitly
