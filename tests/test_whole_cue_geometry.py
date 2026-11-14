@@ -180,7 +180,12 @@ def test_qualified_osd_compiler_matches_authored_fill_at_two_sizes(frame):
 
 
 @pytest.mark.parametrize(
-    ("text", "boundary"), [("猫を見る", 2), ("office AVATAR", 6), ("a\u0308bc", 2)]
+    ("text", "boundary", "font_name"),
+    [
+        ("猫を見る", 2, "NotoSansJP.ttf"),
+        ("office AVATAR", 6, "NotoSans.ttf"),
+        ("a\u0308bc", 2, "NotoSans.ttf"),
+    ],
 )
 @pytest.mark.parametrize("selected", [(0,), (0, 1)])
 @pytest.mark.parametrize(
@@ -188,10 +193,15 @@ def test_qualified_osd_compiler_matches_authored_fill_at_two_sizes(frame):
     [((1280, 720), (0, 0, 0, 0)), ((3456, 2168), (112, 112, 0, 0))],
 )
 def test_marker_layers_preserve_opaque_color_and_final_event_geometry(
-    text, boundary, selected, frame, margins
+    text, boundary, font_name, selected, frame, margins
 ):
     requires_libass()
+    from fontTools.ttLib import TTFont
+
     libasslite = pytest.importorskip("libasslite")
+    font_path = str(Path(_FONT).with_name(font_name))
+    with TTFont(font_path) as face:
+        assert all(ord(character) in face.getBestCmap() for character in text)
 
     source = (
         ASS.decode().replace("猫を見る", text).replace("YCbCr Matrix: TV.601", "YCbCr Matrix: None")
@@ -220,7 +230,7 @@ def test_marker_layers_preserve_opaque_color_and_final_event_geometry(
         native_ass=source,
         coloring="whole-cue-overpaint",
         whole_cue=WholeCue(),
-        font_setup=FontSetup(default_font=_FONT, font_provider=FontProvider.NONE),
+        font_setup=FontSetup(default_font=font_path, font_provider=FontProvider.NONE),
     )
     backend = LibassGeometryBackend()
     try:
@@ -235,7 +245,9 @@ def test_marker_layers_preserve_opaque_color_and_final_event_geometry(
     # Independent final-color document, without marker colors or token-derived bounds.
     raw = text if len(selected) == 2 else text[:boundary] + r"{\1a&HFF&}" + text[boundary:]
     direct = source.decode().replace(text, r"{\1c&H00FF00&\3a&HFF&\4a&HFF&}" + raw).encode()
-    renderer = libasslite.AssRenderer(direct, default_font=_FONT, font_provider=FontProvider.NONE)
+    renderer = libasslite.AssRenderer(
+        direct, default_font=font_path, font_provider=FontProvider.NONE
+    )
     try:
         reference = renderer.render(1500, frame, (1280, 720), margins=margins)
     finally:
@@ -259,6 +271,6 @@ def test_marker_layers_preserve_opaque_color_and_final_event_geometry(
     ] = actual.rgba[..., 3]
     oracle = _character_masks()
     result = oracle.compare_mask(expected_alpha, observed_alpha, expected_alpha)
-    assert result["verdict"] == "passed"
+    assert result["verdict"] == "passed", result
     displaced = np.roll(observed_alpha, shift=(-6, 4), axis=(0, 1))
     assert oracle.compare_mask(expected_alpha, displaced, expected_alpha)["verdict"] == "failed"
