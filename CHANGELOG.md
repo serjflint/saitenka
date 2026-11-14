@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.8.1] - 2026-11-14
+
 ### Fixed
 
 - Native subtitle coloring stays aligned when earlier cues loaded different fallback fonts.
