@@ -262,7 +262,7 @@ class SubtitleGeometryWorker:
             self._deliver_prefetched(key, epoch)
             return False
         with self._condition:
-            if self._closed:
+            if self._closed or key == self._prefetch_inflight_key or key in self._prefetched:
                 return False
             self._prefetch_pending.pop(key, None)
             self._prefetch_pending[key] = build

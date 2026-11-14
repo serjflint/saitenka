@@ -341,6 +341,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 lambda: cue_ref.get().annotation_inputs()
             ),
             notify=lambda text, kind: notify(text, kind, 6.0),
+            geometry_ready=lambda: cue_ref.get().restore_hover(),
         ),
     )
     # Progressive startup: deps loaded on a background thread, injected on the main thread by the
@@ -734,6 +735,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
             query_playback=playback_observation.query,
             actions=TooltipSessionActions(
                 hide=hide_tooltip,
+                cancel_hover_restore=lambda: cue_ref.get().cancel_hover_restore(),
                 set_annotation_hover=set_annotation_hover,
                 draw_cue=subtitle_presentation.draw,
                 mine_token=mining_controller.mine_token,
@@ -862,6 +864,7 @@ def build_session_graph(  # noqa: PLR0913 -- resolved graph conversion is comple
                 translation=translation_controller,
                 colored_track=colored_track,
                 cancel_mining=mining_controller.cancel_operation,
+                recheck_hover=interaction.update_hover,
             )
         )
     )

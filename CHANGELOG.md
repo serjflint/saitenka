@@ -7,6 +7,8 @@ logs.
 
 ## [Unreleased]
 
+## [4.8.0] - 2026-11-14
+
 ### Added
 
 - Saitenka shortcuts accept the equivalent standard Russian layout keys while preserving explicitly
@@ -25,6 +27,18 @@ logs.
   preserving mpv's subtitle settings and falling back for unsupported markup.
 
 ### Fixed
+
+- Tooltips recover under a stationary pointer when background subtitle preparation reinstalls the
+  current cue.
+
+- Retimed subtitles win cache ties at the same format and timestamp, preserving timing corrections
+  on coarse filesystem clocks.
+
+- Dependency requirements exclude vulnerable Pillow, filelock, certifi and OpenTelemetry releases;
+  the lock also includes urllib3 security fixes.
+
+- Repeated subtitle lookahead requests no longer queue another render for a frame already being
+  prepared.
 
 - Esc closes the top open widget after the tooltip disappears, and closing utility panels restores
   the player's shortcuts. Card previews use the shared UI scale with a larger, visible close button;

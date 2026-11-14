@@ -18,7 +18,9 @@ from saitenka.app.profiles import (
     validate_language_code,
 )
 
-DATA = json.loads((Path(__file__).parents[2] / "fixtures/config_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parents[2] / "fixtures/config_reference.json").read_text(encoding="utf-8")
+)
 
 
 def _profile_value(profile):

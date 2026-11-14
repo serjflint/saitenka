@@ -218,6 +218,8 @@ def live_reader(
             "--force-window=yes",
             "--keep-open=yes",
             focus,
+            # Keep window-system motion from replacing IPC-injected pointer events.
+            "--input-cursor=no",
             "--mute=yes",
             "--sub-visibility=no",
             "--osd-level=1",

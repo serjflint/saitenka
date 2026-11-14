@@ -13,7 +13,9 @@ from saitenka.app.subtitle_artifact import (
     resolve,
 )
 
-DATA = json.loads((Path(__file__).parent / "fixtures/subtitle_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parent / "fixtures/subtitle_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["artifacts"], ids=lambda r: r["id"])

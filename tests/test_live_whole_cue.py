@@ -46,9 +46,13 @@ def _character_masks():
     return module
 
 
+@pytest.mark.mpv_min(NATIVE_GEOMETRY_MPV_MIN)
 def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
     from live_harness import make_clip_and_sub
     from test_cue_color_timeline import _coloring
+
+    from saitenka.app.overlay_ids import OverlayId
+    from saitenka.runtime import SurfaceStatus
 
     clip, source = make_clip_and_sub(tmp_path, ((0.0, 8.0, "猫を見る"), (0.0, 8.0, "犬も見る")))
     with live_reader(
@@ -71,10 +75,14 @@ def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
             ),
         ),
     ) as (tmp, session, ipc):
+        surfaces = session.graph.lifecycle_surfaces
         poll_until(
             session,
-            lambda: session.graph.cue.draw_request().whole_cue is not None,
-            "converted cue never prepared",
+            lambda: (
+                (surface := surfaces.snapshot(OverlayId.OVERPAINT)) is not None
+                and surface.status is SurfaceStatus.PRESENT
+            ),
+            "converted cue colors were not acknowledged",
         )
         dimensions = ipc.query("osd-dimensions")
         assert dimensions["mb"] > 20
@@ -82,6 +90,11 @@ def test_converted_letterboxed_colors_cover_the_native_subtitles(tmp_path):
         assert ipc.command("screenshot-to-file", str(path), "window")["error"] == "success"
         colored = np.asarray(Image.open(path).convert("RGB"))
         session.graph.subtitle_presentation.clear_pixels()
+        poll_until(
+            session,
+            lambda: surfaces.snapshot(OverlayId.OVERPAINT).status is SurfaceStatus.ABSENT,
+            "converted cue colors were not cleared",
+        )
         path = tmp / "native.png"
         assert ipc.command("screenshot-to-file", str(path), "window")["error"] == "success"
         native = np.asarray(Image.open(path).convert("RGB"))
@@ -390,7 +403,9 @@ def test_marker_layers_preserve_opaque_color_and_final_event_geometry(text, boun
 def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, override, monkeypatch):
     from saitenka_wordstate import Scorer
     from saitenka_wordstate.known import KnownWords
+    from test_live_colored_track import _selected
 
+    from saitenka.app import colored_subs
     from saitenka.app.scoring import Coloring, Palette
 
     spans = record_spans(monkeypatch)
@@ -398,7 +413,7 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, override, mo
     with live_reader(
         native_visible=True,
         scorer=Coloring(Scorer(known=KnownWords.from_set(["猫"])), Palette()),
-        cues=((0.0, 8.0, "猫を見る"),),
+        cues=((0.5, 8.0, "猫を見る"),),
         layout=LayoutLiveOptions(
             "shadow",
             os.environ.get("SAITENKA_LAYOUT_MPV"),
@@ -417,8 +432,26 @@ def test_optional_coloring_modes_upload_or_keep_boxes(mode, device, override, mo
                 ),
             ),
             coloring=mode,
+            start_seconds=0,
+            wait_for_cue=False,
         ),
     ) as (tmp, session, ipc):
+        if mode == "whole-cue-auto":
+            poll_until(
+                session,
+                lambda: colored_subs.is_copy(_selected(ipc)),
+                "automatic coloring did not select its copy",
+            )
+            original = colored_subs.origin_track(ipc.query("track-list"), _selected(ipc))
+            assert original is not None
+            # Declining the copy exercises automatic overlay fallback through the player.
+            ipc.command("set_property", "sid", original["id"])
+            poll_until(
+                session,
+                lambda: not any(colored_subs.is_copy(track) for track in ipc.query("track-list")),
+                "declined copy remained loaded",
+            )
+        ipc.command("seek", "0.6", "absolute+exact")
         presentation = session.graph.subtitle_presentation
         poll_until(
             session,
@@ -603,8 +636,11 @@ def test_unique_attachment_font_requires_osd_access(tmp_path, osd_access, kernin
     ) as (_tmp, session, ipc):
         poll_until(
             session,
-            lambda: session.graph.cue.draw_request().whole_cue is not None,
-            "attachment cue never prepared",
+            lambda: (
+                (request := session.graph.cue.draw_request()).whole_cue is not None
+                and bool(request.boxes)
+            ),
+            "attachment cue never acquired prepared scan geometry",
         )
         request = session.graph.cue.draw_request()
         assert request.boxes
@@ -666,7 +702,8 @@ def test_first_cue_osd_is_qualified_during_initial_blank(monkeypatch):
         )
 
         assert native.worker.stats.ready_before_presented == 1
-        assert not any(s["name"] == "subtitle_geometry_libass" for s in spans)
+        rendered = [s for s in spans if s["name"] == "subtitle_geometry_libass"]
+        assert not rendered, rendered
         assert session.graph.cue.draw_request().whole_cue.osd_reason == "eligible"
 
 

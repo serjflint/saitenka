@@ -77,39 +77,6 @@ def _targets_for(reader, x, y):
 
 @pytest.mark.live
 @pytest.mark.timeout(30)
-def test_live_real_mouse_shows_tooltip_on_the_aimed_word():
-    with _live_reader() as (tmp, reader, ipc):
-        # aim a REAL mouse move at the screen centre of a content word
-        i = next(
-            k
-            for k, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
-            if t.is_content
-        )
-        box = next(b for b in reader.graph.subtitle_presentation.cue.current.boxes if b.index == i)
-        ox, oy = reader.graph.subtitle_presentation.cue.current.origin
-        cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
-        ipc.command("mouse", cx, cy)
-
-        _poll_until(
-            reader,
-            lambda: reader.graph.tooltip.surface_state().view.rect is not None,
-            "a real mouse over a word did not show a tooltip",
-        )
-        ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
-
-        # R1: the hovered word must be the one we aimed at — this is the mouse-pos→OSD alignment the
-        # headless tests can't check. A mismatch here is the HiDPI scaling bug.
-        assert reader.graph.tooltip.observation().selected == i, (
-            f"hover misaligned: aimed word {i} ({reader.graph.subtitle_presentation.cue.current.tokens[i].surface!r}), "
-            f"got {reader.graph.tooltip.observation().selected} — mouse-pos→OSD mapping (HiDPI/R1)? screenshot: {tmp / 'live_hover.png'}"
-        )
-
-        # a real keypress must reach the reader (mine key is bound) — drive it and drain
-        reader.pump()
-
-
-@pytest.mark.live
-@pytest.mark.timeout(30)
 def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
     """Occlusion + click capture through the REAL mouse-pos→OSD path: with the cursor moved onto the
     shown tooltip, the base hit-test must report over_tip (keep the lease, don't hijack to a word
@@ -136,11 +103,7 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
             """No frequency dictionaries, so no blended rank and no pill."""
             return
 
-    with _live_reader() as (_tmp, reader, ipc):
-        reader.graph.profile.profile.replace_dictionary_set(
-            _TallDS()
-        )  # rebuild the next hover's panel as a tall, scrolling tip
-        reader.graph.tooltip.surface_state().panel_cache.clear()
+    with _live_reader(dict_set=_TallDS()) as (tmp, reader, ipc):
         i = next(
             k
             for k, t in enumerate(reader.graph.subtitle_presentation.cue.current.tokens)
@@ -148,11 +111,26 @@ def test_live_cursor_over_tooltip_keeps_lease_and_captures_click():
         )
         box = next(b for b in reader.graph.subtitle_presentation.cue.current.boxes if b.index == i)
         ox, oy = reader.graph.subtitle_presentation.cue.current.origin
-        ipc.command("mouse", int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2))
-        _poll_until(
-            reader,
-            lambda: reader.graph.tooltip.surface_state().view.rect is not None,
-            "hover did not show a tooltip",
+        cx, cy = int(ox + box.x + box.w / 2), int(oy + box.y + box.h / 2)
+        ipc.command("mouse", cx, cy)
+        try:
+            _poll_until(
+                reader,
+                lambda: reader.graph.tooltip.surface_state().view.rect is not None,
+                "hover did not show a tooltip",
+            )
+        except pytest.fail.Exception as failure:
+            failure.add_note(
+                f"aim=({cx}, {cy}); mouse={ipc.query('mouse-pos')}; "
+                f"observed={reader.graph.playback.value('mouse-pos')}; "
+                f"selected={reader.graph.tooltip.observation().selected}; "
+                f"origin={reader.graph.subtitle_presentation.cue.current.origin}; "
+                f"dimensions={ipc.query('osd-dimensions')}"
+            )
+            raise
+        ipc.command("screenshot-to-file", str(tmp / "live_hover.png"), "window")
+        assert reader.graph.tooltip.observation().selected == i, (
+            f"hover misaligned: aimed word {i}, got {reader.graph.tooltip.observation().selected}"
         )
 
         # occlusion calc: the dead centre of the rendered tooltip must read over_tip (keep the lease),

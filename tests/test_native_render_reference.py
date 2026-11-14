@@ -10,7 +10,9 @@ from dirty_equals import IsPartialDict
 
 from saitenka.app.native_subtitles import _scaled_renderer_state, render_inputs_of
 
-DATA = json.loads((Path(__file__).parent / "fixtures/subtitle_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parent / "fixtures/subtitle_reference.json").read_text(encoding="utf-8")
+)
 
 
 def _inputs(v):

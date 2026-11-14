@@ -219,6 +219,7 @@ class TooltipSessionActions:
     """The named cross-feature effects tooltip policy may request."""
 
     hide: Callable[[], None]
+    cancel_hover_restore: Callable[[], None]
     set_annotation_hover: Callable[..., None]
     draw_cue: Callable[[], None]
     mine_token: Callable[..., None]
@@ -354,6 +355,7 @@ class TooltipController:
         tooltip.update_hover(self.tip_ports, self.hover_actions, self.hover_inputs)
 
     def retire_hover(self) -> None:
+        self._session().actions.cancel_hover_restore()
         tooltip.retire_hover(self.tip_ports, self.hover_inputs, self.show_actions)
 
     def prepare_hover_blocking(self, index: int) -> None:

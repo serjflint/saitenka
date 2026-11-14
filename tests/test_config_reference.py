@@ -9,7 +9,9 @@ import pytest
 
 from saitenka.app import config
 
-DATA = json.loads((Path(__file__).parent / "fixtures/config_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parent / "fixtures/config_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["resync-split"], ids=lambda r: r["id"])
@@ -22,7 +24,7 @@ def test_configuration_file_contents(tmp_path, record):
     path = tmp_path / "overlay.toml"
     content = record["input"].get("content")
     if content is not None:
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
     assert config.load_config(path) == record["expected"]
 
 
@@ -39,7 +41,9 @@ def test_explicit_configuration_path_wins_over_environment(tmp_path, monkeypatch
 def test_configured_resource_paths(monkeypatch, record):
     for name, value in record["input"].get("env", {}).items():
         monkeypatch.setenv(name, value)
-    assert config.expand_paths(record["input"]["paths"]) == record["expected"]
+    assert [Path(path) for path in config.expand_paths(record["input"]["paths"])] == [
+        Path(path) for path in record["expected"]
+    ]
 
 
 @pytest.mark.parametrize("record", DATA["telemetry"], ids=lambda r: r["id"])

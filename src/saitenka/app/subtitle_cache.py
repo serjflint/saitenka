@@ -91,7 +91,7 @@ def _slot_files(slot_dir: Path, slot: str) -> list[Path]:
 def _rank(path: Path) -> tuple:
     from saitenka.app.subtitle_artifact import format_rank
 
-    return (*format_rank(path.suffix), path.stat().st_mtime)
+    return (*format_rank(path.suffix), path.stat().st_mtime, path.stem.endswith(_RETIMED_MODE))
 
 
 def cached_subs(

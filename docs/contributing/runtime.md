@@ -256,8 +256,7 @@ cancelling a timer therefore has the same explicit lifecycle as other asynchrono
 | Correlated IPC | Replies require a known request ID from the current connection epoch; late and unknown replies are discarded. Outbound admission is bounded. |
 | Nonblocking startup clear | Interactive readiness does not wait for the startup OSD clear reply. |
 | Explicit close | Owned surfaces are removed, new work is rejected, and late identity-qualified results cannot republish closed UI. |
-| Closed behavior oracle | `BehaviorTrace` accepts only its enumerated, text-free event, state, and outcome vocabulary. |
-| Bounded feature authority | Any function under `app/` that accepts the whole `SessionController` fails the structural contract. Features receive narrow owners, immutable observations, or named acts. |
+| Bounded feature authority | Features receive narrow owners, immutable observations, or named acts instead of the whole `SessionController`. |
 | Independent runtime core | Import-linter forbids `saitenka.runtime` from importing the application or mpv adapters. |
 | Reserved terminal publication | The isolated mailbox reserves completion capacity before dispatch and accepts at most one terminal event for each reservation. |
 | Effect interpreter ownership | Effects are applied by the owning adapter/coordinator, never by a generic session callback. Both layers return effects; the interpreter belongs to the feature. |
@@ -267,10 +266,8 @@ The executable sources of truth are:
 
 - [`tests/session/test_runtime_behavior_oracle.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_runtime_behavior_oracle.py)
   for ordered production behavior;
-- [`tests/runtime_behavior.py`](https://github.com/serjflint/saitenka/blob/main/tests/runtime_behavior.py)
-  for the closed behavior-record vocabulary;
 - [`tests/session/test_session_controller_host_contract.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_controller_host_contract.py)
-  for the zero-`SessionController` feature boundary;
+  for production/FakeIPC surface parity and shared fake inheritance;
 - [`tests/session/test_session_runtime.py`](https://github.com/serjflint/saitenka/blob/main/tests/session/test_session_runtime.py)
   for mailbox, lifecycle, reconnect, overload, timer, and close contracts;
 - [`tools/mining_ownership_check.py`](https://github.com/serjflint/saitenka/blob/main/tools/mining_ownership_check.py)

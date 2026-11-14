@@ -42,7 +42,7 @@ from saitenka.app.subtitle_intents import SeekCue
 from saitenka.app.subtitle_ownership import PixelOwner
 from saitenka.app.subtitle_render import NativeVisibleRenderer, SubtitleRenderer
 from saitenka.app.subtitle_selection import SubtitleStartup, SubtitleTracks
-from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome
+from saitenka.runtime import EffectError, EffectFinished, EffectId, EffectOutcome, Owner
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -448,6 +448,81 @@ def reader(
         resolve_track_fonts(ipc, ipc.query, result.graph.subtitle_presentation.native)
         result.graph.subtitle_presentation.native.set_source(source)
     return result, ipc, backend
+
+
+@pytest.mark.parametrize("pointer", ["stay", "move", "leave", "new-cue", "dismiss", "new-source"])
+def test_track_adoption_restores_hover_after_native_geometry_arrives(
+    tmp_path, monkeypatch, pointer
+):
+    from saitenka.app import track_preparation
+
+    submitted = []
+    monkeypatch.setattr(
+        track_preparation,
+        "configure_lane",
+        lambda *_args: lambda **job: submitted.append(job) or True,
+    )
+    session, ipc, _backend = reader(tmp_path)
+    source = tmp_path / "episode.ass"
+    ipc.props.update(
+        {
+            "path": "/video.mkv",
+            "sub-text": "猫を見る",
+            "track-list": [
+                {
+                    "id": 2,
+                    "type": "sub",
+                    "selected": True,
+                    "external": True,
+                    "external-filename": str(source),
+                    "codec": "ass",
+                }
+            ],
+        }
+    )
+    session.start()
+    session.graph.subtitle_navigation.load_index(source)
+    session.pump()
+    settle_jobs(session, ipc)
+    session.pump()
+    ui = Driver(session).move_to_word(0)
+    other_word = ui.word_center(2)
+
+    def finish(job):
+        prepared = track_preparation.prepare_track(job["request"], threading.Event())
+        job["on_finished"](
+            EffectFinished(
+                EffectId(1),
+                Owner.SUBTITLE,
+                job["identity"],
+                EffectOutcome.SUCCEEDED,
+                result=prepared,
+            )
+        )
+        session.pump()
+
+    finish(submitted[0])
+    if pointer == "leave":
+        ui.leave()
+    elif pointer == "move":
+        ui.move(*other_word)
+    elif pointer == "new-cue":
+        ui.subtitle("犬を見る")
+    elif pointer == "dismiss":
+        session.command("saitenka-tip-close")
+    elif pointer == "new-source":
+        ipc.set_prop("path", "/another-video.mkv")
+        session.pump()
+    settle_jobs(session, ipc)
+    session.pump()
+    if pointer == "new-source":
+        session.graph.cue.rebuild_sub_index()
+        finish(submitted[-1])
+        settle_jobs(session, ipc)
+        session.pump()
+
+    expected = {"stay": (True, 0), "move": (True, 2)}
+    assert (ui.tip_shown, ui.hover) == expected.get(pointer, (False, -1))
 
 
 def settle_jobs(result: TestSession, ipc: FakeIPC) -> None:

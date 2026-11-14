@@ -214,6 +214,7 @@ class SubtitlePresentationPorts:
     #: Tell the user, not just the log. A geometry refusal costs scanning and overpaint for the
     #: whole episode, and until this existed the only sign was a log line nobody reads live.
     notify: Callable[[str, str], None]
+    geometry_ready: Callable[[], None]
 
 
 class SubtitlePresentation:
@@ -353,6 +354,8 @@ class SubtitlePresentation:
         if self.native is not None:
             self.native.sync_pixel_owner(self.pipeline.renderer)
         self._record_geometry()
+        if self.cue.current.boxes:
+            self._ports.geometry_ready()
 
     def _paint_diagnosis(self, *, allowed: bool) -> str:
         if allowed:

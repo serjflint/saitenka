@@ -9,7 +9,9 @@ from saitenka.app import cli
 from saitenka.app.launch.run import jimaku_should_fetch, resolve_names
 from saitenka.mpvio import launch
 
-DATA = json.loads((Path(__file__).parent / "fixtures/cli_reference.json").read_text())
+DATA = json.loads(
+    (Path(__file__).parent / "fixtures/cli_reference.json").read_text(encoding="utf-8")
+)
 
 
 @pytest.mark.parametrize("record", DATA["mpv-launch"], ids=lambda r: r["id"])
