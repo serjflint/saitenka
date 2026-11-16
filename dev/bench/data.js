@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794838995876,
+  "lastUpdate": 1794839056751,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -21715,6 +21715,52 @@ window.BENCHMARK_DATA = {
             "name": "live: four-scroll interaction latency",
             "value": 30.805563,
             "range": "3 replicas; min 26.9916; max 53.5141; MAD 3.81392",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "3c51e501053d6eab2a3e543319cbf849cc3db072",
+          "message": "chore(release): release 4.8.1\n\nPrepare the patch release containing the native subtitle alignment and tooltip scrolling fixes from #578. Package and lockfile versions agree at 4.8.1; the curated changelog is promoted and Unreleased is empty.\n\nValidated with the complete pre-release gate, 67 real-mpv smoke tests, an isolated built-wheel install reporting 4.8.1, two artifact reviews, and all 32 active release-PR checks.",
+          "timestamp": "2026-11-14T11:54:05Z",
+          "url": "https://github.com/serjflint/saitenka/commit/3c51e501053d6eab2a3e543319cbf849cc3db072"
+        },
+        "date": 1794839055153,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "live jank: total dropped frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live jank: total delayed frames",
+            "value": 0,
+            "range": "3 replicas; min 0; max 0; MAD 0; worst 0",
+            "unit": "frames"
+          },
+          {
+            "name": "live: hover interaction latency",
+            "value": 183.967754,
+            "range": "3 replicas; min 173.059; max 223.015; MAD 10.909",
+            "unit": "ms"
+          },
+          {
+            "name": "live: four-scroll interaction latency",
+            "value": 38.85932,
+            "range": "3 replicas; min 24.8138; max 39.2582; MAD 0.3989",
             "unit": "ms"
           }
         ]
