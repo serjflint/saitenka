@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794657576502,
+  "lastUpdate": 1794838995876,
   "repoUrl": "https://github.com/serjflint/saitenka",
   "entries": {
     "Saitenka render (synth)": [
@@ -23145,6 +23145,46 @@ window.BENCHMARK_DATA = {
             "name": "lifecycle: RSS growth",
             "value": 4.15744,
             "range": "3 replicas; min 4.15744; max 4.34586; MAD 2.84217e-14",
+            "unit": "MB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Sergei Iakhnitskii",
+            "username": "serjflint",
+            "email": "serjflint@gmail.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "3c51e501053d6eab2a3e543319cbf849cc3db072",
+          "message": "chore(release): release 4.8.1\n\nPrepare the patch release containing the native subtitle alignment and tooltip scrolling fixes from #578. Package and lockfile versions agree at 4.8.1; the curated changelog is promoted and Unreleased is empty.\n\nValidated with the complete pre-release gate, 67 real-mpv smoke tests, an isolated built-wheel install reporting 4.8.1, two artifact reviews, and all 32 active release-PR checks.",
+          "timestamp": "2026-11-14T11:54:05Z",
+          "url": "https://github.com/serjflint/saitenka/commit/3c51e501053d6eab2a3e543319cbf849cc3db072"
+        },
+        "date": 1794838994827,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lifecycle: frame p99",
+            "value": 22.373801,
+            "range": "3 replicas; min 20.8799; max 56.3235; MAD 1.49393; worst 56.3235",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: worst frame",
+            "value": 31.142243,
+            "range": "3 replicas; min 30.6449; max 80.8318; MAD 0.49733; worst 80.8318",
+            "unit": "ms"
+          },
+          {
+            "name": "lifecycle: RSS growth",
+            "value": 4.34176,
+            "range": "3 replicas; min 4.15334; max 4.53427; MAD 0.188416",
             "unit": "MB"
           }
         ]
